@@ -754,7 +754,7 @@ paths:
           description: Persisted user, assistant, and tool messages in creation order; the
             caller's turns on the thread that the serving process still retains, with their
             status; and the caller's oldest turn on the thread still in flight (queued or
-            running, with no turn.completed or turn.error), or null. A turn whose turn.completed
+            running, with no turn.completed, turn.error or turn.stopped), or null. A turn whose turn.completed
             names a message in `messages` is never reported in flight. Turns are held in the
             serving process's memory, so a restart, another instance, or the end of retention
             leaves a run out of `runs`.
@@ -782,7 +782,8 @@ paths:
                   runs:
                     description: Oldest first. `in_flight` is queued or running; `completed`
                       ended with turn.completed and names the saved answer when it has one;
-                      `failed` ended with turn.error or without a terminal event.
+                      `stopped` ended with turn.stopped, having saved no answer; `failed` ended
+                      with turn.error or without a terminal event.
                     type: array
                     items:
                       oneOf:
@@ -796,7 +797,7 @@ paths:
                               type: string
                             status:
                               type: string
-                              enum: [in_flight, failed]
+                              enum: [in_flight, stopped, failed]
                         - type: object
                           additionalProperties: false
                           required: [run_id, turn_id, status]
@@ -1052,6 +1053,72 @@ paths:
               schema:
                 type: object
                 properties:
+                  error:
+                    type: string
+  /v1/chat/threads/{threadId}/runs/{runId}/stop:
+    post:
+      tags: [Chat]
+      summary: Stop the caller's turn before it saves an answer
+      operationId: stopThreadRun
+      description: Ends the caller's turn with `turn.stopped` on its stream, aborts the model calls
+        it has in flight, and saves no answer for it. Once the turn has begun saving its answer the
+        stop is refused and the turn ends as that save does, so a turn ends exactly once. Repeating a
+        stop that succeeded returns 200 again. Turns are held in the serving process's memory, as
+        for the stream route.
+      parameters:
+        - in: path
+          name: threadId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: turn_id
+          required: false
+          description: The turn id the stream route was given; `run_id` when omitted.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The turn is stopped, now or by an earlier request.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [stopped]
+        '401':
+          description: Missing or malformed user credential
+        '404':
+          description: Thread not found for the calling user, or no such turn of theirs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+        '409':
+          description: The turn is saving its answer (`saving`) or already ended without a stop
+            (`ended`); nothing changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, error]
+                properties:
+                  status:
+                    type: string
+                    enum: [saving, ended]
                   error:
                     type: string
   /v1/run-activities/stream:

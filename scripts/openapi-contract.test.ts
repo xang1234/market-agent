@@ -31,6 +31,7 @@ const FRONTEND_V1_ROUTES = [
   "/v1/chat/threads",
   "/v1/chat/threads/{threadId}/messages",
   "/v1/chat/threads/{threadId}/stream",
+  "/v1/chat/threads/{threadId}/runs/{runId}/stop",
   "/v1/evidence/fact-review-queue",
   "/v1/evidence/fact-review-queue/{reviewId}/approve",
   "/v1/evidence/fact-review-queue/{reviewId}/candidate",
@@ -96,6 +97,7 @@ const FRONTEND_V1_OPERATIONS = [
   ["post", "/v1/discovery/runs/{runId}/cancel"],
   ["get", "/v1/chat/threads/{threadId}/messages"],
   ["post", "/v1/chat/threads/{threadId}/messages"],
+  ["post", "/v1/chat/threads/{threadId}/runs/{runId}/stop"],
 ] as const;
 
 test("OpenAPI includes every frontend /v1 route", async () => {
@@ -192,8 +194,10 @@ test("OpenAPI documents the runs a chat messages read reports (#332)", async () 
     { run_id: "r1", turn_id: "u1", status: "completed" },
     { run_id: "r2", turn_id: "u2", status: "failed" },
     { run_id: "r3", turn_id: "u3", status: "in_flight" },
+    { run_id: "r4", turn_id: "u4", status: "stopped" },
   ]), JSON.stringify(validate.errors));
-  assert.equal(validate([{ run_id: "r1", turn_id: "u1", status: "queued" }]), false, "status is one of three");
+  assert.equal(validate([{ run_id: "r1", turn_id: "u1", status: "queued" }]), false, "status is one of four");
+  assert.equal(validate([{ run_id: "r1", turn_id: "u1", status: "stopped", message_id: "a1" }]), false, "a stopped run names no message");
   assert.equal(validate([{ run_id: "r1", turn_id: "u1", status: "in_flight", message_id: "a1" }]), false, "only a completed run names a message");
 });
 

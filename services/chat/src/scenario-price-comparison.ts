@@ -15,6 +15,7 @@ import { buildScenarioPriceComparisonSealInput } from "../../snapshot/src/seal-i
 import { sealSnapshotInTransaction, snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { destroyAfterFailedRollback, withPoolClient } from "../../shared/src/pool-client.ts";
 import { contentHashForText } from "./chat-ids.ts";
+import { ChatTurnStoppedError, claimAnswerSave } from "./turn-stop.ts";
 import type { ChatFinancialTurn } from "./financial-runtime.ts";
 import { previousAnswer } from "./thread-context.ts";
 
@@ -165,6 +166,7 @@ export async function publishScenarioPriceComparison(pool: FinancialPool, turn: 
 }
 
 async function publishOnce(pool: FinancialPool, turn: ComparisonPublication): Promise<ComparisonTurn> {
+  if (!claimAnswerSave()) throw new ChatTurnStoppedError();
   return withPoolClient(pool, async (client) => {
     // One snapshot for generation and the seal's regeneration: a close or a
     // split history committed between them would otherwise refuse the turn.

@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import {
   buildLlmDeploymentOrder,
   type LlmDeployment,
@@ -140,6 +142,16 @@ export type CreateLlmRouterInput = {
   onCompletion?: (completion: LlmCompletion) => void;
 };
 
+const callerSignal = new AsyncLocalStorage<AbortSignal>();
+
+/**
+ * Runs `fn` with every routed LLM call made inside it, including async work it
+ * starts, ending when `signal` aborts, as one passed in its controls would.
+ */
+export function withLlmAbortSignal<T>(signal: AbortSignal, fn: () => T): T {
+  return callerSignal.run(signal, fn);
+}
+
 export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
   const deployments = buildLlmDeploymentOrder(input.settings, input.purpose);
   // Telemetry must never change routing: a throwing hook or log sink can't turn a
@@ -155,7 +167,8 @@ export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
     }
   };
   return Object.freeze({
-    async complete(request, controls = {}) {
+    async complete(request, given = {}) {
+      const controls: LlmExecutionControls = { ...given, signal: combineSignals(given.signal, callerSignal.getStore()) };
       const selectedDeployments = selectDeployments(deployments, controls.deploymentOrder);
       if (selectedDeployments.length === 0) {
         throw new LlmRouterError("no_deployments", "no enabled LLM deployments configured", []);

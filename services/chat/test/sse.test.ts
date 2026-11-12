@@ -18,6 +18,7 @@ const PAYLOAD_FOR_KIND: Record<ChatSseEventType, Record<string, unknown>> = {
   "turn.started": {},
   "turn.completed": {},
   "turn.error": {},
+  "turn.stopped": {},
   "tool.started": { tool_call_id: "tc-1" },
   "tool.completed": { tool_call_id: "tc-1" },
   "snapshot.staged": { snapshot_id: "snap-1" },

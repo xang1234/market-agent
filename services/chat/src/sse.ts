@@ -13,6 +13,8 @@ export const CHAT_SSE_EVENT_TYPES = [
   "block.completed",
   "turn.completed",
   "turn.error",
+  // Its owner stopped the turn before it saved an answer; nothing follows it.
+  "turn.stopped",
 ] as const;
 
 export type ChatSseEventType = (typeof CHAT_SSE_EVENT_TYPES)[number];

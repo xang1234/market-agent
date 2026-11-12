@@ -20,6 +20,7 @@ import { buildCallSealInput } from "../../snapshot/src/seal-input.ts";
 import { sealSnapshotInTransaction, snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { destroyAfterFailedRollback, withPoolClient } from "../../shared/src/pool-client.ts";
 import { contentHashForText } from "./chat-ids.ts";
+import { ChatTurnStoppedError, claimAnswerSave } from "./turn-stop.ts";
 import type { ChatFinancialTurn } from "./financial-runtime.ts";
 
 // "Make a Call on AAPL", "What's your call on AAPL?", "Give me your opinion on AAPL": one company, by one word, and nothing else.
@@ -131,6 +132,7 @@ export async function publishCall(pool: FinancialPool, turn: CallPublication): P
 }
 
 async function publishOnce(pool: FinancialPool, turn: CallPublication): Promise<"saved" | "refused"> {
+  if (!claimAnswerSave()) throw new ChatTurnStoppedError();
   return withPoolClient(pool, async (client) => {
     await client.query("begin isolation level repeatable read");
     try {
