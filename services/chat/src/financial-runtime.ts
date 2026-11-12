@@ -46,6 +46,7 @@ import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../fi
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
 import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
+import { PUBLIC_SOURCE_SQL } from "../../evidence/src/financial-input-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId, noteBlock } from "./chat-ids.ts";
 import { priceComparisonTurn } from "./scenario-price-comparison.ts";
@@ -542,15 +543,17 @@ function withinScope(requested: TurnCompanies, scope: ResearchScope | null): Tur
 
 // A company with no fiscal-period fact on file (no CIK yet, or a filer with
 // no 10-K facts, such as an ETF) would show every figure as a gap with no
-// eligible input: the engine binds only facts with a fiscal period
+// eligible input: the engine binds only public facts with a fiscal period
 // (evidence-adapter.ts), and the reference import's are points in time. It is
-// left out of the plan, and the answer names it in one line.
+// left out of the plan, and the answer names it in one line. Only public
+// sources count, so another user's upload neither changes nor reveals this.
 async function withSecFilings(db: SqlExecutor, requested: TurnCompanies): Promise<TurnCompanies> {
   const issuers = requested.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref.id] : []);
   const { rows } = issuers.length === 0 ? { rows: [] } : await db.query<{ issuer_id: string }>(
     `select issuer.id::text as issuer_id
        from unnest($1::uuid[]) as issuer(id)
-      where exists (select 1 from facts f where f.subject_kind = 'issuer' and f.subject_id = issuer.id and f.fiscal_year is not null)`,
+      where exists (select 1 from facts f join sources s on s.source_id = f.source_id
+                     where f.subject_kind = 'issuer' and f.subject_id = issuer.id and f.fiscal_year is not null and ${PUBLIC_SOURCE_SQL})`,
     [issuers],
   );
   const filed = new Set(rows.map((row) => row.issuer_id.toLowerCase()));

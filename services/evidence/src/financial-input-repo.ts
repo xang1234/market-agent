@@ -17,6 +17,9 @@ import { assertNonEmptyString, assertOneOf, assertUuidV4 } from "./validators.ts
 
 export const FINANCIAL_CANDIDATE_LIMIT = 10_000;
 
+/** A public source, on `sources s`: the only kind a public_information read admits. */
+export const PUBLIC_SOURCE_SQL = "s.user_id is null";
+
 /**
  * public_information: public sources only (the verified-finance historical
  * mode never admits private facts). owner_visible: public plus the owner's own.
@@ -159,7 +162,7 @@ export async function listFinancialInputCandidates(db: RowQueryExecutor, request
         and f.method in ('reported', 'extracted', 'restated')
         and f.verification_status in ('authoritative', 'corroborated')
         and f.entitlement_channels ? $6
-        and (s.user_id is null or ($7 = 'owner_visible' and s.user_id = $8::uuid))
+        and (${PUBLIC_SOURCE_SQL} or ($7 = 'owner_visible' and s.user_id = $8::uuid))
       order by f.period_end nulls first, f.fact_id
       limit $9`,
     [

@@ -183,6 +183,15 @@ export async function chatDatabase(t: Parameters<typeof engineDatabase>[0], pref
   const pool = await connectedPool(t, databaseUrl(db));
   const threadId = randomUUID();
   await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [threadId, IDS.owner]);
+  // BBB's only engine fact is the owner's private revenue upload, which a turn
+  // never binds. A public filing's gross profit makes BBB a company with SEC
+  // filings that a turn plans, its revenue still a gap.
+  await db.query(
+    `insert into facts
+     select (jsonb_populate_record(null::facts, to_jsonb(f) || jsonb_build_object('fact_id', gen_random_uuid(), 'subject_id', $1::uuid))).*
+       from facts f where f.fact_id = $2`,
+    [IDS.issuerB, IDS.grossProfit2023],
+  );
   return { db, pool, threadId };
 }
 

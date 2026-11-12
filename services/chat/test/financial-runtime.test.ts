@@ -42,20 +42,29 @@ async function savingMessages(t: TestContext, url: string): Promise<ChatAssistan
 
 // A fiscal-year fact on file for each issuer while `run` runs, so a turn about
 // companies the fixtures give no data plans them instead of naming them in the
-// no-filings line.
-async function withFiledFacts<T>(db: { query: (text: string, values?: unknown[]) => Promise<{ rows: Array<{ fact_id: string }> }> }, issuers: ReadonlyArray<string>, run: () => Promise<T>): Promise<T> {
+// no-filings line. With `uploadedBy`, the facts come from that user's private
+// copy of the source, as an upload's would.
+async function withFiledFacts<T>(db: { query: (text: string, values?: unknown[]) => Promise<{ rows: Array<{ fact_id: string; source_id: string }> }> }, issuers: ReadonlyArray<string>, run: () => Promise<T>, uploadedBy: string | null = null): Promise<T> {
   const { rows } = await db.query(
-    `insert into facts
-     select (jsonb_populate_record(null::facts, to_jsonb(f) || jsonb_build_object('fact_id', gen_random_uuid(), 'subject_id', issuer.id))).*
+    `with private_source as (
+       insert into sources
+       select (jsonb_populate_record(null::sources, to_jsonb(s) || jsonb_build_object('source_id', gen_random_uuid(), 'user_id', $3::uuid))).*
+         from sources s join facts f on f.source_id = s.source_id
+        where f.fact_id = $2 and $3::uuid is not null
+       returning source_id
+     )
+     insert into facts
+     select (jsonb_populate_record(null::facts, to_jsonb(f) || jsonb_build_object('fact_id', gen_random_uuid(), 'subject_id', issuer.id, 'source_id', coalesce((select source_id from private_source), f.source_id)))).*
        from facts f cross join unnest($1::uuid[]) as issuer(id)
       where f.fact_id = $2
-     returning fact_id::text`,
-    [issuers, IDS.grossProfit2023],
+     returning fact_id::text, source_id::text`,
+    [issuers, IDS.grossProfit2023, uploadedBy],
   );
   try {
     return await run();
   } finally {
     await db.query(`delete from facts where fact_id = any($1::uuid[])`, [rows.map((row) => row.fact_id)]);
+    if (uploadedBy !== null) await db.query(`delete from sources where source_id = any($1::uuid[])`, [rows.map((row) => row.source_id)]);
   }
 }
 
@@ -309,6 +318,12 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(Object.values(block.financial.labels as Record<string, { kind: string; text: string }>).filter((label) => label.kind === "subject").map((label) => label.text), ["Alpha Industries Inc."]);
     assert.deepEqual(note.segments, [{ type: "text", text: "No SEC filings are on file for CCC yet." }]);
   });
+
+  await t.test("another user's private fiscal-period facts never stand in for SEC filings, nor show they exist", () => withFiledFacts(db, [MISSING_ISSUER], async () => {
+    const harness = chatHarness(pool, { model: revenueModel(["CCC"]), researchScope: scopeOver as never });
+    assert.deepEqual(completed((await harness.run({ ...base, userIntent: "Revenue for CCC" })).events).financial_gap, { reason_code: "no_sec_filings" });
+    assert.deepEqual((harness.persisted.at(-1)!.blocks[0] as { segments: unknown }).segments, [{ type: "text", text: "No SEC filings are on file for CCC yet." }]);
+  }, IDS.other));
 
   await t.test("a turn naming an ambiguous company changes the previous answer's companies only as its reading says", async () => {
     const seen: string[] = [];
