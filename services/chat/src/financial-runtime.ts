@@ -392,7 +392,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
 const TAKES_EVERY_CHOICE: ReadonlySet<string> = new Set([
   "all", "all of them", "all of the above", "all the above", "all of those", "all of these", "all options", "all of the options", "everything", "both",
 ]);
-const replyWords = (text: string) => text.toLowerCase().split(/[^a-z]+/u).filter(Boolean).join(" ");
+// Digits are words too, so a reply that adds a period ("all 2024") is read as written.
+const replyWords = (text: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(" ");
 
 // The mentions a turn's plan requests: an explicit subject (a thread opened
 // from a ticker page) first; like the analyst path, the companies a

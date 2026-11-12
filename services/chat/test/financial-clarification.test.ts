@@ -214,6 +214,14 @@ test("a typed reply to a metric clarification continues its company, not a ticke
   const before = asked.length;
   await harness.run({ threadId, userId: IDS.owner, userIntent: "both" });
   assert.deepEqual(asked.slice(before).filter((prompt) => prompt.includes("Gross margin; Operating margin")), [], "both is read as written");
+
+  // A reply that adds a period keeps it: it is read as written, not replaced by the options.
+  for (const qualified of ["all 2024", "all, 2023", "all of them (2024–2025)"]) {
+    completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "What drives AAA's margins?" })).events);
+    const start = asked.length;
+    await harness.run({ threadId, userId: IDS.owner, userIntent: qualified });
+    assert.deepEqual(asked.slice(start).filter((prompt) => prompt.includes("Gross margin; Operating margin")), [], `${qualified} is read as written`);
+  }
 });
 
 test("a company-choice clarification names no company, so replaying the pick reaches the choice (#623)", { timeout: 300_000 }, async (t) => {
