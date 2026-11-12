@@ -432,7 +432,7 @@ test("a question about one company that asks for no figure is answered with its 
     ]);
     const { rows: [saved] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
     const notes = (saved.blocks as Array<{ kind: string; segments?: Array<{ text: string }> }>).slice(1).flatMap((block) => block.segments?.map((segment) => segment.text) ?? []);
-    assert.deepEqual(notes, ["A margin trend is charted over reported quarters, and none could be read for ANNL Corp, so its margins are shown for a fiscal year."]);
+    assert.deepEqual(notes, ["A margin trend is charted over reported quarters, and none could be read for ANNL, so its margins are shown for a fiscal year."]);
   });
 
   await t.test("a margin trend's answer is saved without reading its revenue again, as only an overview's note names growth it leaves out (#479 review)", async () => {

@@ -73,10 +73,18 @@
   },
   {
     "id": "hd-trend-offered-period",
-    "note": "#628: a trend with no quarters to chart is a gap, not a menu of periods the engine then refuses",
+    "note": "#628: a trend with no quarters to chart is its fiscal year's margins and a line saying why, not a menu of periods the engine then refuses",
     "budget_ms": { "first_text": 15000, "saved": 15000 },
     "turns": [
-      { "ask": "Show HD's operating margin trend", "expect": { "subjects": ["HD"], "text": ["charted over reported quarters"], "not_text": ["Which periods", "Last 3 fiscal years"] } }
+      { "ask": "Show HD's operating margin trend", "expect": { "subjects": ["HD"], "text": ["Operating margin", "charted over reported quarters"], "not_text": ["Which periods", "Last 3 fiscal years", "outside the verified financial definitions"] } }
+    ]
+  },
+  {
+    "id": "on-trend-annual-margins",
+    "note": "#628 follow-up: ON reports fiscal years only, so a trend shows its latest fiscal year's three margins and says why there is no trend",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [
+      { "ask": "How are ON's margins trending?", "expect": { "subjects": ["ON"], "text": ["Gross margin", "Operating margin", "Net margin", "charted over reported quarters"], "not_text": ["Which periods", "outside the verified financial definitions"] } }
     ]
   },
   {

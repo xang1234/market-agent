@@ -52,7 +52,7 @@ import { priceComparisonTurn } from "./scenario-price-comparison.ts";
 import { callTurn, readCallAsk } from "./call.ts";
 import { planEpsScenarios, priorScenario, SCENARIO_DECLINE, SCENARIO_GAP, SCENARIO_INPUTS, scenarioAnswer, turnScenarioAsk, type ScenarioAsk } from "./eps-scenarios.ts";
 import { asksCause, filedCauses, namedFigures, NOT_ASKED, type FiledCause } from "./filed-cause.ts";
-import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend, type PeersOf } from "./company-overview.ts";
+import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend, reportsFiscalYear, type PeersOf } from "./company-overview.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
@@ -576,10 +576,20 @@ async function planTurn(
     if (!allResolved(subjects)) return null;
     switch (choice.kind) {
       // A trend is the company's reported quarters to a period its scope
-      // holds. Unplanned, it is a gap: a model would offer periods no scope
-      // carries back, so a typed choice of one is refused (#628).
-      case "trend":
-        return subjects.length === 1 ? (await planMarginTrend(planningContext(subjects), turn.evidence, choice.period)) ?? UNQUARTERED_TREND : null;
+      // holds. With none to chart, it is the income statement of the fiscal
+      // year named, or the latest, and a gap when the company reported no such
+      // year: a model would offer periods no scope carries back, so a typed
+      // choice of one is refused (#628).
+      case "trend": {
+        if (subjects.length !== 1) return null;
+        const planning = planningContext(subjects);
+        const named = choice.period.kind === "fiscal_year" ? choice.period : null;
+        return (await planMarginTrend(planning, turn.evidence, choice.period))
+          ?? (await reportsFiscalYear(planning, turn.evidence, named?.fiscal_year ?? null)
+            ? await planScopeFigures(planning, turn.evidence, ["income_statement"], named ?? LATEST_FISCAL_YEAR_READ)
+            : null)
+          ?? UNQUARTERED_TREND;
+      }
       case "overview": {
         const companies = choice.peers ? await withPeers(subjects, turn.peersOf) : subjects;
         const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence, choice.period);
@@ -603,6 +613,7 @@ async function planTurn(
   return planFinancialRequest(planningContext(subjects), text, model ?? noModel);
 }
 
+const LATEST_FISCAL_YEAR_READ: ReadPeriod = { kind: "latest", period: "fiscal_year" };
 const UNQUARTERED_TREND: PlanningResult = { outcome: "unsupported", reason: "unquartered_trend", issues: [], model_calls: 0 };
 
 // One company and its peers; null for several companies, or one with none.
@@ -783,19 +794,28 @@ function persistAssistantMessage(
       ? NOT_ASKED
       : await filedCauses(tx, { threadId, plan, named: namedFigures(reading), names: companyNames, answer: publication });
     const { reading: asked, notes: scenarioNotes } = scenarioAnswer(plan, reading);
+    const shownPeriod = plan === null ? null : planPeriod(plan);
+    const chosen = turn.deterministic();
+    // A trend shown for a fiscal year had no quarters to chart (planTurn), which its own line says.
+    const unquartered = chosen?.kind === "trend" && shownPeriod === "fiscal_year";
     const missing = asked === null || plan === null ? [] : [
-      ...uncoveredAsks(answeredPeers ? withoutPeers(asked) : asked, plan, cause, turn.labels, scope),
+      ...uncoveredAsks(
+        withoutAsks(asked, [...(answeredPeers ? ["peers" as const] : []), ...(unquartered ? ["margin_trend" as const] : [])]),
+        plan,
+        cause,
+        turn.labels,
+        scope !== null && unquartered ? { ...scope, margin_trend: false } : scope,
+      ),
       ...await overviewOmissions(plan, request.authority, inSavepoints(tx.client, turn.evidence(tx.client)), names),
     ];
-    const shownPeriod = plan === null ? null : planPeriod(plan);
     const stillShown = reading === null || plan === null ? [] : shownTurnedOff(reading, plan);
     const replaced = scope === null ? null : periodNote(scope, shownPeriod);
-    const chosen = turn.deterministic();
     const defaults = chosen === null || reading === null || scope === null || plan === null ? [] : defaultsNote(chosen, reading, scope, shownPeriod, plan.subjects.members.length);
     const later = await laterFigures(tx.client, publication.run_id, companyNames);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
+      ...(unquartered ? [`A margin trend is charted over reported quarters, and none could be read for ${labelList([...companyNames.values()])}, so its margins are shown for a fiscal year.`] : []),
       ...(replaced === null ? [] : [replaced]),
       ...defaults,
       ...scenarioNotes,
@@ -884,7 +904,7 @@ function inSavepoints(client: SqlExecutor, evidence: FinancialEvidencePort): Fin
   };
 }
 
-const withoutPeers = (reading: ScopeProposal): ScopeProposal => ({ ...reading, asks: new Set([...reading.asks].filter((facet) => facet !== "peers")) });
+const withoutAsks = (reading: ScopeProposal, facets: ReadonlyArray<ScopeFacet>): ScopeProposal => ({ ...reading, asks: new Set([...reading.asks].filter((facet) => !facets.includes(facet))) });
 
 /**
  * The companies a turn answered for, in its order. A missing label marks an
