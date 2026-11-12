@@ -403,7 +403,7 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual([calls, done.financial_gap, block?.segments[0]?.text], [
       0,
       { reason_code: "unsupported" },
-      "This request asks for a calculation outside the verified financial definitions I can compute: a margin trend, which is charted over reported quarters, and none are on file for this company.",
+      "This request asks for a calculation outside the verified financial definitions I can compute: a margin trend, which is charted over reported quarters, and none could be read for this company.",
     ]);
   });
 
