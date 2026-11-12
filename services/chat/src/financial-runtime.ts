@@ -367,7 +367,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     return kept.subjects.length === 0 ? declined : run(kept, reading, scope, choice);
   };
   const everyOfferedChoice = async (context: ChatTurnRunContext): Promise<string | null> => {
-    if (!context.userId || !UUID.test(context.threadId) || !TAKES_EVERY_CHOICE.has(replyWords(context.userIntent ?? ""))) return null;
+    const words = replyWords(context.userIntent ?? "");
+    if (!context.userId || !UUID.test(context.threadId) || !TAKES_EVERY_CHOICE.has(words)) return null;
     const { rows: [latest] } = await deps.pool.query<{ choices: unknown }>(
       `select m.blocks->0->'clarification_choices' as choices
          from chat_messages m
@@ -378,7 +379,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       [context.threadId, context.userId],
     );
     const choices = Array.isArray(latest?.choices) ? latest.choices.filter((choice): choice is string => typeof choice === "string") : [];
-    return choices.length === 0 ? null : choices.join("; ");
+    if (choices.length === 0 || (words === "both" && choices.length !== 2)) return null;
+    return choices.join("; ");
   };
   const assertReady = () => requireFinancialReadiness(deps.pool, ["chat"]);
   return Object.freeze({ take, everyOfferedChoice, assertReady });

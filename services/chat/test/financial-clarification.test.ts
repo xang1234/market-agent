@@ -208,6 +208,12 @@ test("a typed reply to a metric clarification continues its company, not a ticke
     // The reply is planned as every option the clarification offered, typed out (#626).
     assert.match(asked.at(-1)!, /Gross margin; Operating margin; Net margin; EBITDA margin/u, typed);
   }
+
+  // "both" takes every option only when exactly two were offered; these were four.
+  completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "What drives AAA's margins?" })).events);
+  const before = asked.length;
+  await harness.run({ threadId, userId: IDS.owner, userIntent: "both" });
+  assert.deepEqual(asked.slice(before).filter((prompt) => prompt.includes("Gross margin; Operating margin")), [], "both is read as written");
 });
 
 test("a company-choice clarification names no company, so replaying the pick reaches the choice (#623)", { timeout: 300_000 }, async (t) => {
