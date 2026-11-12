@@ -435,6 +435,30 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(notes, ["A margin trend is charted over reported quarters, and none could be read for ANNL, so its margins are shown for a fiscal year."]);
   });
 
+  await t.test("a margin trend of a company that reports only fiscal years, resumed before its answer was saved, still says why there is no trend (#639 review)", async () => {
+    const thread = (await db.query(`insert into chat_threads (thread_id, user_id) values (gen_random_uuid(), $1) returning thread_id`, [IDS.other])).rows[0].thread_id;
+    const turn = { threadId: thread, userId: IDS.owner, turnId: randomUUID(), userIntent: "How are ANNL's margins trending?" };
+    const trend = { ...NO_ASKS, asks: new Set(["margins", "margin_trend"] as const) };
+    // The thread is another user's, so the first attempt plans and reserves the run but cannot publish.
+    await chatHarness(pool, { model: null, readQuestion: reading(trend), resolveMention: resolve }).run(turn);
+    await db.query(`update chat_threads set user_id = $2 where thread_id = $1`, [thread, IDS.owner]);
+    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(trend), resolveMention: resolve }).run(turn)).events);
+    const { rows: [saved] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
+    const notes = (saved.blocks as Array<{ segments?: Array<{ text: string }> }>).slice(1).flatMap((block) => block.segments?.map((segment) => segment.text) ?? []);
+    assert.deepEqual(notes, ["A margin trend is charted over reported quarters, and none could be read for ANNL, so its margins are shown for a fiscal year."]);
+  });
+
+  await t.test("a turn resumed before its answer was saved names the period and profit lines its first attempt chose (#639 review)", async () => {
+    const thread = (await db.query(`insert into chat_threads (thread_id, user_id) values (gen_random_uuid(), $1) returning thread_id`, [IDS.other])).rows[0].thread_id;
+    const turn = { threadId: thread, userId: IDS.owner, turnId: randomUUID(), userIntent: "Profit for QTRS" };
+    await chatHarness(pool, { model: null, readQuestion: reading(METRIC_READING), resolveMention: resolve }).run(turn);
+    await db.query(`update chat_threads set user_id = $2 where thread_id = $1`, [thread, IDS.owner]);
+    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(METRIC_READING), resolveMention: resolve }).run(turn)).events);
+    const { rows: [saved] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
+    const notes = (saved.blocks as Array<{ segments?: Array<{ text: string }> }>).slice(1).flatMap((block) => block.segments?.map((segment) => segment.text) ?? []);
+    assert.deepEqual(notes, ["No period was named, so the latest reported quarter is shown. Profit is shown as gross profit, operating income and net income, each with its margin."]);
+  });
+
   await t.test("a margin trend follow-up naming a quarter of a company that reports only fiscal years shows that quarter's fiscal year, or a gap when it has none (#639 review)", async () => {
     const trend = { ...NO_ASKS, asks: new Set(["margins", "margin_trend"] as const) };
     const first = completed((await chatHarness(pool, { model: null, readQuestion: reading(trend), resolveMention: resolve }).run({ ...base, userIntent: "How are ANNL's margins trending?" })).events);

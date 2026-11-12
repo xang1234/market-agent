@@ -202,9 +202,6 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // an overview added included, and the planner's result.
       let asked = requested.subjects;
       let planned: PlanningResult | undefined;
-      let overviewPeriod: ReadPeriod | null = null;
-      // The choice a plan built with no model answers, for the defaults it names.
-      let deterministic: PlanChoice | null = null;
       // ponytail: a retry that resumes a reserved run does not plan, so it
       // names the companies the message resolved, without a pick or peers.
       const askedRefs = () => asked.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
@@ -233,15 +230,13 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           }),
         };
       };
-      // ponytail: only the attempt that planned the overview writes its
-      // commentary, so an attempt that did not plan writes none. Two do not: a
-      // retry that resumes a reserved run after a failed commit, and a retry of
-      // a saved answer. Either leaves the answer without commentary. Upgrade
-      // path: mark the overview in the plan's provenance, so any publishing
-      // attempt can compose.
-      const withCommentary = (answer: ChatFinancialTurn): ChatFinancialTurn => {
+      // ponytail: a retry of a saved answer routes no choice, so an answer
+      // whose first attempt stopped after its commit gets no commentary.
+      const withCommentary = async (answer: ChatFinancialTurn): Promise<ChatFinancialTurn> => {
         const { commentary: save } = deps;
-        if (overviewPeriod === null || !save || answer.kind !== "published" || !answer.message) return answer;
+        if (!save || answer.kind !== "published" || !answer.message) return answer;
+        const shown = answeredChoice(await findPlanForRequest(deps.pool, { authority, request_key: turnId }), choice);
+        if (shown?.kind !== "trend" && shown?.kind !== "overview") return answer;
         const { message } = answer;
         return {
           ...answer,
@@ -275,12 +270,6 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
             evidence: deps.evidence(db),
             peersOf: (issuer) => overviewPeers(db, issuer),
             planScenario: async (planning, ask) => planEpsScenarios(planning, ask, await priorScenario(db, context.threadId, context.userId!), received.toISOString()),
-            onOverview: (period) => {
-              overviewPeriod = period;
-            },
-            onDeterministic: (planned) => {
-              deterministic = planned;
-            },
           });
           return planned;
         },
@@ -289,8 +278,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           scope,
           reading,
           evidence: deps.evidence,
-          overviewPeriod: () => overviewPeriod,
-          deterministic: () => deterministic,
+          choice,
           carried: requested.carried,
           notFound: requested.notFound,
           labels: requested.labels,
@@ -361,7 +349,9 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
       return null;
     });
-    const choice: PlanChoice = ask ? { kind: "scenario", ask } : routeTurn(reading, scope);
+    const routed: PlanChoice = ask ? { kind: "scenario", ask } : routeTurn(reading, scope);
+    // An explicit cash-resilience request is that view, unless a scenario or the analyst path takes it.
+    const choice: PlanChoice = routed.kind !== "scenario" && routed.kind !== "analyst" && CASH_RESILIENCE.test(text) ? CASH_RESILIENCE_CHOICE : routed;
     if (reserved) return run(requested, reading, scope, choice);
     if (choice.kind === "analyst") return null;
     const kept = withinScope(requested, scope);
@@ -540,8 +530,6 @@ async function planTurn(
     evidence: FinancialEvidencePort;
     peersOf: PeersOf;
     planScenario: (context: PlanningContext, ask: ScenarioAsk) => Promise<PlanningResult>;
-    onOverview: (period: ReadPeriod) => void;
-    onDeterministic: (choice: PlanChoice) => void;
   }>,
 ): Promise<PlanningResult> {
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
@@ -568,7 +556,7 @@ async function planTurn(
   const { choice } = turn;
   // A company a clarification resolved now reads as the company, not an unknown word.
   if (choice.kind === "scenario") return turn.planScenario(planningContext(subjects), turnScenarioAsk(text, subjects) ?? choice.ask);
-  if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
+  if (choice.kind === "cash_resilience") return planCashResilience(planningContext(subjects), text);
   if (choice.kind === "segments_gap" || choice.kind === "named_gap") {
     return { outcome: "unsupported", reason: choice.kind === "segments_gap" ? "segments" : choice.reason, issues: [], model_calls: 0 };
   }
@@ -603,12 +591,7 @@ async function planTurn(
     }
   };
   const plan = await deterministic();
-  if (plan?.outcome === "unsupported") return plan;
-  if (plan) {
-    turn.onDeterministic(choice);
-    if (choice.kind === "trend" || choice.kind === "overview") turn.onOverview(choice.period);
-    return plan;
-  }
+  if (plan) return plan;
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
   return planFinancialRequest(planningContext(subjects), text, model ?? noModel);
 }
@@ -625,6 +608,7 @@ async function withPeers(subjects: ReadonlyArray<RequestedSubject>, peersOf: Pee
 }
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
+const CASH_RESILIENCE_CHOICE: PlanChoice = { kind: "cash_resilience" };
 const CASH_RESILIENCE_VIEW = "cash_resilience_view";
 // The view is annual and has no score, rank, or cash/debt measure; a request
 // for one is unsupported rather than answered with the annual view.
@@ -762,6 +746,14 @@ function chatAuthority(userId: string, threadId: string, turnId: string): Financ
   });
 }
 
+/**
+ * The choice a saved plan answers: the turn's, when it was planned with no
+ * model, as only the turn's choice plans so (planTurn); null when a model
+ * planned it. A retry that resumes a reserved run reads it as its first attempt did.
+ */
+const answeredChoice = (plan: FinancialPlan | null, choice: PlanChoice): PlanChoice | null =>
+  plan?.planner.kind === "deterministic" ? choice : null;
+
 const UNCHECKED = "It was not checked whether this answer covers everything the question asks for.";
 
 /** Writes the assistant message inside the finalization transaction, under the thread's owner. */
@@ -772,8 +764,7 @@ function persistAssistantMessage(
     scope: ResearchScope | null;
     reading: ScopeProposal | null;
     evidence: ChatFinancialRuntimeDeps["evidence"];
-    overviewPeriod: () => ReadPeriod | null;
-    deterministic: () => PlanChoice | null;
+    choice: PlanChoice;
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;
     labels: ReadonlyMap<string, string>;
@@ -795,7 +786,7 @@ function persistAssistantMessage(
       : await filedCauses(tx, { threadId, plan, named: namedFigures(reading), names: companyNames, answer: publication });
     const { reading: asked, notes: scenarioNotes } = scenarioAnswer(plan, reading);
     const shownPeriod = plan === null ? null : planPeriod(plan);
-    const chosen = turn.deterministic();
+    const chosen = answeredChoice(plan, turn.choice);
     // A trend shown for a fiscal year had no quarters to chart (planTurn), which its own line says.
     const unquartered = chosen?.kind === "trend" && shownPeriod === "fiscal_year";
     const missing = asked === null || plan === null ? [] : [
