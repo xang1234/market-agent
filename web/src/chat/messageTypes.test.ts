@@ -67,6 +67,7 @@ test('parseThreadMessages reads active_run and runs, and treats a missing or mal
       { run_id: 'r1', turn_id: 'u1', status: 'failed' },
       { run_id: 'r2', turn_id: 'u2', status: 'in_flight' },
       { run_id: 'r3', turn_id: 'u3', status: 'completed' },
+      { run_id: 'r4', turn_id: 'u4', status: 'stopped' },
     ],
   }), {
     messages,
@@ -76,6 +77,7 @@ test('parseThreadMessages reads active_run and runs, and treats a missing or mal
       { run: { runId: 'r1', turnId: 'u1' }, status: 'failed' },
       { run: { runId: 'r2', turnId: 'u2' }, status: 'in_flight' },
       { run: { runId: 'r3', turnId: 'u3' }, status: 'completed', messageId: null },
+      { run: { runId: 'r4', turnId: 'u4' }, status: 'stopped' },
     ],
   })
   assert.deepEqual(

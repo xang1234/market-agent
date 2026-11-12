@@ -66,6 +66,7 @@ export type RunRef = Readonly<{ runId: string; turnId: string }>
 export type RunStatus =
   | Readonly<{ run: RunRef; status: 'in_flight' }>
   | Readonly<{ run: RunRef; status: 'completed'; messageId: string | null }>
+  | Readonly<{ run: RunRef; status: 'stopped' }>
   | Readonly<{ run: RunRef; status: 'failed' }>
 
 export type ThreadRead = { messages: ReadonlyArray<ChatMessage>; activeRun: RunRef | null; runs: ReadonlyArray<RunStatus> }
@@ -94,6 +95,7 @@ function parseRunStatus(value: unknown): RunStatus | null {
   if (run === null || !isRecord(value)) return null
   switch (value.status) {
     case 'in_flight':
+    case 'stopped':
     case 'failed':
       return { run, status: value.status }
     case 'completed':

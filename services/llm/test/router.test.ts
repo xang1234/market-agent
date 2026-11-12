@@ -6,6 +6,7 @@ import {
   LlmProviderError,
   LlmRouterError,
   createLlmRouter,
+  withLlmAbortSignal,
   type LlmChatClient,
 } from "../src/router.ts";
 import { parseLlmEnv } from "../src/channel-config.ts";
@@ -368,4 +369,23 @@ test("a client failure stops the router at its first deployment: every other dep
     error instanceof LlmRouterError && error.code === "client_failed" && error.attempts.length === 1 && error.attempts[0]!.code === "client_failed" &&
     /totalTokens/u.test(error.message));
   assert.equal(calls.length, 1);
+});
+
+test("a call inside withLlmAbortSignal ends with the signal's reason when it aborts, and tries no other deployment", async () => {
+  const calls: string[] = [];
+  const router = createLlmRouter({
+    settings: settings(),
+    client: (deployment, _request, options) => {
+      calls.push(`${deployment.channel}/${deployment.model}`);
+      return new Promise((_resolve, reject) => options?.signal?.addEventListener("abort", () => reject(new Error("socket closed")), { once: true }));
+    },
+  });
+  const controller = new AbortController();
+  const stopped = new Error("turn stopped");
+  const call = withLlmAbortSignal(controller.signal, () => router.complete({ messages: [{ role: "user", content: "hi" }] }));
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort(stopped);
+
+  await assert.rejects(call, (error) => error === stopped);
+  assert.deepEqual(calls, ["openai/gpt-4.1"]);
 });

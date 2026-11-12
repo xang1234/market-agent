@@ -13,6 +13,7 @@ export const CHAT_SSE_EVENT_TYPES = [
   'block.completed',
   'turn.completed',
   'turn.error',
+  'turn.stopped',
 ] as const
 
 export type ChatSseEventType = (typeof CHAT_SSE_EVENT_TYPES)[number]

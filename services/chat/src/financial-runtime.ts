@@ -30,6 +30,7 @@ import {
 } from "../../financial-core/src/index.ts";
 import { cashResilienceDraft, LATEST_FISCAL_YEAR, type CashResiliencePeriod } from "../../financial-engine/src/cash-resilience.ts";
 import { ParentRefusedError, type PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
+import { claimAnswerSave } from "./turn-stop.ts";
 import {
   buildDeterministicPlan,
   planFinancialRequest,
@@ -769,6 +770,7 @@ function persistAssistantMessage(
   request: { authority: FinancialRuntimeAuthority; request_key: string },
 ): PersistParentArtifact {
   return async (tx, publication) => {
+    if (!claimAnswerSave()) throw new ParentRefusedError("the chat turn was stopped");
     const { scope, reading } = turn;
     const plan = await findPlanForRequest(tx.client, request);
     // A plan member the turn gave no label is a peer the overview selected. The

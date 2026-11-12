@@ -236,6 +236,7 @@ test("SSE schema enumerates the coordinator event kinds", async () => {
     "block.completed",
     "turn.completed",
     "turn.error",
+    "turn.stopped",
   ]);
 });
 

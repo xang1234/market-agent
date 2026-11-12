@@ -59,7 +59,7 @@ export type StreamState = {
   // turn.completed. A failed turn saved nothing, so it drops it.
   shown?: ShownAnswer | null
 } & (
-  | { turn_status: 'idle' | 'started' | 'error' | 'unverified' }
+  | { turn_status: 'idle' | 'started' | 'error' | 'unverified' | 'stopped' }
   | { turn_status: 'completed'; sealed: SealedChatMessage }
   // Completed without a sealed message the client could accept, so there is
   // nothing to hand off to; message_id names the saved answer when the event did.
@@ -133,6 +133,10 @@ export function applyChatStreamEvent(state: StreamState, event: ChatSseEvent): S
         plan_steps: markRunningPlanStepsError(state.plan_steps),
         error: readString(event.error) ?? readString(event.message) ?? 'unknown stream error',
       }
+
+    // Its owner stopped it before it saved an answer.
+    case 'turn.stopped':
+      return { ...state, shown: null, turn_status: 'stopped' }
 
     case 'tool.started':
       return withPlanSteps(state, planStepsForToolStarted(state.plan_steps, event))

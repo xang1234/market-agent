@@ -674,3 +674,26 @@ test('a load read before the followed run ended, listing it ahead of another run
   const stale = reduceChatSession(ended, read(2, [U1, U2], both))
   assert.deepEqual([wantedStream(stale)?.key, selectThreadView(stale).canAsk], ['T1|run-2|attach|0', false])
 })
+
+test('stop: requested and lapsed for the followed run only, then turn.stopped ends the run stopped and askable', () => {
+  const streaming = streamingT1()
+  assert.equal(selectThreadView(streaming).stop, 'ready')
+  assert.equal(reduceChatSession(streaming, { type: 'stop.requested', runId: 'run-other' }), streaming)
+
+  const stopping = reduceChatSession(streaming, { type: 'stop.requested', runId: 'run-1' })
+  assert.deepEqual([selectThreadView(stopping).stop, selectThreadView(stopping).canAsk], ['stopping', false])
+  assert.equal(selectThreadView(reduceChatSession(stopping, { type: 'stop.lapsed', runId: 'run-1' })).stop, 'ready')
+
+  const stopped = reduceChatSession(stopping, streamEvent(sse('turn.stopped', 5)))
+  assert.deepEqual(stopped.turn, { phase: 'stopped', run: R1, origin: OWN })
+  assert.deepEqual([selectThreadView(stopped).stop, selectThreadView(stopped).canAsk, stopped.endedRuns, wantedStream(stopped)], ['none', true, ['run-1'], null])
+  assert.equal(wantedStream(reduceChatSession(stopped, { type: 'turn.retried', runId: 'run-2' }))?.key, 'T1|run-2|start|0')
+})
+
+test('a load that reports the run stopped ends a reconnecting run, or a released one, stopped', () => {
+  const reconnecting = reduceChatSession(streamingT1(), drop)
+  const back = run(streamingT1(), [toT2, toT1])
+  for (const state of [reduceChatSession(reconnecting, read(2, [U1], [{ run: R1, status: 'stopped' }])), reduceChatSession(back, read(1, [U1], [{ run: R1, status: 'stopped' }]))]) {
+    assert.deepEqual([state.turn, state.endedRuns, state.released, selectThreadView(state).canAsk, wantedStream(state)], [{ phase: 'stopped', run: R1, origin: OWN }, ['run-1'], [], true, null])
+  }
+})

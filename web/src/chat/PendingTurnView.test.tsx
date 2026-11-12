@@ -64,7 +64,7 @@ test('PendingTurnView renders the agent plan panel above streamed blocks', () =>
     error: null,
   }
 
-  const html = renderToStaticMarkup(<PendingTurnView turn={{ phase: 'streaming', run: RUN, origin: OWN, stream: state, link: LINK }} {...handlers} />)
+  const html = renderToStaticMarkup(<PendingTurnView turn={{ phase: 'streaming', run: RUN, origin: OWN, stream: state, link: LINK, stop: 'none' }} {...handlers} />)
 
   assert.match(html, /data-testid="agent-plan-panel"/)
   assert.match(html, /aria-live="polite"/)
@@ -177,7 +177,7 @@ test('PendingTurnView shows the optimistic question while it is being saved', ()
 
 test('an opened stream shows Starting… until turn.started, which no other event precedes (#398)', () => {
   const render = (stream: StreamState) =>
-    renderToStaticMarkup(<PendingTurnView turn={{ phase: 'streaming', run: RUN, origin: OWN, stream, link: LINK }} {...handlers} />)
+    renderToStaticMarkup(<PendingTurnView turn={{ phase: 'streaming', run: RUN, origin: OWN, stream, link: LINK, stop: 'none' }} {...handlers} />)
   assert.match(render(INITIAL_STREAM_STATE), /Starting…/)
   const started = applyChatStreamEvent(INITIAL_STREAM_STATE, { type: 'turn.started', seq: 1, bundle_id: 'financial_answer' } as unknown as ChatSseEvent)
   assert.doesNotMatch(render(started), /Starting…/)
@@ -189,7 +189,7 @@ test('an opened stream shows Starting… until turn.started, which no other even
 
 test('an adopted run shows its plan and its link state, never streamed blocks; an own run shows its blocks attached or not', () => {
   const stream: StreamState = { ...STREAMED, turn_status: 'started', plan_steps: [{ step_id: 'planner', label: 'Planner', detail: 'Planning.', status: 'running' }] }
-  const render = (link: StreamLink, origin: RunOrigin = ADOPTED) => renderToStaticMarkup(<PendingTurnView turn={{ phase: 'streaming', run: RUN, origin, stream, link }} {...handlers} />)
+  const render = (link: StreamLink, origin: RunOrigin = ADOPTED) => renderToStaticMarkup(<PendingTurnView turn={{ phase: 'streaming', run: RUN, origin, stream, link, stop: 'none' }} {...handlers} />)
 
   const notices = ([
     { ...LINK, attach: true },
@@ -233,7 +233,7 @@ test('a sealed answer shown while the judge reads its inferences renders as the 
   const registry = createDefaultBlockRegistry()
   const render = (origin: RunOrigin) => renderToStaticMarkup(
     <BlockRegistryProvider registry={registry}>
-      <PendingTurnView turn={{ phase: 'streaming', run: RUN, origin, stream, link: LINK }} {...handlers} />
+      <PendingTurnView turn={{ phase: 'streaming', run: RUN, origin, stream, link: LINK, stop: 'none' }} {...handlers} />
     </BlockRegistryProvider>,
   )
   const saved = renderToStaticMarkup(
@@ -254,7 +254,7 @@ test('a sealed answer shown while the judge reads its inferences renders as the 
   const held = { message_id: 'a1', thread_id: 'T1', role: 'assistant', snapshot_id: stream.shown!.snapshot_id, blocks: [answer], content_hash: 'sha256:a1', created_at: '2026-05-06T00:00:00.000Z' } as const
   const attached = renderToStaticMarkup(
     <BlockRegistryProvider registry={registry}>
-      <PendingTurnView turn={{ phase: 'streaming', run: RUN, origin: ADOPTED, stream, link: { ...LINK, attach: true } }} {...handlers} messages={[held]} />
+      <PendingTurnView turn={{ phase: 'streaming', run: RUN, origin: ADOPTED, stream, link: { ...LINK, attach: true }, stop: 'none' }} {...handlers} messages={[held]} />
     </BlockRegistryProvider>,
   )
   assert.doesNotMatch(attached, /Data Center revenue was/)
@@ -287,7 +287,7 @@ test('a figure clicked while its answer streams asks the inspector for it in the
       root.render(
         <AuthContext.Provider value={{ session: { userId: '00000000-0000-4000-8000-000000000001', displayName: 'Mock User' }, signIn: noop, signOut: noop }}>
           <EvidenceInspectorProvider>
-            <PendingTurnView turn={{ phase: 'streaming', run: RUN, origin: OWN, stream, link: LINK }} {...handlers} />
+            <PendingTurnView turn={{ phase: 'streaming', run: RUN, origin: OWN, stream, link: LINK, stop: 'none' }} {...handlers} />
           </EvidenceInspectorProvider>
         </AuthContext.Provider>,
       )
@@ -314,11 +314,11 @@ test("a retry's new run starts its own clock, not the failed attempt's", async (
   const stream: StreamState = { ...INITIAL_STREAM_STATE, turn_status: 'started', plan_steps: [{ step_id: 'planner', label: 'Planner', detail: 'Planning.', status: 'running' }] }
   const heading = () => container.querySelector('[data-testid="agent-plan-panel"] h3')?.textContent
 
-  await act(async () => root.render(<PendingTurnView turn={{ phase: 'streaming', run: RUN, origin: OWN, stream, link: LINK }} {...handlers} />))
+  await act(async () => root.render(<PendingTurnView turn={{ phase: 'streaming', run: RUN, origin: OWN, stream, link: LINK, stop: 'none' }} {...handlers} />))
   await act(async () => t.mock.timers.tick(60_000))
   assert.equal(heading(), 'Working · 1m 0s')
 
-  await act(async () => root.render(<PendingTurnView turn={{ phase: 'streaming', run: { runId: 'run-2', turnId: 'u1' }, origin: OWN, stream, link: LINK }} {...handlers} />))
+  await act(async () => root.render(<PendingTurnView turn={{ phase: 'streaming', run: { runId: 'run-2', turnId: 'u1' }, origin: OWN, stream, link: LINK, stop: 'none' }} {...handlers} />))
   assert.equal(heading(), 'Working · 0s')
 
   await act(async () => root.unmount())

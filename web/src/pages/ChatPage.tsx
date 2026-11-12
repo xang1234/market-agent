@@ -97,6 +97,8 @@ export function ChatLayout() {
         draftScope={draftScope}
         canAsk={chat.view.canAsk}
         onAsk={chat.ask}
+        stop={chat.view.stop}
+        onStop={chat.stop}
       />
     </div>
   )

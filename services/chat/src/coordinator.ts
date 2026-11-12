@@ -40,6 +40,7 @@ import { financialAwareRunner, offeredChoicesRunner } from "./financial-turn.ts"
 import { companyNameIn, type CompanyChange, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import type { AssertionReport } from "./assertions.ts";
 import type { BlockProof } from "../../snapshot/src/block-proof.ts";
+import { ChatTurnStoppedError, claimAnswerSave, TurnStop } from "./turn-stop.ts";
 
 // The claims an answer quoted that its seal left out, by claim id (#557):
 // withdrawn, no longer citable; unchecked, being changed by another session,
@@ -225,6 +226,7 @@ export class ChatPersistenceContractError extends Error {
 
 function committing(persist: ChatAssistantMessagePersistence): ChatAssistantMessageCommit {
   return async (input) => {
+    if (!claimAnswerSave()) throw new ChatTurnStoppedError();
     let message: ChatReadMessage;
     try {
       message = await persist({ ...input, message_id: input.message_id ?? answerMessageId(input.threadId, input.runId, input.turnId) });
@@ -260,19 +262,29 @@ export type ChatActiveRun = { runId: string; turnId: string };
 
 /**
  * A retained turn of the caller's and where it stands: queued or running; ended
- * with turn.completed (naming its saved answer when it has one); or ended with
- * turn.error, or with no terminal event at all.
+ * with turn.completed (naming its saved answer when it has one); ended with
+ * turn.stopped, having saved nothing; or ended with turn.error, or with no
+ * terminal event at all.
  */
 export type ChatRunStatus =
   | { runId: string; turnId: string; status: "in_flight" }
   | { runId: string; turnId: string; status: "completed"; messageId?: string }
+  | { runId: string; turnId: string; status: "stopped" }
   | { runId: string; turnId: string; status: "failed" };
+
+/**
+ * What a stop request did: stopped the turn (now or earlier); found it saving
+ * its answer, so it ends as that save does; or found it already ended otherwise.
+ */
+export type ChatStopOutcome = "stopped" | "saving" | "ended";
 
 export type ChatCoordinator = {
   getOrCreateTurn(input: ChatTurnInput): ChatTurnHandle;
   getTurn(input: ChatTurnInput): ChatTurnHandle | null;
   /** The turn with these ids, whatever input started it; never creates one. */
   findTurn(ids: ChatTurnIds): ChatTurnHandle | null;
+  /** Stops the turn with these ids; null when there is none. Repeating it changes nothing. */
+  stopTurn(ids: ChatTurnIds): ChatStopOutcome | null;
   /**
    * Runs `read` (the thread's messages, or null when the caller doesn't own the
    * thread) and pairs it with the caller's turns on the thread that this process
@@ -503,6 +515,10 @@ export function createChatCoordinator(
       pruneCompletedTurns();
       return turns.get(turnKey(normalizeTurnInput(ids)))?.handle ?? null;
     },
+    stopTurn(ids) {
+      pruneCompletedTurns();
+      return turns.get(turnKey(normalizeTurnInput(ids)))?.handle.stop() ?? null;
+    },
     async readThread(scope, read) {
       // Map order is creation order, which is the thread's queue order.
       const retained = () => [...turns.values()].filter((record) =>
@@ -555,6 +571,7 @@ function runStatus(record: TurnRecord, readIds: ReadonlySet<string>): ChatRunSta
       ? { runId, turnId, status: "completed", messageId: terminal.message_id }
       : { runId, turnId, status: "completed" };
   }
+  if (terminal?.type === "turn.stopped") return { runId, turnId, status: "stopped" };
   if (terminal !== null || record.completedAt !== null) return { runId, turnId, status: "failed" };
   return { runId, turnId, status: "in_flight" };
 }
@@ -790,6 +807,10 @@ class MutableChatTurnHandle implements ChatTurnHandle {
   #completedResolve!: () => void;
   #settled = false;
   #runner: ChatTurnRunner;
+  #sequencer: ReturnType<typeof createChatSseSequencer>;
+  #startedEvent: ChatSseEvent | null = null;
+  #stop = new TurnStop();
+  #stopped = Promise.withResolvers<void>();
 
   constructor(
     input: ChatTurnInput,
@@ -797,6 +818,11 @@ class MutableChatTurnHandle implements ChatTurnHandle {
   ) {
     this.input = Object.freeze({ ...input });
     this.#runner = runner;
+    this.#sequencer = createChatSseSequencer({
+      threadId: this.input.threadId,
+      runId: this.input.runId,
+      turnId: this.input.turnId,
+    });
     this.completed = new Promise<void>((resolve) => {
       this.#completedResolve = resolve;
     });
@@ -810,45 +836,35 @@ class MutableChatTurnHandle implements ChatTurnHandle {
     return this.#events.at(-1)?.seq ?? 0;
   }
 
-  /** The turn's first turn.completed or turn.error. */
+  /** The turn's first turn.completed, turn.error or turn.stopped. */
   get terminal(): ChatSseEvent | null {
     return this.#terminal;
   }
 
+  stop(): ChatStopOutcome {
+    if (this.#terminal !== null) return this.#terminal.type === "turn.stopped" ? "stopped" : "ended";
+    if (this.#stop.stop() === "saving") return "saving";
+    this.#emit("turn.stopped");
+    this.#stopped.resolve();
+    return "stopped";
+  }
+
   async run(): Promise<void> {
-    const sequencer = createChatSseSequencer({
-      threadId: this.input.threadId,
-      runId: this.input.runId,
-      turnId: this.input.turnId,
-    });
-
-    let startedEvent: ChatSseEvent | null = null;
-    const emit: ChatTurnEmit = (type, payload = {}) => {
-      if (type === "turn.started" && startedEvent) {
-        if (Object.keys(payload).length === 0) {
-          return startedEvent;
-        }
-        const event = sequencer.next(type, payload);
-        startedEvent = event;
-        return this.append(event);
-      }
-      if (type !== "turn.started" && startedEvent === null) {
-        startedEvent = this.append(sequencer.next("turn.started"));
-      }
-      const event = sequencer.next(type, payload);
-      if (type === "turn.started") {
-        startedEvent = event;
-      }
-      return this.append(event);
-    };
-
     try {
-      // bundleId is a placeholder here — subjectAwareRunner (always the
-      // outermost wrapper, see createChatCoordinator) overwrites it on
-      // every path before invoking the inner runner.
-      await this.#runner({ ...this.input, emit, bundleId: DEFAULT_BUNDLE_ID });
+      // A turn stopped while queued never starts.
+      if (this.#stop.state !== "stopped") {
+        // bundleId is a placeholder here — subjectAwareRunner (always the
+        // outermost wrapper, see createChatCoordinator) overwrites it on
+        // every path before invoking the inner runner.
+        const work = Promise.resolve(this.#stop.run(() => this.#runner({ ...this.input, emit: this.#emit, bundleId: DEFAULT_BUNDLE_ID })));
+        // A stopped turn's work ends at its next model call or save; the thread's next turn need not wait for it.
+        work.catch((error: unknown) => {
+          if (this.#stop.state === "stopped" && !(error instanceof ChatTurnStoppedError)) console.error("[chat] a stopped turn's work failed", error);
+        });
+        await Promise.race([work, this.#stopped.promise]);
+      }
     } catch (error) {
-      emit("turn.error", {
+      this.#emit("turn.error", {
         error_code: errorCode(error),
         message: errorMessage(error),
       });
@@ -858,6 +874,25 @@ class MutableChatTurnHandle implements ChatTurnHandle {
       this.#completedResolve();
     }
   }
+
+  #emit: ChatTurnEmit = (type, payload = {}) => {
+    if (type === "turn.started" && this.#startedEvent) {
+      if (Object.keys(payload).length === 0) {
+        return this.#startedEvent;
+      }
+      const event = this.#sequencer.next(type, payload);
+      this.#startedEvent = event;
+      return this.append(event);
+    }
+    if (type !== "turn.started" && this.#startedEvent === null) {
+      this.#startedEvent = this.append(this.#sequencer.next("turn.started"));
+    }
+    const event = this.#sequencer.next(type, payload);
+    if (type === "turn.started") {
+      this.#startedEvent = event;
+    }
+    return this.append(event);
+  };
 
   waitForEventCount(count: number): Promise<void> {
     if (!Number.isInteger(count) || count < 0) {
@@ -884,8 +919,10 @@ class MutableChatTurnHandle implements ChatTurnHandle {
 
   private append(event: ChatSseEvent): ChatSseEvent {
     const immutableEvent = deepFreeze(cloneEvent(event));
+    // Nothing a stopped turn's work goes on to emit reaches its stream.
+    if (this.#terminal?.type === "turn.stopped") return immutableEvent;
     this.#events.push(immutableEvent);
-    if (this.#terminal === null && (event.type === "turn.completed" || event.type === "turn.error")) {
+    if (this.#terminal === null && (event.type === "turn.completed" || event.type === "turn.error" || event.type === "turn.stopped")) {
       this.#terminal = immutableEvent;
     }
     for (const listener of [...this.#listeners]) {

@@ -51,7 +51,7 @@ test('an own stream that opened and dropped, whose run the server no longer list
     assert.equal(h.said('assistant'), SEALED_TEXT)
     assert.equal(h.query('[data-testid="streaming-turn"]'), null)
     assert.doesNotMatch(h.text(), /didn't answer/)
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
   } finally {
     await h.cleanup()
   }
@@ -81,14 +81,14 @@ test("an own run listed in flight after another tab's answered run is attached, 
     assert.equal(server.gets(HISTORY_T1), 2)
     assert.equal(occurrences(h.text(), 'The Fed held rates'), 1)
     assert.match(h.text(), STILL_ANSWERING)
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
 
     await streamAnswer(h, attached)
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
     await complete(h, attached)
     assert.equal(occurrences(h.text(), ANSWER), 1)
     assert.equal(occurrences(h.text(), 'The Fed held rates'), 1)
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
   } finally {
     await h.cleanup()
   }
@@ -119,12 +119,12 @@ test("Retry on a failed run starts the same question as a fresh run: a new run i
       [retried.params.get('turn_id'), retried.params.get('user_intent'), retried.params.get('attach')],
       [failed.params.get('turn_id'), 'Analyze NVDA', null],
     )
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
 
     await streamAnswer(h, retried)
     await complete(h, retried)
     assert.equal(occurrences(h.text(), ANSWER), 1)
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
   } finally {
     await h.cleanup()
   }
@@ -150,7 +150,7 @@ test('replayed events never refill the drop budget: twelve cycles of a replayed 
     assert.equal(FakeEventSource.instances.length, 4)
     assert.deepEqual(FakeEventSource.instances.slice(1).map((source) => source.params.get('attach')), ['1', '1', '1'])
     assert.equal(server.gets(HISTORY_T1), 4)
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
   } finally {
     await h.cleanup()
   }
@@ -171,7 +171,7 @@ test("an own stream's turn.error opens no other stream", async () => {
     assert.equal(FakeEventSource.instances.length, 1)
     assert.equal(own.closed, true)
     assert.equal(server.gets(HISTORY_T1), 1)
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
   } finally {
     await h.cleanup()
   }
@@ -207,7 +207,7 @@ test('an unverified run that completed while its own stream was down is attached
     assert.match(h.text(), /This answer failed verification and was not saved\./)
     assert.equal(server.gets(HISTORY_T1), 2)
     assert.equal(FakeEventSource.instances.length, 2)
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
   } finally {
     await h.cleanup()
   }
@@ -248,7 +248,7 @@ test('an own run keeps its streamed answer on screen in every commit through a d
     assert.deepEqual(consecutive(sinceStreamed()), [1])
     assert.equal(h.said('assistant'), SEALED_TEXT)
     assert.equal(h.query('[data-testid="streaming-turn"]'), null)
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
   } finally {
     await h.cleanup()
   }

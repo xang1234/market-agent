@@ -33,6 +33,10 @@ export type StreamLink = Readonly<{
   seenSeq: number
 }>
 
+// Whether the reader asked the server to stop the run the session follows: it
+// stays requested until the run ends, or the request fails or never lands.
+export type StopRequest = 'none' | 'requested'
+
 // A run this session sent and left behind on switch-away, until a load of its
 // thread reconciles it. One whose stream hasn't reached the server yet is sent
 // again when that load lacks it.
@@ -44,7 +48,7 @@ export type TurnState =
   | { phase: 'idle' }
   | { phase: 'persisting'; turn: TurnIds }
   | { phase: 'not_sent'; text: string; error: string }
-  | { phase: 'streaming'; run: RunRef; origin: RunOrigin; stream: StreamState; link: StreamLink }
+  | { phase: 'streaming'; run: RunRef; origin: RunOrigin; stream: StreamState; link: StreamLink; stop: StopRequest }
   | { phase: 'failed'; run: RunRef; origin: OwnOrigin; stream: StreamState; error: string; recovery: 'retry_run' }
   // The run completed without a sealed copy on the stream: load the thread until
   // a load returns messageId, the saved answer it named.
@@ -52,6 +56,9 @@ export type TurnState =
   // A run this session didn't send failed; there is no question to send again.
   | { phase: 'failed'; run: RunRef; origin: RunOrigin; stream: StreamState; error: string; recovery: 'none' }
   | { phase: 'unverified'; run: RunRef; stream: StreamState }
+  // Its owner stopped the run before it saved an answer. Its question stays in
+  // the thread, and an own run can be asked again.
+  | { phase: 'stopped'; run: RunRef; origin: RunOrigin }
 
 type LoadedHistory =
   | { kind: 'loading' }
@@ -101,6 +108,9 @@ export type ChatSessionAction =
   | { type: 'stream.event'; threadId: string; event: ChatSseEvent }
   | { type: 'stream.dropped'; threadId: string; runId: string }
   | { type: 'turn.retried'; runId: string }
+  | { type: 'stop.requested'; runId: string }
+  // The stop request failed, or the run went on past its deadline.
+  | { type: 'stop.lapsed'; runId: string }
   | { type: 'link.reconnected' }
   | { type: 'history.requested' }
   | { type: 'history.loaded'; threadId: string; gen: number; messages: ReadonlyArray<ChatMessage>; activeRun: RunRef | null; runs: ReadonlyArray<RunStatus> }
@@ -152,7 +162,7 @@ function releasedOnLeave(s: ChatSessionState): ReadonlyArray<ReleasedRun> {
   return [...s.released, { threadId, run: turn.run, input: turn.origin.input, reached }]
 }
 
-const ASKABLE_PHASES: ReadonlySet<TurnState['phase']> = new Set(['idle', 'not_sent', 'failed', 'unverified'])
+const ASKABLE_PHASES: ReadonlySet<TurnState['phase']> = new Set(['idle', 'not_sent', 'failed', 'unverified', 'stopped'])
 
 const reachedHere = (s: ChatSessionState) => s.released.some((r) => r.threadId === s.threadId && r.reached)
 const waiting = (s: ChatSessionState) => reachedHere(s) || s.inFlight.some((run) => !s.endedRuns.includes(run.runId))
@@ -180,7 +190,7 @@ function followUp(s: ChatSessionState): ChatSessionState {
 }
 
 function following(run: RunRef, origin: RunOrigin, link: StreamLink): TurnState {
-  return { phase: 'streaming', run, origin, stream: INITIAL_STREAM_STATE, link }
+  return { phase: 'streaming', run, origin, stream: INITIAL_STREAM_STATE, link, stop: 'none' }
 }
 
 export function reduceChatSession(s: ChatSessionState, a: ChatSessionAction): ChatSessionState {
@@ -207,7 +217,7 @@ export function reduceChatSession(s: ChatSessionState, a: ChatSessionAction): Ch
       return {
         ...s,
         history: { ...history, loaded: history.loaded.kind === 'ready' ? history.loaded : EMPTY_READY },
-        turn: { phase: 'streaming', run: { runId, turnId: a.message.message_id }, origin: { kind: 'own', input: { userIntent: text } }, stream: INITIAL_STREAM_STATE, link: FRESH_LINK },
+        turn: following({ runId, turnId: a.message.message_id }, { kind: 'own', input: { userIntent: text } }, FRESH_LINK),
       }
     }
 
@@ -260,11 +270,18 @@ export function reduceChatSession(s: ChatSessionState, a: ChatSessionAction): Ch
 
     case 'turn.retried': {
       const { turn } = s
-      if (turn.phase === 'failed' && turn.recovery === 'retry_run') {
-        const run = { runId: a.runId, turnId: turn.run.turnId }
-        return { ...s, turn: { phase: 'streaming', run, origin: turn.origin, stream: INITIAL_STREAM_STATE, link: FRESH_LINK } }
+      if ((turn.phase === 'failed' && turn.recovery === 'retry_run') || (turn.phase === 'stopped' && turn.origin.kind === 'own')) {
+        return { ...s, turn: following({ runId: a.runId, turnId: turn.run.turnId }, turn.origin, FRESH_LINK) }
       }
       return s
+    }
+
+    case 'stop.requested':
+    case 'stop.lapsed': {
+      const { turn } = s
+      const stop: StopRequest = a.type === 'stop.requested' ? 'requested' : 'none'
+      if (turn.phase !== 'streaming' || turn.run.runId !== a.runId || turn.stop === stop) return s
+      return { ...s, turn: { ...turn, stop } }
     }
 
     case 'link.reconnected': {
@@ -339,6 +356,8 @@ function settled(s: ChatSessionState, read: Read): ChatSessionState {
         }
       case 'failed':
         return { ...s, turn: failedRun(turn), endedRuns: withEnded(s, run) }
+      case 'stopped':
+        return { ...s, turn: { phase: 'stopped', run, origin }, endedRuns: withEnded(s, run) }
       case undefined:
         // Restarted, another instance, or past retention: nobody knows, so the thread is shown as it is.
         return { ...s, turn: IDLE, endedRuns: withEnded(s, run) }
@@ -393,6 +412,10 @@ function reconcileReleased(s: ChatSessionState, read: Read): ChatSessionState {
         if (next.turn.phase === 'idle') {
           next = { ...next, turn: { phase: 'failed', run: released.run, origin: own, stream: INITIAL_STREAM_STATE, error: RUN_FAILED, recovery: 'retry_run' } }
         }
+        break
+      case 'stopped':
+        next = { ...next, endedRuns: withEnded(next, released.run) }
+        if (next.turn.phase === 'idle') next = { ...next, turn: { phase: 'stopped', run: released.run, origin: own } }
         break
       case undefined:
         if (!released.reached) follow(FRESH_LINK)
@@ -472,6 +495,8 @@ function reduceStreamEvent(s: ChatSessionState, threadId: string, event: ChatSse
       }
     case 'unverified':
       return followUp({ ...s, turn: { phase: 'unverified', run, stream }, endedRuns: withEnded(s, run) })
+    case 'stopped':
+      return followUp({ ...s, turn: { phase: 'stopped', run, origin }, endedRuns: withEnded(s, run) })
     case 'error': {
       const error = `Stream error: ${stream.error ?? 'unknown'}`
       const failed: TurnState = origin.kind === 'own'
@@ -511,6 +536,8 @@ export type ThreadView = {
   listMounted: boolean
   turn: TurnState
   canAsk: boolean
+  // The composer's stop control: none while no run is followed, else whether a stop is on its way.
+  stop: 'none' | 'ready' | 'stopping'
   firstQuestion: string | null
   sealedTurns: number
   needsLoad: { threadId: string; gen: number } | null
@@ -545,6 +572,7 @@ export function selectThreadView(s: ChatSessionState): ThreadView {
     listMounted: history.loaded.kind === 'ready' || turn.phase !== 'idle',
     turn,
     canAsk: askable(s),
+    stop: turn.phase !== 'streaming' ? 'none' : turn.stop === 'requested' ? 'stopping' : 'ready',
     firstQuestion: (firstUser ? messageText(firstUser) : null) || pendingText,
     sealedTurns: s.sealedTurns,
     needsLoad: s.threadId !== null && history.requested > history.settled

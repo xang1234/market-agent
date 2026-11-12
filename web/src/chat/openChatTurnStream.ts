@@ -44,7 +44,7 @@ export function openChatTurnStream(
         source.close()
       }
       // The turn ended: the event said how, and nothing reopens it.
-      if (type === 'turn.error') source.close()
+      if (type === 'turn.error' || type === 'turn.stopped') source.close()
     })
   }
   source.onerror = () => {

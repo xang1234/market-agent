@@ -115,6 +115,21 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
       return;
     }
 
+    const stop = matchStopRoute(req.method ?? "GET", req.url ?? "/");
+    if (stop === INVALID_STREAM_ROUTE) {
+      respondJson(res, 400, { error: "invalid request path" });
+      return;
+    }
+    if (stop !== null) {
+      const userId = readAuthenticatedUserId(req, options.auth);
+      if (!(await callerMayUseThread(res, { userId, threadId: stop.threadId, required: Boolean(options.runActivity || threadsDb), threadsDb, auth: options.auth }))) return;
+      const outcome = coordinator.stopTurn({ ...(userId ? { userId } : {}), ...stop });
+      if (outcome === null) respondJson(res, 404, { error: "turn not found" });
+      else if (outcome === "stopped") respondJson(res, 200, { status: outcome });
+      else respondJson(res, 409, { status: outcome, error: outcome === "saving" ? "the turn is saving its answer" : "the turn already ended" });
+      return;
+    }
+
     const route = matchStreamRoute(req.method ?? "GET", req.url ?? "/");
 
     if (route === INVALID_STREAM_ROUTE) {
@@ -134,25 +149,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
     const runId = route.runId;
     const turnId = route.turnId ?? runId;
     const userId = readStreamAuthenticatedUserId(req, route, options.auth);
-    if ((options.runActivity || threadsDb) && userId === null) {
-      respondJson(res, 401, { error: authenticatedUserRequiredMessage(options.auth) });
-      return;
-    }
-    if (threadsDb && userId !== null) {
-      try {
-        await getThread(threadsDb, userId, route.threadId);
-      } catch (error) {
-        if (error instanceof ChatThreadNotFoundError) {
-          respondJson(res, 404, { error: "chat thread not found" });
-          return;
-        }
-        if (error instanceof ChatThreadValidationError) {
-          respondJson(res, 400, { error: error.message });
-          return;
-        }
-        throw error;
-      }
-    }
+    if (!(await callerMayUseThread(res, { userId, threadId: route.threadId, required: Boolean(options.runActivity || threadsDb), threadsDb, auth: options.auth }))) return;
 
     const resumeAfterSeq = parseLastEventId(req.headers["last-event-id"]);
     if (resumeAfterSeq === INVALID_LAST_EVENT_ID) {
@@ -226,6 +223,33 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
     res.on("close", cleanup);
     res.on("error", cleanup);
   });
+}
+
+// Responds and returns false unless the caller may use the thread's runs: an
+// authenticated user when `required`, who owns the thread when there is a threads DB.
+async function callerMayUseThread(
+  res: ServerResponse,
+  input: { userId: string | null; threadId: string; required: boolean; threadsDb: ChatThreadsDb | undefined; auth: RequestAuthConfig | undefined },
+): Promise<boolean> {
+  if (input.required && input.userId === null) {
+    respondJson(res, 401, { error: authenticatedUserRequiredMessage(input.auth) });
+    return false;
+  }
+  if (!input.threadsDb || input.userId === null) return true;
+  try {
+    await getThread(input.threadsDb, input.userId, input.threadId);
+    return true;
+  } catch (error) {
+    if (error instanceof ChatThreadNotFoundError) {
+      respondJson(res, 404, { error: "chat thread not found" });
+      return false;
+    }
+    if (error instanceof ChatThreadValidationError) {
+      respondJson(res, 400, { error: error.message });
+      return false;
+    }
+    throw error;
+  }
 }
 
 function handleRunActivityStreamRequest(
@@ -373,6 +397,20 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof 
     clarificationAnswer: clarificationId && choiceId ? { clarification_id: clarificationId, choice_id: choiceId } : null,
     attach: url.searchParams.get("attach") === "1",
   };
+}
+
+// POST /v1/chat/threads/{threadId}/runs/{runId}/stop[?turn_id=]: turn_id defaults to the run id, as on the stream route.
+function matchStopRoute(method: string, rawUrl: string): { threadId: string; runId: string; turnId: string } | typeof INVALID_STREAM_ROUTE | null {
+  if (method !== "POST") return null;
+  const url = new URL(rawUrl, "http://localhost");
+  const match = url.pathname.match(/^\/v1\/chat\/threads\/([^/]+)\/runs\/([^/]+)\/stop$/);
+  if (match == null) return null;
+  try {
+    const runId = decodeURIComponent(match[2]);
+    return { threadId: decodeURIComponent(match[1]), runId, turnId: nonEmptyQueryParam(url.searchParams.get("turn_id")) ?? runId };
+  } catch {
+    return INVALID_STREAM_ROUTE;
+  }
 }
 
 function matchRunActivityStreamRoute(method: string, rawUrl: string): boolean {
