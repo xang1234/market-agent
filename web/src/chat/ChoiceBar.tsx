@@ -1,24 +1,11 @@
-import { useEffect, type ReactElement } from 'react'
+import { useEffect, useMemo, type ReactElement } from 'react'
 
-import type { RichTextBlock } from '../blocks/types.ts'
 import { isTypingTarget } from '../shell/isTypingTarget.ts'
-import type { ChatMessage } from './messageTypes.ts'
-
-// The server's "take every option" path reads this reply (financial-runtime.ts TAKES_EVERY_CHOICE).
-export const ALL_OF_THE_ABOVE = 'All of the above'
-
-// The options the thread's open clarification offered, read from the saved
-// field (#626). A clarification followed by any later message was answered.
-export function offeredChoices(messages: ReadonlyArray<ChatMessage>): ReadonlyArray<string> {
-  const last = messages.at(-1)
-  if (last?.role !== 'assistant') return []
-  const first = last.blocks[0]
-  return first?.kind === 'rich_text' ? (first as RichTextBlock).clarification_choices ?? [] : []
-}
+import { ALL_OF_THE_ABOVE } from './offeredChoices.ts'
 
 // Each offered option as a button the reader can click or pick with keys 1-9.
 export function ChoiceBar({ choices, onAsk }: { choices: ReadonlyArray<string>; onAsk: (text: string) => boolean }): ReactElement | null {
-  const options = choices.length > 1 ? [...choices, ALL_OF_THE_ABOVE] : choices
+  const options = useMemo(() => choices.length > 1 ? [...choices, ALL_OF_THE_ABOVE] : choices, [choices])
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || isTypingTarget(event.target)) return

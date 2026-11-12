@@ -7,7 +7,8 @@ import { createRoot } from 'react-dom/client'
 
 import { installDomGlobals } from '../analyst-grids/testDom.ts'
 import type { Block } from '../blocks/types.ts'
-import { ChoiceBar, offeredChoices } from './ChoiceBar.tsx'
+import { ChoiceBar } from './ChoiceBar.tsx'
+import { offeredChoices } from './offeredChoices.ts'
 import type { ChatMessage } from './messageTypes.ts'
 
 function message(role: ChatMessage['role'], blocks: ReadonlyArray<Partial<Block>>): ChatMessage {
