@@ -181,7 +181,10 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
   ["kept figures after an annual answer, the latest quarter", read({ asks: ["latest_quarter"] }), after({ latest_period: "fiscal_year", ...keeps("free_cash_flow") }), "free_cash_flow at latest quarter"],
   ["kept figures after a quarterly answer, the latest fiscal year", read({ asks: ["latest_fiscal_year"], period: { kind: "latest" } }), after({ latest_period: "quarter", ...keeps("eps_diluted") }), "eps_diluted at latest fiscal year"],
   ["kept figures after an annual answer, the most recent results", read({ period: { kind: "latest" } }), after({ latest_period: "fiscal_year", ...keeps("eps_diluted") }), "eps_diluted at latest quarter"],
-  ["the income statement after an annual answer, adding a company", read({ companies: adds("AMD") }), after({ companies: [NVDA, AMD], latest_period: "fiscal_year", ...keeps("income_statement") }), "overview at latest fiscal year"],
+  ["the income statement after an annual answer, adding a company", read({ companies: adds("AMD") }), after({ companies: [NVDA, AMD], latest_period: "fiscal_year", ...keeps("income_statement") }), "income_statement at latest fiscal year"],
+  ["the income statement after an annual answer, another company", read({ companies: { kind: "unclear", names: ["AMD"] } }), after({ latest_period: "fiscal_year", ...keeps("income_statement") }), "income_statement at latest fiscal year"],
+  ["the income statement after an annual answer, another year", read({ period: FY2024 }), after({ latest_period: "fiscal_year", ...keeps("income_statement") }), "overview at FY2024"],
+  ["the income statement after a quarterly answer, another company", read({ companies: { kind: "unclear", names: ["AMD"] } }), after({ latest_period: "quarter", ...keeps("income_statement") }), "overview at latest quarter"],
   ["kept income statement, another quarter", read({ period: Q2 }), after(keeps("income_statement")), "overview at newest Q2"],
   ["kept figures, a margin asked for", read({ asks: ["margins"] }), after(keeps("free_cash_flow")), "planner"],
   ["kept figures, one turned off", read({ offMetrics: ["capex"] }), after(keeps("free_cash_flow")), "free_cash_flow at latest"],
@@ -204,7 +207,7 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
 function companiesOf(reading: ScopeProposal | null, prior: ResearchScope | null): ResearchScope["companies"] {
   const byName = (name: string) => [NVDA, AMD].find((company) => company.label === name)!;
   const change = reading?.companies;
-  if (change?.kind === "as_named" && change.names.length > 0) return change.names.map(byName);
+  if ((change?.kind === "as_named" || change?.kind === "unclear") && change.names.length > 0) return change.names.map(byName);
   const companies = [...(prior?.companies ?? [NVDA]), ...(change?.kind === "compare" ? change.add.map(byName) : [])];
   return companies.filter((company, index) => companies.indexOf(company) === index);
 }

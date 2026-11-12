@@ -27,7 +27,8 @@
     "budget_ms": { "first_text": 15000, "saved": 15000 },
     "turns": [
       { "ask": "Compare KO and PEP gross margins", "expect": { "subjects": ["KO", "PEP"], "text": ["Coca-Cola", "PepsiCo"] } },
-      { "ask": "what about MSFT?", "expect": { "text": ["MSFT", "KO", "PEP"] } }
+      { "ask": "what about MSFT?", "expect": { "text": ["MSFT", "KO", "PEP"] } },
+      { "ask": "add MSFT", "expect": { "subjects": ["KO", "PEP", "MSFT"], "text": ["Microsoft", "Gross margin"] } }
     ]
   },
   {

@@ -366,7 +366,7 @@ async function turnScope(
   proposal: Promise<ScopeProposal | null>,
 ): Promise<(cutoff: string) => ResearchScope> {
   const carried = companiesOf(covered);
-  const [prior, read] = await Promise.all([continuedScope(threadId, carried), proposal]);
+  const [prior, read] = await Promise.all([continuedScope(threadId, carried, proposal), proposal]);
   // Peers turned off: the previous answer's auto-selected peers (saved with no
   // label) go with them, though the follow-up carried them forward.
   const autoPeers = new Set(prior?.peers ? prior.companies.flatMap((company) => company.label === undefined ? [company.issuer_id] : []) : []);
@@ -407,16 +407,19 @@ async function comparedCompanies(
 
 // The previous answer's scope when this turn continues it: it covers one of
 // that answer's companies, however it named them (carried forward, named
-// again, or the ticker page's subject). A turn about other companies, or about
-// none, starts fresh.
+// again, or the ticker page's subject), or its reading changes the companies
+// discussed ("what about NVDA?", "just AAPL") rather than naming its own
+// (#627). Any other turn about other companies, or about none, starts fresh.
 async function continuedScope(
   threadId: string,
   companies: ResearchScope["companies"],
+  reading: Promise<ScopeProposal | null>,
 ): Promise<ResearchScope | null> {
   if (companies.length === 0) return null;
-  const prior = await loadPriorScope(pool(), { threadId });
+  const [prior, read] = await Promise.all([loadPriorScope(pool(), { threadId }), reading]);
   const ids = new Set(companies.map((company) => company.issuer_id));
-  return prior !== null && prior.companies.some((company) => ids.has(company.issuer_id)) ? prior : null;
+  const changesCompanies = read !== null && read.companies.kind !== "as_named";
+  return prior !== null && (changesCompanies || prior.companies.some((company) => ids.has(company.issuer_id))) ? prior : null;
 }
 
 // Live mode only (marketHydrationOrigin): fetches and stores the YTD window's
