@@ -1,5 +1,12 @@
-import type { DiscoveredListing, DiscoveryAssetType, TickerDiscoveryProvider } from "./discovery.ts";
+import {
+  createPolygonTickerDiscoveryProvider,
+  type DiscoveredListing,
+  type DiscoveryAssetType,
+  type TickerDiscoveryProvider,
+} from "./discovery.ts";
 import { normalizeCik } from "./normalize.ts";
+import { createOpenReferenceTickerDiscoveryProvider } from "./open-reference-providers.ts";
+import { openReferenceProviderConfigFromEnv } from "./provider-sources.ts";
 
 export type DevProvidersTickerDiscoveryProviderOptions = {
   baseUrl: string;
@@ -131,4 +138,24 @@ function discoveredListingFromDevProvider(
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+// Polygon first, then the open reference and unofficial dev providers the env
+// turns on. Chat resolves in-process with the same chain (chat/src/local-runtime.ts),
+// so this module stays free of runtime imports chat does not install, such as pg.
+export function tickerDiscoveryProviderFromEnv(env: NodeJS.ProcessEnv): TickerDiscoveryProvider {
+  const openReferenceConfig = openReferenceProviderConfigFromEnv(env);
+  const devProvidersBaseUrl = env.DEV_PROVIDERS_BASE_URL ?? env.DEV_PROVIDERS_ORIGIN;
+  return createFallbackTickerDiscoveryProvider([
+    createPolygonTickerDiscoveryProvider({
+      apiKey: env.POLYGON_API_KEY,
+      baseUrl: env.RESOLVER_POLYGON_REFERENCE_BASE_URL,
+    }),
+    ...(openReferenceConfig.nasdaqTrader.enabled
+      ? [createOpenReferenceTickerDiscoveryProvider(openReferenceConfig)]
+      : []),
+    ...(env.ENABLE_UNOFFICIAL_DEV_PROVIDERS === "true" && devProvidersBaseUrl
+      ? [createDevProvidersTickerDiscoveryProvider({ baseUrl: devProvidersBaseUrl })]
+      : []),
+  ]);
 }

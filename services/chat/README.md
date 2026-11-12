@@ -97,7 +97,7 @@ shape used by the chat service. The local runtime builds it with
 `services/chat/src/subjects.ts`, which maps resolver statuses such as
 `needs_choice` into chat statuses such as `needs_clarification`. `discovery` is
 the resolver's ticker discovery chain (`tickerDiscoveryProviderFromEnv` in
-`services/resolver/src/dev-server.ts`): a ticker held only by issuers without a
+`services/resolver/src/dev-providers.ts`): a ticker held only by issuers without a
 CIK runs it at most once a minute, so a first question can fill the CIK. A caller of
 `createChatServer` may also pass `renderSubjectClarification(input)` to
 customize the assistant clarification

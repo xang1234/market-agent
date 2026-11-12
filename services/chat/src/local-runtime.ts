@@ -52,7 +52,7 @@ import {
   type ChatResolvedSubjectPreResolution,
   type ChatSubjectPreResolution,
 } from "./subjects.ts";
-import { tickerDiscoveryProviderFromEnv } from "../../resolver/src/dev-server.ts";
+import { tickerDiscoveryProviderFromEnv } from "../../resolver/src/dev-providers.ts";
 import { createThreadTitleGenerationJob } from "./thread-title.ts";
 
 let localPool: Pool | null = null;
