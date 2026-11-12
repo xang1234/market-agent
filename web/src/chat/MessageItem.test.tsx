@@ -167,3 +167,30 @@ test('a saved answer copies as text, and a question has no copy button', async (
     restoreGlobals()
   }
 })
+
+// The list windows on these heights in the same commit that mounts a message, so a
+// height that waits for a ResizeObserver callback is an estimate the list acts on.
+test('a message reports its height when it mounts, before any resize callback', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  dom.window.HTMLElement.prototype.getBoundingClientRect = () => ({ height: 321 }) as DOMRect
+  const measured: Array<[string, number]> = []
+  try {
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        <AuthContext.Provider value={{ session: { userId: USER_ID, displayName: 'Mock User' }, signIn: () => undefined, signOut: () => undefined }}>
+          <EvidenceInspectorProvider>
+            <BlockRegistryProvider registry={createDefaultBlockRegistry()}>
+              <MessageItem message={assistantMessage} onMeasure={(id, height) => measured.push([id, height])} />
+            </BlockRegistryProvider>
+          </EvidenceInspectorProvider>
+        </AuthContext.Provider>,
+      )
+    })
+    assert.deepEqual(measured, [['msg-1', 321]])
+    await act(async () => root.unmount())
+  } finally {
+    restoreGlobals()
+  }
+})
