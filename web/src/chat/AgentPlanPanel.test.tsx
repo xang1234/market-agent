@@ -56,3 +56,42 @@ test('a turn that ended stops the clock and the spinner, and the clock stays out
 
   await act(async () => root.unmount())
 })
+
+test('each step shows how long it ran once it is done, timed from when it was first seen running', async (t) => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  t.after(restore)
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'], now: 0 })
+  const container = dom.window.document.getElementById('root')!
+  const root = createRoot(container)
+  const times = () => [...container.querySelectorAll('li')].map((row) => row.querySelector('[data-testid="step-time"]')?.textContent)
+  const render = (statuses: ReadonlyArray<StreamPlanStep['status']>, active = true) =>
+    act(async () => root.render(<AgentPlanPanel steps={statuses.map((status, index) => step(['Planner', 'Fundamentals', 'Composer'][index]!, status))} active={active} />))
+
+  await render(['running', 'waiting', 'waiting'])
+  await act(async () => t.mock.timers.tick(4_000))
+  await render(['done', 'running', 'waiting'])
+  assert.deepEqual(times(), ['4s', '', ''])
+
+  await act(async () => t.mock.timers.tick(65_000))
+  await render(['done', 'done', 'running'])
+  assert.deepEqual(times(), ['4s', '1m 5s', ''])
+
+  await act(async () => t.mock.timers.tick(2_000))
+  await render(['done', 'done', 'running'], false)
+  assert.deepEqual(times(), ['4s', '1m 5s', '2s'], 'a step the ended turn left running stops when the turn did')
+
+  await act(async () => root.unmount())
+})
+
+test('a step first seen already done shows no time, since when it started is unknown', async (t) => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  t.after(restore)
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'], now: 0 })
+  const container = dom.window.document.getElementById('root')!
+  const root = createRoot(container)
+  await act(async () => root.render(<AgentPlanPanel steps={[step('Planner', 'done')]} active />))
+  assert.equal(container.querySelector('[data-testid="step-time"]')?.textContent, '')
+  await act(async () => root.unmount())
+})

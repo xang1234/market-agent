@@ -48,7 +48,7 @@ test('an own stream that opened and dropped, whose run the server no longer list
     assert.equal(FakeEventSource.instances.length, 1)
     assert.equal(server.gets(HISTORY_T1), 2)
     assert.equal(occurrences(h.text(), ANSWER), 1)
-    assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
+    assert.equal(h.said('assistant'), SEALED_TEXT)
     assert.equal(h.query('[data-testid="streaming-turn"]'), null)
     assert.doesNotMatch(h.text(), /didn't answer/)
     assert.equal(h.button('Send').disabled, false)
@@ -246,7 +246,7 @@ test('an own run keeps its streamed answer on screen in every commit through a d
   try {
     await complete(h, attached)
     assert.deepEqual(consecutive(sinceStreamed()), [1])
-    assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
+    assert.equal(h.said('assistant'), SEALED_TEXT)
     assert.equal(h.query('[data-testid="streaming-turn"]'), null)
     assert.equal(h.button('Send').disabled, false)
   } finally {
