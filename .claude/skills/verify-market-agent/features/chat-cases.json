@@ -72,11 +72,27 @@
   },
   {
     "id": "hd-trend-offered-period",
-    "note": "#628: an option the clarification offers is answered, not refused",
+    "note": "#628: a trend with no quarters to chart is a gap, not a menu of periods the engine then refuses",
     "budget_ms": { "first_text": 15000, "saved": 15000 },
     "turns": [
-      { "ask": "Show HD's operating margin trend", "expect": { "text": ["HD", "Last 3 fiscal years"] } },
-      { "ask": "Last 3 fiscal years (annual)", "expect": { "subjects": ["HD"], "not_text": ["outside the verified financial definitions"] } }
+      { "ask": "Show HD's operating margin trend", "expect": { "subjects": ["HD"], "text": ["charted over reported quarters"], "not_text": ["Which periods", "Last 3 fiscal years"] } }
+    ]
+  },
+  {
+    "id": "msft-trend-unquartered",
+    "note": "#628 on a fresh stack, where MSFT is listed with no facts",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [
+      { "ask": "Show MSFT's operating margin trend", "expect": { "subjects": ["MSFT"], "text": ["charted over reported quarters"], "not_text": ["Which periods", "Last 3 fiscal years"] } }
+    ]
+  },
+  {
+    "id": "aapl-trend-period",
+    "note": "#628: a trend asks no period, and a follow-up at a period its scope holds is answered",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [
+      { "ask": "Show AAPL's operating margin trend", "expect": { "subjects": ["AAPL"], "text": ["Operating margin"], "not_text": ["Which periods"] } },
+      { "ask": "What about fiscal 2025?", "expect": { "subjects": ["AAPL"], "text": ["Operating margin", "FY2025"], "not_text": ["outside the verified financial definitions"] } }
     ]
   },
   {
