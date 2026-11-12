@@ -38,15 +38,30 @@ function letGoIfReaderMoved(el: HTMLElement, pin: RefObject<Pin>, placedTop: Ref
   const lowestTop = el.scrollHeight - el.clientHeight
   if (placed > lowestTop && Math.abs(el.scrollTop - lowestTop) <= 1) return
   pin.current = null
-  keepAnchoring(el, null)
 }
 
-// While pinned, the pin is the list's scroll anchoring, and the browser's would
-// move the view by itself and read as the reader scrolling. Unpinned, the
-// browser keeps what the reader is looking at still as messages above them
-// swap estimated heights for measured ones.
-function keepAnchoring(el: HTMLElement, pin: Pin): void {
-  el.style.overflowAnchor = pin === null ? 'auto' : 'none'
+// The first message the reader can see, and where it sits in the thread.
+type Anchor = { id: string; top: number }
+
+function readAnchor(el: HTMLElement): Anchor | null {
+  const viewTop = el.getBoundingClientRect().top
+  for (const message of el.querySelectorAll<HTMLElement>('[data-message-id]')) {
+    const box = message.getBoundingClientRect()
+    if (box.bottom > viewTop) return { id: message.dataset.messageId ?? '', top: box.top - viewTop + el.scrollTop }
+  }
+  return null
+}
+
+// Unpinned, what the reader is looking at holds still as messages above it
+// mount and swap their estimated height for their real one. The browser's own
+// scroll anchoring lets go whenever the list's padding changes, and Safari has
+// none, so the list does it.
+function holdAnchor(el: HTMLElement, anchor: Anchor | null): void {
+  if (anchor === null) return
+  const now = el.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(anchor.id)}"]`)
+  if (now === null) return
+  const moved = now.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - anchor.top
+  if (Math.abs(moved) > 0.5) el.scrollTop += moved
 }
 
 export type VirtualizedMessageListProps = {
@@ -76,6 +91,8 @@ export function VirtualizedMessageList({
   const pinRef = useRef<Pin>('bottom')
   // Where this code last put the view; any other position is the reader's doing.
   const placedTopRef = useRef<number | null>(null)
+  // Read only unpinned: one read under a pin was taken at a view the reader left.
+  const anchorRef = useRef<Anchor | null>(null)
   // Room below the newest question, kept from the moment it is pinned until the
   // reader follows the bottom again, so the answer never shifts under them.
   const questionRoomRef = useRef(false)
@@ -125,9 +142,11 @@ export function VirtualizedMessageList({
       }
     }
     if (pinRef.current === 'bottom') el.scrollTop = el.scrollHeight
-    keepAnchoring(el, pinRef.current)
-    if (pinRef.current !== null) {
-      placedTopRef.current = el.scrollTop
+    const readerTop = el.scrollTop
+    if (pinRef.current === null) holdAnchor(el, anchorRef.current)
+    anchorRef.current = pinRef.current === null ? readAnchor(el) : null
+    if (pinRef.current !== null) placedTopRef.current = el.scrollTop
+    if (pinRef.current !== null || el.scrollTop !== readerTop) {
       // The virtual window follows the view in this same commit, so a moved
       // view never paints a frame of the window it left.
       // Only a real change: an update on every layout pass would never settle.
@@ -187,7 +206,10 @@ export function VirtualizedMessageList({
   const handleScroll = useCallback(() => {
     // Now, not on the next frame: a streaming render in between would put the
     // view back and erase the reader's move.
-    if (containerRef.current !== null) letGoIfReaderMoved(containerRef.current, pinRef, placedTopRef)
+    if (containerRef.current !== null) {
+      letGoIfReaderMoved(containerRef.current, pinRef, placedTopRef)
+      anchorRef.current = pinRef.current === null ? readAnchor(containerRef.current) : null
+    }
     if (scrollRafRef.current !== null) return
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = null
