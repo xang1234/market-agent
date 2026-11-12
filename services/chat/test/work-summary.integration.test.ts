@@ -5,7 +5,7 @@ import test from "node:test";
 import { bootstrapDatabase, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { listChatMessagesForThread, saveChatMessageWorkSummary } from "../src/messages.ts";
 
-test("a saved work summary is read back with its answer; a message without one reads as it did before", { timeout: 120000 }, async (t) => {
+test("a saved work summary is read back with its answer exactly as written; a message without one has none", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for work summary coverage");
     return;
@@ -32,8 +32,9 @@ test("a saved work summary is read back with its answer; a message without one r
   await saveChatMessageWorkSummary(pool, { thread_id: threadId, message_id: answerId, work_summary });
 
   const read = await listChatMessagesForThread(pool, { thread_id: threadId, user_id: userId });
-  assert.deepEqual(read?.messages.map((message) => [message.role, "work_summary" in message ? message.work_summary : "absent"]), [
-    ["user", "absent"],
-    ["assistant", work_summary],
+  // As text: a reload must return the summary exactly as the completion carried it, key order included.
+  assert.deepEqual(read?.messages.map((message) => [message.role, JSON.stringify(message.work_summary)]), [
+    ["user", undefined],
+    ["assistant", JSON.stringify(work_summary)],
   ]);
 });

@@ -313,8 +313,9 @@ async function readMessages(db: ChatMessagePersistenceDb, where: string, values:
   const snapshots = await loadSealedSnapshots(db, rows.flatMap((row) => [row.snapshot_id, ...blockSnapshotIds(row.blocks)]), rows.flatMap((row) => Array.isArray(row.blocks) ? row.blocks : []));
   return rows.map(({ work_summary, ...row }) => Object.freeze({
     ...row,
-    ...(work_summary == null ? {} : { work_summary }),
     block_proofs: blockProofs(row, snapshots),
+    // Last, where a turn's completion adds it (work-summary.ts): the two read alike.
+    ...(work_summary == null ? {} : { work_summary }),
   }));
 }
 
@@ -325,7 +326,7 @@ export async function saveChatMessageWorkSummary(
 ): Promise<void> {
   await db.query(
     `update chat_messages
-        set work_summary = $3::jsonb
+        set work_summary = $3::json
       where message_id = $1::uuid and thread_id = $2::uuid and role = 'assistant'`,
     [input.message_id, input.thread_id, serializeJsonValue(input.work_summary)],
   );
