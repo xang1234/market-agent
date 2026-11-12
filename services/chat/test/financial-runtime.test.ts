@@ -15,7 +15,7 @@ import { parseProposal } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
-import { changing, chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, METRIC_READING, MISSING_ISSUER, NO_ASKS, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { changing, chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, METRIC_READING, MISSING_ISSUER, NO_ASKS, resolveMention, revenueModel, SEC_ISSUER, SEC_ISSUER_B, SEC_ISSUER_C, SEC_ISSUER_D } from "./financial-fixtures.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 
 test("an unready engine stops the server instead of leaving metric questions on legacy numbers", async () => {
@@ -38,6 +38,25 @@ async function savingMessages(t: TestContext, url: string): Promise<ChatAssistan
     else process.env.CHAT_DATABASE_URL = previous;
   });
   return runtime.persistAssistantMessage;
+}
+
+// A fiscal-year fact on file for each issuer while `run` runs, so a turn about
+// companies the fixtures give no data plans them instead of naming them in the
+// no-filings line.
+async function withFiledFacts<T>(db: { query: (text: string, values?: unknown[]) => Promise<{ rows: Array<{ fact_id: string }> }> }, issuers: ReadonlyArray<string>, run: () => Promise<T>): Promise<T> {
+  const { rows } = await db.query(
+    `insert into facts
+     select (jsonb_populate_record(null::facts, to_jsonb(f) || jsonb_build_object('fact_id', gen_random_uuid(), 'subject_id', issuer.id))).*
+       from facts f cross join unnest($1::uuid[]) as issuer(id)
+      where f.fact_id = $2
+     returning fact_id::text`,
+    [issuers, IDS.grossProfit2023],
+  );
+  try {
+    return await run();
+  } finally {
+    await db.query(`delete from facts where fact_id = any($1::uuid[])`, [rows.map((row) => row.fact_id)]);
+  }
 }
 
 function declining(reason: string): PlanningModel & { calls: number } {
@@ -239,7 +258,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await savedCompanies("Revenue for AMBX", ["AMBX"]), [{ issuer_id: IDS.issuerA, label: "ALPX" }]);
   });
 
-  await t.test("a turn plans at most five companies, from a company's page or beside an ambiguous one, as the analyst path does (#425)", async () => {
+  await t.test("a turn plans at most five companies, from a company's page or beside an ambiguous one, as the analyst path does (#425)", () => withFiledFacts(db, [MISSING_ISSUER, SEC_ISSUER, SEC_ISSUER_B, SEC_ISSUER_C, SEC_ISSUER_D], async () => {
     const seen: string[] = [];
     const model = (async (request: { messages: Array<{ content: string }> }) => {
       seen.push(/Requested companies \(mentions\): (.*)$/mu.exec(request.messages[1]!.content)![1]!);
@@ -275,6 +294,20 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       "BBB; CCC; OPM; PAX; AMB",
       "Alpha Industries Inc.; AMB",
     ]);
+  }));
+
+  await t.test("a company with no fiscal-period facts on file is named in one line, not in a row of gaps", async () => {
+    const harness = chatHarness(pool, { model: revenueModel(["CCC"]), researchScope: scopeOver as never });
+    assert.deepEqual(completed((await harness.run({ ...base, userIntent: "Revenue for CCC" })).events).financial_gap, { reason_code: "no_sec_filings" });
+    const alone = harness.persisted.at(-1)!;
+    assert.deepEqual(
+      [(alone.blocks[0] as { segments: unknown }).segments, (alone.research_scope as { companies: unknown }).companies],
+      [[{ type: "text", text: "No SEC filings are on file for CCC yet." }], [{ issuer_id: MISSING_ISSUER, label: "CCC" }]],
+    );
+    const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion: comparing("AAA", "CCC") }).run({ ...base, userIntent: "Compare revenue for AAA and CCC" });
+    const [block, note] = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0].blocks;
+    assert.deepEqual(Object.values(block.financial.labels as Record<string, { kind: string; text: string }>).filter((label) => label.kind === "subject").map((label) => label.text), ["Alpha Industries Inc."]);
+    assert.deepEqual(note.segments, [{ type: "text", text: "No SEC filings are on file for CCC yet." }]);
   });
 
   await t.test("a turn naming an ambiguous company changes the previous answer's companies only as its reading says", async () => {
@@ -493,11 +526,11 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     }
   });
 
-  await t.test("a calculation that fails verification is a gap, never the narrative composer", async () => {
+  await t.test("a calculation that fails verification is a gap, never the narrative composer", () => withFiledFacts(db, [MISSING_ISSUER], async () => {
     const harness = chatHarness(pool, { model: revenueModel(["CCC"]), researchScope: scopeOver as never });
     assert.deepEqual(completed((await harness.run({ ...base, userIntent: "Revenue for CCC" })).events).financial_gap, { reason_code: "verification_failed" });
     assert.deepEqual((harness.persisted.at(-1)!.research_scope as { companies: unknown }).companies, [{ issuer_id: MISSING_ISSUER, label: "CCC" }]);
-  });
+  }));
 
   await t.test("a retry that finds its run failed declines with its companies (#425)", async () => {
     // The thread is another user's, so the first attempt reserves the run and cannot publish; the run then fails.
