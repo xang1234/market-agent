@@ -36,7 +36,7 @@ import {
   type ChatCommittedMessage,
   type ChatReadMessage,
 } from "./messages.ts";
-import { financialAwareRunner } from "./financial-turn.ts";
+import { financialAwareRunner, offeredChoicesRunner } from "./financial-turn.ts";
 import { companyNameIn, type CompanyChange, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import type { AssertionReport } from "./assertions.ts";
 import type { BlockProof } from "../../snapshot/src/block-proof.ts";
@@ -381,12 +381,12 @@ export function createChatCoordinator(
       verificationMode: options.verificationMode ?? "strict",
     }))
     : missingAnalystToolRuntimeRunner);
-  const runner = threadTitleGenerationRunner(runActivityReportingRunner(readingRunner(financialAwareRunner(subjectAwareRunner(baseRunner, {
+  const runner = threadTitleGenerationRunner(runActivityReportingRunner(offeredChoicesRunner(readingRunner(financialAwareRunner(subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
     preResolveSubject,
     loadPriorSubjects: options.loadPriorSubjects,
     renderSubjectClarification: options.renderSubjectClarification,
-  }), { financialRuntime: options.financialRuntime, persistAssistantMessage }), options.readQuestion), options.runActivity), {
+  }), { financialRuntime: options.financialRuntime, persistAssistantMessage }), options.readQuestion), options.financialRuntime), options.runActivity), {
     generateThreadTitle: options.generateThreadTitle,
     onThreadTitleGenerationError: options.onThreadTitleGenerationError,
   });
