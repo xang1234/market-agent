@@ -244,8 +244,9 @@ test('Chat thread route virtualizes long persisted histories while preserving re
     assert.ok(list)
     assert.ok(renderedRows.length > 0)
     assert.ok(renderedRows.length < 20, `expected a bounded rendered window, got ${renderedRows.length}`)
-    assert.match(dom.window.document.body.innerHTML, /Persisted assistant answer 0/)
-    assert.doesNotMatch(dom.window.document.body.innerHTML, /Persisted assistant answer 79/)
+    // A thread opens at its newest message.
+    assert.match(dom.window.document.body.innerHTML, /Persisted assistant answer 79/)
+    assert.doesNotMatch(dom.window.document.body.innerHTML, /Persisted assistant answer 0</)
     await act(async () => root.unmount())
   } finally {
     globalThis.fetch = originalFetch
