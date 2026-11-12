@@ -1,7 +1,7 @@
 [
   {
     "id": "margins-clarify-all",
-    "note": "#623: replying \"all\" to the margin clarification keeps AAPL and answers the margins it offered",
+    "note": "#623, #626: replying \"all\" to the margin clarification keeps AAPL and answers the margins it offered",
     "budget_ms": { "first_text": 15000, "saved": 15000 },
     "turns": [
       { "ask": "What drives AAPL's margins?", "expect": { "not_subjects": ["ALL"] } },
@@ -15,7 +15,7 @@
   },
   {
     "id": "followup-keeps-metric",
-    "note": "a short follow-up asks the previous question about another company",
+    "note": "#627: a short follow-up asks the previous question about another company",
     "budget_ms": { "first_text": 15000, "saved": 15000 },
     "turns": [
       { "ask": "What was AAPL's gross margin last fiscal year?", "expect": { "subjects": ["AAPL"] } },
@@ -72,7 +72,7 @@
   },
   {
     "id": "hd-trend-offered-period",
-    "note": "an option the clarification offers is answered, not refused",
+    "note": "#628: an option the clarification offers is answered, not refused",
     "budget_ms": { "first_text": 15000, "saved": 15000 },
     "turns": [
       { "ask": "Show HD's operating margin trend", "expect": { "text": ["HD", "Last 3 fiscal years"] } },
