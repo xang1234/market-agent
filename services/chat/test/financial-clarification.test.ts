@@ -209,6 +209,20 @@ test("a typed reply to a metric clarification continues its company, not a ticke
     assert.match(asked.at(-1)!, /Gross margin; Operating margin; Net margin; EBITDA margin/u, typed);
   }
 
+  // The options show as buttons from the saved field, so the text is the question once.
+  completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "What drives AAA's margins?" })).events);
+  const [saved] = harness.persisted.at(-1)!.blocks as Array<{ segments: unknown; clarification_choices: unknown }>;
+  assert.deepEqual(saved!.segments, [{ type: "text", text: "Which margin would you like?" }]);
+  assert.deepEqual(saved!.clarification_choices, ["Gross margin", "Operating margin", "Net margin", "EBITDA margin"]);
+  const picked = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "Gross margin" })).events);
+  assert.ok(picked.message_id && !picked.clarification && !picked.financial_gap, JSON.stringify(picked));
+  const [pickedAnswer] = (await db.query(`select blocks from chat_messages where message_id = $1`, [picked.message_id])).rows[0].blocks;
+  assert.deepEqual(
+    Object.values(pickedAnswer.financial.labels as Record<string, { kind: string; text: string }>).filter((label) => label.kind === "subject").map((label) => label.text),
+    ["Alpha Industries Inc."],
+    "a typed option continues the company the clarification asked about",
+  );
+
   // "both" takes every option only when exactly two were offered; these were four.
   completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "What drives AAA's margins?" })).events);
   const before = asked.length;

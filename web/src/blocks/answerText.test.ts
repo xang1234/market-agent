@@ -77,3 +77,8 @@ test('a copied answer ends with the date of its newest data and its snapshot', (
     'As of 2026-06-01T00:00:00.000Z · Snapshot snap-1',
   )
 })
+
+test('a clarification copies with the options it offered as buttons', () => {
+  const clarification = { ...richTextFixture, segments: [{ type: 'text' as const, text: 'Which margin would you like?' }], clarification_choices: ['Gross margin', 'Operating margin'] }
+  assert.equal(answerText([clarification]), 'Which margin would you like?\n\n- Gross margin\n- Operating margin')
+})

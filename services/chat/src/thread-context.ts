@@ -172,8 +172,11 @@ export function narrativeText(blocks: unknown): string {
   return blocks
     // Commentary appended to an answer is not what the answer said.
     .filter((block) => block?.kind === "rich_text" && Array.isArray(block.segments) && block.analyst_commentary !== true)
-    .flatMap((block) => block.segments)
-    .map((segment: { text?: unknown }) => (typeof segment?.text === "string" ? segment.text : ""))
+    .flatMap((block) => [
+      ...block.segments.map((segment: { text?: unknown }) => (typeof segment?.text === "string" ? segment.text : "")),
+      // A clarification's text is its question; the options it offered are saved beside it.
+      ...(Array.isArray(block.clarification_choices) ? [block.clarification_choices.join("; ")] : []),
+    ])
     .join(" ")
     .trim();
 }

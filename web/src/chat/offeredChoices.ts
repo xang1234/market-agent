@@ -7,8 +7,12 @@ export const ALL_OF_THE_ABOVE = 'All of the above'
 // The options the thread's open clarification offered, read from the saved
 // field (#626). A clarification followed by any later message was answered.
 export function offeredChoices(messages: ReadonlyArray<ChatMessage>): ReadonlyArray<string> {
+  return openClarification(messages)?.clarification_choices ?? []
+}
+
+export function openClarification(messages: ReadonlyArray<ChatMessage>): RichTextBlock | null {
   const last = messages.at(-1)
-  if (last?.role !== 'assistant') return []
+  if (last?.role !== 'assistant') return null
   const first = last.blocks[0]
-  return first?.kind === 'rich_text' ? (first as RichTextBlock).clarification_choices ?? [] : []
+  return first?.kind === 'rich_text' && (first as RichTextBlock).clarification_choices?.length ? first as RichTextBlock : null
 }

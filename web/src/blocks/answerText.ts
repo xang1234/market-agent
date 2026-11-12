@@ -86,10 +86,12 @@ type TextBlocks = {
 }
 
 const BLOCK_TEXT: { readonly [K in keyof TextBlocks]: (block: TextBlocks[K]) => string } = {
-  rich_text: ({ segments, analyst_commentary }) => {
+  rich_text: ({ segments, analyst_commentary, clarification_choices }) => {
     // Plain runs are the answer's Markdown source; refs and toned runs render literally.
     const text = segments.map((segment) => (isRefSegment(segment) ? literal(refSegmentText(segment)) : segment.tone === undefined || segment.tone === 'neutral' ? segment.text : literal(segment.text))).join('')
-    return analyst_commentary ? `Analyst commentary\n\n${text}` : text
+    // A clarification's text is its question; the app shows its options as buttons.
+    const choices = clarification_choices?.map((choice) => `- ${literal(choice)}`) ?? []
+    return [analyst_commentary ? `Analyst commentary\n\n${text}` : text, choices.join('\n')].filter(Boolean).join('\n\n')
   },
   financial_answer: financialAnswerText,
   table: ({ title, columns, rows }) => {

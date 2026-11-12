@@ -100,7 +100,12 @@ async function emitFinancialTurn(
     return;
   }
 
-  const text = turn.kind === "clarification" ? clarificationText(turn) : turn.text;
+  const choices = turn.kind === "clarification" && turn.clarification.kind !== "subject" && turn.clarification.choices.length > 0
+    ? turn.clarification.choices.map((choice) => choice.label)
+    : null;
+  // The options a clarification saves are shown as buttons, so its text is the
+  // question alone. A company choice saves none and keeps them in its text.
+  const text = turn.kind !== "clarification" ? turn.text : choices ? turn.clarification.question : clarificationText(turn);
   const turnId = context.turnId ?? context.runId;
   // Each attempt seals its own snapshot: a retry that saves nothing new (its
   // message is saved) must not seal one id twice.
@@ -121,9 +126,7 @@ async function emitFinancialTurn(
     // A metric or request clarification saves the options it offered, so a
     // reply that takes them all reads as them (#626). A company choice is
     // answered by its pick.
-    ...(turn.kind === "clarification" && turn.clarification.kind !== "subject" && turn.clarification.choices.length > 0
-      ? { clarification_choices: turn.clarification.choices.map((choice) => choice.label) }
-      : {}),
+    ...(choices ? { clarification_choices: choices } : {}),
   }];
   const contentHash = contentHashForText(JSON.stringify(blocks));
   const persisted = persistAssistantMessage
