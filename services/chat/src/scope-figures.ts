@@ -23,7 +23,7 @@ export type ReadPeriod =
 export const LATEST: ReadPeriod = { kind: "latest", period: null };
 
 /** A request the engine declines with no model, by its reason (financial-runtime.ts REASON_TEXT). */
-export type NamedGap = "valuation_period" | "undefined_metric" | "trailing_twelve_months" | "range" | "relative_period" | "peers";
+export type NamedGap = "valuation_period" | "undefined_metric" | "trailing_twelve_months" | "range" | "relative_period" | "peers" | "unquartered_trend";
 
 /** How a turn about a company is answered: by the analyst path, or by the engine with one plan. */
 export type PlanChoice =

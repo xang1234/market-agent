@@ -543,8 +543,11 @@ async function planTurn(
   const deterministic = async (): Promise<PlanningResult | null> => {
     if (!allResolved(subjects)) return null;
     switch (choice.kind) {
+      // A trend is the company's reported quarters to a period its scope
+      // holds. Unplanned, it is a gap: a model would offer periods no scope
+      // carries back, so a typed choice of one is refused (#628).
       case "trend":
-        return subjects.length === 1 ? planMarginTrend(planningContext(subjects), turn.evidence, choice.period) : null;
+        return subjects.length === 1 ? (await planMarginTrend(planningContext(subjects), turn.evidence, choice.period)) ?? UNQUARTERED_TREND : null;
       case "overview": {
         const companies = choice.peers ? await withPeers(subjects, turn.peersOf) : subjects;
         const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence, choice.period);
@@ -558,6 +561,7 @@ async function planTurn(
     }
   };
   const plan = await deterministic();
+  if (plan?.outcome === "unsupported") return plan;
   if (plan) {
     turn.onDeterministic(choice);
     if (choice.kind === "trend" || choice.kind === "overview") turn.onOverview(choice.period);
@@ -566,6 +570,8 @@ async function planTurn(
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
   return planFinancialRequest(planningContext(subjects), text, model ?? noModel);
 }
+
+const UNQUARTERED_TREND: PlanningResult = { outcome: "unsupported", reason: "unquartered_trend", issues: [], model_calls: 0 };
 
 // One company and its peers; null for several companies, or one with none.
 async function withPeers(subjects: ReadonlyArray<RequestedSubject>, peersOf: PeersOf): Promise<ReadonlyArray<RequestedSubject> | null> {
@@ -1026,6 +1032,7 @@ const REASON_TEXT: Readonly<Record<Exclude<UnsupportedReason, "other"> | typeof 
   range: "figures over a range of periods",
   relative_period: "a period named relative to now, such as last year",
   peers: "peers the question does not name, beside figures other than the income statement",
+  unquartered_trend: "a margin trend, which is charted over reported quarters, and none could be read for this company",
 };
 
 function gap(reason_code: ChatGap, planned?: PlanningResult): Extract<ChatFinancialTurn, { kind: "gap" }> {

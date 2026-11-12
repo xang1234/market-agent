@@ -26,6 +26,8 @@ const COMPANIES: Readonly<Record<string, string>> = {
   OFFQ: "4f000000-0000-4000-8000-0000000000e6",
   MOVD: "4f000000-0000-4000-8000-0000000000e7",
   MRGN: "4f000000-0000-4000-8000-0000000000e8",
+  // Its facts are deleted once seeded: it reports nothing.
+  NOQS: "4f000000-0000-4000-8000-0000000000e9",
 };
 const REVENUE = [
   [2022, 1, "800"], [2022, 2, "900"], [2022, 3, "1000"], [2022, 4, "1100"],
@@ -108,6 +110,7 @@ test("a question about one company that asks for no figure is answered with its 
     await quarterly(issuer, "operating_income", 2023, 4, "500", derived);
     await quarterly(issuer, "net_income", 2023, 4, "400", derived);
   }
+  await db.query(`delete from facts where subject_id = $1`, [COMPANIES.NOQS]);
   for (const [metric, value] of [["revenue", "2400"], ["gross_profit", "1200"], ["operating_income", "600"], ["net_income", "480"]] as const) {
     await quarterly(COMPANIES.SECQ!, metric, 2024, 1, value);
   }
@@ -385,6 +388,23 @@ test("a question about one company that asks for no figure is answered with its 
       "series(8)", "series(8)", "series(8)", "predicate", "predicate", "predicate", "predicate", "predicate", "predicate",
     ]);
     assert.deepEqual([shown.research_scope.fiscal_year, shown.research_scope.fiscal_quarter], [null, null], "it shows the latest quarters, so it keeps no period");
+  });
+
+  await t.test("a margin trend of a company with no quarterly revenue is a gap naming it, not a model's menu of periods nothing serves (#628)", async () => {
+    let calls = 0;
+    const counted: PlanningModel = async () => {
+      calls += 1;
+      throw new Error("the planner should not be asked");
+    };
+    const trend = { ...NO_ASKS, asks: new Set(["margins", "margin_trend"] as const), income_items: ["operating_margin" as const] };
+    const harness = chatHarness(pool, { model: counted, readQuestion: reading(trend), resolveMention: resolve });
+    const done = completed((await harness.run({ ...base, userIntent: "Show NOQS's operating margin trend" })).events);
+    const [block] = (harness.persisted.at(-1)?.blocks ?? []) as ReadonlyArray<{ segments: Array<{ text: string }> }>;
+    assert.deepEqual([calls, done.financial_gap, block?.segments[0]?.text], [
+      0,
+      { reason_code: "unsupported" },
+      "This request asks for a calculation outside the verified financial definitions I can compute: a margin trend, which is charted over reported quarters, and none could be read for this company.",
+    ]);
   });
 
   await t.test("a margin trend's answer is saved without reading its revenue again, as only an overview's note names growth it leaves out (#479 review)", async () => {
