@@ -1,3 +1,4 @@
+import { LoaderCircle } from 'lucide-react'
 import type { ReactElement, ReactNode } from 'react'
 
 import { BlockView } from '../blocks/BlockView.tsx'
@@ -33,7 +34,7 @@ export function PendingTurnView({ turn, messages, onRetry, onReconnect, onReload
       return (
         <div data-testid="pending-turn" className="flex flex-col gap-2 py-2">
           <OptimisticUserBubble text={turn.turn.text} askedRun={turn.turn.runId} />
-          <p className="text-sm text-muted">Starting…</p>
+          <StartingLine />
         </div>
       )
     case 'not_sent':
@@ -111,7 +112,7 @@ function StreamedTurn({ phase, stream, blocks, messages, children }: { phase: Tu
     >
       <AgentPlanPanel steps={stream.plan_steps} />
       {/* The server may read the question before it starts the turn (#398). */}
-      {phase === 'streaming' && stream.turn_status === 'idle' ? <p className="text-sm text-muted">Starting…</p> : null}
+      {phase === 'streaming' && stream.turn_status === 'idle' ? <StartingLine /> : null}
       <AssistantTurn className="w-full">
         {blocks && stream.block_order.map((block_id) => {
           const block = stream.blocks_by_id.get(block_id)
@@ -125,6 +126,15 @@ function StreamedTurn({ phase, stream, blocks, messages, children }: { phase: Tu
       </AssistantTurn>
       {children}
     </div>
+  )
+}
+
+function StartingLine(): ReactElement {
+  return (
+    <p className="flex items-center gap-2 text-sm text-muted">
+      <LoaderCircle aria-hidden="true" className="size-4 shrink-0 text-accent motion-safe:animate-spin" />
+      <span className="live-shine">Starting…</span>
+    </p>
   )
 }
 
