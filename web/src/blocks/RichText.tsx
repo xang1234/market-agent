@@ -1,9 +1,10 @@
-import type { ReactElement } from 'react'
+import { useContext, type ReactElement } from 'react'
 import { InspectableRef } from '../evidence/InspectableRef.tsx'
 import { InspectableResult } from '../evidence/InspectableResult.tsx'
 import type { RefSegment, RichTextBlock, TextSegmentTone } from './types.ts'
 import { isRefSegment, refSegmentText } from './richText.ts'
 import { Markdown } from './Markdown.tsx'
+import { OpenClarificationContext } from './openClarification.ts'
 
 type RichTextProps = { block: RichTextBlock }
 
@@ -50,7 +51,17 @@ export function RichText({ block }: RichTextProps): ReactElement {
       {/* Its figures are the answer's; its words are not verified. */}
       {block.analyst_commentary ? <p data-analyst-commentary className="text-xs font-medium text-muted">Analyst commentary</p> : null}
       <Markdown text={parts} />
+      {block.clarification_choices ? <OfferedChoices blockId={block.id} choices={block.clarification_choices} /> : null}
     </div>
+  )
+}
+
+function OfferedChoices({ blockId, choices }: { blockId: string; choices: ReadonlyArray<string> }): ReactElement | null {
+  if (useContext(OpenClarificationContext) === blockId) return null
+  return (
+    <ul aria-label="Options offered" className="mt-1 list-disc pl-5 text-muted">
+      {choices.map((choice, index) => <li key={index}>{choice}</li>)}
+    </ul>
   )
 }
 
