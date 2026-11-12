@@ -19,9 +19,13 @@ type ChatComposerProps = {
   // While a run is followed the send button is a Stop button; it stays typable.
   stop: 'none' | 'ready' | 'stopping'
   onStop: () => void
+  // The question queued behind the running answer; Enter while it streams replaces it.
+  queued: string | null
+  onSendQueued: () => void
+  onRemoveQueued: () => void
 }
 
-export function ChatComposer({ ref, draftScope, canAsk, onAsk, stop, onStop }: ChatComposerProps): ReactElement {
+export function ChatComposer({ ref, draftScope, canAsk, onAsk, stop, onStop, queued, onSendQueued, onRemoveQueued }: ChatComposerProps): ReactElement {
   const [prompt, setPromptState] = useState(() => readDraft(draftScope))
   // Stays mounted across threads, so focus survives; each thread brings its own draft.
   const [shownScope, setShownScope] = useState(draftScope)
@@ -45,6 +49,22 @@ export function ChatComposer({ ref, draftScope, canAsk, onAsk, stop, onStop }: C
   return (
     <form onSubmit={submit} className="shrink-0 border-t border-line bg-surface/70 p-4 backdrop-blur">
       <ThreadColumn>
+        {queued !== null ? (
+          <div data-testid="queued-question" className="mb-2 flex items-center gap-2 rounded-xl border border-accent-border bg-accent-soft px-3 py-1.5 text-xs">
+            <span className="shrink-0 font-semibold text-accent">Queued</span>
+            <span className="min-w-0 flex-1 truncate text-fg" title={queued}>{queued}</span>
+            {stop === 'none' ? (
+              <button type="button" onClick={onSendQueued} disabled={!canAsk} className="shrink-0 font-medium text-accent hover:underline disabled:opacity-50">
+                Send
+              </button>
+            ) : (
+              <span className="shrink-0 text-muted">Sends when this answer finishes · Enter replaces it</span>
+            )}
+            <button type="button" onClick={onRemoveQueued} aria-label="Remove queued question" className="shrink-0 px-1 text-sm leading-none text-muted hover:text-fg">
+              ×
+            </button>
+          </div>
+        ) : null}
         <label className="sr-only" htmlFor="chat-composer">
           Ask the analyst
         </label>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
 import { authenticatedFetch, authenticatedJson } from '../http/authFetch.ts'
 import {
@@ -24,9 +24,11 @@ const STOP_TIMEOUT_MS = 10_000
 
 export type ChatSession = {
   view: ThreadView
-  // Claims the turn synchronously against the store; false means rejected
-  // (a turn is in flight), and the caller keeps its draft.
+  // Claims the turn synchronously against the store, or queues the question
+  // behind a streaming run; false means rejected, and the caller keeps its draft.
   ask(text: string): boolean
+  sendQueued(): void
+  removeQueued(): void
   retry(): void
   // Asks the server to stop the run the session follows.
   stop(): void
@@ -167,13 +169,9 @@ export function useChatSession({ userId, threadId, navigate, onThreadCreated }: 
     return () => streams.dispose()
   }, [streams, userId])
 
-  const ask = useCallback((raw: string): boolean => {
-    const text = raw.trim()
-    const before = store.getState()
-    if (text === '' || !userId || !selectThreadView(before).canAsk) return false
-    const turn: TurnIds = { runId: makeId(), text }
-    store.dispatch({ type: 'ask.started', turn })
-
+  // Sends every turn the store starts persisting: an ask, or a queued question
+  // the store sent when the turn before it handed off.
+  const send = useCallback(async (turn: TurnIds, threadId: string | null) => {
     // A disposed session has no UI left to update or navigate from.
     const owns = () => {
       const current = store.getState().turn
@@ -182,42 +180,66 @@ export function useChatSession({ userId, threadId, navigate, onThreadCreated }: 
     const fail = (caught: unknown) => {
       if (owns()) store.dispatch({ type: 'ask.failed', error: errorText(caught) })
     }
-    const send = async () => {
-      let sendThreadId = before.threadId
-      if (sendThreadId === null) {
-        let created
-        try {
-          created = await createThread(userId)
-        } catch (caught) {
-          fail(caught)
-          return
-        }
-        sendThreadId = created.thread_id
-        onThreadCreated(sendThreadId, owns())
-        if (owns()) {
-          store.dispatch({ type: 'thread.created', threadId: sendThreadId })
-          navigate(`/chat/${sendThreadId}`)
-        }
-      }
-      let message: ChatMessage
+    let sendThreadId = threadId
+    if (sendThreadId === null) {
+      let created
       try {
-        message = await persistUserChatTurn({
-          threadId: sendThreadId,
-          userId,
-          content: turn.text,
-        })
+        created = await createThread(userId)
       } catch (caught) {
         fail(caught)
         return
       }
-      // The store wants the turn's stream from here on. A user who left
-      // mid-send still gets the run started.
-      if (owns() && store.getState().threadId === sendThreadId) store.dispatch({ type: 'message.persisted', threadId: sendThreadId, message })
-      else streams.start(sendThreadId, { runId: turn.runId, turnId: message.message_id }, turn.text)
+      sendThreadId = created.thread_id
+      onThreadCreated(sendThreadId, owns())
+      if (owns()) {
+        store.dispatch({ type: 'thread.created', threadId: sendThreadId })
+        navigate(`/chat/${sendThreadId}`)
+      }
     }
-    void send()
-    return true
+    let message: ChatMessage
+    try {
+      message = await persistUserChatTurn({
+        threadId: sendThreadId,
+        userId,
+        content: turn.text,
+      })
+    } catch (caught) {
+      fail(caught)
+      return
+    }
+    // The store wants the turn's stream from here on. A user who left
+    // mid-send still gets the run started.
+    if (owns() && store.getState().threadId === sendThreadId) store.dispatch({ type: 'message.persisted', threadId: sendThreadId, message })
+    else streams.start(sendThreadId, { runId: turn.runId, turnId: message.message_id }, turn.text)
   }, [store, streams, userId, navigate, onThreadCreated])
+
+  const sentRunId = useRef<string | null>(null)
+  useEffect(() => {
+    const sync = () => {
+      const { turn, threadId } = store.getState()
+      if (turn.phase !== 'persisting' || turn.turn.runId === sentRunId.current) return
+      sentRunId.current = turn.turn.runId
+      void send(turn.turn, threadId)
+    }
+    sync()
+    return store.subscribe(sync)
+  }, [store, send])
+
+  const ask = useCallback((raw: string): boolean => {
+    const text = raw.trim()
+    const before = store.getState()
+    if (text === '' || !userId) return false
+    const turn: TurnIds = { runId: makeId(), text }
+    store.dispatch(selectThreadView(before).canAsk ? { type: 'ask.started', turn } : { type: 'question.queued', turn })
+    return store.getState() !== before
+  }, [store, userId])
+
+  const sendQueued = useCallback(() => {
+    const { threadId, queued } = store.getState()
+    const turn = threadId === null ? undefined : queued[threadId]?.turn
+    if (turn && userId) store.dispatch({ type: 'ask.started', turn })
+  }, [store, userId])
+  const removeQueued = useCallback(() => store.dispatch({ type: 'queue.removed' }), [store])
 
   const retry = useCallback(() => store.dispatch({ type: 'turn.retried', runId: makeId() }), [store])
   const reconnect = useCallback(() => store.dispatch({ type: 'link.reconnected' }), [store])
@@ -265,7 +287,10 @@ export function useChatSession({ userId, threadId, navigate, onThreadCreated }: 
     return () => controller.abort()
   }, [store, userId, loadThreadId, loadGen])
 
-  return useMemo(() => ({ view, ask, retry, stop, reconnect, reload }), [view, ask, retry, stop, reconnect, reload])
+  return useMemo(
+    () => ({ view, ask, sendQueued, removeQueued, retry, stop, reconnect, reload }),
+    [view, ask, sendQueued, removeQueued, retry, stop, reconnect, reload],
+  )
 }
 
 function errorText(caught: unknown): string {
