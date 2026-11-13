@@ -317,6 +317,9 @@ test("amounts that read alike at their scale still compare by their exact values
   assert.deepEqual(report.rejected, []);
   assert.equal(plainText(renderAssertion(report.accepted[0]!, packet, []).segments), "Of NVDA and AMD, AMD's revenue was highest: NVDA $12.9B, AMD $12.9B (Q4 FY2026).");
   assert.deepEqual((packetForModel(packet) as { figures: unknown[] }).figures[0], { id: "F1", company: "NVDA", metric: "Revenue", period: "Q4 FY2026", value: "$12.9B" });
+  // An exact value is a point: "USD 100" is not 99.5-100.5, so ten cents more still orders.
+  const cents = enginePacket(content([usd(1, "a", "USD 100.00", "USD 100"), usd(2, "b", "USD 100.10", "USD 100.1")], ["a", "b"]), TICKERS, null);
+  assert.deepEqual(checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F2"], op: "highest", result: "F2" }], cents).rejected, []);
 });
 
 test("commentary passes the ref check only when each ref is a verified result of its own answer, as that answer shows it", () => {

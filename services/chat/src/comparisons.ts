@@ -185,7 +185,7 @@ export function checkComparison(
   }
   // The cited figure stands for its fact, so the model's id is the one named.
   const figures = eligible.map((figure) => cited.find((entry) => keyOf(entry) === keyOf(figure))!);
-  const values = figures.map((figure) => interval(figure.exact ?? figure.value));
+  const values = figures.map((figure) => (figure.exact === undefined ? interval(figure.value) : point(interval(figure.exact))));
   if (values.some((value) => value === undefined) || new Set(values.map((value) => value!.kind)).size > 1) {
     return fail("the values are in different units or currencies");
   }
@@ -379,6 +379,11 @@ function interval(value: string): Interval | undefined {
   const mid = (sign === "-" || sign === "−" ? -1 : 1) * Number(`${whole!.replace(/,/g, "")}.${fraction || "0"}`) * scale;
   const half = 0.5 * 10 ** -fraction.length * scale;
   return { kind: `${prefix!.trim()}|${unit}`, low: mid - half, high: mid + half, mid };
+}
+
+// An exact value has no rounding to stand for: canonical "USD 100" is 100, not 99.5-100.5.
+function point(value: Interval | undefined): Interval | undefined {
+  return value === undefined ? undefined : { ...value, low: value.mid, high: value.mid };
 }
 
 // Ordered only when the intervals do not overlap; a shared edge is two
