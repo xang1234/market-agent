@@ -12,6 +12,7 @@
 
 import {
   balanceComponentNodes,
+  balanceComponents,
   DEFAULT_EXECUTION_LIMITS,
   dependencyClosure,
   hashCanonical,
@@ -62,7 +63,13 @@ const UNSUPPORTED_MEANINGS: Readonly<Record<UnsupportedReason, string>> = {
  * company on its own, so no option is one the engine cannot answer (#643). A
  * model's clarification names them by key; anything else it offers is dropped.
  */
-export const CLARIFICATION_FIGURES: Readonly<Record<string, Readonly<{ label: string; reads: ReadonlyArray<string> }>>> = {
+// Net cash needs a balance on each side, any one of that side's components.
+const balanceSide = (side: "cash" | "debt") => balanceComponents("net_cash").filter((component) => component.side === side).map((component) => component.metric_key as string);
+
+/** A figure's reads: each entry a metric, or a list of which any one will do. */
+export type FigureReads = ReadonlyArray<string | ReadonlyArray<string>>;
+
+export const CLARIFICATION_FIGURES: Readonly<Record<string, Readonly<{ label: string; reads: FigureReads }>>> = {
   revenue: { label: "Revenue", reads: ["revenue"] },
   gross_margin: { label: "Gross margin", reads: ["gross_profit", "revenue"] },
   operating_margin: { label: "Operating margin", reads: ["operating_income", "revenue"] },
@@ -74,7 +81,7 @@ export const CLARIFICATION_FIGURES: Readonly<Record<string, Readonly<{ label: st
   capex: { label: "Capital expenditures", reads: ["capex"] },
   free_cash_flow: { label: "Free cash flow", reads: ["operating_cash_flow", "capex"] },
   cash_and_equivalents: { label: "Cash and equivalents", reads: ["cash_and_equivalents"] },
-  net_cash: { label: "Net cash", reads: ["cash_and_equivalents"] },
+  net_cash: { label: "Net cash", reads: [balanceSide("cash"), balanceSide("debt")] },
   market_cap: { label: "Market capitalization", reads: ["shares_outstanding"] },
   pe_ratio: { label: "P/E ratio", reads: ["eps_diluted"] },
 };
@@ -254,9 +261,13 @@ function parseDraft(text: string, context: PlanningContext): Attempt<Draft> {
   if (isRecord(value) && value.outcome === "needs_clarification") {
     // Its options are figure keys, worded here, so its own text reaches the
     // user only as a question with no options.
-    const offered = Array.isArray(value.choices) ? value.choices.filter((choice): choice is string => typeof choice === "string" && Object.hasOwn(CLARIFICATION_FIGURES, choice)) : [];
+    const asked = Array.isArray(value.choices) ? value.choices.filter((choice): choice is string => typeof choice === "string") : [];
+    const offered = asked.filter((choice) => Object.hasOwn(CLARIFICATION_FIGURES, choice));
     const choices = figureChoices([...new Set(offered)]);
-    if (choices.length > 0) return { ok: false, kind: "clarify", clarification: clarification("metric", figureQuestion(context), choices) };
+    // An option outside the figures is named, so a reply of "all" doesn't drop it unsaid.
+    const dropped = [...new Set(asked.filter((choice) => !offered.includes(choice)).map((choice) => choice.replaceAll("_", " ").trim().slice(0, 60)).filter(Boolean))].slice(0, 3);
+    const cannot = dropped.length === 0 ? "" : ` I can't compute ${dropped.length < 2 ? dropped[0] : `${dropped.slice(0, -1).join(", ")} or ${dropped.at(-1)}`}.`;
+    if (choices.length > 0) return { ok: false, kind: "clarify", clarification: clarification("metric", `${figureQuestion(context)}${cannot}`, choices) };
     const question = typeof value.question === "string" ? value.question.slice(0, 500) : "Please clarify the request.";
     return { ok: false, kind: "clarify", clarification: clarification("request", question, []) };
   }

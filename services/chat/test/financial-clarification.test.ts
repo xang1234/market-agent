@@ -209,14 +209,14 @@ test("a typed reply to a metric clarification continues its company, not a ticke
       ["Alpha Industries Inc."],
       typed,
     );
-    // The reply is planned as every option the clarification offered, typed out (#626): EBITDA margin has no definition, so it was never offered (#643).
+    // The reply is planned as every option the clarification offered, typed out (#626): EBITDA margin has no definition, so it was never offered, and the question says so (#643).
     assert.match(asked.at(-1)!, /Gross margin; Operating margin; Net margin\n/u, typed);
   }
 
   // The options show as buttons from the saved field, so the text is the question once.
   completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "What drives AAA's margins?" })).events);
   const [saved] = harness.persisted.at(-1)!.blocks as Array<{ segments: unknown; clarification_choices: unknown }>;
-  assert.deepEqual(saved!.segments, [{ type: "text", text: "Which figures should I show for AAA?" }]);
+  assert.deepEqual(saved!.segments, [{ type: "text", text: "Which figures should I show for AAA? I can't compute ebitda margin." }], "an option it can't compute is named, not dropped unsaid");
   assert.deepEqual(saved!.clarification_choices, ["Gross margin", "Operating margin", "Net margin"]);
   const picked = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "Gross margin" })).events);
   assert.ok(picked.message_id && !picked.clarification && !picked.financial_gap, JSON.stringify(picked));
@@ -264,15 +264,17 @@ test("a metric clarification offers only figures the companies' filings compute,
     t.skip("Docker is required for chat clarification coverage");
     return;
   }
-  const { pool, threadId } = await chatDatabase(t, "chat-clarify-computable");
+  const { db, pool, threadId } = await chatDatabase(t, "chat-clarify-computable");
   // The model asks as it asked about MU, SNDK, WDC and STX: a company left out
   // of the plan named in its own words, and options of every kind.
   const planner = (reply: unknown) => (async () => ({ model: "stub-model", text: JSON.stringify(reply) })) as unknown as PlanningModel;
   const asking = planner({
     outcome: "needs_clarification",
     question: "Which metric should I use? Also, CCC is in your request but not in the requested-company list (AAA). Should I include it?",
-    choices: ["revenue", "gross_margin", "operating_margin", "free_cash_flow", "ebitda_margin", "Market cap and P/E"],
+    choices: ["revenue", "gross_margin", "operating_margin", "free_cash_flow", "net_cash", "ebitda_margin", "Market cap and P/E"],
   });
+  // AAA reports cash but no debt: net cash needs a balance on each side, so it is not offered.
+  await seedReportedFact(db, { metric_key: "cash_and_equivalents", value: "1000", fiscal_year: 2023, subject: IDS.issuerA });
   // No reading, so the planner's model plans the turn.
   const harness = chatHarness(pool, { model: asking, readQuestion: async () => null });
   const done = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "compare AAA and CCC" })).events);
@@ -280,7 +282,7 @@ test("a metric clarification offers only figures the companies' filings compute,
   const [block] = harness.persisted.at(-1)!.blocks as Array<{ segments: Array<{ text: string }>; clarification_choices: unknown }>;
   // AAA files revenue and gross profit only; CCC files nothing, so it was left out of the plan.
   assert.deepEqual(block!.clarification_choices, ["Revenue", "Gross margin"]);
-  assert.deepEqual(block!.segments, [{ type: "text", text: "No SEC filings are on file for CCC yet. Which figures should I show for AAA?" }]);
+  assert.deepEqual(block!.segments, [{ type: "text", text: "No SEC filings are on file for CCC yet. Which figures should I show for AAA? I can't compute ebitda margin or Market cap and P/E." }]);
   assert.deepEqual((done.financial_clarification as Offered).choices.map((choice) => choice.choice_id), ["revenue", "gross_margin"]);
 
   // A request the planner declines names the company left out too.
@@ -289,4 +291,11 @@ test("a metric clarification offers only figures the companies' filings compute,
   assert.deepEqual(gap.financial_gap, { reason_code: "unsupported" });
   const [gapBlock] = declining.persisted.at(-1)!.blocks as Array<{ segments: Array<{ text: string }> }>;
   assert.equal(gapBlock!.segments[0]!.text, "No SEC filings are on file for CCC yet. This request asks for a calculation outside the verified financial definitions I can compute: guidance, estimates or forecasts.");
+
+  // Every company left out: the answer names the one with no filings and the name that matched none.
+  const leftOut = chatHarness(pool, { model: asking, readQuestion: async () => null });
+  const none = completed((await leftOut.run({ threadId, userId: IDS.owner, userIntent: "compare CCC and ZZZQ" })).events);
+  assert.deepEqual(none.financial_gap, { reason_code: "no_sec_filings" }, JSON.stringify(none));
+  const [noneBlock] = leftOut.persisted.at(-1)!.blocks as Array<{ segments: Array<{ text: string }> }>;
+  assert.equal(noneBlock!.segments[0]!.text, "No company matched ZZZQ. No SEC filings are on file for CCC yet.");
 });

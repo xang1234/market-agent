@@ -140,7 +140,7 @@ test("an unrecognized metric definition asks for a choice instead of guessing", 
   assert.match(result.clarification.question, /ebitda/u);
 });
 
-test("a model's clarification offers only figures an approved definition computes, worded by the server, never its own text (#643)", async () => {
+test("a model's clarification offers only figures an approved definition computes, worded by the server, naming the ones it cannot compute (#643)", async () => {
   const model = scripted({
     outcome: "needs_clarification",
     question: "Which metric should I use? Also, SNDK is in your request but not in the requested-company list. Should I include it?",
@@ -150,7 +150,8 @@ test("a model's clarification offers only figures an approved definition compute
   assert.equal(result.outcome, "needs_clarification");
   if (result.outcome !== "needs_clarification") return;
   assert.equal(result.clarification.kind, "metric");
-  assert.equal(result.clarification.question, "Which figures should I compare for Apple, Microsoft and Alphabet?");
+  // The options it offered outside the figures are named, so "all" doesn't drop them unsaid; its question is not shown.
+  assert.equal(result.clarification.question, "Which figures should I compare for Apple, Microsoft and Alphabet? I can't compute ebitda margin, Market cap and P/E or share price.");
   assert.deepEqual(result.clarification.choices.map((choice) => [choice.choice_id, choice.label]), [
     ["revenue", "Revenue"],
     ["gross_margin", "Gross margin"],
@@ -166,7 +167,7 @@ test("a model's clarification offers only figures an approved definition compute
 
 test("a figure a clarification may offer reads only approved metrics", () => {
   for (const [key, figure] of Object.entries(CLARIFICATION_FIGURES)) {
-    assert.ok(figure.reads.length > 0 && figure.reads.every((metric) => METRIC_CATALOG_V1.has(metric)), key);
+    assert.ok(figure.reads.length > 0 && figure.reads.every((read) => read.length > 0) && figure.reads.flat().every((metric) => METRIC_CATALOG_V1.has(metric)), key);
   }
 });
 

@@ -373,7 +373,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     return async () => ({
       kind: "gap",
       reason_code: "no_sec_filings",
-      text: noFilingsLine(filed.noFilings!),
+      text: leftOutNotes(kept.notFound, filed.noFilings!).join(" "),
       message_id: messageId,
       subject_refs: refs,
       ...(scope === null ? {} : {
@@ -586,11 +586,11 @@ async function computableChoices(db: SqlExecutor, clarification: Clarification, 
       where f.subject_kind = 'issuer' and f.subject_id = any($1::uuid[]) and m.metric_key = any($2::text[])
         and f.fiscal_year is not null and ${PUBLIC_SOURCE_SQL}
       group by f.subject_id`,
-    [refs.map((ref) => ref.id), [...new Set(clarification.choices.flatMap((choice) => reads(choice.choice_id)!))]],
+    [refs.map((ref) => ref.id), [...new Set(clarification.choices.flatMap((choice) => reads(choice.choice_id)!.flat()))]],
   );
   const filed = rows.map((row) => new Set(row.metric_keys));
   // ponytail: with none left the question stands alone and the user types a figure; a named "none on file" line if that shows up.
-  const choices = clarification.choices.filter((choice) => filed.some((keys) => reads(choice.choice_id)!.every((key) => keys.has(key))));
+  const choices = clarification.choices.filter((choice) => filed.some((keys) => reads(choice.choice_id)!.every((read) => typeof read === "string" ? keys.has(read) : read.some((key) => keys.has(key)))));
   const { kind, question } = clarification;
   return { clarification_id: hashCanonical("clarification", { kind, question, choices: choices.map((choice) => choice.choice_id) }), kind, question, choices };
 }
