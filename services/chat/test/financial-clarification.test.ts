@@ -316,25 +316,41 @@ test("market cap and P/E are offered only for a company with a share price at th
     t.skip("Docker is required for chat clarification coverage");
     return;
   }
-  const { db, pool, threadId } = await chatDatabase(t, "chat-clarify-priced");
+  const { db, pool } = await chatDatabase(t, "chat-clarify-priced");
+  const newThread = async () => {
+    const thread = randomUUID();
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [thread, IDS.owner]);
+    return thread;
+  };
   const PXQ = {
     issuer: "4f000000-0000-4000-8000-000000000ba1", listing: "4f000000-0000-4000-8000-000000000be1",
     tenK: "4f000000-0000-4000-8000-000000000bc1", tenQ: "4f000000-0000-4000-8000-000000000bc2",
     ticker: "PXQ", name: "Priced Corp.", close: "100.00", eps: "4.00", shares: "1000000",
   } as const;
   await seedValuedIssuer(db, PXQ);
+  // PXN has a price but a diluted loss, so P/E (positive earnings only) is not offered for it.
+  const PXN = {
+    issuer: "4f000000-0000-4000-8000-000000000ca1", listing: "4f000000-0000-4000-8000-000000000ce1",
+    tenK: "4f000000-0000-4000-8000-000000000cc1", tenQ: "4f000000-0000-4000-8000-000000000cc2",
+    ticker: "PXN", name: "Loss Corp.", close: "100.00", eps: "-2.00", shares: "1000000",
+  } as const;
+  await seedValuedIssuer(db, PXN);
   const asking = (async () => ({ model: "stub-model", text: JSON.stringify({ outcome: "needs_clarification", question: "Which figure?", choices: ["market_cap", "pe_ratio", "eps_diluted"] }) })) as unknown as PlanningModel;
   let now: string = NVDA.cutoff;
   const harness = chatHarness(pool, {
     model: asking,
     readQuestion: async () => null,
     clock: () => new Date(now),
-    resolveMention: (mention) => mention === "PXQ"
-      ? Promise.resolve({ status: "resolved", subject_ref: { kind: "issuer", id: PXQ.issuer }, display_label: PXQ.name, handoff: { display_labels: { ticker: PXQ.ticker } } } as unknown as ChatResolvedSubjectPreResolution)
-      : resolveMention(mention),
+    resolveMention: (mention) => {
+      const seeded = [PXQ, PXN].find((company) => company.ticker === mention);
+      return seeded
+        ? Promise.resolve({ status: "resolved", subject_ref: { kind: "issuer", id: seeded.issuer }, display_label: seeded.name, handoff: { display_labels: { ticker: seeded.ticker } } } as unknown as ChatResolvedSubjectPreResolution)
+        : resolveMention(mention);
+    },
   });
-  const offered = async () => (completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "value PXQ" })).events).financial_clarification as Offered).choices.map((choice) => choice.choice_id);
+  const offered = async (ticker = "PXQ") => (completed((await harness.run({ threadId: await newThread(), userId: IDS.owner, userIntent: `value ${ticker}` })).events).financial_clarification as Offered).choices.map((choice) => choice.choice_id);
   assert.deepEqual(await offered(), ["market_cap", "pe_ratio", "eps_diluted"]);
+  assert.deepEqual(await offered("PXN"), ["market_cap", "eps_diluted"]);
   // Weeks later its last close is stale: the valuation would end in a gap, so only the filed figure is offered.
   now = "2024-07-01T15:00:00Z";
   assert.deepEqual(await offered(), ["eps_diluted"]);

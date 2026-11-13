@@ -74,7 +74,7 @@ const netCashReads = (): FigureReads => (["cash", "debt"] as const).flatMap((sid
 /** A figure's reads: each entry a metric, or a list of which any one will do. */
 export type FigureReads = ReadonlyArray<string | ReadonlyArray<string>>;
 
-export const CLARIFICATION_FIGURES: Readonly<Record<string, Readonly<{ label: string; reads: FigureReads; priced?: true }>>> = {
+export const CLARIFICATION_FIGURES: Readonly<Record<string, Readonly<{ label: string; reads: FigureReads; priced?: true; positive?: string }>>> = {
   revenue: { label: "Revenue", reads: ["revenue"] },
   gross_margin: { label: "Gross margin", reads: ["gross_profit", "revenue"] },
   operating_margin: { label: "Operating margin", reads: ["operating_income", "revenue"] },
@@ -89,7 +89,8 @@ export const CLARIFICATION_FIGURES: Readonly<Record<string, Readonly<{ label: st
   net_cash: { label: "Net cash", reads: netCashReads() },
   // priced: also needs the share price the valuation binds at the cutoff.
   market_cap: { label: "Market capitalization", reads: ["shares_outstanding"], priced: true },
-  pe_ratio: { label: "P/E ratio", reads: ["eps_diluted"], priced: true },
+  // positive: the latest fiscal year's value of that metric must be above zero (peRatio).
+  pe_ratio: { label: "P/E ratio", reads: ["eps_diluted"], priced: true, positive: "eps_diluted" },
 };
 
 /** Adapter over the existing model router (router.complete). */

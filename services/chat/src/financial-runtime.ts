@@ -604,9 +604,22 @@ async function computableChoices(
   const filed = rows.map((row) => ({ issuer: row.issuer_id, keys: new Set(row.metric_keys) }));
   // A valuation also needs the price binding would select for that company (bindPriceSlot).
   const priced = clarification.choices.some((choice) => figure(choice.choice_id)!.priced) ? await pricedIssuers(evidence, refs, asOf, allowed) : new Set<string>();
+  const positives = [...new Set(clarification.choices.flatMap((choice) => figure(choice.choice_id)!.positive ?? []))];
+  // ponytail: the latest fiscal year's most recently reported fact stands in for the value selection binds; selectInput if they ever disagree.
+  const positive = positives.length === 0 ? new Set<string>() : new Set((await db.query<{ key: string }>(
+    `select key from (
+       select distinct on (f.subject_id, m.metric_key) f.subject_id::text || ':' || m.metric_key as key, f.value_num > 0 as above_zero
+         from facts f join metrics m on m.metric_id = f.metric_id join sources s on s.source_id = f.source_id
+        where f.subject_kind = 'issuer' and f.subject_id = any($1::uuid[]) and m.metric_key = any($2::text[])
+          and f.fiscal_period = 'FY' and ${PUBLIC_SOURCE_SQL} and ${ELIGIBLE_FACT_SQL} and f.entitlement_channels ? 'app'
+        order by f.subject_id, m.metric_key, f.fiscal_year desc, f.reported_at desc nulls last
+     ) latest where above_zero`,
+    [refs.map((ref) => ref.id), positives],
+  )).rows.map((row) => row.key));
   // ponytail: with none left the question stands alone and the user types a figure; a named "none on file" line if that shows up.
   const choices = clarification.choices.filter((choice) => filed.some(({ issuer, keys }) =>
     (!figure(choice.choice_id)!.priced || priced.has(issuer))
+    && (figure(choice.choice_id)!.positive === undefined || positive.has(`${issuer}:${figure(choice.choice_id)!.positive}`))
     && reads(choice.choice_id)!.every((read) => typeof read === "string" ? keys.has(read) : read.some((key) => keys.has(key)))));
   const { kind, question } = clarification;
   return { clarification_id: hashCanonical("clarification", { kind, question, choices: choices.map((choice) => choice.choice_id) }), kind, question, choices };
