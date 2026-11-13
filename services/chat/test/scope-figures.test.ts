@@ -126,7 +126,17 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
   ["the income statement, for the latest fiscal year", read({ metrics: ["income_statement"], asks: ["latest_fiscal_year"], period: { kind: "latest" }, companies: named("NVDA") }), FRESH, "income_statement at latest fiscal year"],
   ["the income statement against peers, for a fiscal year", read({ metrics: ["income_statement"], asks: ["peers"], period: FY2025, companies: named("NVDA") }), FRESH, "overview at FY2025 with peers"],
   ["operating expenses", read({ metrics: ["income_statement"], items: ["operating_expenses"], companies: named("NVDA") }), FRESH, "planner"],
-  ["the income statement beside another metric", read({ metrics: ["income_statement", "free_cash_flow"], companies: named("NVDA") }), FRESH, "planner"],
+  // Several figures the engine plans with no model are one plan of them all, the income statement's lines included.
+  ["the income statement beside another metric", read({ metrics: ["income_statement", "free_cash_flow"], companies: named("NVDA") }), FRESH, "income_statement, free_cash_flow at latest"],
+  ["an income line beside another metric", read({ metrics: ["free_cash_flow"], items: ["revenue"], companies: named("NVDA") }), FRESH, "income_statement, free_cash_flow at latest"],
+  [
+    "every figure a metric clarification offered, at the latest fiscal year",
+    read({ metrics: ["income_statement", "free_cash_flow", "net_cash", "market_cap", "pe_ratio"], items: ["revenue", "gross_margin", "operating_margin", "net_margin"], asks: ["margins", "latest_fiscal_year"], period: { kind: "latest" }, companies: named("NVDA", "AMD") }),
+    after({ companies: [NVDA, AMD] }),
+    "income_statement, free_cash_flow, net_cash, market_cap, pe_ratio at latest fiscal year",
+  ],
+  ["operating expenses beside another metric", read({ metrics: ["free_cash_flow"], items: ["operating_expenses"], companies: named("NVDA") }), FRESH, "planner"],
+  ["the income statement beside a metric no definition serves", read({ metrics: ["income_statement", "ebitda"], companies: named("NVDA") }), FRESH, "planner"],
   ["the income statement, with the evidence", read({ metrics: ["income_statement"], asks: ["evidence"], companies: named("NVDA") }), FRESH, "planner"],
   ["the income statement, another figure turned off", read({ metrics: ["income_statement"], offMetrics: ["eps_diluted"], companies: named("NVDA") }), FRESH, "planner"],
   ["earnings per share", read({ metrics: ["eps_diluted", "eps_basic"], companies: named("AMD") }), FRESH, "eps_diluted, eps_basic at latest"],

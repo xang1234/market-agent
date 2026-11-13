@@ -33,6 +33,7 @@ import { ParentRefusedError, type PersistParentArtifact } from "../../financial-
 import { claimAnswerSave } from "./turn-stop.ts";
 import {
   buildDeterministicPlan,
+  CLARIFICATION_FIGURES,
   planFinancialRequest,
   resolveClarification,
   type Clarification,
@@ -53,7 +54,7 @@ import { priceComparisonTurn } from "./scenario-price-comparison.ts";
 import { callTurn, readCallAsk } from "./call.ts";
 import { planEpsScenarios, priorScenario, SCENARIO_DECLINE, SCENARIO_GAP, SCENARIO_INPUTS, scenarioAnswer, turnScenarioAsk, type ScenarioAsk } from "./eps-scenarios.ts";
 import { asksCause, filedCauses, namedFigures, NOT_ASKED, type FiledCause } from "./filed-cause.ts";
-import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend, reportsFiscalYear, type PeersOf } from "./company-overview.ts";
+import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend, reportsFiscalYear, UNPLANNED, type PeersOf } from "./company-overview.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
@@ -76,7 +77,8 @@ export type ChatClarificationAnswer = Readonly<{ clarification_id: string; choic
 export type ChatFinancialTurn =
   // A metric or request clarification names the companies it asked about, so
   // a typed reply ("all") continues them (#623).
-  | Readonly<{ kind: "clarification"; clarification: Clarification; subject_refs?: ReadonlyArray<FinancialSubjectRef> }>
+  // Either names, in note, the companies the turn left out (leftOutNotes).
+  | Readonly<{ kind: "clarification"; clarification: Clarification; subject_refs?: ReadonlyArray<FinancialSubjectRef>; note?: string }>
   // A gap the turn declined with names the companies it was asked about and
   // saves its scope, so a follow-up continues them (#425). It is saved under
   // the id the turn's answer takes (message_id): an answer saved first keeps
@@ -85,6 +87,7 @@ export type ChatFinancialTurn =
     kind: "gap";
     reason_code: string;
     text: string;
+    note?: string;
     // A price comparison's decline or refusal (#224), marked in the saved block.
     comparison_gap?: "declined" | "refused";
     message_id?: string;
@@ -206,12 +209,15 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // ponytail: a retry that resumes a reserved run does not plan, so it
       // names the companies the message resolved, without a pick or peers.
       const askedRefs = () => asked.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
+      const note = leftOutNotes(requested.notFound, requested.noFilings ?? []).join(" ");
+      const noted = note === "" ? {} : { note };
       const declinedGap = (reason: ChatGap) => {
         const refs = askedRefs();
         // One about no company leaves the previous answer's companies and scope.
-        if (refs.length === 0) return gap(reason, planned);
+        if (refs.length === 0) return { ...gap(reason, planned), ...noted };
         return {
           ...gap(reason, planned),
+          ...noted,
           // Another attempt may answer the turn meanwhile (a run it finished
           // reads here as run_failed): the gap never replaces that answer.
           message_id: messageId,
@@ -293,7 +299,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           // the still-ambiguous mention as a new company before the pick
           // applies. Only a metric or request question is answered by typing.
           const refs = outcome.clarification.kind === "subject" ? [] : askedRefs();
-          return { kind: "clarification", clarification: outcome.clarification, ...(refs.length > 0 ? { subject_refs: refs } : {}) };
+          const clarification = outcome.clarification.kind === "metric" ? await computableChoices(deps.pool, outcome.clarification, refs) : outcome.clarification;
+          return { kind: "clarification", clarification, ...(refs.length > 0 ? { subject_refs: refs } : {}), ...noted };
         }
         case "gap":
           // A commit that failed is an error of this turn, not an answer; the retry publishes it.
@@ -558,6 +565,36 @@ async function withSecFilings(db: SqlExecutor, requested: TurnCompanies): Promis
 
 const noFilingsLine = (labels: ReadonlyArray<string>): string => `No SEC filings are on file for ${labelList(labels)} yet.`;
 
+/** What a turn says of the companies it left out: names that matched none, and companies with no filings. */
+const leftOutNotes = (notFound: ReadonlyArray<string>, noFilings: ReadonlyArray<string>): string[] => [
+  ...(notFound.length === 0 ? [] : [`No company matched ${labelList(notFound)}.`]),
+  ...(noFilings.length === 0 ? [] : [noFilingsLine(noFilings)]),
+];
+
+/**
+ * A figure clarification's options that some asked company's public filings
+ * compute: one with a fiscal-period fact for every metric the figure reads
+ * (CLARIFICATION_FIGURES), so the user is never offered what no company can
+ * answer (#643). A clarification offering anything else is left as it is.
+ */
+async function computableChoices(db: SqlExecutor, clarification: Clarification, refs: ReadonlyArray<FinancialSubjectRef>): Promise<Clarification> {
+  const reads = (choiceId: string) => Object.hasOwn(CLARIFICATION_FIGURES, choiceId) ? CLARIFICATION_FIGURES[choiceId]!.reads : null;
+  if (refs.length === 0 || clarification.choices.some((choice) => reads(choice.choice_id) === null)) return clarification;
+  const { rows } = await db.query<{ issuer_id: string; metric_keys: string[] }>(
+    `select f.subject_id::text as issuer_id, array_agg(distinct m.metric_key) as metric_keys
+       from facts f join metrics m on m.metric_id = f.metric_id join sources s on s.source_id = f.source_id
+      where f.subject_kind = 'issuer' and f.subject_id = any($1::uuid[]) and m.metric_key = any($2::text[])
+        and f.fiscal_year is not null and ${PUBLIC_SOURCE_SQL}
+      group by f.subject_id`,
+    [refs.map((ref) => ref.id), [...new Set(clarification.choices.flatMap((choice) => reads(choice.choice_id)!))]],
+  );
+  const filed = rows.map((row) => new Set(row.metric_keys));
+  // ponytail: with none left the question stands alone and the user types a figure; a named "none on file" line if that shows up.
+  const choices = clarification.choices.filter((choice) => filed.some((keys) => reads(choice.choice_id)!.every((key) => keys.has(key))));
+  const { kind, question } = clarification;
+  return { clarification_id: hashCanonical("clarification", { kind, question, choices: choices.map((choice) => choice.choice_id) }), kind, question, choices };
+}
+
 const NO_COMPANIES: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [], labels: new Map() };
 const PLANNER: PlanChoice = { kind: "planner" };
 
@@ -626,8 +663,16 @@ async function planTurn(
       }
       case "overview": {
         const companies = choice.peers ? await withPeers(subjects, turn.peersOf) : subjects;
-        const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence, choice.period);
-        if (overview) onSubjects(companies!);
+        if (!companies) return null;
+        const planning = planningContext(companies);
+        // Asked for no figure, a company that reports no quarter is compared
+        // with the others at each one's latest fiscal year, as a margin trend
+        // falls back (#639), rather than leaving the model only a menu to offer (#643).
+        const overview = await planCompanyOverview(planning, turn.evidence, choice.period) ??
+          (choice.byYear && choice.period.kind === "latest" && await everyReportsFiscalYear(planning, turn.evidence)
+            ? await planScopeFigures(planning, turn.evidence, ["income_statement"], LATEST_FISCAL_YEAR_READ)
+            : null);
+        if (overview) onSubjects(companies);
         return overview;
       }
       case "kept_figures":
@@ -643,6 +688,13 @@ async function planTurn(
 }
 
 const LATEST_FISCAL_YEAR_READ: ReadPeriod = { kind: "latest", period: "fiscal_year" };
+
+async function everyReportsFiscalYear(context: PlanningContext, evidence: FinancialEvidencePort): Promise<boolean> {
+  for (const subject of context.requested_subjects) {
+    if (!await reportsFiscalYear({ ...context, requested_subjects: [subject] }, evidence, null, UNPLANNED)) return false;
+  }
+  return true;
+}
 const UNQUARTERED_TREND: PlanningResult = { outcome: "unsupported", reason: "unquartered_trend", issues: [], model_calls: 0 };
 
 // One company and its peers; null for several companies, or one with none.
@@ -836,6 +888,8 @@ function persistAssistantMessage(
     const chosen = answeredChoice(plan, turn.choice);
     // A trend shown for a fiscal year had no quarters to chart (planTurn), which its own line says.
     const unquartered = chosen?.kind === "trend" && shownPeriod === "fiscal_year";
+    // So is an overview of the latest quarters a company had none for.
+    const annualOverview = chosen?.kind === "overview" && chosen.period.kind === "latest" && shownPeriod === "fiscal_year";
     const missing = asked === null || plan === null ? [] : [
       ...uncoveredAsks(
         withoutAsks(asked, [...(answeredPeers ? ["peers" as const] : []), ...(unquartered ? ["margin_trend" as const] : [])]),
@@ -851,11 +905,15 @@ function persistAssistantMessage(
     const defaults = chosen === null || reading === null || scope === null || plan === null ? [] : defaultsNote(chosen, reading, scope, shownPeriod, plan.subjects.members.length);
     const later = await laterFigures(tx.client, publication.run_id, companyNames);
     const note = [
-      ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
-      ...(turn.noFilings.length === 0 ? [] : [noFilingsLine(turn.noFilings)]),
+      ...leftOutNotes(turn.notFound, turn.noFilings),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
       ...(unquartered ? [`A margin trend is charted over reported quarters, and none could be read for ${labelList([...companyNames.values()])}, so its margins are shown for a fiscal year.`] : []),
       ...(replaced === null ? [] : [replaced]),
+      ...(annualOverview && replaced === null
+        ? [(plan?.subjects.members.length ?? 0) > 1
+          ? "Quarterly figures are not on file for every company, so each company's latest fiscal year is shown."
+          : "Quarterly figures are not on file for this company, so its latest fiscal year is shown."]
+        : []),
       ...defaults,
       ...scenarioNotes,
       ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),

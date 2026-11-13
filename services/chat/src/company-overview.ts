@@ -18,7 +18,7 @@ const GROWTH = [
   { metric: "revenue_growth_qoq", quartersBack: 1 },
   { metric: "revenue_growth_yoy", quartersBack: 4 },
 ] as const;
-const UNPLANNED = "[chat] the company overview could not be planned; the planner answers";
+export const UNPLANNED = "[chat] the company overview could not be planned; the planner answers";
 const TREND_UNPLANNED = "[chat] the margin trend could not be planned; the planner answers";
 
 type Node = Record<string, unknown> & { node_id: string };
@@ -81,7 +81,7 @@ export async function planMarginTrend(context: PlanningContext, evidence: Financ
 }
 
 /** Whether the context's one company reported revenue for the fiscal year, or for any with none named, by the cutoff; false when it cannot be read. */
-export async function reportsFiscalYear(context: PlanningContext, evidence: FinancialEvidencePort, fiscal_year: number | null): Promise<boolean> {
+export async function reportsFiscalYear(context: PlanningContext, evidence: FinancialEvidencePort, fiscal_year: number | null, unplanned = TREND_UNPLANNED): Promise<boolean> {
   const [subject] = context.requested_subjects;
   if (subject?.resolution.status !== "resolved") return false;
   const { authority, knowledge_cutoff } = context;
@@ -94,7 +94,7 @@ export async function reportsFiscalYear(context: PlanningContext, evidence: Fina
     limit: DEFAULT_EXECUTION_LIMITS.max_input_candidates,
   });
   if (page.status === "error") {
-    console.warn(TREND_UNPLANNED, page.reason_code);
+    console.warn(unplanned, page.reason_code);
     return false;
   }
   const policy = { knowledge_cutoff, allowed_source_classes: authority.allowed_source_classes };

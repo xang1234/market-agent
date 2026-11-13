@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { databaseUrl, IDS, RESTATED_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
+import { databaseUrl, IDS, RESTATED_REVENUE, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { createChatServer } from "../src/http.ts";
 import { loadPriorSubjects } from "../src/thread-context.ts";
@@ -154,6 +154,10 @@ test("a typed reply to a metric clarification continues its company, not a ticke
     return;
   }
   const { db, pool, threadId } = await chatDatabase(t, "chat-clarify-reply");
+  // AAA files the lines each margin reads, so the clarification offers all three.
+  for (const [metric_key, value] of [["operating_income", "60000000000"], ["net_income", "50000000000"]] as const) {
+    await seedReportedFact(db, { metric_key, value, fiscal_year: 2023, subject: IDS.issuerA });
+  }
   // The resolver reads any one word as a ticker: "all" is ALL, here issuer B.
   const resolver = (mention: string) => {
     const read = /\s/u.test(mention) ? mention : mention.toUpperCase();
@@ -164,7 +168,7 @@ test("a typed reply to a metric clarification continues its company, not a ticke
   const model = (async (request: { messages: ReadonlyArray<{ content: string }> }) => {
     asked.push(request.messages.map((message) => message.content).join("\n"));
     return asked.at(-1)!.includes("What drives")
-      ? { model: "stub-model", text: JSON.stringify({ outcome: "needs_clarification", question: "Which margin would you like?", choices: ["Gross margin", "Operating margin", "Net margin", "EBITDA margin"] }) }
+      ? { model: "stub-model", text: JSON.stringify({ outcome: "needs_clarification", question: "Which margin would you like?", choices: ["gross_margin", "operating_margin", "net_margin", "ebitda_margin"] }) }
       : revenueModel(["AAA"])({ messages: [] });
   }) as unknown as PlanningModel;
   const hydrate = async (_db: unknown, ref: { kind: string; id: string }) =>
@@ -205,15 +209,15 @@ test("a typed reply to a metric clarification continues its company, not a ticke
       ["Alpha Industries Inc."],
       typed,
     );
-    // The reply is planned as every option the clarification offered, typed out (#626).
-    assert.match(asked.at(-1)!, /Gross margin; Operating margin; Net margin; EBITDA margin/u, typed);
+    // The reply is planned as every option the clarification offered, typed out (#626): EBITDA margin has no definition, so it was never offered (#643).
+    assert.match(asked.at(-1)!, /Gross margin; Operating margin; Net margin\n/u, typed);
   }
 
   // The options show as buttons from the saved field, so the text is the question once.
   completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "What drives AAA's margins?" })).events);
   const [saved] = harness.persisted.at(-1)!.blocks as Array<{ segments: unknown; clarification_choices: unknown }>;
-  assert.deepEqual(saved!.segments, [{ type: "text", text: "Which margin would you like?" }]);
-  assert.deepEqual(saved!.clarification_choices, ["Gross margin", "Operating margin", "Net margin", "EBITDA margin"]);
+  assert.deepEqual(saved!.segments, [{ type: "text", text: "Which figures should I show for AAA?" }]);
+  assert.deepEqual(saved!.clarification_choices, ["Gross margin", "Operating margin", "Net margin"]);
   const picked = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "Gross margin" })).events);
   assert.ok(picked.message_id && !picked.clarification && !picked.financial_gap, JSON.stringify(picked));
   const [pickedAnswer] = (await db.query(`select blocks from chat_messages where message_id = $1`, [picked.message_id])).rows[0].blocks;
@@ -223,7 +227,7 @@ test("a typed reply to a metric clarification continues its company, not a ticke
     "a typed option continues the company the clarification asked about",
   );
 
-  // "both" takes every option only when exactly two were offered; these were four.
+  // "both" takes every option only when exactly two were offered; these were three.
   completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "What drives AAA's margins?" })).events);
   const before = asked.length;
   await harness.run({ threadId, userId: IDS.owner, userIntent: "both" });
@@ -253,4 +257,36 @@ test("a company-choice clarification names no company, so replaying the pick rea
   assert.match((asked.financial_clarification as Offered).question, /Which company did you mean by "AMB"\?/u);
   const [block] = harness.persisted.at(-1)!.blocks as Array<{ subject_refs?: unknown }>;
   assert.equal(block!.subject_refs, undefined);
+});
+
+test("a metric clarification offers only figures the companies' filings compute, in the server's words, and names a company with no filings (#643)", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for chat clarification coverage");
+    return;
+  }
+  const { pool, threadId } = await chatDatabase(t, "chat-clarify-computable");
+  // The model asks as it asked about MU, SNDK, WDC and STX: a company left out
+  // of the plan named in its own words, and options of every kind.
+  const planner = (reply: unknown) => (async () => ({ model: "stub-model", text: JSON.stringify(reply) })) as unknown as PlanningModel;
+  const asking = planner({
+    outcome: "needs_clarification",
+    question: "Which metric should I use? Also, CCC is in your request but not in the requested-company list (AAA). Should I include it?",
+    choices: ["revenue", "gross_margin", "operating_margin", "free_cash_flow", "ebitda_margin", "Market cap and P/E"],
+  });
+  // No reading, so the planner's model plans the turn.
+  const harness = chatHarness(pool, { model: asking, readQuestion: async () => null });
+  const done = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "compare AAA and CCC" })).events);
+  assert.equal(done.clarification, true, JSON.stringify(done));
+  const [block] = harness.persisted.at(-1)!.blocks as Array<{ segments: Array<{ text: string }>; clarification_choices: unknown }>;
+  // AAA files revenue and gross profit only; CCC files nothing, so it was left out of the plan.
+  assert.deepEqual(block!.clarification_choices, ["Revenue", "Gross margin"]);
+  assert.deepEqual(block!.segments, [{ type: "text", text: "No SEC filings are on file for CCC yet. Which figures should I show for AAA?" }]);
+  assert.deepEqual((done.financial_clarification as Offered).choices.map((choice) => choice.choice_id), ["revenue", "gross_margin"]);
+
+  // A request the planner declines names the company left out too.
+  const declining = chatHarness(pool, { model: planner({ outcome: "unsupported", reason: "forecast" }), readQuestion: async () => null });
+  const gap = completed((await declining.run({ threadId, userId: IDS.owner, userIntent: "forecast AAA and CCC" })).events);
+  assert.deepEqual(gap.financial_gap, { reason_code: "unsupported" });
+  const [gapBlock] = declining.persisted.at(-1)!.blocks as Array<{ segments: Array<{ text: string }> }>;
+  assert.equal(gapBlock!.segments[0]!.text, "No SEC filings are on file for CCC yet. This request asks for a calculation outside the verified financial definitions I can compute: guidance, estimates or forecasts.");
 });
