@@ -320,17 +320,18 @@ test("market cap and P/E are offered only for a company with a share price at th
   } as const;
   await seedValuedIssuer(db, PXQ);
   const asking = (async () => ({ model: "stub-model", text: JSON.stringify({ outcome: "needs_clarification", question: "Which figure?", choices: ["market_cap", "pe_ratio", "eps_diluted"] }) })) as unknown as PlanningModel;
+  let now: string = NVDA.cutoff;
   const harness = chatHarness(pool, {
     model: asking,
     readQuestion: async () => null,
-    clock: () => new Date(NVDA.cutoff),
+    clock: () => new Date(now),
     resolveMention: (mention) => mention === "PXQ"
       ? Promise.resolve({ status: "resolved", subject_ref: { kind: "issuer", id: PXQ.issuer }, display_label: PXQ.name, handoff: { display_labels: { ticker: PXQ.ticker } } } as unknown as ChatResolvedSubjectPreResolution)
       : resolveMention(mention),
   });
   const offered = async () => (completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "value PXQ" })).events).financial_clarification as Offered).choices.map((choice) => choice.choice_id);
   assert.deepEqual(await offered(), ["market_cap", "pe_ratio", "eps_diluted"]);
-  // Without a price the valuation would end in a gap, so only the filed figure is offered.
-  await db.query(`delete from price_observations where listing_id = $1`, [PXQ.listing]);
+  // Weeks later its last close is stale: the valuation would end in a gap, so only the filed figure is offered.
+  now = "2024-07-01T15:00:00Z";
   assert.deepEqual(await offered(), ["eps_diluted"]);
 });
