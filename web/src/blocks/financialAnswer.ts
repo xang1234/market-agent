@@ -36,6 +36,32 @@ export function resultLabel(content: FinancialAnswerContent, result: FinancialPr
   return ids.flatMap((id) => (id === null ? [] : [labelText(content, id)])).join(', ')
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** "FY2026 (ended 2026-09-03)" reads "FY2026 · ended Sep 2026"; the full label stays in the title. */
+export function shortPeriod(text: string): string {
+  return text.replace(/ \((ended|as of) (\d{4})-(\d{2})-\d{2}\)/g, (_, word: string, year: string, month: string) => ` · ${word} ${MONTHS[Number(month) - 1]} ${year}`)
+}
+
+/** Each measure without its formula ("Gross margin"), unless two columns would then read alike. */
+export function columnNames(measures: ReadonlyArray<string>): string[] {
+  const short = measures.map((measure) => measure.replace(/ \([^()]*\)$/, ''))
+  return short.map((name, i) => (short.some((other, j) => other === name && measures[j] !== measures[i]) ? measures[i]! : name))
+}
+
+/** The one period label every value in a row's undated columns reads, or null when they read several. */
+export function rowPeriod(
+  table: FinancialTablePresentation,
+  row: FinancialTablePresentation['rows'][number],
+  results: ReadonlyMap<string, FinancialPresentedResult>,
+): string | null {
+  const periods = new Set(row.cells.flatMap((cell, index) => {
+    const result = cell == null || table.columns[index]?.period_label_id !== null ? undefined : results.get(cell)
+    return result?.presented.kind === 'value' ? [result.period_label_id] : []
+  }))
+  return periods.size === 1 ? [...periods][0]! : null
+}
+
 export type SortDirection = 'ascending' | 'descending'
 
 /**
