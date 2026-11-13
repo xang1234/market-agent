@@ -38,8 +38,8 @@ const FIGURES = "By revenue, highest first: Data Center $55.2B, Gaming $4.3B, OE
 const PENDING = "> _Checking an analyst inference against the figures it rests on…_";
 const CONCENTRATED_TEXT = "Its revenue is overwhelmingly concentrated in Data Center, with every other segment far smaller.";
 const CUSHION_TEXT = "Counterpoint: only one quarter of segment data is shown, so the data cannot show whether this concentration is rising or falling.";
-const CONCENTRATED = `> **Analyst inference** (revenue highest first: Data Center, Gaming, OEM & Other, Professional Visualization, Automotive): ${CONCENTRATED_TEXT}`;
-const CUSHION = `> **Analyst inference** (revenue highest first: Data Center, Gaming, OEM & Other, Professional Visualization, Automotive): ${CUSHION_TEXT}`;
+const CONCENTRATED = `> **Analyst inference** (from NVDA's revenue ranking by segment): ${CONCENTRATED_TEXT}`;
+const CUSHION = `> **Analyst inference** (from NVDA's revenue ranking by segment): ${CUSHION_TEXT}`;
 const UNVERIFIED_CONCENTRATED = `> **Unverified analyst view** (not backed by the figures shown): ${CONCENTRATED_TEXT}`;
 const UNVERIFIED_CUSHION = `> **Unverified analyst view** (not backed by the figures shown): ${CUSHION_TEXT}`;
 

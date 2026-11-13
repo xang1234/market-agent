@@ -8,7 +8,7 @@
 // to the observations it rests on, writing no figure, so every figure shown is
 // a template's value from the packet. A comparison states the high or low,
 // ranking or trend its check derived, never the model's wording of it, and an
-// inference resting on comparisons carries their checked results in its label.
+// inference resting on comparisons names the metrics they rank or trace in its label.
 
 import type { Assertion } from "./assertions.ts";
 import { checkedComparisons, metricLabel, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
@@ -121,8 +121,8 @@ function templateSegments(
     }
     case "analyst_inference": {
       // Words only: the check rejected any figure or reference in it.
-      const label = checkedResults(assertion, packet, accepted);
-      text(`> **Analyst inference${subjectClause(assertion, packet)}${label.length > 0 ? `** (${label.join("; ")}):` : ":**"} ${literal(assertion.text)}`);
+      const basis = inferenceBasis(assertion, packet, accepted);
+      text(`> **Analyst inference${subjectClause(assertion, packet)}${basis ? `** (from ${basis}):` : ":**"} ${literal(assertion.text)}`);
       break;
     }
   }
@@ -164,7 +164,7 @@ function subjectClause(assertion: Assertion, packet: EvidencePacket): string {
   return assertion.subject && packet.companies.length > 1 ? ` on ${assertion.subject}` : "";
 }
 
-// What an inference's comparisons checked, for its label, from their results.
+// What an inference's comparisons checked, for the judge, from their results.
 // One company highest on several metrics is one clause.
 export function checkedResults(
   assertion: Assertion,
@@ -180,6 +180,30 @@ export function checkedResults(
     }
   }
   return [...clauses].map(([clause, metrics]) => (metrics.length > 0 ? `${clause} ${new Intl.ListFormat("en").format(metrics)}` : clause));
+}
+
+// What an inference rests on, for its label: the metrics its comparisons rank
+// or trace ("the revenue and net margin rankings"), not their results, which
+// the comparisons above it state; empty when it rests on none.
+function inferenceBasis(assertion: Assertion, packet: EvidencePacket, accepted: ReadonlyArray<Assertion & { index: number }>): string {
+  const NOUNS = { ranking: ["ranking", "rankings"], segments: ["ranking by segment", "rankings by segment"], trend: ["trend", "trends"] } as const;
+  const bases = new Map<string, { owner: string; noun: keyof typeof NOUNS; metrics: string[] }>();
+  for (const n of assertion.supports ?? []) {
+    const entry = accepted.find((candidate) => candidate.index === n && candidate.kind === "comparison");
+    for (const comparison of entry ? checkedComparisons(entry, packet) : []) {
+      const first = comparison.figures[0]!;
+      const noun = comparison.op === "trend" ? "trend" : first.segment !== undefined ? "segments" : "ranking";
+      // Over time or across segments, the metric is one company's.
+      const owner = comparison.axis === "time" || noun === "segments" ? ownerOf(first, packet) : "";
+      const basis = bases.get(`${owner}|${noun}`) ?? { owner, noun, metrics: [] };
+      // An engine measure's formula ("net margin (net income / revenue)") is said where its figures are.
+      const metric = metricLabel(comparison.metric).replace(/ \([^()]*[/×][^()]*\)$/, "");
+      if (!basis.metrics.includes(metric)) basis.metrics.push(metric);
+      bases.set(`${owner}|${noun}`, basis);
+    }
+  }
+  return new Intl.ListFormat("en").format([...bases.values()].map(({ owner, noun, metrics }) =>
+    `${owner || "the "}${new Intl.ListFormat("en").format(metrics)} ${NOUNS[noun][metrics.length > 1 ? 1 : 0]}`));
 }
 
 // "NVDA's ": a figure's company as its possessive, the only company's when it names none.

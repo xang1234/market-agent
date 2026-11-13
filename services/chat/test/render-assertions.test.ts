@@ -243,7 +243,7 @@ test("an observation names each period once, and segments and acronyms read as w
   );
 });
 
-test("an inference's label states each supporting comparison's checked result; one on observations alone keeps the plain label (#288)", () => {
+test("an inference's label names the metrics its comparisons rank or trace, not their results, which are said above it; one on observations alone keeps the plain label (#288)", () => {
   const comparisons = [
     { index: 0, kind: "comparison" as const, op: "trend" as const, result: "rebounded", text: "x", evidence: ALL },
     { index: 1, kind: "comparison" as const, op: "lowest" as const, result: "T2", text: "x", evidence: ALL },
@@ -253,28 +253,36 @@ test("an inference's label states each supporting comparison's checked result; o
   const label = (packet: EvidencePacket, supports: number[], accepted: ReadonlyArray<Assertion & { index: number }> = comparisons) =>
     plainText(renderAssertion({ index: 9, kind: "analyst_inference", text: "The loss quarter was a one-off.", evidence: [], supports }, packet, [], accepted).segments);
   assert.equal(label(AMD_QUARTERS, [0, 1, 3]),
-    "> **Analyst inference** (AMD's operating margin fell, then rebounded; AMD's operating margin lowest in Q2 2025): The loss quarter was a one-off.");
+    "> **Analyst inference** (from AMD's operating margin trend and AMD's operating margin ranking): The loss quarter was a one-off.");
   assert.equal(label(AMD_QUARTERS, [2]),
-    "> **Analyst inference** (AMD's operating margin highest first: Q4 2025, Q3 2025, Q1 2025, Q2 2025): The loss quarter was a one-off.");
+    "> **Analyst inference** (from AMD's operating margin ranking): The loss quarter was a one-off.");
   assert.equal(label(AMD_QUARTERS, [3]), "> **Analyst inference:** The loss quarter was a one-off.");
   const peers: EvidencePacket = { ...PACKET, companies: ["NVDA", "AMD"], figures: PACKET.figures.slice(0, 2) };
   assert.equal(label(peers, [0], [{ index: 0, kind: "comparison", op: "order", result: ["F1", "F2"], text: "x", evidence: ["F1", "F2"] }]),
-    "> **Analyst inference** (gross margin highest first: NVDA, AMD): The loss quarter was a one-off.");
-  // One company highest on several metrics is said once.
+    "> **Analyst inference** (from the gross margin ranking): The loss quarter was a one-off.");
+  // Several metrics are one list, each without its formula.
   const margins: EvidencePacket = { ...peers, figures: [
     ...peers.figures,
-    { id: "F4", company: "NVDA", metric: "Net margin", period: "FY2026", value: "55.0%", source_ids: [] },
-    { id: "F5", company: "AMD", metric: "Net margin", period: "FY2025", value: "12.0%", source_ids: [] },
+    { id: "F4", company: "NVDA", metric: "Net margin (net income / revenue)", period: "FY2026", value: "55.0%", source_ids: [] },
+    { id: "F5", company: "AMD", metric: "Net margin (net income / revenue)", period: "FY2025", value: "12.0%", source_ids: [] },
+    { id: "F6", company: "NVDA", metric: "Revenue", period: "FY2026", value: "$130.5B", source_ids: [] },
+    { id: "F7", company: "AMD", metric: "Revenue", period: "FY2025", value: "$25.8B", source_ids: [] },
   ] };
   assert.equal(label(margins, [0, 1], [
     { index: 0, kind: "comparison", op: "highest", result: "F1", text: "x", evidence: ["F1", "F2"] },
     { index: 1, kind: "comparison", op: "highest", result: "F4", text: "x", evidence: ["F4", "F5"] },
-  ]), "> **Analyst inference** (NVDA highest on gross margin and net margin): The loss quarter was a one-off.");
+    { index: 2, kind: "comparison", op: "order", result: ["F6", "F7"], text: "x", evidence: ["F6", "F7"] },
+  ]), "> **Analyst inference** (from the gross margin and net margin rankings): The loss quarter was a one-off.");
+  assert.equal(label(margins, [2, 0, 1], [
+    { index: 0, kind: "comparison", op: "highest", result: "F1", text: "x", evidence: ["F1", "F2"] },
+    { index: 1, kind: "comparison", op: "highest", result: "F4", text: "x", evidence: ["F4", "F5"] },
+    { index: 2, kind: "comparison", op: "order", result: ["F6", "F7"], text: "x", evidence: ["F6", "F7"] },
+  ]), "> **Analyst inference** (from the revenue, gross margin, and net margin rankings): The loss quarter was a one-off.");
   // A subject is named in the label, beside what its comparisons checked (#308).
   const on = (supports: number[], accepted: ReadonlyArray<Assertion & { index: number }>) =>
     plainText(renderAssertion({ index: 9, kind: "analyst_inference", subject: "AMD", text: "Its net margin may understate underlying profitability.", evidence: [], supports }, margins, [], accepted).segments);
   assert.equal(on([1], [{ index: 1, kind: "comparison", op: "highest", result: "F4", text: "x", evidence: ["F4", "F5"] }]),
-    "> **Analyst inference on AMD** (NVDA highest on net margin): Its net margin may understate underlying profitability.");
+    "> **Analyst inference on AMD** (from the net margin ranking): Its net margin may understate underlying profitability.");
   assert.equal(on([3], [{ index: 3, kind: "observation", text: "x", evidence: ["F5"] }]),
     "> **Analyst inference on AMD:** Its net margin may understate underlying profitability.");
   // A one-company answer's subject goes without saying.

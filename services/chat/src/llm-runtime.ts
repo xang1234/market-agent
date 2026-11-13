@@ -348,7 +348,7 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
     if (report.status !== "checked" || report.accepted.length === 0) return { answer: null, report };
     // Nothing is left out once accepted, so every support an inference rests
     // on is on the page (assertions.ts binds only accepted supports), and its
-    // label states what those comparisons checked.
+    // label names the metrics those comparisons checked.
     // An inference shows no figure, so its evidence covers no company.
     const keptAssertions = report.accepted.filter((assertion) => assertion.kind !== "analyst_inference");
     const periods = answerPeriods(keptAssertions, packet);

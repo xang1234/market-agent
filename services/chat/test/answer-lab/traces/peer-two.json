@@ -2983,7 +2983,7 @@
       "segments": [
         {
           "type": "text",
-          "text": "> **Analyst inference on NVDA** (revenue highest first: NVDA, AMD; gross margin highest first: NVDA, AMD; net margin highest first: NVDA, AMD; revenue growth (YoY) highest first: NVDA, AMD; price return highest first: NVDA, AMD): It is the stronger business on scale, growth and profitability, though the two fiscal years shown end at different dates and the share price gap is much narrower."
+          "text": "> **Analyst inference on NVDA** (from the revenue, gross margin, net margin, revenue growth (YoY), and price return rankings): It is the stronger business on scale, growth and profitability, though the two fiscal years shown end at different dates and the share price gap is much narrower."
         },
         {
           "type": "text",

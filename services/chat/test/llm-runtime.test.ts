@@ -1275,7 +1275,7 @@ test("a ranking of price returns read off their chart renders (#301)", async () 
   assert.deepEqual(reports[0]!.rejected, []);
 });
 
-test("across companies, an inference's label states what its comparisons checked (#288, #301)", async () => {
+test("across companies, an inference's label names the metrics its comparisons checked (#288, #301)", async () => {
   const { block, report } = await renderWithReply(withList([
     { kind: "analyst_inference", text: "The margin lead leaves more room to invest.", evidence: [], supports: [1] },
     { kind: "comparison", op: "highest", result: "F2", text: "NVDA's gross margin is the highest.", evidence: ["F2", "F4"] },
@@ -1286,7 +1286,7 @@ test("across companies, an inference's label states what its comparisons checked
   // In the model's order: its takeaway first.
   assert.equal(
     segments.map((segment) => segment.text ?? segment.format).join(""),
-    "> **Analyst inference** (NVDA highest on gross margin): The margin lead leaves more room to invest." +
+    "> **Analyst inference** (from the gross margin ranking): The margin lead leaves more room to invest." +
       "\n\nOf NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6%, AMD 49.2%." +
       "\n\nNVDA's revenue was $130.5B; AMD's revenue was $25.8B." +
       "\n\n> **Analyst inference:** Scale leaves room to invest." +
@@ -1315,7 +1315,7 @@ test("across companies, an inference's subject is named in its label (#308)", as
   assert.equal(
     (block.segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join(""),
     "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6%, AMD 49.2%." +
-      "\n\n> **Analyst inference on AMD** (NVDA highest on gross margin): Its thinner margin leaves less room to invest." +
+      "\n\n> **Analyst inference on AMD** (from the gross margin ranking): Its thinner margin leaves less room to invest." +
       "\n\nPeriods: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025).",
   );
   assert.deepEqual(report.rejected, []);
