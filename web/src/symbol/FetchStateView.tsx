@@ -26,6 +26,7 @@ export function FetchStateView<T>({
   if (state.status === 'unavailable') {
     return <FailureNotice message={`Couldn't load the ${noun}.`} detail={state.reason} onRetry={state.retry} />
   }
+  if (state.status === 'not_on_file') return <p className="text-sm text-muted">{`No ${noun} on file.`}</p>
   return (
     <>
       {children(state.data)}

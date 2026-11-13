@@ -1,5 +1,6 @@
 import type { SubjectRef } from './search.ts'
 import { defineResource } from '../fetch/resource.ts'
+import { notOnFileError } from './fundamentalsNotOnFile.ts'
 
 export type KeyStatKey =
   | 'gross_margin'
@@ -83,7 +84,7 @@ export async function fetchKeyStats(
   const url = `${FUNDAMENTALS_API_BASE}/stats?subject_kind=issuer&subject_id=${encodeURIComponent(issuerId)}`
   const res = await fetchFn(url, { signal: init.signal })
   if (!res.ok) {
-    throw new StatsFetchError(res.status, `fundamentals stats fetch failed: HTTP ${res.status}`)
+    throw (await notOnFileError(res)) ?? new StatsFetchError(res.status, `fundamentals stats fetch failed: HTTP ${res.status}`)
   }
   const body = (await res.json()) as WireGetStatsResponse
   return body.stats

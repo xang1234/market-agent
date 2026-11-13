@@ -1,5 +1,6 @@
 import { isCanonicalResolvedSubject, type ResolvedSubject, type RouteResolvedSubject, type SubjectRef } from './search.ts'
 import { defineResource } from '../fetch/resource.ts'
+import { notOnFileError } from './fundamentalsNotOnFile.ts'
 
 export type IssuerProfileExchange = {
   listing: SubjectRef & { kind: 'listing' }
@@ -57,7 +58,7 @@ export async function fetchIssuerProfile(
   const url = `${FUNDAMENTALS_API_BASE}/profile?subject_kind=issuer&subject_id=${encodeURIComponent(issuerId)}`
   const res = await fetchFn(url, { signal: init.signal })
   if (!res.ok) {
-    throw new ProfileFetchError(res.status, `fundamentals profile fetch failed: HTTP ${res.status}`)
+    throw (await notOnFileError(res)) ?? new ProfileFetchError(res.status, `fundamentals profile fetch failed: HTTP ${res.status}`)
   }
   const body = (await res.json()) as WireGetProfileResponse
   return body.profile

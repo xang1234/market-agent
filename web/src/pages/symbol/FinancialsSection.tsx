@@ -5,7 +5,8 @@ import { Card } from '../../symbol/Card.tsx'
 import { FetchStateView } from '../../symbol/FetchStateView.tsx'
 import { issuerIdFromSubject } from '../../symbol/profile.ts'
 import { SegmentedToggle } from '../../symbol/SegmentedToggle.tsx'
-import { useResource } from '../../fetch/resource.ts'
+import { useResource, type VisibleFetchState } from '../../fetch/resource.ts'
+import { keyStats } from '../../symbol/stats.ts'
 import {
   financialStatements,
   findLineValue,
@@ -34,13 +35,11 @@ type PeriodMode = 'annual' | 'quarterly'
 
 const PERIOD_COUNT = 5
 const QUARTER_PERIOD_COUNT = 4
+// ponytail: quarters count back from the latest stored FY's Q4 (key stats'
+// fiscal_year, the issuer's own fiscal calendar), so quarters of a fiscal year
+// still open show only once its 10-K lands. Upgrade: a latest-quarter field
+// from the fundamentals service.
 const LATEST_FISCAL_QUARTER = 'Q4' as const
-// Apple, MSFT, NVDA, etc. each have a different fiscal year end (Sep, Jun,
-// Jan…), so a calendar-year heuristic is wrong in general. The current
-// fixture caps at FY2024 for every issuer; a real backend would expose a
-// "latest period" hint we'd consume here instead.
-const LATEST_FISCAL_YEAR = 2024
-const SEGMENT_PERIOD = recentFyPeriods(LATEST_FISCAL_YEAR, 1)[0]
 
 const INCOME_LINE_ORDER: ReadonlyArray<{ metric_key: string; label: string; emphasis?: 'subtotal' | 'eps' }> = [
   { metric_key: 'revenue', label: 'Revenue' },
@@ -78,32 +77,41 @@ export function FinancialsSection() {
   const periodSpan =
     periodMode === 'annual' ? `last ${PERIOD_COUNT} FY` : `last ${QUARTER_PERIOD_COUNT} quarters`
 
-  const statements = useResource(
+  // The issuer's latest stored fiscal year anchors every period here; until it
+  // is known, each card shows the key-stats state (loading, failed, not on file).
+  const latest = useResource(keyStats, issuerId)
+  const latestFiscalYear = latest.status === 'ready' ? latest.data.fiscal_year : null
+  const segmentPeriod = latestFiscalYear === null ? null : recentFyPeriods(latestFiscalYear, 1)[0]
+
+  const statementsQuery = useResource(
     financialStatements,
-    issuerId === null
+    issuerId === null || latestFiscalYear === null
       ? null
       : {
           subject_ref: { kind: 'issuer', id: issuerId },
           statement: STATEMENT_FAMILY,
           periods:
             periodMode === 'annual'
-              ? recentFyPeriods(LATEST_FISCAL_YEAR, PERIOD_COUNT)
-              : recentFiscalQuarterPeriods(LATEST_FISCAL_YEAR, LATEST_FISCAL_QUARTER, QUARTER_PERIOD_COUNT),
+              ? recentFyPeriods(latestFiscalYear, PERIOD_COUNT)
+              : recentFiscalQuarterPeriods(latestFiscalYear, LATEST_FISCAL_QUARTER, QUARTER_PERIOD_COUNT),
           basis,
         },
   )
 
-  const segments = useResource(
+  const segmentsQuery = useResource(
     segmentFacts,
-    issuerId === null
+    issuerId === null || segmentPeriod === null
       ? null
       : {
           subject_ref: { kind: 'issuer', id: issuerId },
           axis,
-          period: SEGMENT_PERIOD,
+          period: segmentPeriod,
           basis: 'as_reported',
         },
   )
+
+  const statements: VisibleFetchState<GetStatementsResponse> = latest.status === 'ready' ? statementsQuery : latest
+  const segments: VisibleFetchState<SegmentFactsEnvelope> = latest.status === 'ready' ? segmentsQuery : latest
 
   return (
     <div data-testid="section-financials" className={SECTION_STACK_CLASS}>
@@ -132,7 +140,7 @@ export function FinancialsSection() {
       <Card
         testId="financials-segments"
         headingId="financials-segments-heading"
-        heading={`Segments · ${SEGMENT_PERIOD} · revenue share`}
+        heading={segmentPeriod === null ? 'Segments · revenue share' : `Segments · ${segmentPeriod} · revenue share`}
         action={
           <SegmentedToggle
             options={AXIS_OPTIONS}

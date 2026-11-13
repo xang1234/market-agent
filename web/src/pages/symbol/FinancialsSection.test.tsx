@@ -113,31 +113,64 @@ function segmentsResponse(): SegmentFactsEnvelope {
   }
 }
 
-test('FinancialsSection requests recent fiscal quarters after switching statement period mode', async () => {
+type Routes404 = { stats?: unknown; segments?: unknown }
+
+function statsResponse(fiscalYear: number) {
+  return {
+    stats: {
+      subject: { kind: 'issuer', id: ISSUER_ID },
+      family: 'key_stats',
+      basis: 'as_reported',
+      period_kind: 'fiscal_y',
+      period_start: null,
+      period_end: `${fiscalYear}-08-28`,
+      fiscal_year: fiscalYear,
+      fiscal_period: 'FY',
+      reporting_currency: 'USD',
+      as_of: '2026-10-01T00:00:00.000Z',
+      stats: [],
+    },
+  }
+}
+
+const notOnFile = (detail: string) => ({
+  error: 'fundamentals unavailable',
+  unavailable: { outcome: 'unavailable', reason: 'missing_coverage', retryable: false, detail },
+})
+
+function json(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+}
+
+async function mountFinancials(
+  run: (ctx: { doc: Document; dom: JSDOM; statementCalls: GetStatementsRequest[]; segmentCalls: { period: string }[] }) => Promise<void>,
+  options: { fiscalYear?: number; notOnFile?: Routes404 } = {},
+): Promise<void> {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
   const originalFetch = globalThis.fetch
   const statementCalls: GetStatementsRequest[] = []
+  const segmentCalls: { period: string }[] = []
   let root: Root | null = null
 
   try {
     globalThis.fetch = async (input, init) => {
       const url = input.toString()
+      if (url.startsWith('/v1/fundamentals/stats?')) {
+        if (options.notOnFile?.stats) return json(404, options.notOnFile.stats)
+        return json(200, statsResponse(options.fiscalYear ?? 2026))
+      }
       if (url === '/v1/fundamentals/statements') {
         const query = JSON.parse(String(init?.body ?? '{}')) as GetStatementsRequest
         statementCalls.push(query)
-        return new Response(JSON.stringify(statementsResponse(query)), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        })
+        return json(200, statementsResponse(query))
       }
       if (url === '/v1/fundamentals/segments') {
-        return new Response(JSON.stringify({ segments: segmentsResponse() }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        })
+        segmentCalls.push(JSON.parse(String(init?.body ?? '{}')) as { period: string })
+        if (options.notOnFile?.segments) return json(404, options.notOnFile.segments)
+        return json(200, { segments: segmentsResponse() })
       }
-      return new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } })
+      return json(404, {})
     }
 
     const mountedRoot = createRoot(dom.window.document.getElementById('root')!)
@@ -153,29 +186,7 @@ test('FinancialsSection requests recent fiscal quarters after switching statemen
         </MemoryRouter>,
       )
     })
-
-    await waitFor(() => {
-      assert.equal(statementCalls.length, 1)
-    })
-    assert.deepEqual(statementCalls[0]?.periods, ['2024-FY', '2023-FY', '2022-FY', '2021-FY', '2020-FY'])
-
-    const quarterlyButton = dom.window.document.querySelector('[data-testid="period-mode-quarterly"]')
-    assert.ok(quarterlyButton)
-    await act(async () => {
-      quarterlyButton.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
-    })
-
-    await waitFor(() => {
-      assert.ok(
-        statementCalls.some((call) =>
-          call.periods.length === 4 &&
-          call.periods[0] === '2024-Q4' &&
-          call.periods[1] === '2024-Q3' &&
-          call.periods[2] === '2024-Q2' &&
-          call.periods[3] === '2024-Q1',
-        ),
-      )
-    })
+    await run({ doc: dom.window.document, dom, statementCalls, segmentCalls })
   } finally {
     if (root !== null) {
       await act(async () => root?.unmount())
@@ -184,4 +195,58 @@ test('FinancialsSection requests recent fiscal quarters after switching statemen
     globalThis.fetch = originalFetch
     restoreGlobals()
   }
+}
+
+test('FinancialsSection anchors annual, quarterly and segment periods on the issuer latest fiscal year', async () => {
+  await mountFinancials(async ({ doc, dom, statementCalls, segmentCalls }) => {
+    await waitFor(() => {
+      assert.equal(statementCalls.length, 1)
+    })
+    assert.deepEqual(statementCalls[0]?.periods, ['2026-FY', '2025-FY', '2024-FY', '2023-FY', '2022-FY'])
+    assert.deepEqual(segmentCalls.map((call) => call.period), ['2026-FY'])
+    assert.match(doc.querySelector('[data-testid="financials-segments"]')?.textContent ?? '', /Segments · 2026-FY/)
+
+    const quarterlyButton = doc.querySelector('[data-testid="period-mode-quarterly"]')
+    assert.ok(quarterlyButton)
+    await act(async () => {
+      quarterlyButton.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    })
+
+    await waitFor(() => {
+      assert.ok(
+        statementCalls.some((call) =>
+          call.periods.join() === ['2026-Q4', '2026-Q3', '2026-Q2', '2026-Q1'].join(),
+        ),
+      )
+    })
+  })
+})
+
+test('FinancialsSection shows segments not on file as an empty state with no Retry', async () => {
+  await mountFinancials(
+    async ({ doc }) => {
+      await waitFor(() => {
+        const card = doc.querySelector('[data-testid="financials-segments"]')
+        assert.match(card?.textContent ?? '', /No revenue segments on file\./)
+        assert.equal(card?.querySelector('button:not([data-testid^="axis-"])'), null)
+      })
+    },
+    { notOnFile: { segments: notOnFile('business segments not found') } },
+  )
+})
+
+test('FinancialsSection with no fiscal year on file requests no statements and says so', async () => {
+  await mountFinancials(
+    async ({ doc, statementCalls, segmentCalls }) => {
+      await waitFor(() => {
+        assert.match(
+          doc.querySelector('[data-testid="financials-statements"]')?.textContent ?? '',
+          /No income statement on file\./,
+        )
+      })
+      assert.equal(statementCalls.length, 0)
+      assert.equal(segmentCalls.length, 0)
+    },
+    { notOnFile: { stats: notOnFile('stats not found') } },
+  )
 })
