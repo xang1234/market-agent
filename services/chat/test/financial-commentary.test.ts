@@ -208,7 +208,7 @@ test("a company overview carries analyst commentary on its published results (#3
     const [, commentary] = (await message(done.message_id)).blocks;
     assert.equal(
       plainText(segmentsOf(commentary)),
-      "Of ALFA and BRVO, ALFA's gross margin (gross profit / revenue) was highest: ALFA 60.00%, BRVO 45.00% (Q4 FY2023 (ended Dec 2023)).",
+      "Of ALFA and BRVO, ALFA's gross margin (gross profit / revenue) was highest: ALFA 60.00%, BRVO 45.00%.\n\nPeriod: Q4 FY2023 (ended Dec 2023).",
     );
   });
 

@@ -183,7 +183,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const performance = answer.blocks.find((block) => block.kind === "perf_comparison")!;
     const seriesRefs = (performance.data_ref as { params: { series_refs: string[] } }).params.series_refs;
     const narrative = answer.blocks[0]!;
-    assert.equal(narrativeText(narrative), "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close).");
+    assert.equal(narrativeText(narrative), "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17%.\n\nPeriod: YTD 2026: Dec 2025 close to Aug 2026 close.");
     assert.deepEqual(refsOf(narrative), [["series", seriesRefs[0], "5.81%"], ["series", seriesRefs[1], "3.17%"]]);
     assert.deepEqual(answer.block_proofs?.[String(performance.id)], { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown" }, "the chart is source-linked, not a verified calculation (#236)");
     assert.equal((answer.block_proofs?.[String(narrative.id)] as { calculation?: string } | undefined)?.calculation, "not_verified");
@@ -239,8 +239,9 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     // The answer is rendered from the recorded reply's assertions: not the placeholder, nor the fallback.
     const narrative = answer.blocks[0]!;
     assert.equal(narrativeText(narrative), [
-      "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close).",
+      "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17%.",
       `According to a source dated Aug 2025 on AMD: ${AMD_Q2_2025_RELEASE.text}`,
+      "Period: YTD 2026: Dec 2025 close to Aug 2026 close.",
     ].join("\n\n"));
     const [claim] = refsOf(narrative).filter(([kind]) => kind === "claim");
     const { rows } = await client.query<{ claim_refs: string[] }>(`select claim_refs from snapshots where snapshot_id = $1::uuid`, [answer.snapshot_id]);
@@ -359,8 +360,9 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       ["Gross margin (gross profit / revenue)", "Q2 FY2026 (ended 2026-06-27)", "verified", "54.02%"],
     ]);
     assert.deepEqual(engineAnswer(answer).notes, [
-      "Of NVDA and Advanced Micro Devices, Inc., NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026 (ended Jan 2026)), Advanced Micro Devices, Inc. 54.02% (Q2 FY2026 (ended Jun 2026)).\n\n" +
-        "NVDA's revenue was $62.1B in Q4 FY2026 (ended Jan 2026); Advanced Micro Devices, Inc.'s revenue was $11.2B in Q2 FY2026 (ended Jun 2026).",
+      "Of NVDA and Advanced Micro Devices, Inc., NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40%, Advanced Micro Devices, Inc. 54.02%.\n\n" +
+        "NVDA's revenue was $62.1B; Advanced Micro Devices, Inc.'s revenue was $11.2B.\n\n" +
+        "Periods: NVDA Q4 FY2026 (ended Jan 2026), Advanced Micro Devices, Inc. Q2 FY2026 (ended Jun 2026).",
     ]);
     // The saved scope covers the auto-selected peer, so a follow-up about AMD continues it (#206).
     const { rows } = await client.query<{ research_scope: { companies: Array<{ issuer_id: string }> } }>(

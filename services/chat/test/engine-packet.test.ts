@@ -258,7 +258,7 @@ test("companies on different fiscal calendars, each shown for two years, are com
   assert.deepEqual(report.rejected, []);
   assert.equal(
     plainText(renderAssertion(report.accepted[0]!, packet, []).segments),
-    "Of NVDA and AMD, NVDA's revenue was highest: NVDA USD 130,497,000,000.00 (FY2025 (ended Jan 2025)), AMD USD 34,639,000,000.00 (FY2025 (ended Dec 2025)).",
+    "Of NVDA and AMD, NVDA's revenue was highest: NVDA USD 130,497,000,000.00 (FY2025, ended Jan 2025), AMD USD 34,639,000,000.00 (FY2025, ended Dec 2025).",
   );
 });
 
@@ -361,7 +361,12 @@ test("an answer written on an engine packet is sent only that packet, and its in
   const observed = "NVDA's gross margin (gross profit / revenue) was 74.40% in Q4 FY2026; AMD's year-over-year percent change in revenue was 45.74% in Q2 FY2026 vs Q2 FY2025.";
   assert.deepEqual(asked.inferences[0]!.supports, [observed]);
   const segments = judged.blocks[0]!.segments as Parameters<typeof plainText>[0];
-  assert.equal(plainText(segments), `${observed}\n\n> **Analyst inference on NVDA:** Its pricing holds.`);
+  // The reader gets each company's one period once; the judge read it by each figure.
+  assert.equal(plainText(segments), [
+    "NVDA's gross margin (gross profit / revenue) was 74.40%; AMD's year-over-year percent change in revenue was 45.74%.",
+    "> **Analyst inference on NVDA:** Its pricing holds.",
+    "Periods: NVDA Q4 FY2026, AMD Q2 FY2026 vs Q2 FY2025.",
+  ].join("\n\n"));
   assert.deepEqual(segments.filter((segment) => segment.type === "ref"), [
     { type: "ref", ref_kind: "result", ref_id: RESULT(1), format: "74.40%", period: "Q4 FY2026" },
     { type: "ref", ref_kind: "result", ref_id: RESULT(6), format: "45.74%", period: "Q2 FY2026 vs Q2 FY2025" },

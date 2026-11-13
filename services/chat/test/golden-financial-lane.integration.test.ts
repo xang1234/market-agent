@@ -150,8 +150,8 @@ test("golden metric questions certify through the chat financial lane on the rec
     "No period was named, so each company's latest reported quarter is shown. Profit is shown as gross profit, operating income and net income, each with its margin.",
   ]);
   assert.equal(await commentaryText(), [
-    "Of NVDA and AMD, NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026 (ended Jan 2026)), AMD 54.02% (Q2 FY2026 (ended Jun 2026)).",
-    "Of NVDA and AMD, NVDA's year-over-year percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 (ended Jan 2026) vs Q4 FY2025 (ended Jan 2025)), AMD 45.74% (Q2 FY2026 (ended Jun 2026) vs Q2 FY2025 (ended Jun 2025)).",
+    "Of NVDA and AMD, NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026, ended Jan 2026), AMD 54.02% (Q2 FY2026, ended Jun 2026).",
+    "Of NVDA and AMD, NVDA's year-over-year percent change in revenue was highest: NVDA 57.89% (Q4 FY2026, ended Jan 2026 vs Q4 FY2025, ended Jan 2025), AMD 45.74% (Q2 FY2026, ended Jun 2026 vs Q2 FY2025, ended Jun 2025).",
     "NVDA's revenue was $62.1B in Q4 FY2026 (ended Jan 2026); AMD's revenue was $11.2B in Q2 FY2026 (ended Jun 2026).",
   ].join("\n\n"), "each company is shown at its newest quarter alone, so the recorded gross margin comparison of the two stands");
   assert.deepEqual(await ask("Compare NVDA, AMD and AAPL profit", readingOf(METRIC_READING)), [

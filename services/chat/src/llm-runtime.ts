@@ -12,7 +12,7 @@ import type {
 } from "./coordinator.ts";
 import { buildEvidencePacket, figureCompanies, packetForModel, type ClaimEvidence, type ClaimRecord, type EvidencePacket } from "./evidence-packet.ts";
 import { assertionList, checkAssertions, MAX_ASSERTIONS, type AssertionReport } from "./assertions.ts";
-import { calendarNote, plainText, renderAssertion, unverifiedInference, type RenderedAssertion } from "./render-assertions.ts";
+import { answerPeriods, plainText, renderAssertion, unverifiedInference, type RenderedAssertion } from "./render-assertions.ts";
 import type { Segment } from "./prose-refs.ts";
 import type { ShownAs } from "./verdicts.ts";
 import type { ResearchScope } from "./research-scope.ts";
@@ -349,8 +349,11 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
     // Nothing is left out once accepted, so every support an inference rests
     // on is on the page (assertions.ts binds only accepted supports), and its
     // label states what those comparisons checked.
+    // An inference shows no figure, so its evidence covers no company.
+    const keptAssertions = report.accepted.filter((assertion) => assertion.kind !== "analyst_inference");
+    const periods = answerPeriods(keptAssertions, packet);
     const kept = report.accepted.map((assertion) => ({
-      ...renderAssertion(assertion, packet, factBlocks, report.accepted),
+      ...renderAssertion(assertion, packet, factBlocks, report.accepted, periods.once),
       kind: assertion.kind,
       ...(assertion.kind === "analyst_inference"
         ? { inference: { index: assertion.index, unverified: unverifiedInference(assertion, packet) } }
@@ -359,8 +362,6 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
     // The figures the kept assertions state, and their companies: a comparison
     // rendered for only some of the companies it shows figures for would read
     // one-sided, so the fallback stands instead.
-    // An inference shows no figure, so its evidence covers no company.
-    const keptAssertions = report.accepted.filter((assertion) => assertion.kind !== "analyst_inference");
     const keptFigures = keptAssertions.flatMap((assertion) => packet.figures.filter((figure) => assertion.evidence.includes(figure.id)));
     const covered = new Set([
       ...keptFigures.flatMap((figure) => figureCompanies(figure, packet)),
@@ -398,7 +399,7 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
         ...otherSides,
       ],
       notes: [
-        ...[calendarNote(keptAssertions, packet)].filter((note) => note !== undefined),
+        ...(periods.note === undefined ? [] : [periods.note]),
         ...(notShown.length > 0 ? [`No figures are shown for ${new Intl.ListFormat("en").format(notShown)}.`] : []),
         // The claims as selected: more matched than were read, or none could be.
         ...(packet.claims_truncated ? ["More sources matched than are shown here."] : []),

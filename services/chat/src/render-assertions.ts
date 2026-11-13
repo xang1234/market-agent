@@ -32,15 +32,19 @@ export type RenderedAssertion = {
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // accepted: the answer's accepted assertions, which an inference's supports index.
+// once: each company whose one period the answer's notes name (answerPeriods),
+// keyed to that period; its figures there go undated.
 export function renderAssertion(
   assertion: Assertion & { index: number },
   packet: EvidencePacket,
   factBlocks: ReadonlyArray<Block>,
   accepted: ReadonlyArray<Assertion & { index: number }> = [],
+  once: ReadonlyMap<string, string> = new Map(),
 ): RenderedAssertion {
   const seal = createSealer(factBlocks);
   const figure_ids: string[] = [];
-  const segments = templateSegments(assertion, packet, accepted, {
+  const undated = (figure: PacketFigure) => figure.company !== undefined && once.get(figure.company) === periodKey(figure);
+  const segments = templateSegments(assertion, packet, accepted, undated, {
     value: (figure) => {
       figure_ids.push(figure.id);
       return seal.value(figure);
@@ -61,6 +65,7 @@ function templateSegments(
   assertion: Assertion & { index: number },
   packet: EvidencePacket,
   accepted: ReadonlyArray<Assertion & { index: number }>,
+  undated: (figure: PacketFigure) => boolean,
   { value, gap, quote }: Writes,
 ): Segment[] {
   const figures = assertion.evidence.flatMap((id) => packet.figures.filter((figure) => figure.id === id));
@@ -83,7 +88,7 @@ function templateSegments(
           text(i === 0 ? `${g === 0 ? "" : "; "}${capitalize(`${owner(figure)}${figureLabel(figure)}`)} was ` : `${joiner}${figureLabel(figure)} `);
           segments.push(value(figure));
         });
-        text(periodPhrase(group[0]!));
+        if (!undated(group[0]!)) text(periodPhrase(group[0]!));
       });
       if (groups.size > 0) text(".");
       figures.filter((entry) => entry.ranking).forEach((figure) => {
@@ -106,7 +111,7 @@ function templateSegments(
       // A claim over several metrics reads as the comparisons it stands for.
       checkedComparisons(assertion, packet).forEach((comparison, i) => {
         if (i > 0) text("\n\n");
-        comparisonSegments(comparison, { text, value, owner, push: (segment) => segments.push(segment) });
+        comparisonSegments(comparison, { text, value, owner, undated, push: (segment) => segments.push(segment) });
       });
       break;
     case "unknown_cause": {
@@ -187,6 +192,7 @@ type Writer = {
   text: (value: string) => void;
   value: (figure: PacketFigure) => Segment;
   owner: (figure: PacketFigure) => string;
+  undated: (figure: PacketFigure) => boolean;
   push: (segment: Segment) => void;
 };
 
@@ -202,14 +208,19 @@ function comparisonSegments(comparison: CheckedComparison, out: Writer): void {
     out.push(out.value(figure));
     if (figure.period) out.text(` in ${periodText(figure.period)}`);
   };
-  // Across companies, each value's period; one period they all share is said once.
-  const datedAs = (figure: PacketFigure) => (figure.period ? ` (${periodText(figure.period)}${figure.period_end ? `, ended ${monthYear(figure.period_end)}` : ""})` : "");
-  const shared = new Set(figures.map(datedAs)).size === 1;
+  // Across companies, each value's period, unless the answer says its company's
+  // apart; one period they all share is said once. An engine period's own end
+  // ("FY2026 (ended Sep 2026)") joins it with a comma, never a second bracket.
+  const datedAs = (figure: PacketFigure) => (figure.period
+    ? ` (${periodText(figure.period).replace(/ \((ended|as of) ([^()]*)\)/g, ", $1 $2")}${figure.period_end ? `, ended ${monthYear(figure.period_end)}` : ""})`
+    : "");
+  const dated = figures.filter((figure) => !out.undated(figure));
+  const shared = dated.length === figures.length && new Set(figures.map(datedAs)).size === 1;
   const list = (label: (figure: PacketFigure) => string) => {
     figures.forEach((figure, i) => {
       out.text(`${i === 0 ? "" : ", "}${label(figure)} `);
       out.push(out.value(figure));
-      if (comparison.axis === "cohort" && !shared) out.text(datedAs(figure));
+      if (comparison.axis === "cohort" && !shared && !out.undated(figure)) out.text(datedAs(figure));
     });
     if (comparison.axis === "cohort" && shared) out.text(datedAs(first));
   };
@@ -322,6 +333,33 @@ export function calendarNote(assertions: ReadonlyArray<Assertion>, packet: Evide
   return named.length === 0
     ? undefined
     : `The periods compared end at different times, so they do not line up: ${new Intl.ListFormat("en").format(named)}.`;
+}
+
+// Across companies, each company that shows one period in the answer's
+// figures has it said once, here, rather than after each of its figures; a
+// company shown at several periods keeps them by its figures. Then the
+// calendar note is not needed: each period is named with its end.
+export function answerPeriods(assertions: ReadonlyArray<Assertion>, packet: EvidencePacket): { once: ReadonlyMap<string, string>; note?: string } {
+  const periods = new Map<string, Map<string, PacketFigure>>();
+  if (packet.companies.length > 1) {
+    for (const figure of assertions.flatMap((assertion) => assertion.kind === "analyst_inference" ? [] : packet.figures.filter((entry) => assertion.evidence.includes(entry.id)))) {
+      if (figure.company === undefined || figure.period === undefined || figure.gap !== undefined || figure.ranking) continue;
+      periods.set(figure.company, (periods.get(figure.company) ?? new Map()).set(periodKey(figure), figure));
+    }
+  }
+  const once = new Map([...periods].flatMap(([company, keys]) => (keys.size === 1 ? [[company, [...keys.keys()][0]!] as const] : [])));
+  if (once.size === 0) {
+    const note = calendarNote(assertions, packet);
+    return note === undefined ? { once } : { once, note };
+  }
+  const named = (figure: PacketFigure) => `${periodText(figure.period!)}${figure.period_end ? ` (ended ${monthYear(figure.period_end)})` : ""}`;
+  const firsts = [...once.keys()].map((company) => periods.get(company)!.values().next().value!);
+  if (once.size === periods.size && new Set(once.values()).size === 1) return { once, note: `Period: ${named(firsts[0]!)}.` };
+  return { once, note: `Periods: ${firsts.map((figure) => `${figure.company} ${named(figure)}`).join(", ")}.` };
+}
+
+function periodKey(figure: PacketFigure): string {
+  return `${figure.period ?? ""}|${figure.period_end ?? ""}`;
 }
 
 // The text a rendered assertion reads as, each value as displayed.

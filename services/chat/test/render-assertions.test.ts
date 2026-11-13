@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { calendarNote, plainText, renderAssertion, unverifiedInference } from "../src/render-assertions.ts";
+import { answerPeriods, calendarNote, plainText, renderAssertion, unverifiedInference } from "../src/render-assertions.ts";
 import type { Assertion } from "../src/assertions.ts";
 import type { EvidencePacket } from "../src/evidence-packet.ts";
 
@@ -174,6 +174,37 @@ test("a ranking across companies lists every company's value and period, and nam
   assert.deepEqual(rendered.source_refs, ["s-nvda", "s-amd"]);
   assert.equal(plainText(renderComparison(peers, FACT_BLOCKS, "order", ["F1", "F2"], ["F1", "F2"]).segments),
     "By gross margin, highest first: NVDA 74.6% (FY2026), AMD 49.2% (FY2025). No gross margin is shown for AAPL.");
+});
+
+test("across companies, each company's one period is said once for the answer, and a company with two keeps them by its figures", () => {
+  const engine = (id: string, company: string, metric: string, period: string, value: string) => ({ id, company, metric, period, value, source_ids: [] });
+  const storage: EvidencePacket = { ...PACKET, companies: ["MU", "WDC", "STX"], claims: [], figures: [
+    engine("F1", "MU", "Revenue", "FY2026 (ended 2026-09-03)", "$133.2B"),
+    engine("F2", "WDC", "Revenue", "FY2026 (ended 2026-07-03)", "$12.9B"),
+    engine("F3", "STX", "Revenue", "FY2027 (ended 2025-06-27)", "$9.1B"),
+    engine("F4", "MU", "Net income", "FY2025 (ended 2025-08-28)", "$8.5B"),
+    engine("F5", "WDC", "Net income", "FY2026 (ended 2026-07-03)", "$1.9B"),
+  ] };
+  const order: Assertion & { index: number } = { index: 0, kind: "comparison", op: "order", result: ["F1", "F2", "F3"], text: "x", evidence: ["F1", "F2", "F3"] };
+  const wdc: Assertion & { index: number } = { index: 1, kind: "observation", text: "x", evidence: ["F5"] };
+  const mu: Assertion & { index: number } = { index: 2, kind: "observation", text: "x", evidence: ["F4"] };
+  const say = (assertion: Assertion & { index: number }, assertions: ReadonlyArray<Assertion>) =>
+    plainText(renderAssertion(assertion, storage, [], [], answerPeriods(assertions, storage).once).segments);
+
+  assert.equal(say(order, [order, wdc]), "By revenue, highest first: MU $133.2B, WDC $12.9B, STX $9.1B.");
+  assert.equal(say(wdc, [order, wdc]), "WDC's net income was $1.9B.");
+  assert.equal(answerPeriods([order, wdc], storage).note, "Periods: MU FY2026 (ended Sep 2026), WDC FY2026 (ended Jul 2026), STX FY2027 (ended Jun 2025).");
+
+  assert.equal(say(order, [order, wdc, mu]), "By revenue, highest first: MU $133.2B (FY2026, ended Sep 2026), WDC $12.9B, STX $9.1B.");
+  assert.equal(say(mu, [order, wdc, mu]), "MU's net income was $8.5B in FY2025 (ended Aug 2025).");
+  assert.equal(answerPeriods([order, wdc, mu], storage).note, "Periods: WDC FY2026 (ended Jul 2026), STX FY2027 (ended Jun 2025).");
+
+  const together = { ...storage, figures: storage.figures.map((figure) => ({ ...figure, period: "FY2026 (ended 2026-09-03)" })) };
+  assert.equal(answerPeriods([order, wdc], together).note, "Period: FY2026 (ended Sep 2026).", "one period every company shares is said once");
+
+  assert.equal(plainText(renderAssertion(order, storage, []).segments),
+    "By revenue, highest first: MU $133.2B (FY2026, ended Sep 2026), WDC $12.9B (FY2026, ended Jul 2026), STX $9.1B (FY2027, ended Jun 2025).",
+    "rendered alone, each figure keeps its period, in one pair of parentheses");
 });
 
 test("a ranking over a price window writes its dates by month and year (#301), each return a chip on its chart line (#317)", () => {

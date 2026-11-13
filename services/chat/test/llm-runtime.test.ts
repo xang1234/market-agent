@@ -774,7 +774,7 @@ test("the answer is written from its accepted assertions, values as sealed refs 
   const segments = block.segments as Array<{ type: string; text?: string; format?: string; ref_id?: string }>;
   assert.equal(
     segments.map((segment) => segment.text ?? segment.format).join(""),
-    "NVDA's gross margin was 74.6% in FY2026 (ended Jan 2026); AMD's gross margin was 49.2% in FY2025 (ended Dec 2025).\n\nNVDA's revenue was $130.5B in FY2026 (ended Jan 2026).",
+    "NVDA's gross margin was 74.6%; AMD's gross margin was 49.2%.\n\nNVDA's revenue was $130.5B.\n\nPeriods: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025).",
   );
   assert.deepEqual(segments.filter((segment) => segment.type === "ref").map((segment) => segment.ref_id), [FACT(2), FACT(4), FACT(1)]);
   assert.deepEqual(
@@ -795,7 +795,7 @@ test("a data gap the model writes never reaches the answer: what is missing is t
   ]));
   assert.equal(
     (block.segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join(""),
-    "NVDA's revenue was $130.5B in FY2026 (ended Jan 2026); AMD's revenue was $25.8B in FY2025 (ended Dec 2025).",
+    "NVDA's revenue was $130.5B; AMD's revenue was $25.8B.\n\nPeriods: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025).",
   );
   assert.deepEqual(report.rejected, [{ index: 1, text: "No revenue is shown.", check: "format", reason: "unknown kind \"data_gap\"" }]);
 });
@@ -966,7 +966,7 @@ test("when no assertion renders, the answer is the fixed fallback sentence, neve
 
 test("an answer is rendered from its list alone: no prose before it, or prose cut off after it, still renders", async () => {
   const list = [{ kind: "observation", text: "NVDA's gross margin was [[F2]] and AMD's was [[F4]].", evidence: ["F2", "F4"] }];
-  const rendered = "NVDA's gross margin was 74.6% in FY2026 (ended Jan 2026); AMD's gross margin was 49.2% in FY2025 (ended Dec 2025).";
+  const rendered = "NVDA's gross margin was 74.6%; AMD's gross margin was 49.2%.\n\nPeriods: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025).";
   for (const reply of [`\`\`\`assertions\n${JSON.stringify(list)}\n\`\`\``, { text: `${withList(list)}\n\nAMD trails on every metr`, truncated: true }]) {
     const { block, report } = await renderWithReply(reply);
     const text = (block.segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
@@ -1050,8 +1050,9 @@ test("a rendered inference is words only: one with a figure, typed or referenced
   const segments = block.segments as Array<{ type: string; text?: string; format?: string; ref_id?: string }>;
   assert.equal(
     segments.map((segment) => segment.text ?? segment.format).join(""),
-    "NVDA's gross margin was 74.6% in FY2026 (ended Jan 2026); AMD's gross margin was 49.2% in FY2025 (ended Dec 2025)." +
-      "\n\n> **Analyst inference:** The leader appears to hold pricing power.",
+    "NVDA's gross margin was 74.6%; AMD's gross margin was 49.2%." +
+      "\n\n> **Analyst inference:** The leader appears to hold pricing power." +
+      "\n\nPeriods: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025).",
   );
   // Every figure shown is the observation's, each from its own company's packet entry.
   assert.deepEqual(segments.filter((segment) => segment.type === "ref").map((segment) => segment.ref_id), [FACT(2), FACT(4)]);
@@ -1074,7 +1075,7 @@ test("a rendered answer says which compared companies it shows no figures for (#
     createClient: () => async () => ({ text: withList([{ kind: "observation", text: "NVDA's gross margin was [[F2]].", evidence: ["F2"] }]) }),
   });
   const text = (composed[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
-  assert.equal(text, "NVDA's gross margin was 74.6% in FY2026 (ended Jan 2026).\n\nNo figures are shown for AMD.");
+  assert.equal(text, "NVDA's gross margin was 74.6%.\n\nPeriod: FY2026 (ended Jan 2026). No figures are shown for AMD.");
 });
 
 test("a cited claim about a compared company does not drop the note that no figures are shown for it (#302 review)", async () => {
@@ -1097,7 +1098,7 @@ test("a cited claim about a compared company does not drop the note that no figu
     ]) }),
   });
   const text = (composed[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
-  assert.equal(text, "NVDA's gross margin was 74.6% in FY2026 (ended Jan 2026).\n\nAccording to a source dated Feb 2026 on AMD: AMD expects data center growth.\n\nNo figures are shown for AMD.");
+  assert.equal(text, "NVDA's gross margin was 74.6%.\n\nAccording to a source dated Feb 2026 on AMD: AMD expects data center growth.\n\nPeriod: FY2026 (ended Jan 2026). No figures are shown for AMD.");
 });
 
 test("a rendered answer keeps the other side of a stored disagreement (#208)", async () => {
@@ -1131,9 +1132,9 @@ test("a rendered answer keeps the other side of a stored disagreement (#208)", a
   ]);
 });
 
-test("a rendered comparison covers every company it shows figures for, and warns of calendars across observations (#208)", async () => {
+test("a rendered comparison covers every company it shows figures for, and names each company's period across observations (#208)", async () => {
   const leftOut = "left out: the answer would show only some of the companies shown";
-  const nvdaMargin = { index: 0, text: "NVDA's gross margin was 74.6% in FY2026 (ended Jan 2026).", check: "rendering", reason: leftOut };
+  const nvdaMargin = { index: 0, text: "NVDA's gross margin was 74.6%.", check: "rendering", reason: leftOut };
   // An answer about one of the two companies shown falls back, and the report says why.
   const oneSided = await renderWithReply(withList([{ kind: "observation", text: "NVDA's gross margin was [[F2]].", evidence: ["F2"] }]));
   assert.deepEqual(
@@ -1175,7 +1176,7 @@ test("a rendered comparison covers every company it shows figures for, and warns
     onAssertions: (report) => reports.push(report),
   });
   assert.deepEqual({ text: (claimedSide[0]!.segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join(""), rejected: reports[0]!.rejected }, {
-    text: "NVDA's gross margin was 74.6% in FY2026 (ended Jan 2026).\n\nAccording to a source on AMD: Data center demand doubled.",
+    text: "NVDA's gross margin was 74.6%.\n\nAccording to a source on AMD: Data center demand doubled.\n\nPeriod: FY2026 (ended Jan 2026).",
     rejected: [],
   });
 
@@ -1193,7 +1194,7 @@ test("a rendered comparison covers every company it shows figures for, and warns
     ]) }),
   });
   const text = (composed[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
-  assert.match(text, /\n\nThe periods compared end at different times, so they do not line up: NVDA's FY2026 ended Jan 2026 and AMD's FY2026 ended Dec 2025\.$/);
+  assert.match(text, /\n\nPeriods: NVDA FY2026 \(ended Jan 2026\), AMD FY2026 \(ended Dec 2025\)\.$/);
 });
 
 test("a rendered answer says when more claims matched, or none could be read (#208)", async () => {
@@ -1221,7 +1222,7 @@ test("a rendered answer says when more claims matched, or none could be read (#2
     packet: recordedPacket(RENDER_FIGURES, { toolCalls: [unreadable], factBlocks: RENDER_BLOCKS }),
     createClient: () => async () => ({ text: withList([{ kind: "observation", text: "NVDA's gross margin was [[F2]] and AMD's was [[F4]].", evidence: ["F2", "F4"] }]) }),
   });
-  assert.match((answer[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join(""), /\n\nResearch claims could not be read for this answer\.$/);
+  assert.match((answer[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join(""), /\n\nPeriods: NVDA FY2026 \(ended Jan 2026\), AMD FY2025 \(ended Dec 2025\)\. Research claims could not be read for this answer\.$/);
 });
 
 test("an observation whose value cannot be sealed renders the packet's value as plain text (#301)", async () => {
@@ -1286,10 +1287,10 @@ test("across companies, an inference's label states what its comparisons checked
   assert.equal(
     segments.map((segment) => segment.text ?? segment.format).join(""),
     "> **Analyst inference** (NVDA highest on gross margin): The margin lead leaves more room to invest." +
-      "\n\nOf NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026, ended Jan 2026), AMD 49.2% (FY2025, ended Dec 2025)." +
-      "\n\nNVDA's revenue was $130.5B in FY2026 (ended Jan 2026); AMD's revenue was $25.8B in FY2025 (ended Dec 2025)." +
+      "\n\nOf NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6%, AMD 49.2%." +
+      "\n\nNVDA's revenue was $130.5B; AMD's revenue was $25.8B." +
       "\n\n> **Analyst inference:** Scale leaves room to invest." +
-      "\n\nThe periods compared end at different times, so they do not line up: NVDA's FY2026 ended Jan 2026 and AMD's FY2025 ended Dec 2025.",
+      "\n\nPeriods: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025).",
   );
   assert.deepEqual(segments.filter((segment) => segment.type === "ref").map((segment) => segment.ref_id), [FACT(2), FACT(4), FACT(1), FACT(3)]);
   assert.deepEqual(report.rejected, []);
@@ -1313,9 +1314,9 @@ test("across companies, an inference's subject is named in its label (#308)", as
   ]));
   assert.equal(
     (block.segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join(""),
-    "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026, ended Jan 2026), AMD 49.2% (FY2025, ended Dec 2025)." +
+    "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6%, AMD 49.2%." +
       "\n\n> **Analyst inference on AMD** (NVDA highest on gross margin): Its thinner margin leaves less room to invest." +
-      "\n\nThe periods compared end at different times, so they do not line up: NVDA's FY2026 ended Jan 2026 and AMD's FY2025 ended Dec 2025.",
+      "\n\nPeriods: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025).",
   );
   assert.deepEqual(report.rejected, []);
 });
@@ -1330,10 +1331,10 @@ test("an observation a kept comparison already writes in full is not said twice;
   ]));
   assert.equal(
     (block.segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join(""),
-    "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026, ended Jan 2026), AMD 49.2% (FY2025, ended Dec 2025)." +
-      "\n\nNVDA's gross margin was 74.6% in FY2026 (ended Jan 2026); AMD's revenue was $25.8B in FY2025 (ended Dec 2025)." +
+    "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6%, AMD 49.2%." +
+      "\n\nNVDA's gross margin was 74.6%; AMD's revenue was $25.8B." +
       "\n\n> **Analyst inference:** Pricing power shows in the margin." +
-      "\n\nThe periods compared end at different times, so they do not line up: NVDA's FY2026 ended Jan 2026 and AMD's FY2025 ended Dec 2025.",
+      "\n\nPeriods: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025).",
   );
   assert.deepEqual(report.repeated, [1]);
   assert.deepEqual((report.accepted as Array<{ index: number }>).map((entry) => entry.index), [0, 1, 2, 3]);
