@@ -282,6 +282,10 @@ test("a metric clarification offers only figures the companies' filings compute,
   // Its cash flow inputs sit in different years, so free cash flow, which needs both in one period, is not offered either.
   await seedReportedFact(db, { metric_key: "operating_cash_flow", value: "900", fiscal_year: 2022, subject: IDS.issuerA });
   await seedReportedFact(db, { metric_key: "capex", value: "100", fiscal_year: 2023, subject: IDS.issuerA });
+  // Its FY2020 operating income was invalidated, so binding cannot read it and operating margin is not offered.
+  await seedReportedFact(db, { metric_key: "revenue", value: "2000", fiscal_year: 2020, subject: IDS.issuerA });
+  const invalidated = await seedReportedFact(db, { metric_key: "operating_income", value: "400", fiscal_year: 2020, subject: IDS.issuerA });
+  await db.query(`update facts set invalidated_at = now() where fact_id = $1`, [invalidated]);
   // No reading, so the planner's model plans the turn.
   const harness = chatHarness(pool, { model: asking, readQuestion: async () => null });
   const done = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "compare AAA and CCC" })).events);

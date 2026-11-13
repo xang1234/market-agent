@@ -20,6 +20,13 @@ export const FINANCIAL_CANDIDATE_LIMIT = 10_000;
 /** A public source, on `sources s`: the only kind a public_information read admits. */
 export const PUBLIC_SOURCE_SQL = "s.user_id is null";
 
+/** A fact a candidate read may return: a finite, live, reported value with verified provenance (alias f). */
+export const ELIGIBLE_FACT_SQL = `f.value_num is not null
+        and f.value_num not in ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric)
+        and f.invalidated_at is null
+        and f.method in ('reported', 'extracted', 'restated')
+        and f.verification_status in ('authoritative', 'corroborated')`;
+
 /**
  * public_information: public sources only (the verified-finance historical
  * mode never admits private facts). owner_visible: public plus the owner's own.
@@ -156,11 +163,7 @@ export async function listFinancialInputCandidates(db: RowQueryExecutor, request
       where f.subject_kind = $1::subject_kind and f.subject_id = $2::uuid and m.metric_key = $3
         and ($4::int is null or f.fiscal_year = $4::int)
         and ($5::text is null or f.fiscal_period = $5::text)
-        and f.value_num is not null
-        and f.value_num not in ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric)
-        and f.invalidated_at is null
-        and f.method in ('reported', 'extracted', 'restated')
-        and f.verification_status in ('authoritative', 'corroborated')
+        and ${ELIGIBLE_FACT_SQL}
         and f.entitlement_channels ? $6
         and (${PUBLIC_SOURCE_SQL} or ($7 = 'owner_visible' and s.user_id = $8::uuid))
       order by f.period_end nulls first, f.fact_id

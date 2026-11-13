@@ -47,7 +47,7 @@ import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../fi
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
 import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
-import { PUBLIC_SOURCE_SQL } from "../../evidence/src/financial-input-repo.ts";
+import { ELIGIBLE_FACT_SQL, PUBLIC_SOURCE_SQL } from "../../evidence/src/financial-input-repo.ts";
 import { selectPrice } from "../../financial-engine/src/select-price.ts";
 import type { SelectionPolicy } from "../../financial-engine/src/select-inputs.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
@@ -595,6 +595,8 @@ async function computableChoices(
        from facts f join metrics m on m.metric_id = f.metric_id join sources s on s.source_id = f.source_id
       where f.subject_kind = 'issuer' and f.subject_id = any($1::uuid[]) and m.metric_key = any($2::text[])
         and f.fiscal_year is not null and ${PUBLIC_SOURCE_SQL}
+        -- The facts input binding can read: eligible and entitled to the app, as the engine's evidence adapter asks.
+        and ${ELIGIBLE_FACT_SQL} and f.entitlement_channels ? 'app'
       group by f.subject_id, f.fiscal_year, f.fiscal_period`,
     [refs.map((ref) => ref.id), [...new Set(clarification.choices.flatMap((choice) => reads(choice.choice_id)!.flat()))]],
   );
