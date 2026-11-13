@@ -88,7 +88,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     // The commentary is rendered from the recorded reply's assertions, so the LLM step really ran.
     assert.deepEqual(engineAnswer(assistant).notes, [
       "NVDA's revenue rose in every period from Q1 FY2025 (ended Apr 2024) ($26.0B) to Q4 FY2026 (ended Jan 2026) ($62.1B).\n\n" +
-        "NVDA's gross margin (gross profit / revenue) was 74.40%, operating margin (operating income / revenue) 64.90% and net margin (net income / revenue) 57.00% in Q4 FY2026 (ended Jan 2026).",
+        "NVDA's gross margin was 74.40%, operating margin 64.90% and net margin 57.00% in Q4 FY2026 (ended Jan 2026).",
     ]);
     // ...and the deployment that wrote it is on the completion and saved with the message (#183).
     assert.equal(completed.data.answered_by, "fixture/recorded");
@@ -360,7 +360,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       ["Gross margin (gross profit / revenue)", "Q2 FY2026 (ended 2026-06-27)", "verified", "54.02%"],
     ]);
     assert.deepEqual(engineAnswer(answer).notes, [
-      "Of NVDA and Advanced Micro Devices, Inc., NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40%, Advanced Micro Devices, Inc. 54.02%.\n\n" +
+      "Of NVDA and Advanced Micro Devices, Inc., NVDA's gross margin was highest: NVDA 74.40%, Advanced Micro Devices, Inc. 54.02%.\n\n" +
         "NVDA's revenue was $62.1B; Advanced Micro Devices, Inc.'s revenue was $11.2B.\n\n" +
         "Periods: NVDA Q4 FY2026 (ended Jan 2026), Advanced Micro Devices, Inc. Q2 FY2026 (ended Jun 2026).",
     ]);

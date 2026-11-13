@@ -138,14 +138,21 @@ test("an observation writes each engine value as a result ref, and a gap as its 
   const packet = enginePacket(COMPARISON, TICKERS, null);
   const values = renderAssertion({ index: 0, kind: "observation", text: "x", evidence: ["F1"] }, packet, []);
   assert.deepEqual(values.segments, [
-    { type: "text", text: "NVDA's gross margin (gross profit / revenue) was " },
+    { type: "text", text: "NVDA's gross margin was " },
     { type: "ref", ref_kind: "result", ref_id: RESULT(1), format: "74.40%", period: "Q4 FY2026" },
     { type: "text", text: " in Q4 FY2026" },
     { type: "text", text: "." },
   ]);
   const missing = renderAssertion({ index: 0, kind: "observation", text: "x", evidence: ["F6", "F4"] }, packet, []);
-  assert.equal(plainText(missing.segments), `AMD's year-over-year percent change in revenue was 45.74% in Q2 FY2026 vs Q2 FY2025. AMD's gross margin (gross profit / revenue) in Q2 FY2026 is not available: ${NOT_REPORTED}`);
+  assert.equal(plainText(missing.segments), `AMD's year-over-year percent change in revenue was 45.74% in Q2 FY2026 vs Q2 FY2025. AMD's gross margin in Q2 FY2026 is not available: ${NOT_REPORTED}`);
   assert.deepEqual(missing.segments.filter((segment) => segment.type === "ref").map((segment) => segment.type === "ref" && segment.ref_id), [RESULT(6)]);
+});
+
+test("a gap bound to no period names none, since its selector says nothing the answer's periods don't", () => {
+  const packet = enginePacket(COMPARISON, TICKERS, null);
+  const unbound = { ...packet, figures: packet.figures.map((figure) => (figure.id === "F4" ? { ...figure, period: "latest fiscal year" } : figure)) };
+  const missing = renderAssertion({ index: 0, kind: "observation", text: "x", evidence: ["F4"] }, unbound, []);
+  assert.equal(plainText(missing.segments), `AMD's gross margin is not available: ${NOT_REPORTED}`);
 });
 
 test("a gap is never compared: a comparison citing one is rejected, and a cohort names its company as not shown", () => {
@@ -162,7 +169,7 @@ test("a gap is never compared: a comparison citing one is rejected, and a cohort
   assert.deepEqual(report.rejected, []);
   assert.equal(
     plainText(renderAssertion(report.accepted[0]!, three, []).segments),
-    "Of NVDA and AAPL, NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026), AAPL 47.06% (Q3 FY2026). No gross margin (gross profit / revenue) is shown for AMD.",
+    "Of NVDA and AAPL, NVDA's gross margin was highest: NVDA 74.40% (Q4 FY2026), AAPL 47.06% (Q3 FY2026). No gross margin is shown for AMD.",
   );
 });
 
@@ -358,12 +365,12 @@ test("an answer written on an engine packet is sent only that packet, and its in
   assert.deepEqual(sent.evidence_packet, packetForModel(packet));
   assert.equal(sent.evidence_packet.route, "financial_engine");
   const asked = JSON.parse(requests[1]!.messages[1]!.content) as { inferences: Array<{ supports: string[] }> };
-  const observed = "NVDA's gross margin (gross profit / revenue) was 74.40% in Q4 FY2026; AMD's year-over-year percent change in revenue was 45.74% in Q2 FY2026 vs Q2 FY2025.";
+  const observed = "NVDA's gross margin was 74.40% in Q4 FY2026; AMD's year-over-year percent change in revenue was 45.74% in Q2 FY2026 vs Q2 FY2025.";
   assert.deepEqual(asked.inferences[0]!.supports, [observed]);
   const segments = judged.blocks[0]!.segments as Parameters<typeof plainText>[0];
   // The reader gets each company's one period once; the judge read it by each figure.
   assert.equal(plainText(segments), [
-    "NVDA's gross margin (gross profit / revenue) was 74.40%; AMD's year-over-year percent change in revenue was 45.74%.",
+    "NVDA's gross margin was 74.40%; AMD's year-over-year percent change in revenue was 45.74%.",
     "> **Analyst inference on NVDA:** Its pricing holds.",
     "Periods: NVDA Q4 FY2026, AMD Q2 FY2026 vs Q2 FY2025.",
   ].join("\n\n"));
@@ -434,7 +441,7 @@ test("a lead is a figure derived from its two sides' results, and a ranking is a
 test("commentary cites a lead and a ranking by their results, and the judge reads them as supports (#398)", () => {
   const lead = enginePacket(LEAD, TICKERS, LEAD_PLAN);
   const leads = renderAssertion({ index: 0, kind: "observation", text: "x", evidence: ["F3"] }, lead, []);
-  assert.equal(plainText(leads.segments), "Difference in gross margin (gross profit / revenue) was 20.38 pp in NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026.");
+  assert.equal(plainText(leads.segments), "Difference in gross margin was 20.38 pp in NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026.");
   assert.deepEqual(leads.segments.filter((segment) => segment.type === "ref"), [
     { type: "ref", ref_kind: "result", ref_id: RESULT(3), format: "20.38 pp", period: "NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026" },
   ]);
@@ -453,7 +460,7 @@ test("commentary cites a lead and a ranking by their results, and the judge read
     { kind: "analyst_inference", subject: "AMD", text: "Its pricing trails.", supports: [0] },
   ], lead);
   assert.deepEqual([trailing.accepted.map((entry) => entry.index), trailing.rejected], [[0, 1], []], "a lead is about both its companies");
-  assert.deepEqual(judged!.supports, ["Difference in gross margin (gross profit / revenue) was 20.38 pp in NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026."]);
+  assert.deepEqual(judged!.supports, ["Difference in gross margin was 20.38 pp in NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026."]);
   const [window] = judgeCases(checkAssertions([
     { kind: "observation", text: "x", evidence: ["F9"] },
     { kind: "analyst_inference", text: "Its growth has not stalled.", supports: [0] },

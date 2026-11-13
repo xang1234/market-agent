@@ -11,9 +11,12 @@
 // inference resting on comparisons names the metrics they rank or trace in its label.
 
 import type { Assertion } from "./assertions.ts";
-import { checkedComparisons, metricLabel, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
+import { checkedComparisons, metricLabel as definedMetric, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
 import type { EvidencePacket, PacketClaim, PacketFigure } from "./evidence-packet.ts";
 import { createSealer, type Sealer, type Segment } from "./prose-refs.ts";
+
+// Prose names an engine measure without its formula ("net margin", not "net margin (net income / revenue)"): the table's heading carries it.
+const metricLabel = (metric: string): string => definedMetric(metric).replace(/ \([^()]*[/×][^()]*\)$/, "");
 
 type Block = Record<string, unknown>;
 
@@ -98,7 +101,7 @@ function templateSegments(
         text(".");
       });
       figures.filter((entry) => entry.gap !== undefined).forEach((figure) => {
-        text(`${segments.length > 0 ? " " : ""}${capitalize(`${owner(figure)}${figureLabel(figure)}`)}${periodPhrase(figure)} is not available: `);
+        text(`${segments.length > 0 ? " " : ""}${capitalize(`${owner(figure)}${figureLabel(figure)}`)}${namesYear(figure) ? periodPhrase(figure) : ""} is not available: `);
         segments.push(gap(figure));
       });
       break;
@@ -196,8 +199,7 @@ function inferenceBasis(assertion: Assertion, packet: EvidencePacket, accepted: 
       // Over time or across segments, the metric is one company's.
       const owner = comparison.axis === "time" || noun === "segments" ? ownerOf(first, packet) : "";
       const basis = bases.get(`${owner}|${noun}`) ?? { owner, noun, metrics: [] };
-      // An engine measure's formula ("net margin (net income / revenue)") is said where its figures are.
-      const metric = metricLabel(comparison.metric).replace(/ \([^()]*[/×][^()]*\)$/, "");
+      const metric = metricLabel(comparison.metric);
       if (!basis.metrics.includes(metric)) basis.metrics.push(metric);
       bases.set(`${owner}|${noun}`, basis);
     }
@@ -310,17 +312,17 @@ function resultClause(comparison: CheckedComparison, owner: (figure: PacketFigur
   const { op, axis, figures, metric } = comparison;
   const first = figures[0]!;
   const member = (figure: PacketFigure) => figure.segment ?? figure.company ?? "";
-  const subject = `${owner(first)}${metricLabel(metric)}`;
+  const subject = `${owner(first)}${definedMetric(metric)}`;
   const segmented = first.segment !== undefined;
   if (op === "highest" || op === "lowest") {
     if (axis === "time") return [`${subject} ${op} in ${periodText(comparison.winner!.period!)}`];
     return segmented
-      ? [`${member(comparison.winner!)} ${op} of ${owner(first)}segments by ${metricLabel(metric)}`]
-      : [`${member(comparison.winner!)} ${op} on`, metricLabel(metric)];
+      ? [`${member(comparison.winner!)} ${op} of ${owner(first)}segments by ${definedMetric(metric)}`]
+      : [`${member(comparison.winner!)} ${op} on`, definedMetric(metric)];
   }
   if (op === "order") {
     const names = figures.map((figure) => (axis === "time" ? periodText(figure.period!) : member(figure)));
-    return [`${axis === "time" ? subject : metricLabel(metric)} highest first: ${names.join(", ")}`];
+    return [`${axis === "time" ? subject : definedMetric(metric)} highest first: ${names.join(", ")}`];
   }
   const moved: Record<TrendResult, string> = {
     rose: "rose",
@@ -392,6 +394,11 @@ export function plainText(segments: ReadonlyArray<Segment>): string {
 }
 
 // A segment's figure is its revenue: "Data Center revenue".
+// A gap the engine could not bind has only its selector ("latest fiscal year"), which says nothing the answer's periods don't.
+function namesYear(figure: PacketFigure): boolean {
+  return figure.period_end !== undefined || /\d{4}/.test(figure.period ?? "");
+}
+
 function figureLabel(figure: PacketFigure): string {
   return figure.segment ? `${figure.segment} ${metricLabel(figure.metric)}` : metricLabel(figure.metric);
 }
