@@ -451,8 +451,11 @@ function readsAsMultiple(plan: FinancialPlan, node: OperationNode): boolean {
 
 function formatValue(value: ExactDecimal, unit: FinancialUnit): { text: string; full_text: string } {
   switch (unit.kind) {
-    case "currency":
-      return { text: `${unit.currency} ${fixed(value, 2)}`, full_text: `${unit.currency} ${canonicalDecimalString(value)}` };
+    case "currency": {
+      const short = compact(value);
+      const symbol = unit.currency === "USD" ? "$" : `${unit.currency} `;
+      return { text: short === null ? `${unit.currency} ${fixed(value, 2)}` : `${short.sign}${symbol}${short.text}`, full_text: `${unit.currency} ${canonicalDecimalString(value)}` };
+    }
     case "currency_per_share":
       return { text: `${unit.currency} ${fixed(value, 2)} per share`, full_text: `${unit.currency} ${canonicalDecimalString(value)} per share` };
     case "ratio": {
@@ -465,11 +468,25 @@ function formatValue(value: ExactDecimal, unit: FinancialUnit): { text: string; 
       return { text: `${fixed(value, 2)} pp`, full_text: `${canonicalDecimalString(value)} pp` };
     case "basis_points":
       return { text: `${fixed(value, 0)} bp`, full_text: `${canonicalDecimalString(value)} bp` };
-    case "shares":
-      return { text: `${fixed(value, 0)} shares`, full_text: `${canonicalDecimalString(value)} shares` };
+    case "shares": {
+      const short = compact(value);
+      return { text: `${short === null ? fixed(value, 0) : `${short.sign}${short.text}`} shares`, full_text: `${canonicalDecimalString(value)} shares` };
+    }
     case "count":
       return { text: fixed(value, 0), full_text: canonicalDecimalString(value) };
   }
+}
+
+const SCALES = [[12, "T"], [9, "B"], [6, "M"]] as const;
+
+/** A magnitude of a million or more at one decimal of its scale ("133.2B"); null below a million. */
+function compact(value: ExactDecimal): { sign: string; text: string } | null {
+  const magnitude = { coefficient: value.coefficient < 0n ? -value.coefficient : value.coefficient, scale: value.scale };
+  const index = SCALES.findIndex(([power]) => compareExactDecimals(magnitude, { coefficient: 10n ** BigInt(power), scale: 0 }) >= 0);
+  if (index === -1) return null;
+  const [power, suffix] = SCALES[index]!;
+  const text = fixed({ coefficient: magnitude.coefficient, scale: magnitude.scale + power }, 1);
+  return { sign: value.coefficient < 0n ? "-" : "", text: text === "1,000.0" && index > 0 ? `1.0${SCALES[index - 1]![1]}` : `${text}${suffix}` };
 }
 
 /** Half-even rounding to `places` fraction digits, with thousands separators. */

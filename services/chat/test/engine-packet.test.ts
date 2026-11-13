@@ -307,6 +307,18 @@ test("negative engine amounts compare by their sign", () => {
   assert.deepEqual(report.rejected, []);
 });
 
+test("amounts that read alike at their scale still compare by their exact values, and show as they read", () => {
+  const usd = (n: number, slot: string, text: string, exact: string): PresentedResult => {
+    const base = value(n, slot, "measure:m0", "period:p0", text);
+    return { ...base, presented: { kind: "value", text, full_text: exact, value: "0", unit: { kind: "currency", currency: "USD" }, exact: true } };
+  };
+  const packet = enginePacket(content([usd(1, "a", "$12.9B", "USD 12910000000"), usd(2, "b", "$12.9B", "USD 12940000000")], ["a", "b"]), TICKERS, null);
+  const report = checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F2"], op: "highest", result: "F2" }], packet);
+  assert.deepEqual(report.rejected, []);
+  assert.equal(plainText(renderAssertion(report.accepted[0]!, packet, []).segments), "Of NVDA and AMD, AMD's revenue was highest: NVDA $12.9B, AMD $12.9B (Q4 FY2026).");
+  assert.deepEqual((packetForModel(packet) as { figures: unknown[] }).figures[0], { id: "F1", company: "NVDA", metric: "Revenue", period: "Q4 FY2026", value: "$12.9B" });
+});
+
 test("commentary passes the ref check only when each ref is a verified result of its own answer, as that answer shows it", () => {
   const answer = block(COMPARISON);
   const ref = (fields: Record<string, unknown>) => ({ type: "ref", ref_kind: "result", ref_id: RESULT(1), format: "74.40%", period: "Q4 FY2026", ...fields });

@@ -26,6 +26,8 @@ export type PacketFigure = {
   period?: string;
   period_end?: string;
   value: string;
+  // An engine amount shown at its scale ("$12.9B") in full, so two that read alike still compare; never sent to the model.
+  exact?: string;
   shown_in?: string;
   fact_id?: string;
   series_ref?: string;
@@ -365,6 +367,7 @@ export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyM
       metric: content.labels[measure_label_id]!.text,
       period: content.labels[period_label_id]!.text,
       value: presented.text,
+      ...(presented.kind === "value" && presented.unit.kind === "currency" ? { exact: presented.full_text } : {}),
       ...(presented.kind === "gap" ? { gap: presented.text } : {}),
       ...(presented.kind === "ranking" ? { ranking: true as const } : {}),
       ...(lead === undefined ? {} : { lead_of: lead }),
@@ -467,7 +470,7 @@ export function packetForModel(packet: EvidencePacket): Record<string, unknown> 
     route: packet.route,
     cutoff: packet.cutoff,
     figures: packet.figures.map((figure) => {
-      const { fact_id: _factId, result_id: _resultId, series_ref: _seriesRef, source_ids: _sourceIds, ...shown } = figure;
+      const { fact_id: _factId, result_id: _resultId, series_ref: _seriesRef, source_ids: _sourceIds, exact: _exact, ...shown } = figure;
       if (shown.gap === undefined) return shown;
       const { value: _value, ...unavailable } = shown;
       return unavailable;

@@ -13,7 +13,9 @@
 // standing for the interval its rounding covers ("74.4%" is 74.35-74.45). Two
 // values are ordered only when their intervals do not overlap, so rounding
 // cannot make a false winner; values too close to separate at the precision
-// shown are a tie. Upgrade path: carry each fact's unrounded value in the packet.
+// shown are a tie. An engine amount, shown at its scale, carries its exact
+// value (PacketFigure.exact) and compares by that. Upgrade path: carry each
+// other fact's unrounded value in the packet.
 //
 // A claim citing several metrics is one comparison per metric (claimParts), so
 // checkComparison only ever sees one.
@@ -183,7 +185,7 @@ export function checkComparison(
   }
   // The cited figure stands for its fact, so the model's id is the one named.
   const figures = eligible.map((figure) => cited.find((entry) => keyOf(entry) === keyOf(figure))!);
-  const values = figures.map((figure) => interval(figure.value));
+  const values = figures.map((figure) => interval(figure.exact ?? figure.value));
   if (values.some((value) => value === undefined) || new Set(values.map((value) => value!.kind)).size > 1) {
     return fail("the values are in different units or currencies");
   }

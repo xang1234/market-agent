@@ -232,7 +232,7 @@ function showsChange(cited: ReadonlyArray<EvidencePacket["figures"][number]>, pa
   const changes = (figure: EvidencePacket["figures"][number]) => figure.gap === undefined && !figure.ranking && new Set(figureCompanies(figure, packet)).size === 1;
   return cited.length > 0 && cited.every((a) => packet.figures.some((b) =>
     changes(a) && changes(b) && a.company === b.company && a.metric === b.metric && a.segment === b.segment && a.period !== undefined && b.period !== undefined &&
-    a.period.replace(/\s+/g, "") !== b.period.replace(/\s+/g, "") && a.value !== b.value && comparablePeriods(a, b)
+    a.period.replace(/\s+/g, "") !== b.period.replace(/\s+/g, "") && (a.exact ?? a.value) !== (b.exact ?? b.value) && comparablePeriods(a, b)
   ));
 }
 

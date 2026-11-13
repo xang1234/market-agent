@@ -111,10 +111,10 @@ test('a comparison across fiscal calendars has one column per line, each cell na
   assert.deepEqual(rows, [
     [
       'NVIDIA Corp',
-      ['USD 68,000,000,000.00', 'Q4 FY2026'],
-      ['USD 51,000,000,000.00', 'Q4 FY2026'],
-      ['USD 44,200,000,000.00', 'Q4 FY2026'],
-      ['USD 37,400,000,000.00', 'Q4 FY2026'],
+      ['$68.0B', 'Q4 FY2026'],
+      ['$51.0B', 'Q4 FY2026'],
+      ['$44.2B', 'Q4 FY2026'],
+      ['$37.4B', 'Q4 FY2026'],
       ['75.00%', 'Q4 FY2026'],
       ['65.00%', 'Q4 FY2026'],
       ['55.00%', 'Q4 FY2026'],
@@ -123,10 +123,10 @@ test('a comparison across fiscal calendars has one column per line, each cell na
     ],
     [
       'Advanced Micro Devices, Inc.',
-      ['USD 7,700,000,000.00', 'Q2 FY2026'],
-      ['USD 3,080,000,000.00', 'Q2 FY2026'],
-      ['USD 770,000,000.00', 'Q2 FY2026'],
-      ['USD 693,000,000.00', 'Q2 FY2026'],
+      ['$7.7B', 'Q2 FY2026'],
+      ['$3.1B', 'Q2 FY2026'],
+      ['$770.0M', 'Q2 FY2026'],
+      ['$693.0M', 'Q2 FY2026'],
       ['40.00%', 'Q2 FY2026'],
       ['10.00%', 'Q2 FY2026'],
       ['9.00%', 'Q2 FY2026'],
@@ -137,7 +137,7 @@ test('a comparison across fiscal calendars has one column per line, each cell na
   assert.doesNotMatch(html, /Not requested/)
   assert.equal(table.querySelector('tbody td button')!.getAttribute('aria-label'), 'Inspect the verified calculation for USD 68000000000, Q4 FY2026')
   const plain = renderToStaticMarkup(<FinancialAnswer block={financialAnswerFiscalCalendarsFixture} />)
-  assert.match(plain, /title="USD 7700000000" aria-label="USD 7700000000">USD 7,700,000,000\.00<\/span><span class="block text-xs text-muted">Q2 FY2026<\/span>/, 'the value keeps its own label; the period is ordinary text after it')
+  assert.match(plain, /title="USD 7700000000" aria-label="USD 7700000000">\$7\.7B<\/span><span class="block text-xs text-muted">Q2 FY2026<\/span>/, 'the value keeps its own label; the period is ordinary text after it')
 })
 
 test('sorting uses the server exact order; descending keeps rows without a value last', () => {

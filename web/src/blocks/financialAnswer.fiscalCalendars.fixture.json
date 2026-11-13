@@ -10,7 +10,7 @@
     "44444444-4444-4444-9444-444444444444"
   ],
   "as_of": "2024-01-16T04:59:59.999Z",
-  "presentation_hash": "91991fb79100d0d7db3f24c05c6711251e0927d04c3830744a2b4f74549af9f9",
+  "presentation_hash": "e30561dc8463da9dea9d40555cdcba1b5ba852b15f6aa36c3f29b598a200e4c7",
   "financial": {
     "presentation_version": "financial-presentation.v2",
     "template_version": "financial-answer.v1",
@@ -104,7 +104,7 @@
         "period_label_id": "period:p0",
         "presented": {
           "kind": "value",
-          "text": "USD 68,000,000,000.00",
+          "text": "$68.0B",
           "full_text": "USD 68000000000",
           "value": "68000000000",
           "unit": {
@@ -124,7 +124,7 @@
         "period_label_id": "period:p0",
         "presented": {
           "kind": "value",
-          "text": "USD 51,000,000,000.00",
+          "text": "$51.0B",
           "full_text": "USD 51000000000",
           "value": "51000000000",
           "unit": {
@@ -144,7 +144,7 @@
         "period_label_id": "period:p0",
         "presented": {
           "kind": "value",
-          "text": "USD 44,200,000,000.00",
+          "text": "$44.2B",
           "full_text": "USD 44200000000",
           "value": "44200000000",
           "unit": {
@@ -164,7 +164,7 @@
         "period_label_id": "period:p0",
         "presented": {
           "kind": "value",
-          "text": "USD 37,400,000,000.00",
+          "text": "$37.4B",
           "full_text": "USD 37400000000",
           "value": "37400000000",
           "unit": {
@@ -279,7 +279,7 @@
         "period_label_id": "period:p3",
         "presented": {
           "kind": "value",
-          "text": "USD 7,700,000,000.00",
+          "text": "$7.7B",
           "full_text": "USD 7700000000",
           "value": "7700000000",
           "unit": {
@@ -299,7 +299,7 @@
         "period_label_id": "period:p3",
         "presented": {
           "kind": "value",
-          "text": "USD 3,080,000,000.00",
+          "text": "$3.1B",
           "full_text": "USD 3080000000",
           "value": "3080000000",
           "unit": {
@@ -319,7 +319,7 @@
         "period_label_id": "period:p3",
         "presented": {
           "kind": "value",
-          "text": "USD 770,000,000.00",
+          "text": "$770.0M",
           "full_text": "USD 770000000",
           "value": "770000000",
           "unit": {
@@ -339,7 +339,7 @@
         "period_label_id": "period:p3",
         "presented": {
           "kind": "value",
-          "text": "USD 693,000,000.00",
+          "text": "$693.0M",
           "full_text": "USD 693000000",
           "value": "693000000",
           "unit": {
