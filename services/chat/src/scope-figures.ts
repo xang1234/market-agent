@@ -31,7 +31,9 @@ export type PlanChoice =
   | Readonly<{ kind: "segments_gap" }>
   | Readonly<{ kind: "named_gap"; reason: NamedGap }>
   | Readonly<{ kind: "trend"; period: ReadPeriod }>
-  | Readonly<{ kind: "overview"; period: ReadPeriod; peers: boolean }>
+  // byYear: a question naming no figure, so a company with no quarter has
+  // the overview's lines at its latest fiscal year instead (#643).
+  | Readonly<{ kind: "overview"; period: ReadPeriod; peers: boolean; byYear?: true }>
   | Readonly<{ kind: "kept_figures"; metrics: ReadonlyArray<string>; period: ReadPeriod }>
   // P/E multiples the message states (eps-scenarios.ts): it outranks every route, P/E at the current price included.
   | Readonly<{ kind: "scenario"; ask: ScenarioAsk }>
@@ -133,15 +135,21 @@ export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | 
   // a quarterly overview (#627).
   const keptYear = kept.length > 0 && reading.period.kind === "none";
   if (overview && keptIncome && (broadIncome || keptYear) && !asks.has("peers") && readsYear(period)) return { kind: "kept_figures", metrics: [INCOME_STATEMENT], period };
-  if (overview && keptIncome) return { kind: "overview", period, peers: asks.has("peers") };
-  // A figure the engine plans with no model, asked alone with no qualifier
-  // and no period of its own ("AMD's earnings per share"), at the scope's
-  // period: with none, the latest fiscal year (#517).
+  if (overview && keptIncome) return { kind: "overview", period, peers: asks.has("peers"), ...(asksNoFigure ? { byYear: true as const } : {}) };
+  // Figures the engine plans with no model, with no qualifier and no period
+  // of their own ("AMD's earnings per share"), at the scope's period: with
+  // none, the latest fiscal year (#517). Beside another such figure, the
+  // income statement or its lines join them ("revenue and free cash flow"),
+  // its margins too, so a reply taking every offered option is one plan of
+  // them all rather than the model's.
   const figures = reading.metrics.map((metric) => metric.metric_key);
+  const others = figures.filter((key) => key !== INCOME_STATEMENT);
+  const income = others.length < figures.length || reading.income_items.length > 0;
   const plannable = (key: string) => Object.hasOwn(ENGINE_READS_BY_CATALOG_METRIC, key) || (VALUATIONS.has(key) && period.kind === "latest");
-  if (READ_PERIODS.has(reading.period.kind) && !namesPeriod && figures.length > 0 && !figures.includes(INCOME_STATEMENT) && figures.every(plannable) &&
-    reading.income_items.length === 0 && offMetrics.size === 0 && offFacets.size === 0 && keptIncome && [...asks].every((facet) => KEPT_ASKS.has(facet))) {
-    return { kind: "kept_figures", metrics: figures, period };
+  if (READ_PERIODS.has(reading.period.kind) && !namesPeriod && others.length > 0 && others.every(plannable) &&
+    reading.income_items.every((item) => INCOME_ITEM_FIGURE[item] !== null) && offMetrics.size === 0 && offFacets.size === 0 && keptIncome &&
+    [...asks].every((facet) => KEPT_ASKS.has(facet) || (income && facet === "margins"))) {
+    return { kind: "kept_figures", metrics: income ? [INCOME_STATEMENT, ...others] : others, period };
   }
   if (asksNoFigure && !keptIncome && [...asks].every((facet) => KEPT_ASKS.has(facet) || facet === "peers")) {
     if (asks.has("peers")) return { kind: "named_gap", reason: "peers" };

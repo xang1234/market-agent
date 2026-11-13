@@ -105,7 +105,9 @@ async function emitFinancialTurn(
     : null;
   // The options a clarification saves are shown as buttons, so its text is the
   // question alone. A company choice saves none and keeps them in its text.
-  const text = turn.kind !== "clarification" ? turn.text : choices ? turn.clarification.question : clarificationText(turn);
+  const body = turn.kind !== "clarification" ? turn.text : choices ? turn.clarification.question : clarificationText(turn);
+  // The companies the turn left out lead its text, as they lead an answer's note.
+  const text = turn.note ? `${turn.note} ${body}` : body;
   const turnId = context.turnId ?? context.runId;
   // Each attempt seals its own snapshot: a retry that saves nothing new (its
   // message is saved) must not seal one id twice.

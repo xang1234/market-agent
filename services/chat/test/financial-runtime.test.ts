@@ -384,7 +384,11 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await answer(async () => null), unchecked, "no reading");
     assert.deepEqual(await answer(async () => { throw new Error("scope model down"); }), unchecked, "a failed reading");
     assert.deepEqual(await answer(() => { throw new Error("no scope reader"); }), unchecked, "a reader that throws before it answers");
-    assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: ["AAA"] } }), "Revenue for AAA")), [[], undefined]);
+    assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: ["AAA"] } }), "Revenue for AAA")), [
+      // A reading that asks for no figure of a company with no quarters is its latest fiscal year (#643).
+      ["Quarterly figures are not on file for this company, so its latest fiscal year is shown."],
+      undefined,
+    ]);
   });
 
   await t.test("each name a turn gives is resolved once (#425)", async () => {

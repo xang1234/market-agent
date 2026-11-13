@@ -12,7 +12,7 @@ import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
 import type { FinancialAnswerContent } from "../../financial-core/src/index.ts";
 import { enginePacket, figureCompanies } from "../src/evidence-packet.ts";
 import { IDS, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
-import { resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
+import { proposedMetric, resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 import { chatDatabase, chatHarness, completed, FY2023_REVENUE, METRIC_READING, NO_ASKS, readingOf, resolveMention, revenueModel } from "./financial-fixtures.ts";
 
@@ -30,6 +30,10 @@ const COMPANIES: Readonly<Record<string, string>> = {
   NOQS: "4f000000-0000-4000-8000-0000000000e9",
   // Its quarters are deleted once seeded: it reports fiscal years only.
   ANNL: "4f000000-0000-4000-8000-0000000000ea",
+  // Quarters and fiscal years both on file.
+  MIXD: "4f000000-0000-4000-8000-0000000000eb",
+  // Fiscal years only, and no gross profit: as STX files.
+  NOGA: "4f000000-0000-4000-8000-0000000000ec",
 };
 const REVENUE = [
   [2022, 1, "800"], [2022, 2, "900"], [2022, 3, "1000"], [2022, 4, "1100"],
@@ -65,6 +69,9 @@ const QTRS_OVERVIEW = [
   ["out_revenue_highest", "Q1 FY2022 (ended 2022-03-31) to Q4 FY2023 (ended 2023-12-31)", "verified", "Q4 FY2023 (ended 2023-12-31) has the highest revenue of the 8 quarters ranked"],
   ["out_revenue_lowest", "Q1 FY2022 (ended 2022-03-31) to Q4 FY2023 (ended 2023-12-31)", "verified", "Q1 FY2022 (ended 2022-03-31) has the lowest revenue of the 8 quarters ranked"],
 ];
+
+// The income statement at the latest fiscal year, in the order a figures plan shows it.
+const ANNUAL_FIGURES = ["revenue", "gross_profit", "operating_income", "net_income", "gross_margin", "operating_margin", "net_margin"];
 
 function resolve(mention: string): Promise<ChatSubjectPreResolution> {
   const id = COMPANIES[mention];
@@ -129,6 +136,15 @@ test("a question about one company that asks for no figure is answered with its 
   }
   for (const [metric, value] of [["revenue", "2400"], ["gross_profit", "1200"], ["operating_income", "600"], ["net_income", "480"]] as const) {
     await quarterly(COMPANIES.SECQ!, metric, 2024, 1, value);
+  }
+  for (const [metric_key, value] of [["revenue", "5800"], ["gross_profit", "3000"], ["operating_income", "1200"], ["net_income", "900"]] as const) {
+    await seedReportedFact(db, { metric_key, value, fiscal_year: 2023, subject: COMPANIES.MIXD! });
+  }
+  await db.query(`delete from facts where subject_id = $1`, [COMPANIES.NOGA]);
+  for (const [year, revenue, operating, net] of [[2023, "900", "90", "60"], [2024, "1000", "100", "70"]] as const) {
+    for (const [metric_key, value] of [["revenue", revenue], ["operating_income", operating], ["net_income", net]] as const) {
+      await seedReportedFact(db, { metric_key, value, fiscal_year: year, subject: COMPANIES.NOGA! });
+    }
   }
   await db.query(
     `update facts set period_start = period_start + interval '1 month', period_end = period_start + interval '4 months' - interval '1 day' where subject_id = $1 and fiscal_year = 2023`,
@@ -277,7 +293,7 @@ test("a question about one company that asks for no figure is answered with its 
     }
   });
 
-  await t.test("a reading that asks for a figure or a period other than the latest, or a company with no quarters, goes to the planner; a carried company is the overview, and a price window the analyst's", async () => {
+  await t.test("a reading that asks for a figure or a period other than the latest goes to the planner; a company with no quarters is compared at the latest fiscal year; a carried company is the overview, and a price window the analyst's", async () => {
     const planned = async (userIntent: string, mentions: string[], options: { readQuestion?: (question: string) => Promise<ScopeProposal | null>; priorSubjects?: () => Promise<ChatResolvedSubjectPreResolution[]>; researchScope?: typeof scoped | (() => Promise<ResearchScope>) } = {}) => {
       const model = revenueModel(mentions);
       const done = completed((await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, ...options }).run({ ...base, userIntent })).events);
@@ -289,8 +305,10 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(await planned("Revenue for QTRS", ["QTRS"], { readQuestion: reading({ ...NO_ASKS, income_items: ["revenue"] }) }), [1, ["a_out"]], "an income item");
     assert.deepEqual(await planned("Revenue for QTRS", ["QTRS"], { readQuestion: reading({ ...NO_ASKS, asks: new Set(["margins"]) }) }), [1, ["a_out"]], "a facet");
     assert.deepEqual(await planned("Revenue for QTRS", ["QTRS"], { readQuestion: reading(null) }), [1, ["a_out"]], "no reading");
-    assert.deepEqual(await planned("Revenue for AAA", ["AAA"]), [1, ["a_out"]], "a company with no quarterly revenue");
-    assert.deepEqual(await planned("Compare revenue for QTRS and AAA", ["QTRS", "AAA"]), [1, ["a_out", "b_out"]], "a company with no quarterly revenue beside one with");
+    // A company that reports fiscal years and no quarter is shown at its latest fiscal year, with no model (#643).
+    assert.deepEqual(await planned("Revenue for AAA", ["AAA"]), [0, ANNUAL_FIGURES.map((figure) => `out_${figure}_latest_fy`)], "a company with no quarterly revenue");
+    // QTRS files quarters and no fiscal year, so no one period compares them.
+    assert.deepEqual(await planned("Compare revenue for QTRS and AAA", ["QTRS", "AAA"]), [1, ["a_out", "b_out"]], "a company with no quarterly revenue beside one with no fiscal year's");
     const carried = (await resolve("QTRS")) as ChatResolvedSubjectPreResolution;
     // A follow-up that adds a company is the overview of the carried one and the added one.
     assert.deepEqual(await planned("Compare it with AAA", ["QTRS", "AAA"], { priorSubjects: async () => [carried], readQuestion: reading({ ...NO_ASKS, companies: { kind: "compare", add: ["AAA"] } }) }), [1, ["a_out", "b_out"]], "a carried company beside one with no quarters");
@@ -441,6 +459,68 @@ test("a question about one company that asks for no figure is answered with its 
     const { rows: [saved] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
     const notes = (saved.blocks as Array<{ kind: string; segments?: Array<{ text: string }> }>).slice(1).flatMap((block) => block.segments?.map((segment) => segment.text) ?? []);
     assert.deepEqual(notes, ["A margin trend is charted over reported quarters, and none could be read for ANNL, so its margins are shown for a fiscal year."]);
+  });
+
+  await t.test("a comparison of a company with quarters and ones that report only fiscal years shows each company's latest fiscal year, never the model's menu, and gaps a line one company does not file (#643)", async () => {
+    let calls = 0;
+    const counted: PlanningModel = async () => {
+      calls += 1;
+      throw new Error("the planner should not be asked");
+    };
+    const harness = chatHarness(pool, { model: counted, readQuestion: reading({ ...NO_ASKS, companies: { kind: "as_named", names: ["MIXD", "ANNL", "NOGA"] } }), resolveMention: resolve });
+    const done = completed((await harness.run({ ...base, userIntent: "compare MIXD, ANNL and NOGA" })).events);
+    assert.ok(done.message_id && !done.clarification && !done.financial_gap, JSON.stringify(done));
+    assert.equal(calls, 0);
+    const rows = await results(done.message_id);
+    // MIXD reports its fiscal 2023 quarters and the year: the year is compared.
+    assert.deepEqual(rows.filter(([outputId]) => outputId!.endsWith("_revenue_latest_fy")).map(([outputId, period, disposition]) => [outputId, period, disposition]), [
+      ["out_a_revenue_latest_fy", "FY2023 (ended 2023-12-31)", "verified"],
+      ["out_b_revenue_latest_fy", "FY2023 (ended 2023-12-31)", "verified"],
+      ["out_c_revenue_latest_fy", "FY2024 (ended 2024-12-31)", "verified"],
+    ]);
+    // NOGA files no gross profit: its gross margin is a gap, and the rest publishes.
+    assert.deepEqual(rows.filter(([outputId]) => /^out_c_gross_(profit|margin)_latest_fy$/u.test(outputId!)).map(([outputId, , disposition]) => [outputId, disposition]), [
+      ["out_c_gross_profit_latest_fy", "missing"],
+      ["out_c_gross_margin_latest_fy", "blocked_dependency"],
+    ]);
+    const { rows: [saved] } = await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [done.message_id]);
+    const notes = (saved.blocks as Array<{ segments?: Array<{ text: string }> }>).slice(1).flatMap((block) => block.segments?.map((segment) => segment.text) ?? []);
+    assert.deepEqual(notes, ["Quarterly figures are not on file for every company, so each company's latest fiscal year is shown."]);
+    assert.equal(saved.research_scope.latest_period, "fiscal_year", "a follow-up reads fiscal years too");
+  });
+
+  await t.test("a reply taking every figure a clarification offered is one plan of them all, with no model, each company at its latest fiscal year (#643)", async () => {
+    let calls = 0;
+    const counted: PlanningModel = async () => {
+      calls += 1;
+      throw new Error("the planner should not be asked");
+    };
+    // "Revenue; Gross margin; Operating margin; Net margin; Free cash flow; Net cash", as the model reads it.
+    const every: ScopeProposal = {
+      ...NO_ASKS,
+      metrics: ["income_statement", "free_cash_flow", "net_cash"].map((key) => proposedMetric(key, null, null)!),
+      income_items: ["revenue", "gross_margin", "operating_margin", "net_margin"],
+      asks: new Set(["margins", "latest_fiscal_year"]),
+      period: { kind: "latest" },
+      companies: { kind: "as_named", names: ["MIXD", "ANNL", "NOGA"] },
+    };
+    const harness = chatHarness(pool, { model: counted, readQuestion: reading(every), resolveMention: resolve });
+    const done = completed((await harness.run({ ...base, userIntent: "MIXD, ANNL and NOGA: Revenue; Gross margin; Operating margin; Net margin; Free cash flow; Net cash" })).events);
+    assert.ok(done.message_id && !done.clarification && !done.financial_gap, JSON.stringify(done));
+    assert.equal(calls, 0);
+    const rows = await results(done.message_id);
+    // A figure missing an input is a gap at the latest fiscal year; the rest publishes.
+    assert.deepEqual(rows.filter(([outputId]) => /^out_[abc]_(revenue|gross_margin|free_cash_flow)_latest_fy$/u.test(outputId!)).map(([outputId, period, disposition]) => [outputId, period, disposition]), [
+      ["out_a_revenue_latest_fy", "FY2023 (ended 2023-12-31)", "verified"],
+      ["out_a_gross_margin_latest_fy", "FY2023 (ended 2023-12-31)", "verified"],
+      ["out_a_free_cash_flow_latest_fy", "latest fiscal year", "blocked_dependency"],
+      ["out_b_revenue_latest_fy", "FY2023 (ended 2023-12-31)", "verified"],
+      ["out_b_gross_margin_latest_fy", "FY2023 (ended 2023-12-31)", "verified"],
+      ["out_b_free_cash_flow_latest_fy", "latest fiscal year", "blocked_dependency"],
+      ["out_c_revenue_latest_fy", "FY2024 (ended 2024-12-31)", "verified"],
+      ["out_c_gross_margin_latest_fy", "latest fiscal year", "blocked_dependency"],
+      ["out_c_free_cash_flow_latest_fy", "latest fiscal year", "blocked_dependency"],
+    ]);
   });
 
   await t.test("a margin trend of a company that reports only fiscal years, resumed before its answer was saved, still says why there is no trend (#639 review)", async () => {

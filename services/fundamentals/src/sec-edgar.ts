@@ -109,7 +109,8 @@ function fromLosslessCompanyFacts(raw: unknown): unknown {
   rejectStrayNumbers(rest, "companyfacts");
   return {
     ...rest,
-    cik: isSourceNumber(cik) ? boundedInteger(cik, "cik", { min: 1, max: 9_999_999_999 }) : cik,
+    // Some companies' cik is served as a zero-padded string ("0002023554").
+    cik: isSourceNumber(cik) ? boundedInteger(cik, "cik", { min: 1, max: 9_999_999_999 }) : typeof cik === "string" && /^\d{1,10}$/u.test(cik) ? Number(cik) : cik,
     facts: mapRecord(facts, (taxonomy) => mapRecord(taxonomy, losslessConcept)),
   };
 }

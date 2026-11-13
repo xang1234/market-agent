@@ -12,6 +12,7 @@
 
 import {
   balanceComponentNodes,
+  balanceComponents,
   DEFAULT_EXECUTION_LIMITS,
   dependencyClosure,
   hashCanonical,
@@ -39,7 +40,7 @@ import { interpretPlan } from "./plan-interpretation.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 export const PLANNER_ADAPTER_VERSION = "financial-planner.v1";
-export const PLANNER_PROMPT_VERSION = "financial-plan-prompt.v4";
+export const PLANNER_PROMPT_VERSION = "financial-plan-prompt.v5";
 export const DETERMINISTIC_ADAPTER_VERSION = "financial-deterministic-planner.v1";
 
 /**
@@ -54,6 +55,42 @@ const UNSUPPORTED_MEANINGS: Readonly<Record<UnsupportedReason, string>> = {
   adjusted: "an adjusted or non-GAAP figure",
   undefined_metric: "a metric with no approved definition",
   other: "anything else",
+};
+
+/**
+ * The figures a clarification may offer, each worded by the server, with the
+ * reported metrics it reads: only what an approved definition computes for a
+ * company on its own, so no option is one the engine cannot answer (#643). A
+ * model's clarification names them by key; anything else it offers is dropped.
+ */
+// Net cash needs every required balance (cash and equivalents) and, on a side
+// with none required (debt), any one of its components, as balanceSum does.
+const netCashReads = (): FigureReads => (["cash", "debt"] as const).flatMap((side): FigureReads => {
+  const components = balanceComponents("net_cash").filter((component) => component.side === side);
+  const required = components.filter((component) => component.required).map((component) => component.metric_key as string);
+  return required.length > 0 ? required : [components.map((component) => component.metric_key as string)];
+});
+
+/** A figure's reads: each entry a metric, or a list of which any one will do. */
+export type FigureReads = ReadonlyArray<string | ReadonlyArray<string>>;
+
+export const CLARIFICATION_FIGURES: Readonly<Record<string, Readonly<{ label: string; reads: FigureReads; priced?: true; positive?: string }>>> = {
+  revenue: { label: "Revenue", reads: ["revenue"] },
+  gross_margin: { label: "Gross margin", reads: ["gross_profit", "revenue"] },
+  operating_margin: { label: "Operating margin", reads: ["operating_income", "revenue"] },
+  net_margin: { label: "Net margin", reads: ["net_income", "revenue"] },
+  operating_income: { label: "Operating income", reads: ["operating_income"] },
+  net_income: { label: "Net income", reads: ["net_income"] },
+  eps_diluted: { label: "Diluted EPS", reads: ["eps_diluted"] },
+  operating_cash_flow: { label: "Operating cash flow", reads: ["operating_cash_flow"] },
+  capex: { label: "Capital expenditures", reads: ["capex"] },
+  free_cash_flow: { label: "Free cash flow", reads: ["operating_cash_flow", "capex"] },
+  cash_and_equivalents: { label: "Cash and equivalents", reads: ["cash_and_equivalents"] },
+  net_cash: { label: "Net cash", reads: netCashReads() },
+  // priced: also needs the share price the valuation binds at the cutoff.
+  market_cap: { label: "Market capitalization", reads: ["shares_outstanding"], priced: true },
+  // positive: the latest fiscal year's value of that metric must be above zero (peRatio).
+  pe_ratio: { label: "P/E ratio", reads: ["eps_diluted"], priced: true, positive: "eps_diluted" },
 };
 
 /** Adapter over the existing model router (router.complete). */
@@ -156,7 +193,7 @@ export async function planFinancialRequest(context: PlanningContext, requestText
       throw new PlanningModelError(cause);
     }
     calls += 1;
-    const draft = parseDraft(response.text);
+    const draft = parseDraft(response.text, context);
     const attempt = draft.ok ? assemblePlan(context, draft.value, { kind: "model", adapter_version: PLANNER_ADAPTER_VERSION, model: response.model, prompt_version: PLANNER_PROMPT_VERSION }) : draft;
     if (attempt.ok) return finish(attempt.value, calls);
     if (attempt.kind === "clarify") return { outcome: "needs_clarification", clarification: attempt.clarification, model_calls: calls };
@@ -216,7 +253,7 @@ type Attempt<T> = { ok: true; value: T } | ({ ok: false } & Rejection);
 const READY_KEYS = ["outcome", "subjects", "operations", "outputs", "thresholds"];
 const DETERMINISTIC_KEYS = [...READY_KEYS, "assumptions"];
 
-function parseDraft(text: string): Attempt<Draft> {
+function parseDraft(text: string, context: PlanningContext): Attempt<Draft> {
   const body = text.trim().replace(/^```(?:json)?\s*/u, "").replace(/\s*```$/u, "");
   let value: unknown;
   try {
@@ -229,9 +266,17 @@ function parseDraft(text: string): Attempt<Draft> {
     return { ok: false, kind: "unsupported", reason, issues: [] };
   }
   if (isRecord(value) && value.outcome === "needs_clarification") {
+    // Its options are figure keys, worded here, so its own text reaches the
+    // user only as a question with no options.
+    const asked = Array.isArray(value.choices) ? value.choices.filter((choice): choice is string => typeof choice === "string") : [];
+    const offered = asked.filter((choice) => Object.hasOwn(CLARIFICATION_FIGURES, choice));
+    const choices = figureChoices([...new Set(offered)]);
+    // An option outside the figures is named, so a reply of "all" doesn't drop it unsaid.
+    const dropped = [...new Set(asked.filter((choice) => !offered.includes(choice)).map((choice) => choice.replaceAll("_", " ").trim().slice(0, 60)).filter(Boolean))].slice(0, 3);
+    const cannot = dropped.length === 0 ? "" : ` I can't compute ${dropped.length < 2 ? dropped[0] : `${dropped.slice(0, -1).join(", ")} or ${dropped.at(-1)}`}.`;
+    if (choices.length > 0) return { ok: false, kind: "clarify", clarification: clarification("metric", `${figureQuestion(context)}${cannot}`, choices) };
     const question = typeof value.question === "string" ? value.question.slice(0, 500) : "Please clarify the request.";
-    const choices = Array.isArray(value.choices) ? value.choices.filter((choice): choice is string => typeof choice === "string").slice(0, 10) : [];
-    return { ok: false, kind: "clarify", clarification: clarification("request", question, choices.map((label, index) => ({ choice_id: `option_${index + 1}`, label }))) };
+    return { ok: false, kind: "clarify", clarification: clarification("request", question, []) };
   }
   return checkDraft(value, READY_KEYS);
 }
@@ -297,7 +342,7 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
       clarification: clarification(
         "metric",
         question,
-        PLANNABLE_METRICS.map((definition) => ({ choice_id: definition.metric_key, label: `${definition.label} (${definition.definition_version})` })),
+        figureChoices(Object.keys(CLARIFICATION_FIGURES)),
       ),
     };
   }
@@ -455,6 +500,16 @@ export function unresolvedSubjectClarification(context: PlanningContext): Clarif
   return null;
 }
 
+function figureChoices(keys: ReadonlyArray<string>): ClarificationChoice[] {
+  return keys.map((key) => ({ choice_id: key, label: CLARIFICATION_FIGURES[key]!.label }));
+}
+
+function figureQuestion(context: PlanningContext): string {
+  const names = context.requested_subjects.map((subject) => subject.mention);
+  const listed = names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  return `Which figures should I ${names.length > 1 ? "compare" : "show"} for ${listed}?`;
+}
+
 function clarification(kind: Clarification["kind"], question: string, choices: ReadonlyArray<ClarificationChoice>): Clarification {
   return { clarification_id: hashCanonical("clarification", { kind, question, choices: choices.map((choice) => choice.choice_id) }), kind, question, choices };
 }
@@ -482,7 +537,7 @@ function systemPrompt(): string {
     'A valuation\'s price is a reported_metric of share_price with period {kind:"at_cutoff"}, planned only as the price of market_cap or pe_ratio. market_cap\'s shares are shares_outstanding with period {kind:"latest",period_type:"quarterly",offset:0}. pe_ratio\'s earnings are eps_diluted with period {kind:"latest",period_type:"annual",offset:0}: P/E uses the latest fiscal year\'s diluted EPS.',
     'An absolute_change of a margin or of a percent_change_positive_base is in percentage points, and so is a threshold on it, with unit {"kind":"percentage_points"}. Its value is in points, not a fraction: a 2-point fall is {"value":"-2","unit":{"kind":"percentage_points"}}, never -0.02.',
     "Plan every requested company. Threshold values are decimal strings. Never invent metric definitions, identifiers, owners, budgets, modes, or verification fields.",
-    'If a definition is ambiguous reply {"outcome":"needs_clarification","question","choices"}; if it cannot be expressed reply {"outcome":"unsupported","reason"}.',
+    `If a definition is ambiguous reply {"outcome":"needs_clarification","question","choices"}, each choice one of these figure keys: ${Object.keys(CLARIFICATION_FIGURES).join(", ")}; if it cannot be expressed reply {"outcome":"unsupported","reason"}.`,
     `An unsupported reason is one of these keys (key: what the request asks for): ${UNSUPPORTED_REASONS.map((reason) => `${reason}: ${UNSUPPORTED_MEANINGS[reason]}`).join("; ")}.`,
   ].join("\n");
 }

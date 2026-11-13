@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createRuntimeAuthority, evaluatePlan, planSemanticHash, type ValuePayload } from "../../financial-core/src/index.ts";
+import { createRuntimeAuthority, evaluatePlan, METRIC_CATALOG_V1, planSemanticHash, type ValuePayload } from "../../financial-core/src/index.ts";
 import { operand } from "../../financial-core/test/operand-fixtures.ts";
 import {
   buildDeterministicPlan,
+  CLARIFICATION_FIGURES,
   ClarificationError,
   planFinancialRequest,
   planningModelFromRouter,
@@ -134,7 +135,40 @@ test("an unrecognized metric definition asks for a choice instead of guessing", 
   if (result.outcome !== "needs_clarification") return;
   assert.equal(result.clarification.kind, "metric");
   assert.ok(result.clarification.choices.some((choice) => choice.choice_id === "operating_income"));
+  // Only figures the engine plans alone: a share price is planned only as a valuation's price.
+  assert.deepEqual(result.clarification.choices.map((choice) => choice.choice_id), Object.keys(CLARIFICATION_FIGURES));
   assert.match(result.clarification.question, /ebitda/u);
+});
+
+test("a model's clarification offers only figures an approved definition computes, worded by the server, naming the ones it cannot compute (#643)", async () => {
+  const model = scripted({
+    outcome: "needs_clarification",
+    question: "Which metric should I use? Also, SNDK is in your request but not in the requested-company list. Should I include it?",
+    choices: ["revenue", "gross_margin", "ebitda_margin", "Market cap and P/E", "free_cash_flow", "pe_ratio", "share_price", "revenue"],
+  });
+  const result = await planFinancialRequest(context({ requested_subjects: [0, 1, 2].map(resolved) }), "compare Apple, SNDK, Microsoft and Alphabet", model);
+  assert.equal(result.outcome, "needs_clarification");
+  if (result.outcome !== "needs_clarification") return;
+  assert.equal(result.clarification.kind, "metric");
+  // The options it offered outside the figures are named, so "all" doesn't drop them unsaid; its question is not shown.
+  assert.equal(result.clarification.question, "Which figures should I compare for Apple, Microsoft and Alphabet? I can't compute ebitda margin, Market cap and P/E or share price.");
+  assert.deepEqual(result.clarification.choices.map((choice) => [choice.choice_id, choice.label]), [
+    ["revenue", "Revenue"],
+    ["gross_margin", "Gross margin"],
+    ["free_cash_flow", "Free cash flow"],
+    ["pe_ratio", "P/E ratio"],
+  ]);
+
+  // With no figure it can offer, the model's question stands alone, with no options.
+  const period = await planFinancialRequest(context({ requested_subjects: [resolved(0)] }), "Apple revenue", scripted({ outcome: "needs_clarification", question: "Which fiscal year?", choices: ["2023", "2024"] }));
+  assert.ok(period.outcome === "needs_clarification");
+  assert.deepEqual([period.clarification.kind, period.clarification.question, period.clarification.choices], ["request", "Which fiscal year?", []]);
+});
+
+test("a figure a clarification may offer reads only approved metrics", () => {
+  for (const [key, figure] of Object.entries(CLARIFICATION_FIGURES)) {
+    assert.ok(figure.reads.length > 0 && figure.reads.every((read) => read.length > 0) && figure.reads.flat().every((metric) => METRIC_CATALOG_V1.has(metric)), key);
+  }
 });
 
 test("model JSON cannot carry ownership, budgets, verification, or executable content", async () => {
