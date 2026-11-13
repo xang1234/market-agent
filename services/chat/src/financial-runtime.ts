@@ -48,6 +48,8 @@ import { requireFinancialReadiness } from "../../financial-engine/src/readiness.
 import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { PUBLIC_SOURCE_SQL } from "../../evidence/src/financial-input-repo.ts";
+import { selectPrice } from "../../financial-engine/src/select-price.ts";
+import type { SelectionPolicy } from "../../financial-engine/src/select-inputs.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId, noteBlock } from "./chat-ids.ts";
 import { priceComparisonTurn } from "./scenario-price-comparison.ts";
@@ -299,7 +301,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           // the still-ambiguous mention as a new company before the pick
           // applies. Only a metric or request question is answered by typing.
           const refs = outcome.clarification.kind === "subject" ? [] : askedRefs();
-          const clarification = outcome.clarification.kind === "metric" ? await computableChoices(deps.pool, outcome.clarification, refs) : outcome.clarification;
+          const clarification = outcome.clarification.kind === "metric" ? await computableChoices(deps.pool, deps.evidence(deps.pool), outcome.clarification, refs, (deps.clock?.() ?? new Date()).toISOString(), authority.allowed_source_classes) : outcome.clarification;
           return { kind: "clarification", clarification, ...(refs.length > 0 ? { subject_refs: refs } : {}), ...noted };
         }
         case "gap":
@@ -577,8 +579,16 @@ const leftOutNotes = (notFound: ReadonlyArray<string>, noFilings: ReadonlyArray<
  * (CLARIFICATION_FIGURES), so the user is never offered what no company can
  * answer (#643). A clarification offering anything else is left as it is.
  */
-async function computableChoices(db: SqlExecutor, clarification: Clarification, refs: ReadonlyArray<FinancialSubjectRef>): Promise<Clarification> {
-  const reads = (choiceId: string) => Object.hasOwn(CLARIFICATION_FIGURES, choiceId) ? CLARIFICATION_FIGURES[choiceId]!.reads : null;
+async function computableChoices(
+  db: SqlExecutor,
+  evidence: FinancialEvidencePort,
+  clarification: Clarification,
+  refs: ReadonlyArray<FinancialSubjectRef>,
+  asOf: string,
+  allowed: SelectionPolicy["allowed_source_classes"],
+): Promise<Clarification> {
+  const figure = (choiceId: string) => Object.hasOwn(CLARIFICATION_FIGURES, choiceId) ? CLARIFICATION_FIGURES[choiceId]! : null;
+  const reads = (choiceId: string) => figure(choiceId)?.reads ?? null;
   if (refs.length === 0 || clarification.choices.some((choice) => reads(choice.choice_id) === null)) return clarification;
   const { rows } = await db.query<{ issuer_id: string; metric_keys: string[] }>(
     `select f.subject_id::text as issuer_id, array_agg(distinct m.metric_key) as metric_keys
@@ -589,11 +599,27 @@ async function computableChoices(db: SqlExecutor, clarification: Clarification, 
     [refs.map((ref) => ref.id), [...new Set(clarification.choices.flatMap((choice) => reads(choice.choice_id)!.flat()))]],
   );
   // By company and fiscal period: a derived figure needs its inputs in one period, as the operation does.
-  const filed = rows.map((row) => new Set(row.metric_keys));
+  const filed = rows.map((row) => ({ issuer: row.issuer_id, keys: new Set(row.metric_keys) }));
+  // A valuation also needs the price binding would select for that company (bindPriceSlot).
+  const priced = clarification.choices.some((choice) => figure(choice.choice_id)!.priced) ? await pricedIssuers(evidence, refs, asOf, allowed) : new Set<string>();
   // ponytail: with none left the question stands alone and the user types a figure; a named "none on file" line if that shows up.
-  const choices = clarification.choices.filter((choice) => filed.some((keys) => reads(choice.choice_id)!.every((read) => typeof read === "string" ? keys.has(read) : read.some((key) => keys.has(key)))));
+  const choices = clarification.choices.filter((choice) => filed.some(({ issuer, keys }) =>
+    (!figure(choice.choice_id)!.priced || priced.has(issuer))
+    && reads(choice.choice_id)!.every((read) => typeof read === "string" ? keys.has(read) : read.some((key) => keys.has(key)))));
   const { kind, question } = clarification;
   return { clarification_id: hashCanonical("clarification", { kind, question, choices: choices.map((choice) => choice.choice_id) }), kind, question, choices };
+}
+
+/** The companies whose listing has a share price selectPrice takes at `asOf`, as bindPriceSlot reads it. */
+async function pricedIssuers(evidence: FinancialEvidencePort, refs: ReadonlyArray<FinancialSubjectRef>, asOf: string, allowed: SelectionPolicy["allowed_source_classes"]): Promise<Set<string>> {
+  const priced = new Set<string>();
+  for (const ref of refs) {
+    const history = await evidence.readSplitHistory({ subject: ref, as_of: asOf });
+    if (history.status === "gap") continue;
+    const page = await evidence.readPriceObservations({ listing_id: history.listing_id, as_of: asOf });
+    if (page.status === "ok" && selectPrice(page, history, { knowledge_cutoff: asOf, allowed_source_classes: allowed }).status === "selected") priced.add(ref.id.toLowerCase());
+  }
+  return priced;
 }
 
 const NO_COMPANIES: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [], labels: new Map() };

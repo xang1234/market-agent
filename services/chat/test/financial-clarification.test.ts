@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { databaseUrl, IDS, RESTATED_REVENUE, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
+import { databaseUrl, IDS, NVDA, RESTATED_REVENUE, seedReportedFact, seedValuedIssuer } from "../../financial-engine/test/db-fixtures.ts";
+import type { ChatResolvedSubjectPreResolution } from "../src/subjects.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { createChatServer } from "../src/http.ts";
 import { loadPriorSubjects } from "../src/thread-context.ts";
@@ -304,4 +305,32 @@ test("a metric clarification offers only figures the companies' filings compute,
   assert.deepEqual(none.financial_gap, { reason_code: "no_sec_filings" }, JSON.stringify(none));
   const [noneBlock] = leftOut.persisted.at(-1)!.blocks as Array<{ segments: Array<{ text: string }> }>;
   assert.equal(noneBlock!.segments[0]!.text, "No company matched ZZZQ. No SEC filings are on file for CCC yet.");
+});
+
+test("market cap and P/E are offered only for a company with a share price at the cutoff (#645)", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for chat clarification coverage");
+    return;
+  }
+  const { db, pool, threadId } = await chatDatabase(t, "chat-clarify-priced");
+  const PXQ = {
+    issuer: "4f000000-0000-4000-8000-000000000ba1", listing: "4f000000-0000-4000-8000-000000000be1",
+    tenK: "4f000000-0000-4000-8000-000000000bc1", tenQ: "4f000000-0000-4000-8000-000000000bc2",
+    ticker: "PXQ", name: "Priced Corp.", close: "100.00", eps: "4.00", shares: "1000000",
+  } as const;
+  await seedValuedIssuer(db, PXQ);
+  const asking = (async () => ({ model: "stub-model", text: JSON.stringify({ outcome: "needs_clarification", question: "Which figure?", choices: ["market_cap", "pe_ratio", "eps_diluted"] }) })) as unknown as PlanningModel;
+  const harness = chatHarness(pool, {
+    model: asking,
+    readQuestion: async () => null,
+    clock: () => new Date(NVDA.cutoff),
+    resolveMention: (mention) => mention === "PXQ"
+      ? Promise.resolve({ status: "resolved", subject_ref: { kind: "issuer", id: PXQ.issuer }, display_label: PXQ.name, handoff: { display_labels: { ticker: PXQ.ticker } } } as unknown as ChatResolvedSubjectPreResolution)
+      : resolveMention(mention),
+  });
+  const offered = async () => (completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "value PXQ" })).events).financial_clarification as Offered).choices.map((choice) => choice.choice_id);
+  assert.deepEqual(await offered(), ["market_cap", "pe_ratio", "eps_diluted"]);
+  // Without a price the valuation would end in a gap, so only the filed figure is offered.
+  await db.query(`delete from price_observations where listing_id = $1`, [PXQ.listing]);
+  assert.deepEqual(await offered(), ["eps_diluted"]);
 });
