@@ -703,6 +703,16 @@ test("fetchCompanyFacts calls the fetcher with the padded path and returns the p
   assert.deepEqual(evidence, { url: fetched.url, body_sha256: fetched.body_sha256, completed_at: "2024-02-01T10:05:00.000Z" });
 });
 
+// SEC serves some companies' companyfacts cik as a zero-padded string (SNDK: "0002023554").
+test("fetchCompanyFacts reads a zero-padded string cik as its number, and still rejects one that is no CIK", async () => {
+  const padded: SecEdgarFetcher = async () => secFetched({ ...aaplCompanyFactsFixture(), cik: "0000320193" });
+  assert.equal((await fetchCompanyFacts(padded, AAPL_CIK)).facts.cik, AAPL_CIK);
+  for (const cik of ["0000000000", "32O193", "", "12345678901"]) {
+    const bad: SecEdgarFetcher = async () => secFetched({ ...aaplCompanyFactsFixture(), cik });
+    await assert.rejects(fetchCompanyFacts(bad, AAPL_CIK), /cik/, cik);
+  }
+});
+
 test("fetchCompanyFacts rejects malformed responses", async () => {
   const fetcher: SecEdgarFetcher = async () => secFetched({ wrong: "shape" });
   await assert.rejects(
