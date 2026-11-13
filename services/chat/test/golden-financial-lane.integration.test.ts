@@ -81,15 +81,15 @@ test("golden metric questions certify through the chat financial lane on the rec
 
   assert.deepEqual(await ask("Why did AMD's operating margin turn negative in Q2 2025?"), [["out_a_om", "verified", "-1.74%"]]);
   assert.deepEqual(await ask("Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500"), [
-    ["out_a_rev", "verified", "USD 209,911,000,000.00"],
+    ["out_a_rev", "verified", "$209.9B"],
     ["out_a_gm", "verified", "70.78%"],
     ["out_a_om", "verified", "60.21%"],
     ["out_a_nm", "verified", "53.60%"],
-    ["out_b_rev", "verified", "USD 34,669,000,000.00"],
+    ["out_b_rev", "verified", "$34.7B"],
     ["out_b_gm", "verified", "49.92%"],
     ["out_b_om", "verified", "9.78%"],
     ["out_b_nm", "verified", "12.04%"],
-    ["out_c_rev", "verified", "USD 416,161,000,000.00"],
+    ["out_c_rev", "verified", "$416.2B"],
     ["out_c_gm", "verified", "46.91%"],
     ["out_c_om", "verified", "31.97%"],
     ["out_c_nm", "verified", "26.92%"],
@@ -103,17 +103,17 @@ test("golden metric questions certify through the chat financial lane on the rec
   // Each reading names the company its question writes and the income
   // statement, as profit reads: the overview, not a menu of profit measures (#517).
   assert.deepEqual(await ask("Analyze NVDA's profit", readingOf(METRIC_READING)), [
-    ["out_revenue_fy2025_q1", "verified", "USD 26,044,000,000.00"],
-    ["out_revenue_fy2025_q2", "verified", "USD 30,040,000,000.00"],
-    ["out_revenue_fy2025_q3", "verified", "USD 35,082,000,000.00"],
-    ["out_revenue_fy2025_q4", "verified", "USD 39,331,000,000.00"],
-    ["out_revenue_fy2026_q1", "verified", "USD 44,062,000,000.00"],
-    ["out_revenue_fy2026_q2", "verified", "USD 46,743,000,000.00"],
-    ["out_revenue_fy2026_q3", "verified", "USD 57,006,000,000.00"],
-    ["out_revenue_fy2026_q4", "verified", "USD 62,100,000,000.00"],
-    ["out_gross_profit_fy2026_q4", "verified", "USD 46,200,000,000.00"],
-    ["out_operating_income_fy2026_q4", "verified", "USD 40,300,000,000.00"],
-    ["out_net_income_fy2026_q4", "verified", "USD 35,400,000,000.00"],
+    ["out_revenue_fy2025_q1", "verified", "$26.0B"],
+    ["out_revenue_fy2025_q2", "verified", "$30.0B"],
+    ["out_revenue_fy2025_q3", "verified", "$35.1B"],
+    ["out_revenue_fy2025_q4", "verified", "$39.3B"],
+    ["out_revenue_fy2026_q1", "verified", "$44.1B"],
+    ["out_revenue_fy2026_q2", "verified", "$46.7B"],
+    ["out_revenue_fy2026_q3", "verified", "$57.0B"],
+    ["out_revenue_fy2026_q4", "verified", "$62.1B"],
+    ["out_gross_profit_fy2026_q4", "verified", "$46.2B"],
+    ["out_operating_income_fy2026_q4", "verified", "$40.3B"],
+    ["out_net_income_fy2026_q4", "verified", "$35.4B"],
     ["out_gross_margin", "verified", "74.40%"],
     ["out_operating_margin", "verified", "64.90%"],
     ["out_net_margin", "verified", "57.00%"],
@@ -132,15 +132,15 @@ test("golden metric questions certify through the chat financial lane on the rec
     "No period was named, so the latest reported quarter is shown. Profit is shown as gross profit, operating income and net income, each with its margin.",
   ]);
   assert.equal(await commentaryText(), [
-    "NVDA's revenue rose in every period from Q1 FY2025 (ended Apr 2024) (USD 26,044,000,000.00) to Q4 FY2026 (ended Jan 2026) (USD 62,100,000,000.00).",
+    "NVDA's revenue rose in every period from Q1 FY2025 (ended Apr 2024) ($26.0B) to Q4 FY2026 (ended Jan 2026) ($62.1B).",
     "NVDA's gross margin (gross profit / revenue) was 74.40%, operating margin (operating income / revenue) 64.90% and net margin (net income / revenue) 57.00% in Q4 FY2026 (ended Jan 2026).",
   ].join("\n\n"));
   const latestQuarter = (slot: string, quarter: string, values: string[]) =>
     [`revenue_${quarter}`, `gross_profit_${quarter}`, `operating_income_${quarter}`, `net_income_${quarter}`, "gross_margin", "operating_margin", "net_margin", "revenue_growth_qoq", "revenue_growth_yoy"]
       .map((id, index) => [`out_${slot}_${id}`, "verified", values[index]]);
-  const NVDA = ["USD 62,100,000,000.00", "USD 46,200,000,000.00", "USD 40,300,000,000.00", "USD 35,400,000,000.00", "74.40%", "64.90%", "57.00%", "8.94%", "57.89%"];
-  const AMD = ["USD 11,200,000,000.00", "USD 6,050,000,000.00", "USD 1,610,000,000.00", "USD 1,480,000,000.00", "54.02%", "14.38%", "13.21%", "4.67%", "45.74%"];
-  const AAPL = ["USD 97,100,000,000.00", "USD 45,700,000,000.00", "USD 29,800,000,000.00", "USD 24,900,000,000.00", "47.06%", "30.69%", "25.64%", "-1.62%", "3.26%"];
+  const NVDA = ["$62.1B", "$46.2B", "$40.3B", "$35.4B", "74.40%", "64.90%", "57.00%", "8.94%", "57.89%"];
+  const AMD = ["$11.2B", "$6.0B", "$1.6B", "$1.5B", "54.02%", "14.38%", "13.21%", "4.67%", "45.74%"];
+  const AAPL = ["$97.1B", "$45.7B", "$29.8B", "$24.9B", "47.06%", "30.69%", "25.64%", "-1.62%", "3.26%"];
   const MARGINS = ["gross_margin", "operating_margin", "net_margin"];
   const LEADS: Record<string, string[]> = { b: ["20.42 pp", "50.82 pp", "43.90 pp"], c: ["27.36 pp", "30.44 pp", "27.71 pp"] };
   const leads = (...slots: string[]) => MARGINS.flatMap((metric, index) => slots.map((slot) => [`out_a_minus_${slot}_${metric}`, "verified", LEADS[slot]![index]]));
@@ -152,7 +152,7 @@ test("golden metric questions certify through the chat financial lane on the rec
   assert.equal(await commentaryText(), [
     "Of NVDA and AMD, NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026 (ended Jan 2026)), AMD 54.02% (Q2 FY2026 (ended Jun 2026)).",
     "Of NVDA and AMD, NVDA's year-over-year percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 (ended Jan 2026) vs Q4 FY2025 (ended Jan 2025)), AMD 45.74% (Q2 FY2026 (ended Jun 2026) vs Q2 FY2025 (ended Jun 2025)).",
-    "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026 (ended Jan 2026); AMD's revenue was USD 11,200,000,000.00 in Q2 FY2026 (ended Jun 2026).",
+    "NVDA's revenue was $62.1B in Q4 FY2026 (ended Jan 2026); AMD's revenue was $11.2B in Q2 FY2026 (ended Jun 2026).",
   ].join("\n\n"), "each company is shown at its newest quarter alone, so the recorded gross margin comparison of the two stands");
   assert.deepEqual(await ask("Compare NVDA, AMD and AAPL profit", readingOf(METRIC_READING)), [
     ...latestQuarter("a", "fy2026_q4", NVDA),

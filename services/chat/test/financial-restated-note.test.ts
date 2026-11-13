@@ -111,15 +111,15 @@ test("the note on a figure later filings moved", { timeout: 300_000 }, async (t)
 
   await t.test("a quarter a later filing changed says the filing restated it", async () => {
     const blocks = await answer("Q1");
-    assert.ok(blocks.includes("8,955,000,000"), blocks);
+    assert.ok(blocks.includes("USD 8955000000"), blocks);
     assert.ok(blocks.includes("Restated by a later filing, so not as first reported: OPM's revenue in Q1 FY2024 (ended 2024-03-31)."), blocks);
     assert.ok(!blocks.includes(SEC_ISSUER), "no raw subject id");
   });
 
   await t.test("a figure restated and then reversed is as first reported, so no note says otherwise", async () => {
     const blocks = await answer("Q1", "OPM", "net_income");
-    assert.ok(blocks.includes("100,000,000"), blocks);
-    assert.ok(!blocks.includes("110,000,000"), "the reversed figure is not shown");
+    assert.ok(blocks.includes("USD 100000000"), blocks);
+    assert.ok(!blocks.includes("USD 110000000"), "the reversed figure is not shown");
     assert.ok(!blocks.includes("Restated by a later filing"), blocks);
   });
 
@@ -131,7 +131,7 @@ test("the note on a figure later filings moved", { timeout: 300_000 }, async (t)
 
   await t.test("a derived fourth quarter says it is the filing's own statement, not a restatement", async () => {
     const blocks = await answer("Q4");
-    assert.ok(blocks.includes("10,812,000,000"), blocks);
+    assert.ok(blocks.includes("USD 10812000000"), blocks);
     assert.ok(blocks.includes("Taken from the filing's own statement of the quarter: OPM's revenue in Q4 FY2024 (ended 2024-12-31)."), blocks);
     assert.ok(!blocks.includes("Restated by a later filing"), blocks);
   });
@@ -139,7 +139,7 @@ test("the note on a figure later filings moved", { timeout: 300_000 }, async (t)
   await t.test("a derived quarter whose input a filing changed is a gap that says so, with no number and no talk of stock splits", async () => {
     const blocks = await answer("Q4", "PAX");
     assert.ok(blocks.includes("A later filing states a different figure, or changes one this is derived from, and the current figure could not be verified."), blocks);
-    assert.ok(!blocks.includes("3,713,000,000"), "the stale figure is not shown");
+    for (const stale of ["3713000000", "$3.7B"]) assert.ok(!blocks.includes(stale), `the stale figure is not shown as ${stale}`);
     assert.ok(!blocks.includes("stock splits"), blocks);
   });
 });
