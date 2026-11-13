@@ -63,8 +63,13 @@ const UNSUPPORTED_MEANINGS: Readonly<Record<UnsupportedReason, string>> = {
  * company on its own, so no option is one the engine cannot answer (#643). A
  * model's clarification names them by key; anything else it offers is dropped.
  */
-// Net cash needs a balance on each side, any one of that side's components.
-const balanceSide = (side: "cash" | "debt") => balanceComponents("net_cash").filter((component) => component.side === side).map((component) => component.metric_key as string);
+// Net cash needs every required balance (cash and equivalents) and, on a side
+// with none required (debt), any one of its components, as balanceSum does.
+const netCashReads = (): FigureReads => (["cash", "debt"] as const).flatMap((side): FigureReads => {
+  const components = balanceComponents("net_cash").filter((component) => component.side === side);
+  const required = components.filter((component) => component.required).map((component) => component.metric_key as string);
+  return required.length > 0 ? required : [components.map((component) => component.metric_key as string)];
+});
 
 /** A figure's reads: each entry a metric, or a list of which any one will do. */
 export type FigureReads = ReadonlyArray<string | ReadonlyArray<string>>;
@@ -81,7 +86,7 @@ export const CLARIFICATION_FIGURES: Readonly<Record<string, Readonly<{ label: st
   capex: { label: "Capital expenditures", reads: ["capex"] },
   free_cash_flow: { label: "Free cash flow", reads: ["operating_cash_flow", "capex"] },
   cash_and_equivalents: { label: "Cash and equivalents", reads: ["cash_and_equivalents"] },
-  net_cash: { label: "Net cash", reads: [balanceSide("cash"), balanceSide("debt")] },
+  net_cash: { label: "Net cash", reads: netCashReads() },
   market_cap: { label: "Market capitalization", reads: ["shares_outstanding"] },
   pe_ratio: { label: "P/E ratio", reads: ["eps_diluted"] },
 };

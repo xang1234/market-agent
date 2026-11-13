@@ -275,6 +275,9 @@ test("a metric clarification offers only figures the companies' filings compute,
   });
   // AAA reports cash but no debt: net cash needs a balance on each side, so it is not offered.
   await seedReportedFact(db, { metric_key: "cash_and_equivalents", value: "1000", fiscal_year: 2023, subject: IDS.issuerA });
+  // Nor with securities and debt but no cash and equivalents, which net cash requires.
+  await seedReportedFact(db, { metric_key: "marketable_securities_current", value: "500", fiscal_year: 2021, subject: IDS.issuerA });
+  await seedReportedFact(db, { metric_key: "long_term_debt_noncurrent", value: "300", fiscal_year: 2021, subject: IDS.issuerA });
   // Its cash flow inputs sit in different years, so free cash flow, which needs both in one period, is not offered either.
   await seedReportedFact(db, { metric_key: "operating_cash_flow", value: "900", fiscal_year: 2022, subject: IDS.issuerA });
   await seedReportedFact(db, { metric_key: "capex", value: "100", fiscal_year: 2023, subject: IDS.issuerA });
