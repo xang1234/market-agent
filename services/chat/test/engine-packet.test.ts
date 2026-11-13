@@ -320,6 +320,9 @@ test("amounts that read alike at their scale still compare by their exact values
   // An exact value is a point: "USD 100" is not 99.5-100.5, so ten cents more still orders.
   const cents = enginePacket(content([usd(1, "a", "USD 100.00", "USD 100"), usd(2, "b", "USD 100.10", "USD 100.1")], ["a", "b"]), TICKERS, null);
   assert.deepEqual(checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F2"], op: "highest", result: "F2" }], cents).rejected, []);
+  // Equal exact amounts are a tie, never a winner.
+  const equal = enginePacket(content([usd(1, "a", "$12.9B", "USD 12910000000"), usd(2, "b", "$12.9B", "USD 12910000000")], ["a", "b"]), TICKERS, null);
+  assert.equal(checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F2"], op: "highest", result: "F2" }], equal).rejected.length, 1);
 });
 
 test("commentary passes the ref check only when each ref is a verified result of its own answer, as that answer shows it", () => {

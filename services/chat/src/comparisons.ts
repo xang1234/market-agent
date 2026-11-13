@@ -382,6 +382,7 @@ function interval(value: string): Interval | undefined {
 }
 
 // An exact value has no rounding to stand for: canonical "USD 100" is 100, not 99.5-100.5.
+// ponytail: compared as floats, so amounts within one part in a billion tie; a decimal compare if that ever matters.
 function point(value: Interval | undefined): Interval | undefined {
   return value === undefined ? undefined : { ...value, low: value.mid, high: value.mid };
 }
@@ -391,6 +392,8 @@ function point(value: Interval | undefined): Interval | undefined {
 // 14.2% share 14.15%).
 function compareIntervals(a: Interval, b: Interval): Direction {
   const epsilon = 1e-9 * Math.max(Math.abs(a.mid), Math.abs(b.mid), 1);
+  // Equal values tie: two equal exact points would otherwise share an edge and order.
+  if (Math.abs(a.mid - b.mid) <= epsilon) return 0;
   if (a.low >= b.high - epsilon) return 1;
   if (a.high <= b.low + epsilon) return -1;
   return 0;
