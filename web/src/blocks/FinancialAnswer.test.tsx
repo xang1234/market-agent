@@ -131,7 +131,7 @@ test('a comparison across fiscal calendars has one column per line, each cell na
       ['10.00%', 'Q2 FY2026'],
       ['9.00%', 'Q2 FY2026'],
       ['4.80%', 'Q2 FY2026 vs Q1 FY2026'],
-      ['n/a'],
+      ['n/a', 'Q2 FY2026 vs Q2 FY2025'],
     ],
   ])
   assert.doesNotMatch(html, /Not requested/)
@@ -176,6 +176,23 @@ test('a row whose cells read one period names it once under its company, and a g
   assert.equal(gap.getAttribute('title'), reason)
   assert.equal(gap.querySelector('.sr-only')!.textContent, reason, 'a screen reader hears the reason')
   assert.equal(gap.querySelector('[aria-hidden="true"]')!.textContent, 'n/a')
+})
+
+test('a gap for another period than its row names that period, so the missing figure is identified', () => {
+  const block = structuredClone(financialAnswerFiscalCalendarsFixture) as FinancialAnswerBlock & { financial: FinancialAnswerContent }
+  const labels = block.financial.labels as Record<string, { kind: string; text: string }>
+  labels['period:p3'] = { kind: 'period', text: 'FY2026 (ended 2026-07-03)' }
+  labels['period:p9'] = { kind: 'period', text: 'FY2025 (ended 2025-06-27)' }
+  const net = block.financial.results.find((result) => result.result_id.endsWith('000000000013'))!
+  Object.assign(net, { disposition: 'missing', period_label_id: 'period:p9', presented: { kind: 'gap', text: 'No eligible input was public before the knowledge cutoff.', reason_code: 'missing_input' } })
+  const table = block.financial.presentations[0] as FinancialTablePresentation
+  Object.assign(table, { columns: table.columns.slice(0, 7), rows: table.rows.map((row) => ({ ...row, cells: row.cells.slice(0, 7) })) })
+  const document = new JSDOM(renderToStaticMarkup(<FinancialAnswer block={block} />)).window.document
+  const row = document.querySelectorAll('tbody tr')[1]!
+  assert.deepEqual([...row.querySelector('th')!.childNodes].map((node) => node.textContent), ['Advanced Micro Devices, Inc.', 'FY2026 · ended Jul 2026'])
+  const cells = [...row.querySelectorAll('td')].map((cell) => [...cell.children].map((child) => child.querySelector('[aria-hidden="true"]')?.textContent ?? child.textContent))
+  assert.deepEqual(cells[3], ['n/a', 'FY2025 · ended Jun 2025'])
+  assert.deepEqual(cells[2], ['$770.0M'], 'a value of the row period names none')
 })
 
 test('sorting uses the server exact order; descending keeps rows without a value last', () => {

@@ -148,13 +148,6 @@ test("an observation writes each engine value as a result ref, and a gap as its 
   assert.deepEqual(missing.segments.filter((segment) => segment.type === "ref").map((segment) => segment.type === "ref" && segment.ref_id), [RESULT(6)]);
 });
 
-test("a gap bound to no period names none, since its selector says nothing the answer's periods don't", () => {
-  const packet = enginePacket(COMPARISON, TICKERS, null);
-  const unbound = { ...packet, figures: packet.figures.map((figure) => (figure.id === "F4" ? { ...figure, period: "latest fiscal year" } : figure)) };
-  const missing = renderAssertion({ index: 0, kind: "observation", text: "x", evidence: ["F4"] }, unbound, []);
-  assert.equal(plainText(missing.segments), `AMD's gross margin is not available: ${NOT_REPORTED}`);
-});
-
 test("a gap is never compared: a comparison citing one is rejected, and a cohort names its company as not shown", () => {
   const packet = enginePacket(COMPARISON, TICKERS, null);
   assert.deepEqual(checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F4"], op: "highest", result: "F1" }], packet).rejected,

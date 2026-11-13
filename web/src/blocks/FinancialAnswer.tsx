@@ -123,7 +123,7 @@ function ResultLine({ content, result, badge }: { content: FinancialAnswerConten
   )
 }
 
-// A cell prints its period only when its row reads several; a gap's reason is its title and its screen-reader text.
+// A cell prints its period when its row reads several, or when it is a gap for another period than the row's; a gap's reason is its title and its screen-reader text.
 function Cell({ result, period, showPeriod = false }: { result: FinancialPresentedResult | undefined; period?: string; showPeriod?: boolean }): ReactElement {
   if (!result) return <span className="text-muted">Not requested</span>
   const { presented } = result
@@ -140,10 +140,13 @@ function Cell({ result, period, showPeriod = false }: { result: FinancialPresent
     )
   }
   return (
-    <span className="text-muted" title={presented.text}>
-      <span aria-hidden="true">n/a</span>
-      <span className="sr-only">{presented.text}</span>
-    </span>
+    <>
+      <span className="text-muted" title={presented.text}>
+        <span aria-hidden="true">n/a</span>
+        <span className="sr-only">{presented.text}</span>
+      </span>
+      {showPeriod && period !== undefined ? <span className="block text-xs text-muted">{period}</span> : null}
+    </>
   )
 }
 
@@ -210,7 +213,7 @@ function CertifiedTable({ blockId, provenance, content, results, table }: TableP
                     const period = table.columns[cellIndex]?.period_label_id === null && result ? shortPeriod(labelText(content, result.period_label_id)) : undefined
                     return (
                       <td key={`${row.subject_label_id}-${cellIndex}`} className="num px-3 py-2 text-right text-fg">
-                        <Cell result={result} period={period} showPeriod={shared === null} />
+                        <Cell result={result} period={period} showPeriod={shared === null || result?.period_label_id !== shared} />
                       </td>
                     )
                   })}

@@ -101,7 +101,7 @@ function templateSegments(
         text(".");
       });
       figures.filter((entry) => entry.gap !== undefined).forEach((figure) => {
-        text(`${segments.length > 0 ? " " : ""}${capitalize(`${owner(figure)}${figureLabel(figure)}`)}${namesYear(figure) ? periodPhrase(figure) : ""} is not available: `);
+        text(`${segments.length > 0 ? " " : ""}${capitalize(`${owner(figure)}${figureLabel(figure)}`)}${periodPhrase(figure)} is not available: `);
         segments.push(gap(figure));
       });
       break;
@@ -394,11 +394,6 @@ export function plainText(segments: ReadonlyArray<Segment>): string {
 }
 
 // A segment's figure is its revenue: "Data Center revenue".
-// A gap the engine could not bind has only its selector ("latest fiscal year"), which says nothing the answer's periods don't.
-function namesYear(figure: PacketFigure): boolean {
-  return figure.period_end !== undefined || /\d{4}/.test(figure.period ?? "");
-}
-
 function figureLabel(figure: PacketFigure): string {
   return figure.segment ? `${figure.segment} ${metricLabel(figure.metric)}` : metricLabel(figure.metric);
 }
