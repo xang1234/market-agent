@@ -573,7 +573,7 @@ const leftOutNotes = (notFound: ReadonlyArray<string>, noFilings: ReadonlyArray<
 
 /**
  * A figure clarification's options that some asked company's public filings
- * compute: one with a fiscal-period fact for every metric the figure reads
+ * compute: one with a fact for every metric the figure reads, all in one fiscal period
  * (CLARIFICATION_FIGURES), so the user is never offered what no company can
  * answer (#643). A clarification offering anything else is left as it is.
  */
@@ -585,9 +585,10 @@ async function computableChoices(db: SqlExecutor, clarification: Clarification, 
        from facts f join metrics m on m.metric_id = f.metric_id join sources s on s.source_id = f.source_id
       where f.subject_kind = 'issuer' and f.subject_id = any($1::uuid[]) and m.metric_key = any($2::text[])
         and f.fiscal_year is not null and ${PUBLIC_SOURCE_SQL}
-      group by f.subject_id`,
+      group by f.subject_id, f.fiscal_year, f.fiscal_period`,
     [refs.map((ref) => ref.id), [...new Set(clarification.choices.flatMap((choice) => reads(choice.choice_id)!.flat()))]],
   );
+  // By company and fiscal period: a derived figure needs its inputs in one period, as the operation does.
   const filed = rows.map((row) => new Set(row.metric_keys));
   // ponytail: with none left the question stands alone and the user types a figure; a named "none on file" line if that shows up.
   const choices = clarification.choices.filter((choice) => filed.some((keys) => reads(choice.choice_id)!.every((read) => typeof read === "string" ? keys.has(read) : read.some((key) => keys.has(key)))));
