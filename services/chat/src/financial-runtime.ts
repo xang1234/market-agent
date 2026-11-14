@@ -378,9 +378,19 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const refs = kept.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
     return async () => {
       // What a company lacks is fetched before its filings are counted, and
-      // before the run takes its cutoff, so what the fetch stored is read.
-      const companies = refs.map((ref) => ({ issuer_id: ref.id, label: kept.labels.get(ref.id.toLowerCase()) ?? ref.id }));
-      const loading = deps.hydrate ? await deps.hydrate(companies, { emit: context.emit, turnId }).catch((reason: unknown) => {
+      // before the run takes its cutoff, so what the fetch stored is read. A
+      // clarification's pick is fetched too; planTurn applies it again to plan.
+      const hydrate = async (fetch: NonNullable<typeof deps.hydrate>) => {
+        const { clarificationAnswer } = context;
+        const answered = clarificationAnswer
+          ? distinctBy(await applyAnswer(kept.subjects, clarificationAnswer, planningContextAt(deps.planningModel, context, authority, deps.clock?.() ?? new Date()), text), requestedKey)
+          : kept.subjects;
+        const companies = answered.flatMap(({ resolution }) => resolution.status === "resolved"
+          ? [{ issuer_id: resolution.subject_ref.id, label: kept.labels.get(resolution.subject_ref.id.toLowerCase()) ?? resolution.subject_ref.id }]
+          : []);
+        return fetch(companies, { emit: context.emit, turnId });
+      };
+      const loading = deps.hydrate ? await hydrate(deps.hydrate).catch((reason: unknown) => {
         console.warn("[chat] fetching the turn's companies failed; answering from what is on file", reason);
         return NOTHING_LOADING;
       }) : NOTHING_LOADING;
@@ -675,6 +685,27 @@ async function pricedIssuers(evidence: FinancialEvidencePort, refs: ReadonlyArra
 const NO_COMPANIES: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [], labels: new Map() };
 const PLANNER: PlanChoice = { kind: "planner" };
 
+function planningContextAt(
+  model: PlanningModel | null,
+  context: ChatFinancialTurnContext,
+  authority: FinancialRuntimeAuthority,
+  cutoff: Date,
+): (subjects: ReadonlyArray<RequestedSubject>) => PlanningContext {
+  return (subjects) => ({
+    plan_id: randomUUID(),
+    origin: { kind: "chat_request", ref: `chat:${context.threadId}:${context.turnId ?? context.runId}` },
+    knowledge_cutoff: cutoff.toISOString(),
+    cutoff_timezone: "UTC",
+    reporting_basis: "as_restated",
+    freshness_max_age_days: null,
+    authority,
+    parent_limits: {},
+    max_model_calls: model ? MAX_PLANNING_MODEL_CALLS : 0,
+    requested_subjects: subjects,
+    publication_unit_kind: "chat_section",
+  });
+}
+
 async function planTurn(
   model: PlanningModel | null,
   context: ChatFinancialTurnContext,
@@ -692,19 +723,7 @@ async function planTurn(
     planScenario: (context: PlanningContext, ask: ScenarioAsk) => Promise<PlanningResult>;
   }>,
 ): Promise<PlanningResult> {
-  const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
-    plan_id: randomUUID(),
-    origin: { kind: "chat_request", ref: `chat:${context.threadId}:${context.turnId ?? context.runId}` },
-    knowledge_cutoff: cutoff.toISOString(),
-    cutoff_timezone: "UTC",
-    reporting_basis: "as_restated",
-    freshness_max_age_days: null,
-    authority,
-    parent_limits: {},
-    max_model_calls: model ? MAX_PLANNING_MODEL_CALLS : 0,
-    requested_subjects: subjects,
-    publication_unit_kind: "chat_section",
-  });
+  const planningContext = planningContextAt(model, context, authority, cutoff);
 
   let subjects = requested;
   if (context.clarificationAnswer) {

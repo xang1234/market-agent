@@ -358,6 +358,44 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     }
   });
 
+  await t.test("a company picked in answer to a clarification is fetched before the run when it has no filings", async () => {
+    const fetched: string[] = [];
+    const removals: Array<() => Promise<void>> = [];
+    const hydrate = createTurnHydrator({
+      db: pool,
+      env: { SEC_EDGAR_USER_AGENT: "test-agent" },
+      fetchFilings: async (issuerId) => {
+        fetched.push(issuerId);
+        removals.push(await fileFacts(db, [issuerId]));
+      },
+      fetchBars: async () => assert.fail("no market origin is configured"),
+    });
+    // AMBC is Alpha (filed) or Gamma (CCC, none on file).
+    const ambiguous = (mention: string): Promise<ChatSubjectPreResolution> => mention !== "AMBC" ? resolveMention(mention) : Promise.resolve({
+      status: "needs_clarification", input_text: mention, normalized_input: mention, message: "ambiguous",
+      candidates: [
+        { subject_ref: { kind: "issuer", id: IDS.issuerA }, display_name: "Alpha Industries Inc.", confidence: 0.5 },
+        { subject_ref: { kind: "issuer", id: MISSING_ISSUER }, display_name: "Gamma Unlisted", confidence: 0.5 },
+      ],
+    } as ChatSubjectPreResolution);
+    try {
+      const harness = chatHarness(pool, { model: revenueModel(["BBB", "AMBC"]), readQuestion: comparing("BBB", "AMBC"), resolveMention: ambiguous, hydrate });
+      const offered = completed((await harness.run({ ...base, userIntent: "Compare revenue for BBB and AMBC" })).events).financial_clarification as { clarification_id: string; choices: Array<{ choice_id: string; label: string }> };
+      assert.deepEqual(fetched, [], "nothing is fetched for a mention still to be asked about");
+      const gamma = offered.choices.find((choice) => choice.label === "Gamma Unlisted")!;
+      const stale = await harness.run({ ...base, userIntent: "Compare revenue for BBB and AMBC", clarificationAnswer: { clarification_id: "stale", choice_id: gamma.choice_id } });
+      assert.deepEqual([completed(stale.events).clarification, fetched], [true, []], "a stale pick fetches nothing and asks again");
+      const { events } = await harness.run({ ...base, userIntent: "Compare revenue for BBB and AMBC", clarificationAnswer: { clarification_id: offered.clarification_id, choice_id: gamma.choice_id } });
+      assert.deepEqual(fetched, [MISSING_ISSUER]);
+      assert.deepEqual(events.slice(1, 3).map((event) => [event.type, event.tool_name, event.label, event.status ?? null]), [
+        ["tool.started", "fetch_filings", "Fetching filings for Gamma Unlisted", null],
+        ["tool.completed", "fetch_filings", "Fetching filings for Gamma Unlisted", "ok"],
+      ]);
+    } finally {
+      for (const remove of removals) await remove();
+    }
+  });
+
   await t.test("a company whose filings are still loading at the budget is named so, and the turn completes", async () => {
     let finish!: () => void;
     const hydrate = createTurnHydrator({
