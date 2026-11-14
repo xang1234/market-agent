@@ -11,7 +11,7 @@
 import type { DecimalString, GapDisposition, IsoDate, LocalId, ReasonCode, Sha256Hex, UUID } from "./contracts.ts";
 import { balanceComponents } from "./definitions.ts";
 import { canonicalDecimalString, parseFinancialDecimal, type ExactDecimal } from "./exact-decimal.ts";
-import { fixed } from "./presentation.ts";
+import { fixed } from "./value-text.ts";
 import { compareRationals, divideRationals, multiplyRationals, rationalFromDecimal, rationalSign, roundRational, type ExactRational } from "./rational.ts";
 import {
   consensusRow,

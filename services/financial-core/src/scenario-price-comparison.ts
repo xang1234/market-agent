@@ -19,7 +19,7 @@ import { SCENARIOS } from "./contracts.ts";
 import { canonicalDecimalString, parseDerivedDecimalText, parseFinancialDecimal, subtractExactDecimals, type ExactDecimal } from "./exact-decimal.ts";
 import { sourceClassOf, type SourceClass } from "./evidence-vocabulary.ts";
 import { NUMERIC_POLICY } from "./numeric-policy.ts";
-import { fixed } from "./presentation.ts";
+import { fixed } from "./value-text.ts";
 import { conservativeAvailability, localDateOf, startOfLocalDay, type PublicationTiming } from "./public-time.ts";
 import { divideRationals, rationalFromDecimal, rationalSign, rationalToValue, roundRational, type ExactRational } from "./rational.ts";
 import { restateToReference, splitHistoryCovers, type RecordedSplit } from "./split-adjustment.ts";
