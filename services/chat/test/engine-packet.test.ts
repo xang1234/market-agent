@@ -369,9 +369,9 @@ test("an answer written on an engine packet is sent only that packet, and its in
   const segments = judged.blocks[0]!.segments as Parameters<typeof plainText>[0];
   // The reader gets each company's one period once; the judge read it by each figure.
   assert.equal(plainText(segments), [
-    "NVDA's gross margin was 74.40%; AMD's year-over-year percent change in revenue was 45.74%.",
+    "NVDA's gross margin was 74.40%; AMD's year-over-year percent change in revenue was 45.74% vs Q2 FY2025.",
     "> **Analyst inference on NVDA:** Its pricing holds.",
-    "Periods: NVDA Q4 FY2026, AMD Q2 FY2026 vs Q2 FY2025.",
+    "Periods: NVDA Q4 FY2026, AMD Q2 FY2026.",
   ].join("\n\n"));
   assert.deepEqual(segments.filter((segment) => segment.type === "ref"), [
     { type: "ref", ref_kind: "result", ref_id: RESULT(1), format: "74.40%", period: "Q4 FY2026" },

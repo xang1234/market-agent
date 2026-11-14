@@ -26,6 +26,7 @@
 // follow. Upgrade path: a gap op over two checked comparisons, comparing
 // intervals, if readers miss them.
 
+import { periodParts } from "../../financial-core/src/index.ts";
 import type { EvidencePacket, PacketFigure } from "./evidence-packet.ts";
 
 export const COMPARISON_OPS = ["highest", "lowest", "order", "trend"] as const;
@@ -297,9 +298,9 @@ function periodName(period: string | undefined): string {
 // calendar's; any other period by its fiscal name, whatever day each
 // company's ends.
 function cohortPeriod(period: string | undefined): string {
-  const [current, prior, ...more] = (period ?? "").split(" vs ");
-  const [from, to] = [periodIndex(prior), periodIndex(current)];
-  return more.length === 0 && from !== undefined && to !== undefined && quarterly(current) === quarterly(prior) ? `span:${to - from}` : periodName(period);
+  const { current, compared } = periodParts(period ?? "");
+  const [from, to] = [periodIndex(compared), periodIndex(current)];
+  return compared !== undefined && from !== undefined && to !== undefined && quarterly(current) === quarterly(compared) ? `span:${to - from}` : periodName(period);
 }
 
 function quarterly(period: string | undefined): boolean {
