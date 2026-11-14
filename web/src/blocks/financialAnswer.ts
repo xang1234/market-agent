@@ -14,6 +14,7 @@ import {
   type FinancialTablePresentation,
   type FinancialUnit,
 } from './types.ts'
+import type { FinancialResultShown } from './financialInspection.ts'
 
 export function supportedFinancialContent(block: FinancialAnswerBlock): FinancialAnswerContent | null {
   const version = block.financial.presentation_version
@@ -34,6 +35,17 @@ export function labelText(content: FinancialAnswerContent, labelId: string): str
 export function resultLabel(content: FinancialAnswerContent, result: FinancialPresentedResult): string {
   const ids = [result.subject_label_id, result.measure_label_id, result.period_label_id]
   return ids.flatMap((id) => (id === null ? [] : [labelText(content, id)])).join(', ')
+}
+
+/** What a value says it is, for the inspector's heading: its company, its measure without the formula (a lead's measure and two companies when it has no company), its short period, and its printed text. */
+export function resultShown(content: FinancialAnswerContent, result: FinancialPresentedResult): FinancialResultShown | undefined {
+  if (result.presented.kind !== 'value') return undefined
+  const subject = result.subject_label_id === null ? null : labelText(content, result.subject_label_id)
+  const lead = subject === null ? leadParts(content, result) : null
+  const measure = lead !== null
+    ? `${columnNames([lead.measure])[0]}, ${lead.sides.join(' minus ')}`
+    : subject === null ? resultLabel(content, result) : columnNames([labelText(content, result.measure_label_id)])[0]!
+  return { subject, measure, period: shortPeriod(labelText(content, result.period_label_id)) || null, value: result.presented.text }
 }
 
 /** A lead's measure and its two companies ("Gross margin (gross profit / revenue)", ["NVIDIA Corp", "Apple Inc."]), or null for any other result. */

@@ -10,6 +10,7 @@ import type { EvidenceBlockInspection } from '../evidence/inspectionTypes.ts'
 import { useEvidenceInspector } from '../evidence/useEvidenceInspector.ts'
 import { BlockProofContext, proofLabels, proofRows, type BlockProof } from './blockProof.ts'
 import { VerificationLabel } from './VerificationLabel.tsx'
+import { humanize } from '../evidence/readable.ts'
 import type { VerificationKind } from './verification.ts'
 
 type BlockRegistryProviderProps = {
@@ -131,11 +132,11 @@ function blockInspectionFromBlock(block: Block, proof: BlockProof | undefined): 
     block_id: block.id,
     block_kind: block.kind,
     title: blockTitle(block),
-    subtitle: block.snapshot_id,
-    badges: [block.kind],
+    subtitle: null,
+    badges: [],
     rows: [
       { label: 'Block id', value: block.id },
-      { label: 'Kind', value: block.kind },
+      { label: 'Kind', value: humanize(block.kind) },
       { label: 'Snapshot', value: block.snapshot_id },
       { label: 'As of', value: block.as_of },
       { label: 'Data ref', value: data_ref_label(block.data_ref) },
@@ -148,7 +149,7 @@ function blockInspectionFromBlock(block: Block, proof: BlockProof | undefined): 
 }
 
 function blockTitle(block: Block): string {
-  return typeof block.title === 'string' && block.title.trim() !== '' ? block.title : block.kind
+  return typeof block.title === 'string' && block.title.trim() !== '' ? block.title : humanize(block.kind)
 }
 
 function data_ref_label(data_ref: Block['data_ref']): string {

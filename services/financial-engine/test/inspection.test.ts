@@ -126,7 +126,8 @@ test("committed result inspection", { timeout: 300_000 }, async (t) => {
     const margin = available(await inspect("out_gm"));
     assert.equal(margin.run_id, runId);
     assert.equal(margin.disposition, "verified");
-    assert.deepEqual(margin.formula, { operation: "gross_margin", operation_version: "gross_margin.v1", numeric_policy_version: margin.formula!.numeric_policy_version });
+    assert.deepEqual(margin.formula, { operation: "gross_margin", operation_version: "gross_margin.v1", numeric_policy_version: margin.formula!.numeric_policy_version, reads_as_multiple: false });
+    assert.equal(margin.measure, "Gross margin (gross profit / revenue)");
     assert.deepEqual(margin.definitions.map((definition) => definition.metric_key).sort(), ["gross_profit", "revenue"]);
     assert.deepEqual(margin.inputs.map((input) => [input.input_slot, input.status, "fact_id" in input ? input.fact_id : null]), [
       ["a_gp", "bound", IDS.grossProfit2023],
@@ -137,6 +138,7 @@ test("committed result inspection", { timeout: 300_000 }, async (t) => {
     assert.equal(revenue.source.source_id, IDS.sourceV1);
     assert.equal(revenue.period.fiscal_year, 2023);
     assert.equal(revenue.derivation, null);
+    assert.deepEqual([revenue.company, revenue.source.filed, revenue.publication.precision, revenue.publication.source_timezone], ["Alpha Industries Inc.", "2024-01-10", "date", "America/New_York"]);
     assert.match(revenue.publication.available_no_later_than, /^2024-/u);
     assert.equal(margin.time.time_mode, "public_information");
     assert.equal(margin.coverage_state, "partial", "the unit's FY2022 margin is a gap");
@@ -254,6 +256,9 @@ test("committed result inspection", { timeout: 300_000 }, async (t) => {
       "verified", "spread", { kind: "percentage_points" },
       [["a_gp", IDS.grossProfit2023], ["a_rev", IDS.original], ["b_gp", bGrossProfit], ["b_rev", bRevenue]],
     ]);
+    assert.deepEqual(lead.inputs.map((input) => [input.input_slot, input.status === "bound" ? input.company : null]).sort(), [
+      ["a_gp", "Alpha Industries Inc."], ["a_rev", "Alpha Industries Inc."], ["b_gp", "Beta Holdings Corp."], ["b_rev", "Beta Holdings Corp."],
+    ], "each input names its company");
   });
 
   await t.test("a derived quarter binds with its derivation, passes the seal, and is inspected with each term's filing (#481)", async () => {

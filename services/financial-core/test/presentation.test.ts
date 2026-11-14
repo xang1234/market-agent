@@ -4,7 +4,8 @@ import type { BoundFinancialInputV1, FinancialPlanV1, PeriodSelector, ValuePaylo
 import { evaluatePlan } from "../src/coverage.ts";
 import { parseDerivedDecimalText } from "../src/exact-decimal.ts";
 import { operandFromBoundInput } from "../src/operations.ts";
-import { fixed, presentationHash, presentFinancialUnit, type BoundPeriod, type CommittedResult, type FinancialAnswerContent } from "../src/presentation.ts";
+import { fixed } from "../src/value-text.ts";
+import { presentationHash, presentFinancialUnit, type BoundPeriod, type CommittedResult, type FinancialAnswerContent } from "../src/presentation.ts";
 import { change, mutable, overviewComparisonPlan, planFixture, quarterBack, reportedAt } from "./fixtures.ts";
 import { boundInput, operand, priceInput, SLOTS, SPLIT_CUTOFF, splitAdjustment } from "./operand-fixtures.ts";
 

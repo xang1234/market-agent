@@ -8,7 +8,7 @@
 // the Call (#604) calls them, with inputs its caller has already certified.
 
 import type { DecimalString, IsoDate, ReasonCode } from "./contracts.ts";
-import { fixed } from "./presentation.ts";
+import { fixed } from "./value-text.ts";
 import { addRationals, compareRationals, divideRationals, multiplyRationals, rationalSign, roundRational, subtractRationals, type ExactRational } from "./rational.ts";
 
 /** Every reason the model shows no number, with the reason code ADR 0006 names for it, and what the Call says instead. */

@@ -171,9 +171,17 @@
             "period",
             "precision_status",
             "derivation",
-            "publication"
+            "publication",
+            "company"
           ],
           "properties": {
+            "company": {
+              "description": "The issuer's name, as the answer names its subjects.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "input_slot": {
               "type": "string",
               "pattern": "^[a-z][a-z0-9_]{0,63}$"
@@ -191,7 +199,8 @@
                 "source_id",
                 "document_id",
                 "source_version_hash",
-                "locator"
+                "locator",
+                "filed"
               ],
               "properties": {
                 "source_id": {
@@ -214,6 +223,14 @@
                     "string",
                     "null"
                   ]
+                },
+                "filed": {
+                  "description": "The date the filing was filed, when known.",
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date"
                 }
               },
               "additionalProperties": false
@@ -302,7 +319,8 @@
               "required": [
                 "attestation_id",
                 "available_no_later_than",
-                "precision"
+                "precision",
+                "source_timezone"
               ],
               "properties": {
                 "attestation_id": {
@@ -316,6 +334,10 @@
                 "precision": {
                   "type": "string",
                   "pattern": "^[a-z][a-z0-9_]*$"
+                },
+                "source_timezone": {
+                  "description": "The zone a date-precision bound is the end of the day in.",
+                  "type": "string"
                 }
               },
               "additionalProperties": false
@@ -339,9 +361,17 @@
             "value",
             "split_adjustment",
             "unit",
-            "observation"
+            "observation",
+            "company"
           ],
           "properties": {
+            "company": {
+              "description": "The issuer's name, as the answer names its subjects.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "input_slot": {
               "type": "string",
               "pattern": "^[a-z][a-z0-9_]{0,63}$"
@@ -478,6 +508,7 @@
             "time",
             "publication",
             "formula",
+            "measure",
             "definitions",
             "inputs"
           ],
@@ -597,7 +628,8 @@
                   "required": [
                     "operation",
                     "operation_version",
-                    "numeric_policy_version"
+                    "numeric_policy_version",
+                    "reads_as_multiple"
                   ],
                   "properties": {
                     "operation": {
@@ -609,11 +641,19 @@
                     },
                     "numeric_policy_version": {
                       "type": "string"
+                    },
+                    "reads_as_multiple": {
+                      "description": "Whether the answer prints this ratio as a multiple (3.50x) rather than a percentage.",
+                      "type": "boolean"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "measure": {
+              "description": "What the result measures, as the answer labels it.",
+              "type": "string"
             },
             "definitions": {
               "type": "array",
@@ -661,6 +701,7 @@
             "time",
             "publication",
             "formula",
+            "measure",
             "definitions",
             "inputs",
             "assumptions"
@@ -781,7 +822,8 @@
                   "required": [
                     "operation",
                     "operation_version",
-                    "numeric_policy_version"
+                    "numeric_policy_version",
+                    "reads_as_multiple"
                   ],
                   "properties": {
                     "operation": {
@@ -793,11 +835,19 @@
                     },
                     "numeric_policy_version": {
                       "type": "string"
+                    },
+                    "reads_as_multiple": {
+                      "description": "Whether the answer prints this ratio as a multiple (3.50x) rather than a percentage.",
+                      "type": "boolean"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "measure": {
+              "description": "What the result measures, as the answer labels it.",
+              "type": "string"
             },
             "definitions": {
               "type": "array",

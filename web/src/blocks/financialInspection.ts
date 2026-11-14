@@ -1,10 +1,13 @@
 // The authorized inspection of one committed financial result
 // (GET /v1/financial/results/:id, services/financial-engine/src/inspection.ts).
 // Values stay the canonical decimal strings the server sent: nothing here
-// parses, rounds, or reformats them, so what is shown and copied is exactly
-// what was certified.
+// parses, rounds, or reformats them, so what is copied is exactly what was
+// certified. The inspector prints a value as the answer did (readable.ts)
+// with this exact text beside it.
 
 import { authenticatedJson, type FetchImpl } from '../http/authFetch.ts'
+import { resolveMetricDefinition } from '../../../services/financial-core/src/definitions.ts'
+import { humanize, MONTHS } from '../evidence/readable.ts'
 
 export const SUPPORTED_INSPECTION_SCHEMA_VERSION = 'financial_result_inspection.v1'
 /** v1 plus the P/E assumptions a scenario result reads (#201). */
@@ -41,7 +44,9 @@ export type FinancialInspectedInput =
       input_slot: string
       status: 'bound'
       fact_id: string
-      source: { source_id: string; document_id: string | null; source_version_hash: string; locator: string | null }
+      /** The issuer's name, as the answer names its subjects. */
+      company: string | null
+      source: { source_id: string; document_id: string | null; source_version_hash: string; locator: string | null; filed: string | null }
       metric: { metric_key: string; definition_version: string }
       value: string
       unit: unknown
@@ -50,13 +55,14 @@ export type FinancialInspectedInput =
       derivation: FinancialDerivation | null
       /** Present for a value that stands for a metric its concept does not name. */
       inference?: { kind: 'no_noncontrolling_interest'; concept: string; checked: ReadonlyArray<string> }
-      publication: { attestation_id: string; available_no_later_than: string; precision: string }
+      publication: { attestation_id: string; available_no_later_than: string; precision: string; source_timezone: string }
     }
   | {
       input_slot: string
       status: 'bound'
       observation_id: string
       listing_id: string
+      company: string | null
       source: { source_id: string; body_sha256: string }
       metric: { metric_key: string; definition_version: string }
       value: string
@@ -81,7 +87,9 @@ export type FinancialResultInspection =
       coverage_state: 'complete' | 'partial' | 'none' | null
       time: { knowledge_cutoff: string; time_mode: string; finalized_at: string }
       publication: { snapshot_id: string; certificate_digest: string }
-      formula: { operation: string; operation_version: string; numeric_policy_version: string } | null
+      formula: { operation: string; operation_version: string; numeric_policy_version: string; reads_as_multiple: boolean } | null
+      /** What the result measures, as the answer labels it. */
+      measure: string
       definitions: ReadonlyArray<{ metric_key: string; definition_version: string }>
       inputs: ReadonlyArray<FinancialInspectedInput>
       /** v2 only. */
@@ -115,16 +123,31 @@ export function canonicalValue(payload: unknown): string | null {
   return record.kind === 'value' && typeof record.value === 'string' ? record.value : null
 }
 
+/** What a clicked value printed, so the inspector heads with the cell the reader chose; commentary names no company or measure. */
+export type FinancialResultShown = { subject: string | null; measure: string | null; period: string | null; value: string }
+
+/** A fiscal period as the answer table writes it: "Q4 FY2026 · ended Sep 2026", "FY2026". */
+export function fiscalPeriodText(period: { fiscal_year: number; fiscal_period: string; end?: string | null }): string {
+  const name = period.fiscal_period === 'FY' ? `FY${period.fiscal_year}` : `${period.fiscal_period} FY${period.fiscal_year}`
+  const end = period.end ? /^(\d{4})-(0[1-9]|1[0-2])/u.exec(period.end) : null
+  return end ? `${name} · ended ${MONTHS[Number(end[2]) - 1]} ${end[1]}` : name
+}
+
+/** A metric as the answer labels it ("EPS (diluted)"); a key the catalog does not know reads in words. */
+export function metricLabel(metricKey: string): string {
+  return resolveMetricDefinition(metricKey)?.label ?? humanize(metricKey)
+}
+
 /** A term as its derivation writes it: signed, except a leading added term. */
 export function derivationTermLabel(term: FinancialDerivation['terms'][number], index: number): string {
   const name = term.span === 'fiscal_year'
-    ? `FY ${term.fiscal_year}`
-    : `${term.fiscal_period} ${term.fiscal_year}${term.span === 'year_to_date' ? ' year to date' : ''}`
+    ? `FY${term.fiscal_year}`
+    : `${term.fiscal_period} FY${term.fiscal_year}${term.span === 'year_to_date' ? ' year to date' : ''}`
   return index === 0 && term.sign === '+' ? name : `${term.sign === '-' ? '−' : '+'} ${name}`
 }
 
 export function derivationFormula(period: { fiscal_year: number; fiscal_period: string }, derivation: FinancialDerivation): string {
-  return `${period.fiscal_period} ${period.fiscal_year} = ${derivation.terms.map(derivationTermLabel).join(' ')}`
+  return `${fiscalPeriodText({ ...period, end: null })} = ${derivation.terms.map(derivationTermLabel).join(' ')}`
 }
 
 /** A unit as plain words, without converting any value. */
@@ -151,5 +174,46 @@ export function payloadSummary(payload: unknown, operation?: string): string {
       return `Not available (${String(record.reason_code ?? 'unknown')})`
     default:
       return 'Unrecognized result'
+  }
+}
+
+// Each operation's formula in words. An operation missing here reads as its key in words.
+export const OPERATION_FORMULAS: Readonly<Record<string, string>> = {
+  absolute_change: 'Current − prior',
+  percent_change_positive_base: '(Current − prior) ÷ prior',
+  gross_margin: 'Gross profit ÷ revenue',
+  operating_margin: 'Operating income ÷ revenue',
+  net_margin: 'Net income ÷ revenue',
+  free_cash_flow: 'Operating cash flow − capital expenditure',
+  net_cash: 'Cash and investments − debt, from one 10-K',
+  total_debt: 'Long-term debt + commercial paper + short-term borrowings, from one 10-K',
+  ratio: 'Numerator ÷ denominator',
+  trailing_sum: 'Sum of four consecutive quarters',
+  threshold: 'Value compared with the stated threshold',
+  peer_compare: 'Companies ranked on one measure',
+  period_rank: 'Periods ranked on one measure',
+  market_cap: 'Share price × shares outstanding',
+  pe_ratio: 'Share price ÷ diluted EPS',
+  spread: 'First company − second company, each in its own period',
+  scenario_eps_multiple: 'Diluted EPS × your P/E',
+}
+
+/**
+ * What the inspector heads with: what the click showed, and from the
+ * inspection whatever it did not say. The inspection names a company or a
+ * period only when every input reads the same one.
+ */
+export function financialHeading(shown: FinancialResultShown | undefined, inspection: FinancialResultInspection | null): { title: string; subtitle: string } {
+  const details = inspection === null ? null : inspectableDetails(inspection)
+  const bound = details?.inputs.filter((input): input is Exclude<FinancialInspectedInput, { status: 'gap' }> => input.status === 'bound') ?? []
+  const facts = bound.filter((input): input is Extract<FinancialInspectedInput, { fact_id: string }> => 'fact_id' in input)
+  // A gap input may be another company or period, and a price is dated by its session, not a fiscal period.
+  const whole = bound.length === (details?.inputs.length ?? 0)
+  const only = (values: ReadonlyArray<string | null | undefined>) => (whole && new Set(values).size === 1 ? values[0] ?? null : null)
+  const subject = shown?.subject ?? only(bound.map((input) => input.company))
+  const period = shown?.period ?? (facts.length === bound.length ? only(facts.map((input) => fiscalPeriodText(input.period))) : null)
+  return {
+    title: shown?.measure ?? details?.measure ?? 'Verified calculation',
+    subtitle: [subject, period].filter((part) => part != null).join(' · ') || 'Verified calculation',
   }
 }

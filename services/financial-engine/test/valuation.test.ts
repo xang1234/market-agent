@@ -90,10 +90,13 @@ test("market cap and P/E", { timeout: 300_000 }, async (t) => {
     const valid = ajv.getSchema("https://example.com/schemas/financial_answer_http_schema.json#/$defs/FinancialResultInspection")!;
     assert.ok(valid(inspection), JSON.stringify(valid.errors));
     assert.ok(inspection?.availability === "available");
-    assert.deepEqual([inspection.disposition, inspection.formula], ["verified", { operation: "pe_ratio", operation_version: "pe_ratio.v1", numeric_policy_version: "numeric-policy.v1" }]);
-    assert.deepEqual(inspection.inputs.map((input) => input.status === "bound" && [input.input_slot, input.value, input.split_adjustment?.adjusted_native_value]), [
-      ["eps", "11.93", { numerator: "1193", denominator: "1000" }],
-      ["px", "1200", { numerator: "120", denominator: "1" }],
+    assert.deepEqual([inspection.disposition, inspection.formula, inspection.measure], [
+      "verified", { operation: "pe_ratio", operation_version: "pe_ratio.v1", numeric_policy_version: "numeric-policy.v1", reads_as_multiple: true },
+      "P/E ratio (share price / latest fiscal year diluted EPS)",
+    ]);
+    assert.deepEqual(inspection.inputs.map((input) => input.status === "bound" && [input.input_slot, input.value, input.split_adjustment?.adjusted_native_value, input.company]), [
+      ["eps", "11.93", { numerator: "1193", denominator: "1000" }, "NVIDIA Corporation"],
+      ["px", "1200", { numerator: "120", denominator: "1" }, "NVIDIA Corporation"],
     ]);
   });
 

@@ -333,10 +333,28 @@ test("the header names the kind, provider, and as-of date instead of the snapsho
   try {
     await app.click(app.opener("Revenue"));
 
-    assert.equal(app.headerSubtitle(), "Fact · sec · As of 2026-05-29");
+    assert.equal(app.headerSubtitle(), "Fact · sec · As of May 29, 2026");
     assert.equal(app.panel()?.querySelector("header")?.textContent?.includes(SNAPSHOT_ID), false);
   } finally {
     await app.unmount();
+  }
+});
+
+test("the header's date is the day the body's time falls on, in the reader's zone", async () => {
+  const previous = process.env.TZ;
+  process.env.TZ = "America/New_York";
+  const late = { ...SOURCE_INSPECTION, rows: [{ label: "Provider", value: "sec" }, { label: "Retrieved", value: "2026-05-30T02:00:00.000Z" }] };
+  const app = await mountDockedInspector(async () => jsonResponse(late));
+  try {
+    await app.click(app.opener("Filing"));
+
+    assert.equal(app.headerSubtitle(), "Source · sec · Retrieved May 29, 2026");
+    const body = [...(app.panel()?.querySelectorAll("dt") ?? [])].find((term) => term.textContent === "Retrieved")?.nextElementSibling;
+    assert.equal(body?.textContent, "May 29, 2026, 22:00");
+  } finally {
+    await app.unmount();
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
   }
 });
 
@@ -359,7 +377,7 @@ test("following a related ref pushes a page, and Back returns to the previous pa
     await app.click(app.relatedRef("sec"));
 
     assert.equal(app.heading(), "sec filing");
-    assert.equal(app.headerSubtitle(), "Source · sec · Retrieved 2026-05-30");
+    assert.equal(app.headerSubtitle(), "Source · sec · Retrieved May 30, 2026");
     assert.deepEqual(app.breadcrumb(), ["42 %", "sec filing"]);
     assert.equal(app.document.activeElement?.textContent, "sec filing");
     assert.equal(opener.getAttribute("data-inspecting"), "true");

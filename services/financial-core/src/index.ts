@@ -21,6 +21,7 @@ export * from "./public-time.ts";
 export * from "./split-adjustment.ts";
 export * from "./derivation.ts";
 export * from "./presentation.ts";
+export * from "./value-text.ts";
 export * from "./scenario-price-comparison.ts";
 export * from "./valuation-model.ts";
 export * from "./call.ts";

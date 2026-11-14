@@ -25,7 +25,11 @@ export function RichText({ block }: RichTextProps): ReactElement {
       if (segment.ref_kind === 'result') {
         const shown = refSegmentText(segment)
         return (
-          <InspectableResult resultId={segment.ref_id} label={segment.period ? `${shown}, ${segment.period}` : shown}>
+          <InspectableResult
+            resultId={segment.ref_id}
+            label={segment.period ? `${shown}, ${segment.period}` : shown}
+            shown={{ subject: null, measure: null, period: segment.period ?? null, value: shown }}
+          >
             {shown}
           </InspectableResult>
         )

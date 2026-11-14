@@ -15,6 +15,7 @@ import {
   leadParts,
   shortNames,
   resultLabel,
+  resultShown,
   resultsById,
   rowPeriod,
   seriesBars,
@@ -128,7 +129,7 @@ function ResultLine({ content, result, badge }: { content: FinancialAnswerConten
     return (
       <p className={`${RESULT_ROW_CLASS} text-fg`} data-result-id={result.result_id}>
         <span className="text-muted">{label}: {badge}</span>
-        <InspectableResult resultId={result.result_id} label={`${label}: ${presented.full_text}`} className={VALUE_BUTTON}>
+        <InspectableResult resultId={result.result_id} label={`${label}: ${presented.full_text}`} shown={resultShown(content, result)} className={VALUE_BUTTON}>
           <span className="whitespace-nowrap tabular-nums" title={presented.full_text} aria-label={`${label}: ${presented.full_text}`}>
             {presented.text}
           </span>
@@ -157,11 +158,11 @@ function LeadValue({ content, result }: { content: FinancialAnswerContent; resul
   // A gap opens no inspector, so it names its own periods.
   if (presented.kind !== 'value') {
     const period = shortPeriod(labelText(content, result.period_label_id))
-    return <Cell result={result} period={period} shown={period} />
+    return <Cell content={content} result={result} period={period} shown={period} />
   }
   // The whole label names each company's period, which the matrix headings leave out.
   return (
-    <InspectableResult resultId={result.result_id} label={`${label}: ${presented.full_text}`} className={VALUE_BUTTON}>
+    <InspectableResult resultId={result.result_id} label={`${label}: ${presented.full_text}`} shown={resultShown(content, result)} className={VALUE_BUTTON}>
       <span title={`${label}: ${presented.full_text}`} aria-label={`${label}: ${presented.full_text}`}>{presented.text}</span>
     </InspectableResult>
   )
@@ -228,14 +229,14 @@ function Leads({ content, names, leads }: { content: FinancialAnswerContent; nam
 }
 
 // period names the cell to the inspector; shown is what the cell prints of it (cellPeriod), the whole period its title. A gap's reason is its title and its screen-reader text.
-function Cell({ result, period, shown }: { result: FinancialPresentedResult | undefined; period?: string; shown?: string }): ReactElement {
+function Cell({ content, result, period, shown }: { content: FinancialAnswerContent; result: FinancialPresentedResult | undefined; period?: string; shown?: string }): ReactElement {
   if (!result) return <span className="text-muted">Not requested</span>
   const { presented } = result
   const note = shown === undefined ? null : <span className="block text-xs text-muted" title={shown === period ? undefined : period}>{shown}</span>
   if (presented.kind === 'value') {
     return (
       <>
-        <InspectableResult resultId={result.result_id} label={period === undefined ? presented.full_text : `${presented.full_text}, ${period}`} className={VALUE_BUTTON}>
+        <InspectableResult resultId={result.result_id} label={period === undefined ? presented.full_text : `${presented.full_text}, ${period}`} shown={resultShown(content, result)} className={VALUE_BUTTON}>
           <span title={presented.full_text} aria-label={presented.full_text}>
             {presented.text}
           </span>
@@ -346,7 +347,7 @@ function CertifiedTable({ blockId, provenance, content, results, names: companie
                     const label = table.columns[cellIndex]?.period_label_id === null && result ? labelText(content, result.period_label_id) : undefined
                     return (
                       <td key={`${row.subject_label_id}-${cellIndex}`} className={`${CELL} whitespace-nowrap text-right text-fg${starts[cellIndex] ? ` ${GROUP}` : ''}`}>
-                        <Cell result={result} period={label === undefined ? undefined : shortPeriod(label)} shown={label === undefined ? undefined : cellPeriod(label, shared)} />
+                        <Cell content={content} result={result} period={label === undefined ? undefined : shortPeriod(label)} shown={label === undefined ? undefined : cellPeriod(label, shared)} />
                       </td>
                     )
                   })}
@@ -382,7 +383,7 @@ function CertifiedSeries({ provenance, content, results, series }: SeriesProps):
                   {labelText(content, point.period_label_id)}
                 </th>
                 <td className="whitespace-nowrap py-1.5 pr-4 text-right tabular-nums text-fg">
-                  <Cell result={points[index]} />
+                  <Cell content={content} result={points[index]} />
                 </td>
                 <td aria-hidden="true" className="w-1/2 py-1.5">
                   <div
@@ -433,7 +434,7 @@ function CertifiedScenarios({ blockId, content, results, scenarios }: ScenariosP
                 <span className="block text-xs text-muted">{row.attribution_text}</span>
               </td>
               <td className={`${CELL} text-right text-fg`}>
-                <Cell result={results.get(row.result_id)} />
+                <Cell content={content} result={results.get(row.result_id)} />
               </td>
             </tr>
           ))}

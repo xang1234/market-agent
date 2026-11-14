@@ -1,10 +1,11 @@
 import type { ReactElement, ReactNode } from 'react'
 
+import type { FinancialResultShown } from '../blocks/financialInspection.ts'
 import { useEvidenceInspector } from './useEvidenceInspector.ts'
 
 // A certified value opens the shared result inspector where the host provides
 // one; a real button, so it is reachable by keyboard. Without a host it is text.
-export function InspectableResult({ resultId, label, className, children }: { resultId: string; label: string; className?: string; children: ReactNode }): ReactElement {
+export function InspectableResult({ resultId, label, shown, className, children }: { resultId: string; label: string; shown?: FinancialResultShown; className?: string; children: ReactNode }): ReactElement {
   const inspector = useEvidenceInspector()
   const open = inspector?.openFinancialResult
   if (!open) return <>{children}</>
@@ -14,7 +15,7 @@ export function InspectableResult({ resultId, label, className, children }: { re
       className={className ?? 'border-0 bg-transparent p-0 text-left underline decoration-dotted underline-offset-2'}
       data-inspect-result={resultId}
       aria-label={`Inspect the verified calculation for ${label}`}
-      onClick={() => open(resultId)}
+      onClick={() => open(resultId, shown)}
     >
       {children}
     </button>

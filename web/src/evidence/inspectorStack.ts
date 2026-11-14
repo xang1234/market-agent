@@ -1,3 +1,4 @@
+import type { FinancialResultShown } from '../blocks/financialInspection.ts'
 import type { FinancialInspectorLoad } from '../blocks/renderers/FinancialResultInspector.tsx'
 import type { EvidenceBlockInspection, EvidenceInspection, EvidenceInspectionRef } from './inspectionTypes.ts'
 
@@ -9,7 +10,7 @@ export type EvidenceLoad =
 export type InspectorPage =
   | { kind: 'evidence'; request: number; snapshotId: string; ref: EvidenceInspectionRef; shownAs?: string; load: EvidenceLoad }
   | { kind: 'block'; inspection: EvidenceBlockInspection }
-  | { kind: 'financial'; request: number; load: FinancialInspectorLoad }
+  | { kind: 'financial'; request: number; shown?: FinancialResultShown; load: FinancialInspectorLoad }
 
 /** Pages the inspector has walked through. Empty means closed; the last page is shown. */
 export type InspectorStack = ReadonlyArray<InspectorPage>
