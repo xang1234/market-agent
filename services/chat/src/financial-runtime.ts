@@ -151,8 +151,9 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   commentary?: (db: SqlExecutor, input: CommentaryRequest) => Promise<void>;
   /**
    * Fetches what the turn's companies lack before the run (turn-hydration.ts)
-   * and returns the issuers whose filings were still loading at its budget;
-   * absent, nothing is fetched. Injected, like commentary.
+   * and returns the issuers, lowercased, whose filings are still loading (a
+   * fetch running at its budget, or one that failed); absent, nothing is
+   * fetched. Injected, like commentary.
    */
   hydrate?: (companies: ReadonlyArray<{ issuer_id: string; label: string }>, turn: { emit: ChatTurnRunContext["emit"]; turnId: string }) => Promise<ReadonlySet<string>>;
 }>;
@@ -454,7 +455,7 @@ type TurnCompanies = Readonly<{
   notFound: ReadonlyArray<string>;
   // Labels of the companies left out for having no fiscal-period facts on file (withSecFilings).
   noFilings?: ReadonlyArray<string>;
-  // Of those, the ones whose filings were still being fetched.
+  // Labels of the companies whose filings are still loading: left out when none are stored, else answered from what is.
   loadingFilings?: ReadonlyArray<string>;
   // By issuer, the label each company the turn may answer for takes in its saved scope.
   labels: ReadonlyMap<string, string>;
@@ -564,18 +565,22 @@ function withinScope(requested: TurnCompanies, scope: ResearchScope | null): Tur
 // (evidence-adapter.ts), and the reference import's are points in time. It is
 // left out of the plan, and the answer names it in one line. Only public
 // sources count, so another user's upload neither changes nor reveals this.
+// The hydrator's word overrides the count: a company whose filings are still
+// loading (`loading`, lowercased: a fetch running or failed) is named so,
+// left out if nothing is stored yet, and otherwise answered from the years
+// stored so far.
 async function withSecFilings(db: SqlExecutor, requested: TurnCompanies, loading: ReadonlySet<string>): Promise<TurnCompanies> {
-  const issuerOf = (subject: RequestedSubject) => subject.resolution.status === "resolved" ? subject.resolution.subject_ref.id.toLowerCase() : null;
-  const unfiled = await issuersWithoutFilings(db, requested.subjects.flatMap((subject) => issuerOf(subject) ?? []));
-  const without = requested.subjects.filter((subject) => unfiled.has(issuerOf(subject) ?? ""));
-  if (without.length === 0) return requested;
-  const fetching = new Set([...loading].map((id) => id.toLowerCase()));
-  const labelOf = (subject: RequestedSubject) => requested.labels.get(issuerOf(subject)!) ?? subject.mention;
+  const issuerOf = (subject: RequestedSubject) => subject.resolution.status === "resolved" ? subject.resolution.subject_ref.id.toLowerCase() : "";
+  const unfiled = await issuersWithoutFilings(db, requested.subjects.flatMap((subject) => issuerOf(subject) || []));
+  const without = requested.subjects.filter((subject) => unfiled.has(issuerOf(subject)));
+  const stillLoading = requested.subjects.filter((subject) => loading.has(issuerOf(subject)));
+  if (without.length === 0 && stillLoading.length === 0) return requested;
+  const labelOf = (subject: RequestedSubject) => requested.labels.get(issuerOf(subject)) ?? subject.mention;
   return {
     ...requested,
     subjects: requested.subjects.filter((subject) => !without.includes(subject)),
-    noFilings: without.filter((subject) => !fetching.has(issuerOf(subject)!)).map(labelOf),
-    loadingFilings: without.filter((subject) => fetching.has(issuerOf(subject)!)).map(labelOf),
+    noFilings: without.filter((subject) => !stillLoading.includes(subject)).map(labelOf),
+    loadingFilings: stillLoading.map(labelOf),
   };
 }
 
@@ -596,7 +601,7 @@ export async function issuersWithoutFilings(db: Pick<SqlExecutor, "query">, issu
 
 const noFilingsLine = (labels: ReadonlyArray<string>): string => `No SEC filings are on file for ${labelList(labels)} yet.`;
 
-/** What a turn says of the companies it left out: names that matched none, companies with no filings, and ones whose filings are still being fetched. */
+/** What a turn says of the companies it left out or answered in part: names that matched none, companies with no filings, and ones whose filings are still loading. */
 const leftOutNotes = ({ notFound, noFilings = [], loadingFilings = [] }: Pick<TurnCompanies, "notFound" | "noFilings" | "loadingFilings">): string[] => [
   ...(notFound.length === 0 ? [] : [`No company matched ${labelList(notFound)}.`]),
   ...(noFilings.length === 0 ? [] : [noFilingsLine(noFilings)]),

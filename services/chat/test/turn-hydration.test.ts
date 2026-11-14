@@ -82,22 +82,48 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], first.turn)], [ZETA]);
     assert.ok(Date.now() - started < 5_000);
     assert.deepEqual(first.events.at(-1), { type: "tool.completed", tool_call_id: "fetch_filings-t1", tool_name: "fetch_filings", label: "Fetching filings for ZETA", status: "still_loading" });
-    assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn)], [ZETA]);
+    assert.deepEqual([...await hydrate([{ issuer_id: ZETA.toUpperCase(), label: "ZETA" }], recorder().turn)], [ZETA]);
     finish();
     assert.deepEqual(fetch.sec, [ZETA]);
   });
 
-  await t.test("a company whose fetch failed is not fetched again within a minute", async () => {
+  await t.test("a fetch still running reads still loading once some of its years are stored, and settles to filed", async () => {
+    let finish!: () => void;
+    const fetch = fakes({ filings: () => new Promise<void>((resolve) => { finish = resolve; }) });
+    const hydrate = createTurnHydrator({ db: pool, env: { SEC_EDGAR_USER_AGENT: "test-agent" }, ...fetch, budgetMs: 30 });
+    assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn)], [ZETA]);
+    const { rows } = await db.query(
+      `insert into facts
+       select (jsonb_populate_record(null::facts, to_jsonb(f) || jsonb_build_object('fact_id', gen_random_uuid(), 'subject_id', $1::uuid))).*
+         from facts f where f.fact_id = $2
+       returning fact_id::text`,
+      [ZETA, IDS.grossProfit2023],
+    );
+    try {
+      const pending = recorder();
+      assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], pending.turn)], [ZETA]);
+      assert.equal(pending.events.at(-1)!.status, "still_loading");
+      finish();
+      const settled = recorder();
+      assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], settled.turn)], []);
+      assert.deepEqual([fetch.sec, settled.events], [[ZETA], []]);
+    } finally {
+      await db.query(`delete from facts where fact_id = $1`, [rows[0].fact_id]);
+    }
+  });
+
+  await t.test("a company whose fetch failed reads still loading, and is not fetched again within a minute", async () => {
     let clock = 1_000_000;
     const fetch = fakes({ filings: async () => { throw new Error("sec_edgar: HTTP 503"); } });
     const warnings: unknown[] = [];
     const hydrate = createTurnHydrator({ db: pool, env: { SEC_EDGAR_USER_AGENT: "test-agent" }, ...fetch, now: () => clock, logger: { warn: (message: unknown) => warnings.push(message) } });
     const first = recorder();
-    await hydrate([{ issuer_id: ZETA, label: "ZETA" }], first.turn);
+    assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], first.turn)], [ZETA]);
     assert.equal(first.events.at(-1)!.status, "failed");
     clock += 59_999;
-    await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn);
-    assert.deepEqual(fetch.sec, [ZETA]);
+    const cooling = recorder();
+    assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], cooling.turn)], [ZETA]);
+    assert.deepEqual([fetch.sec, cooling.events], [[ZETA], []]);
     clock += 1;
     await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn);
     assert.deepEqual(fetch.sec, [ZETA, ZETA]);

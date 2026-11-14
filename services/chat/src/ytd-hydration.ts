@@ -5,8 +5,9 @@
 // year's last sessions to the last completed session, which fetches through the
 // cached adapter and persists the bars. The turn captures its cutoff only
 // afterwards, so the stored bars are inside it. Charting and its named gaps are
-// unchanged: if this fetch fails or times out, the chart says what is missing,
-// and a stored window that is no longer current is a gap too (#256).
+// unchanged: a fetch that fails or times out rejects, its callers carry on
+// without it, and the chart says what is missing; a stored window that is no
+// longer current is a gap too (#256).
 //
 // Frozen data modes (no-keys, analyst) never hydrate: the golden dataset
 // answers from seeded bars, and live bars must not mix into it.
@@ -64,22 +65,18 @@ export async function hydrateYtdBars(input: {
   if (input.listings.length === 0) return;
   const fetchImpl = input.fetchImpl ?? fetch;
   const signal = AbortSignal.timeout(input.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  try {
-    // Every company on one basis, or the chart cannot compare them. A basis is
-    // enough only when what came back makes a full YTD window (an "available"
-    // answer can still hold no bars) that reaches the last completed session
-    // (all series stopping months ago still agree); otherwise fetch them all on
-    // the next.
-    for (const basis of BASES) {
-      const bars = await fetchWindows(fetchImpl, input.origin, input.listings, input.now, basis, signal);
-      const window = selectYtdWindow(
-        input.listings.map((listing) => ({ label: listing.id, timeZone: listing.timeZone, bars: bars.get(listing.id) ?? [] })),
-        input.now,
-      );
-      if (window.ok && input.listings.every((listing) => isCurrentEnd(window.endDate, input.now, listing.timeZone))) return;
-    }
-  } catch (reason) {
-    console.warn("[chat] YTD price fetch failed; charting from the bars already stored", reason);
+  // Every company on one basis, or the chart cannot compare them. A basis is
+  // enough only when what came back makes a full YTD window (an "available"
+  // answer can still hold no bars) that reaches the last completed session
+  // (all series stopping months ago still agree); otherwise fetch them all on
+  // the next.
+  for (const basis of BASES) {
+    const bars = await fetchWindows(fetchImpl, input.origin, input.listings, input.now, basis, signal);
+    const window = selectYtdWindow(
+      input.listings.map((listing) => ({ label: listing.id, timeZone: listing.timeZone, bars: bars.get(listing.id) ?? [] })),
+      input.now,
+    );
+    if (window.ok && input.listings.every((listing) => isCurrentEnd(window.endDate, input.now, listing.timeZone))) return;
   }
 }
 

@@ -377,6 +377,45 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     finish();
   });
 
+  await t.test("a company whose filings fetch failed is named still loading, not as having no filings", async () => {
+    const hydrate = createTurnHydrator({
+      db: pool,
+      env: { SEC_EDGAR_USER_AGENT: "test-agent" },
+      fetchFilings: async () => { throw new Error("sec_edgar: HTTP 503"); },
+      fetchBars: async () => assert.fail("no market origin is configured"),
+      logger: { warn: () => {} },
+    });
+    const harness = chatHarness(pool, { model: revenueModel(["CCC"]), researchScope: scopeOver as never, hydrate });
+    assert.deepEqual(completed((await harness.run({ ...base, userIntent: "Revenue for CCC" })).events).financial_gap, { reason_code: "no_sec_filings" });
+    assert.deepEqual((harness.persisted.at(-1)!.blocks[0] as { segments: unknown }).segments, [{ type: "text", text: "Filings for CCC are still loading; ask again in a minute." }]);
+  });
+
+  await t.test("a company with some years stored while its fetch still runs is planned with them, and the answer says it is still loading", async () => {
+    let remove: (() => Promise<void>) | undefined;
+    const hydrate = createTurnHydrator({
+      db: pool,
+      env: { SEC_EDGAR_USER_AGENT: "test-agent" },
+      fetchFilings: async (issuerId) => {
+        remove = await fileFacts(db, [issuerId]);
+        await new Promise<void>(() => {});
+      },
+      fetchBars: async () => assert.fail("no market origin is configured"),
+      budgetMs: 1_000,
+    });
+    try {
+      const model = revenueModel(["CCC"]);
+      const harness = chatHarness(pool, { model, researchScope: scopeOver as never, hydrate });
+      const { events } = await harness.run({ ...base, userIntent: "Revenue for CCC" });
+      assert.deepEqual(completed(events).financial_gap, { reason_code: "verification_failed" }, "planned with the stored year");
+      assert.equal(model.calls, 1);
+      assert.deepEqual((harness.persisted.at(-1)!.blocks[0] as { segments: unknown }).segments, [
+        { type: "text", text: "Filings for CCC are still loading; ask again in a minute. The calculation did not pass verification, so no number is shown." },
+      ]);
+    } finally {
+      await remove?.();
+    }
+  });
+
   await t.test("another user's private fiscal-period facts never stand in for SEC filings, nor show they exist", () => withFiledFacts(db, [MISSING_ISSUER], async () => {
     const harness = chatHarness(pool, { model: revenueModel(["CCC"]), researchScope: scopeOver as never });
     assert.deepEqual(completed((await harness.run({ ...base, userIntent: "Revenue for CCC" })).events).financial_gap, { reason_code: "no_sec_filings" });

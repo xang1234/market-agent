@@ -474,7 +474,7 @@ async function hydrateYtdWindow(
       now,
     });
   } catch (reason) {
-    console.warn("[chat] YTD price fetch skipped; charting from the bars already stored", reason);
+    console.warn("[chat] YTD price fetch failed; charting from the bars already stored", reason);
   }
 }
 

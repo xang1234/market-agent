@@ -96,17 +96,15 @@ test("before the close, the fetch stops at the last completed session, never the
   assert.equal((market.requests[0].body.range as { end: string }).end, "2026-08-31T04:00:00.000Z");
 });
 
-test("a market failure or a hung market never fails the turn", async (t) => {
-  const warn = t.mock.method(console, "warn", () => {});
+test("a market failure or a hung market rejects, so the turn's step reads failed", async (t) => {
   const failing = (async () => new Response("down", { status: 502 })) as typeof fetch;
-  await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: failing });
+  await assert.rejects(hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: failing }), /answered 502/);
   // A market that never answers is cut off by the timeout.
   const keepAlive = setInterval(() => {}, 1_000);
   t.after(() => clearInterval(keepAlive));
   const hung = ((_url: URL | string, init?: RequestInit) =>
     new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)))) as typeof fetch;
-  await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: hung, timeoutMs: 20 });
-  assert.equal(warn.mock.callCount(), 2);
+  await assert.rejects(hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: hung, timeoutMs: 20 }), { name: "TimeoutError" });
 });
 
 test("frozen data modes answer at the golden dataset's cutoff, whatever the year; live modes at the wall clock (#259)", () => {
