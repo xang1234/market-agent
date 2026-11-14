@@ -36,13 +36,13 @@ export function resultLabel(content: FinancialAnswerContent, result: FinancialPr
   return ids.flatMap((id) => (id === null ? [] : [labelText(content, id)])).join(', ')
 }
 
-/** A lead's title, its measure and its two companies ("Gross margin, NVIDIA Corp minus Apple Inc."); any other result's is its resultLabel. */
-export function resultTitle(content: FinancialAnswerContent, result: FinancialPresentedResult): string {
+/** A lead's measure and its two companies ("Gross margin (gross profit / revenue)", ["NVIDIA Corp", "Apple Inc."]), or null for any other result. */
+export function leadParts(content: FinancialAnswerContent, result: FinancialPresentedResult): { measure: string; sides: [string, string] } | null {
   const measure = labelText(content, result.measure_label_id)
   const names = Object.values(content.labels).flatMap((label) => (label.kind === 'subject' ? [label.text] : [])).sort((a, b) => b.length - a.length)
   const sides = labelText(content, result.period_label_id).split(' minus ').map((side) => names.find((name) => side.startsWith(`${name} `)))
-  if (result.subject_label_id !== null || !measure.startsWith('Difference in ') || sides.length !== 2 || sides.includes(undefined)) return resultLabel(content, result)
-  return `${columnNames([measure.slice('Difference in '.length)])[0]}, ${sides.join(' minus ')}`
+  if (result.subject_label_id !== null || !measure.startsWith('Difference in ') || sides.length !== 2 || sides.includes(undefined)) return null
+  return { measure: measure.slice('Difference in '.length), sides: sides as [string, string] }
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -52,10 +52,51 @@ export function shortPeriod(text: string): string {
   return text.replace(/ \((ended|as of) (\d{4})-(\d{2})-\d{2}\)/g, (_, word: string, year: string, month: string) => ` · ${word} ${MONTHS[Number(month) - 1]} ${year}`)
 }
 
-/** Each measure without its formula ("Gross margin"), unless two columns would then read alike. */
+/** Each text through shorten, unless two different texts would then read alike, which keep their whole text. */
+function distinct(texts: ReadonlyArray<string>, shorten: (text: string) => string): string[] {
+  let shown = texts.map(shorten)
+  for (;;) {
+    // A text kept whole can read as another's short form ("Acme Inc" beside "Acme Inc Ltd"), so repeat until none collide.
+    const next = shown.map((name, i) => (shown.some((other, j) => other === name && texts[j] !== texts[i]) ? texts[i]! : name))
+    if (next.every((name, i) => name === shown[i])) return next
+    shown = next
+  }
+}
+
+const HORIZON: Readonly<Record<string, string>> = { 'Quarter-over-quarter': 'QoQ', 'Year-over-year': 'YoY' }
+
+/** A measure as a column heading: no formula ("Gross margin"), a quarter or year change by its abbreviation ("QoQ revenue", "YoY revenue change"). */
+function columnName(measure: string): string {
+  const name = measure.replace(/ \([^()]*\)$/, '')
+  const change = /^(Quarter-over-quarter|Year-over-year) (percent change|change) in (.+)$/.exec(name)
+  if (!change) return name
+  const [, horizon, kind, of] = change as unknown as [string, string, string, string]
+  const subject = /^[A-Z][a-z]/.test(of) ? `${of[0]!.toLowerCase()}${of.slice(1)}` : of
+  return `${HORIZON[horizon]} ${subject}${kind === 'change' ? ' change' : ''}`
+}
+
+/** Each measure's column heading, unless two columns would then read alike. */
 export function columnNames(measures: ReadonlyArray<string>): string[] {
-  const short = measures.map((measure) => measure.replace(/ \([^()]*\)$/, ''))
-  return short.map((name, i) => (short.some((other, j) => other === name && measures[j] !== measures[i]) ? measures[i]! : name))
+  return distinct(measures, columnName)
+}
+
+/** Each company without its legal suffix ("Apple Inc." reads "Apple"), unless two would then read alike. */
+export function shortNames(names: ReadonlyArray<string>): string[] {
+  return distinct(names, (name) => name.replace(/,?(?: &)? (?:Inc|Incorporated|Corp|Corporation|Co|Company|Ltd|Limited|plc|PLC|LLC|N\.V|S\.A|SE|AG)\.?$/, ''))
+}
+
+/** Whether each column starts a new kind of figure (amounts, ratios, changes), so the table can set kinds apart. */
+export function groupStarts(
+  content: FinancialAnswerContent,
+  table: FinancialTablePresentation,
+  results: ReadonlyMap<string, FinancialPresentedResult>,
+): boolean[] {
+  const kinds = table.columns.map((column, index) => {
+    if (/change in /i.test(labelText(content, column.measure_label_id))) return 'change'
+    const value = table.rows.map((row) => results.get(row.cells[index] ?? '')?.presented).find((presented) => presented?.kind === 'value')
+    return value?.kind === 'value' ? value.unit.kind : 'none'
+  })
+  return kinds.map((kind, index) => index > 0 && kind !== kinds[index - 1])
 }
 
 /** A period label read back where the engine joins a change's two: its own period and the one it is compared with ("Q4 FY2026 vs Q3 FY2026"). */

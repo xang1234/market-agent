@@ -9,7 +9,7 @@ import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from '..
 import { validateBlock } from './BlockValidator.ts'
 import { BlockProofContext, type BlockProof } from './blockProof.ts'
 import { FinancialAnswer } from './FinancialAnswer.tsx'
-import { resultsById, seriesBars, sortedRowIndexes } from './financialAnswer.ts'
+import { columnNames, groupStarts, resultsById, seriesBars, shortNames, sortedRowIndexes } from './financialAnswer.ts'
 import { readFileSync } from 'node:fs'
 import { financialAnswerFiscalCalendarsFixture, financialAnswerFixture, financialAnswerScenariosFixture } from './fixtures.ts'
 import type { FinancialAnswerBlock, FinancialAnswerContent, FinancialPresentedResult, FinancialTablePresentation } from './types.ts'
@@ -75,7 +75,7 @@ test('a supported answer prints server strings with full values, coverage, and a
   assert.match(html, /data-coverage="partial"[^>]*>4 of 5 requested results verified</)
   assert.match(html, /<caption[^>]*>Revenue, Gross margin \(gross profit \/ revenue\) by company<\/caption>/)
   assert.match(html, /<th scope="col"[^>]*>Company<\/th>/)
-  assert.match(html, /<th scope="row"[^>]*>Apple Inc\.<span class="block text-xs text-muted">FY2023<\/span><\/th>/, 'the row names its one period once')
+  assert.match(html, /<th scope="row"[^>]*><span title="Apple Inc\.">Apple<\/span><span class="block text-xs font-normal text-muted">FY2023<\/span><\/th>/, 'the row names its company short, its full name on hover, and its one period once')
   assert.match(html, /title="46\.206%" aria-label="46\.206%">46\.21%</, 'rounded label with the exact value for tooltips and assistive tech')
   assert.match(html, /title="A required input or calculation is unavailable\."><span aria-hidden="true">n\/a<\/span>/, 'a gap is shown as a gap')
   assert.match(html, /Not requested/, 'a cell outside the request is explicit')
@@ -101,8 +101,8 @@ test('a comparison across fiscal calendars has one column per line, each row nam
     'Gross margin',
     'Operating margin',
     'Net margin',
-    'Quarter-over-quarter percent change in Revenue',
-    'Year-over-year percent change in Revenue',
+    'QoQ revenue',
+    'YoY revenue',
   ])
   const rows = [...table.querySelectorAll('tbody tr')].map((row) => [
     [...row.querySelector('th')!.childNodes].map((node) => node.textContent),
@@ -110,7 +110,7 @@ test('a comparison across fiscal calendars has one column per line, each row nam
   ])
   assert.deepEqual(rows, [
     [
-      ['NVIDIA Corp', 'Q4 FY2026'],
+      ['NVIDIA', 'Q4 FY2026'],
       ['$68.0B'],
       ['$51.0B'],
       ['$44.2B'],
@@ -122,7 +122,7 @@ test('a comparison across fiscal calendars has one column per line, each row nam
       ['73.20%', 'vs Q4 FY2025'],
     ],
     [
-      ['Advanced Micro Devices, Inc.', 'Q2 FY2026'],
+      ['Advanced Micro Devices', 'Q2 FY2026'],
       ['$7.7B'],
       ['$3.1B'],
       ['$770.0M'],
@@ -169,8 +169,8 @@ test('a row whose cells read one period names it once under its company, and a g
     ...[...row.querySelectorAll('td')].map((cell) => visible(cell.firstElementChild!)),
   ])
   assert.deepEqual(rows, [
-    [['NVIDIA Corp', 'FY2026 · ended Sep 2026'], '$68.0B', '$51.0B', '$44.2B', '$37.4B', '75.00%', '65.00%', '55.00%'],
-    [['Advanced Micro Devices, Inc.', 'FY2026 · ended Jul 2026'], '$7.7B', '$3.1B', '$770.0M', 'n/a', '40.00%', '10.00%', '9.00%'],
+    [['NVIDIA', 'FY2026 · ended Sep 2026'], '$68.0B', '$51.0B', '$44.2B', '$37.4B', '75.00%', '65.00%', '55.00%'],
+    [['Advanced Micro Devices', 'FY2026 · ended Jul 2026'], '$7.7B', '$3.1B', '$770.0M', 'n/a', '40.00%', '10.00%', '9.00%'],
   ])
   const gap = document.querySelectorAll('tbody tr')[1]!.querySelectorAll('td')[3]!.firstElementChild!
   assert.equal(gap.getAttribute('title'), reason)
@@ -189,7 +189,7 @@ test('a gap for another period than its row names that period, so the missing fi
   Object.assign(table, { columns: table.columns.slice(0, 7), rows: table.rows.map((row) => ({ ...row, cells: row.cells.slice(0, 7) })) })
   const document = new JSDOM(renderToStaticMarkup(<FinancialAnswer block={block} />)).window.document
   const row = document.querySelectorAll('tbody tr')[1]!
-  assert.deepEqual([...row.querySelector('th')!.childNodes].map((node) => node.textContent), ['Advanced Micro Devices, Inc.', 'FY2026 · ended Jul 2026'])
+  assert.deepEqual([...row.querySelector('th')!.childNodes].map((node) => node.textContent), ['Advanced Micro Devices', 'FY2026 · ended Jul 2026'])
   const cells = [...row.querySelectorAll('td')].map((cell) => [...cell.children].map((child) => child.querySelector('[aria-hidden="true"]')?.textContent ?? child.textContent))
   assert.deepEqual(cells[3], ['n/a', 'FY2025 · ended Jun 2025'])
   assert.deepEqual(cells[2], ['$770.0M'], 'a value of the row period names none')
@@ -222,7 +222,7 @@ test('a row with no value reads n/a once across its columns, with each distinct 
   const unavailable = 'A required input or calculation is unavailable.'
   const document = amdGaps(true)
   const [nvda, row] = [...document.querySelectorAll('tbody tr')]
-  assert.deepEqual([...row!.querySelector('th')!.childNodes].map((node) => node.textContent), ['Advanced Micro Devices, Inc.', 'Q2 FY2026'])
+  assert.deepEqual([...row!.querySelector('th')!.childNodes].map((node) => node.textContent), ['Advanced Micro Devices', 'Q2 FY2026'])
   const cells = [...row!.querySelectorAll('td')]
   assert.deepEqual(cells.map((cell) => [cell.getAttribute('colspan'), [...cell.children].map((child) => child.textContent)]), [
     ['9', ['n/a', 'Not available.', `${cutoff} ${unavailable}`]],
@@ -232,7 +232,7 @@ test('a row with no value reads n/a once across its columns, with each distinct 
   assert.equal(nvda!.querySelectorAll('td').length, 9, 'a row with values keeps a cell per column')
 })
 
-test('a lead between two companies is titled by its measure and the two companies, its whole label kept for hover and the inspector', () => {
+test('leads between two companies form one table of measures against pairs, each value keeping its whole label for hover and the inspector', () => {
   const block = structuredClone(financialAnswerFiscalCalendarsFixture) as FinancialAnswerBlock & { financial: FinancialAnswerContent }
   const labels = block.financial.labels as Record<string, { kind: string; text: string }>
   labels['measure:lead'] = { kind: 'measure', text: 'Difference in Gross margin (gross profit / revenue)' }
@@ -246,17 +246,136 @@ test('a lead between two companies is titled by its measure and the two companie
     period_label_id: 'period:lead',
     presented: { kind: 'value', text: '35.00 pp', full_text: '35 pp', value: '35', unit: { kind: 'percentage_points' }, exact: true },
   } as FinancialPresentedResult
-  Object.assign(block.financial, { results: [...block.financial.results, lead], presentations: [{ kind: 'scalar', result_id: lead.result_id }] })
+  const operating = { ...lead, result_id: '5e000000-0000-4000-8000-0000000000fe', measure_label_id: 'measure:lead-operating', presented: { kind: 'gap', text: 'A required input or calculation is unavailable.', reason_code: 'missing_input' } } as FinancialPresentedResult
+  labels['measure:lead-operating'] = { kind: 'measure', text: 'Difference in Operating margin (operating income / revenue)' }
+  Object.assign(block.financial, {
+    results: [...block.financial.results, lead, operating],
+    presentations: [{ kind: 'scalar', result_id: lead.result_id }, { kind: 'scalar', result_id: operating.result_id }],
+  })
   const inspector: EvidenceInspectorContextValue = { openInspection() {}, openBlockInspection() {}, openFinancialResult() {}, closeInspection() {} }
   const document = new JSDOM(renderToStaticMarkup(
     <EvidenceInspectorContext.Provider value={inspector}>
       <FinancialAnswer block={block} />
     </EvidenceInspectorContext.Provider>,
   )).window.document
-  const line = document.querySelector(`[data-result-id="${lead.result_id}"]`)!
-  assert.equal(line.textContent, 'Gross margin, NVIDIA Corp minus Advanced Micro Devices, Inc.: 35.00 pp')
-  assert.equal(line.querySelector('span')!.getAttribute('title'), whole)
-  assert.equal(line.querySelector('button')!.getAttribute('aria-label'), `Inspect the verified calculation for ${whole}: 35 pp`)
+  const tables = document.querySelectorAll('table')
+  assert.equal(tables.length, 1, 'both leads share one table')
+  assert.deepEqual([...tables[0]!.querySelectorAll('thead th')].map((heading) => [heading.textContent, heading.getAttribute('title')]), [
+    ['Difference', null],
+    ['NVIDIA − Advanced Micro Devices', 'NVIDIA Corp minus Advanced Micro Devices, Inc.'],
+  ])
+  assert.deepEqual([...tables[0]!.querySelectorAll('tbody tr')].map((row) => [...row.children].map((cell) => cell.textContent)), [
+    ['Gross margin', '35.00 pp'],
+    ['Operating margin', 'n/aA required input or calculation is unavailable.NVIDIA Corp Q4 FY2026 · ended Jan 2026 minus Advanced Micro Devices, Inc. Q2 FY2026 · ended Jun 2026'],
+  ])
+  const cell = document.querySelector(`[data-result-id="${lead.result_id}"]`)!
+  assert.equal(cell.querySelector('span')!.getAttribute('title'), `${whole}: 35 pp`)
+  assert.equal(cell.querySelector('button')!.getAttribute('aria-label'), `Inspect the verified calculation for ${whole}: 35 pp`)
+})
+
+function leadsDocument(leads: ReadonlyArray<{ measure: string; period: string; text: string }>): Document {
+  const block = structuredClone(financialAnswerFiscalCalendarsFixture) as FinancialAnswerBlock & { financial: FinancialAnswerContent }
+  const labels = block.financial.labels as Record<string, { kind: string; text: string }>
+  const results = leads.map(({ measure, period, text }, index) => {
+    labels[`measure:${measure}`] = { kind: 'measure', text: `Difference in ${measure}` }
+    labels[`period:${period}`] = { kind: 'period', text: period }
+    return {
+      ...block.financial.results[0]!,
+      result_id: `5e000000-0000-4000-8000-0000000001${String(index).padStart(2, '0')}`,
+      subject_label_id: null,
+      measure_label_id: `measure:${measure}`,
+      period_label_id: `period:${period}`,
+      presented: { kind: 'value', text, full_text: text, value: '1', unit: { kind: 'percentage_points' }, exact: true },
+    } as FinancialPresentedResult
+  })
+  Object.assign(block.financial, {
+    results: [...block.financial.results, ...results],
+    presentations: results.map((result) => ({ kind: 'scalar', result_id: result.result_id })),
+  })
+  return new JSDOM(renderToStaticMarkup(<FinancialAnswer block={block} />)).window.document
+}
+
+const tableText = (document: Document) => [...document.querySelectorAll('table tr')].map((row) => [...row.children].map((cell) => cell.textContent))
+
+test('leads of one measure and pair for two periods each keep a row naming its periods', () => {
+  const q1 = 'NVIDIA Corp Q1 FY2026 (ended 2025-04-27) minus Advanced Micro Devices, Inc. Q1 FY2026 (ended 2025-03-29)'
+  const q2 = 'NVIDIA Corp Q2 FY2026 (ended 2025-07-27) minus Advanced Micro Devices, Inc. Q2 FY2026 (ended 2025-06-28)'
+  const document = leadsDocument([
+    { measure: 'Gross margin (gross profit / revenue)', period: q1, text: '10.00 pp' },
+    { measure: 'Gross margin (gross profit / revenue)', period: q2, text: '11.00 pp' },
+  ])
+  assert.deepEqual(tableText(document), [
+    ['Difference', 'Between', 'Value'],
+    ['Gross margin', 'NVIDIA Corp Q1 FY2026 · ended Apr 2025 minus Advanced Micro Devices, Inc. Q1 FY2026 · ended Mar 2025', '10.00 pp'],
+    ['Gross margin', 'NVIDIA Corp Q2 FY2026 · ended Jul 2025 minus Advanced Micro Devices, Inc. Q2 FY2026 · ended Jun 2025', '11.00 pp'],
+  ])
+})
+
+test('leads of two measures that shorten alike each keep a row under the whole measure', () => {
+  const period = 'NVIDIA Corp Q1 FY2026 (ended 2025-04-27) minus Advanced Micro Devices, Inc. Q1 FY2026 (ended 2025-03-29)'
+  const document = leadsDocument([
+    { measure: 'Gross margin (gross profit / revenue)', period, text: '10.00 pp' },
+    { measure: 'Gross margin (gross profit / sales)', period, text: '12.00 pp' },
+  ])
+  assert.deepEqual(tableText(document), [
+    ['Difference', 'NVIDIA − Advanced Micro Devices'],
+    ['Gross margin (gross profit / revenue)', '10.00 pp'],
+    ['Gross margin (gross profit / sales)', '12.00 pp'],
+  ])
+})
+
+test('a row period of several quarters keeps every quarter, the first on its own line', () => {
+  const block = structuredClone(financialAnswerFiscalCalendarsFixture) as FinancialAnswerBlock & { financial: FinancialAnswerContent }
+  const table = block.financial.presentations[0] as FinancialTablePresentation
+  Object.assign(table, { columns: table.columns.slice(0, 1), rows: table.rows.slice(0, 1).map((row) => ({ ...row, cells: row.cells.slice(0, 1) })) })
+  const result = block.financial.results.find((candidate) => candidate.result_id === table.rows[0]!.cells[0])!
+  ;(block.financial.labels as Record<string, { kind: string; text: string }>)[result.period_label_id] = {
+    kind: 'period',
+    text: 'Q4 FY2026 (ended 2026-01-25) vs Q3 FY2026 (ended 2025-10-26) vs Q2 FY2026 (ended 2025-07-27) vs Q1 FY2026 (ended 2025-04-27)',
+  }
+  const document = new JSDOM(renderToStaticMarkup(<FinancialAnswer block={block} />)).window.document
+  const heading = document.querySelector('tbody th')!
+  assert.deepEqual([...heading.childNodes].map((node) => node.textContent), [
+    'NVIDIA',
+    'Q4 FY2026 · ended Jan 2026 vs Q3 FY2026 · ended Oct 2025 vs Q2 FY2026 · ended Jul 2025 vs Q1 FY2026 · ended Apr 2025',
+  ])
+  assert.equal(heading.querySelector('span.block span.block')!.textContent, 'ended Jan 2026 vs Q3 FY2026 · ended Oct 2025 vs Q2 FY2026 · ended Jul 2025 vs Q1 FY2026 · ended Apr 2025')
+})
+
+test('a column heading drops the formula and abbreviates a quarter or year change, unless two headings would then read alike', () => {
+  assert.deepEqual(columnNames([
+    'Gross margin (gross profit / revenue)',
+    'Quarter-over-quarter percent change in Revenue',
+    'Year-over-year percent change in Gross margin (gross profit / revenue)',
+    'Year-over-year change in Revenue',
+    'Quarter-over-quarter percent change in EPS',
+    'Percent change in Revenue over 2 quarters',
+  ]), ['Gross margin', 'QoQ revenue', 'YoY gross margin', 'YoY revenue change', 'QoQ EPS', 'Percent change in Revenue over 2 quarters'])
+  assert.deepEqual(columnNames(['Net margin (net income / revenue)', 'Net margin (net income / sales)']), ['Net margin (net income / revenue)', 'Net margin (net income / sales)'])
+  assert.deepEqual(
+    columnNames(['Net margin (net income / revenue)', 'Net margin (net income / sales)', 'Net margin (net income / revenue) (GAAP)']),
+    ['Net margin (net income / revenue)', 'Net margin (net income / sales)', 'Net margin (net income / revenue) (GAAP)'],
+    'a heading that reads as another column\'s kept heading is kept whole too',
+  )
+})
+
+test('a company reads without its legal suffix, unless two companies would then read alike', () => {
+  assert.deepEqual(shortNames(['Micron Technology Inc', 'NVIDIA Corp', 'Apple Inc.', 'Advanced Micro Devices, Inc.', 'JPMorgan Chase & Co.', 'Shell plc', 'Meta Platforms']), [
+    'Micron Technology',
+    'NVIDIA',
+    'Apple',
+    'Advanced Micro Devices',
+    'JPMorgan Chase',
+    'Shell',
+    'Meta Platforms',
+  ])
+  assert.deepEqual(shortNames(['Acme Inc', 'Acme Corp']), ['Acme Inc', 'Acme Corp'])
+  assert.deepEqual(shortNames(['Acme Inc', 'Acme Corp', 'Acme Inc Ltd']), ['Acme Inc', 'Acme Corp', 'Acme Inc Ltd'], 'a short name that reads as another company\'s kept name is kept whole too')
+})
+
+test('a table starts a new group where its figures turn from amounts to ratios to changes', () => {
+  const answer = content(financialAnswerFiscalCalendarsFixture)
+  assert.deepEqual(groupStarts(answer, answer.presentations[0] as FinancialTablePresentation, resultsById(answer)), [false, false, false, false, true, false, false, true, false])
 })
 
 test('sorting uses the server exact order; descending keeps rows without a value last', () => {
@@ -316,7 +435,7 @@ test('P/E scenarios label the EPS as source-linked and each P/E as the user\'s, 
     ['user_supplied', 'Your assumption'],
   ])
   const eps = document.querySelector('[data-testid$="-scenarios"] > p')!
-  assert.deepEqual([eps.querySelector('[data-verification]')?.getAttribute('data-verification'), eps.querySelector('.num')?.textContent], ['source_linked', 'USD 4.00 per share'])
+  assert.deepEqual([eps.querySelector('[data-verification]')?.getAttribute('data-verification'), eps.querySelector('[data-inspect-result]')?.textContent], ['source_linked', 'USD 4.00 per share'])
   const table = document.querySelector('[data-testid$="-scenarios"] table')!
   assert.deepEqual([...table.querySelectorAll('thead th')].map((heading) => heading.textContent), ['Scenario', 'P/E Your assumption', 'Value per share'])
   assert.deepEqual([...table.querySelectorAll('tbody tr')].map((row) => [...row.children].map((cell) => cell.textContent)), [
