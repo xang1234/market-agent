@@ -154,7 +154,11 @@ function ResultLine({ content, result, badge }: { content: FinancialAnswerConten
 function LeadValue({ content, result }: { content: FinancialAnswerContent; result: FinancialPresentedResult }): ReactElement {
   const { presented } = result
   const label = resultLabel(content, result)
-  if (presented.kind !== 'value') return <Cell result={result} />
+  // A gap opens no inspector, so it names its own periods.
+  if (presented.kind !== 'value') {
+    const period = shortPeriod(labelText(content, result.period_label_id))
+    return <Cell result={result} period={period} shown={period} />
+  }
   // The whole label names each company's period, which the matrix headings leave out.
   return (
     <InspectableResult resultId={result.result_id} label={`${label}: ${presented.full_text}`} className={VALUE_BUTTON}>

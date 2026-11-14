@@ -266,7 +266,7 @@ test('leads between two companies form one table of measures against pairs, each
   ])
   assert.deepEqual([...tables[0]!.querySelectorAll('tbody tr')].map((row) => [...row.children].map((cell) => cell.textContent)), [
     ['Gross margin', '35.00 pp'],
-    ['Operating margin', 'n/aA required input or calculation is unavailable.'],
+    ['Operating margin', 'n/aA required input or calculation is unavailable.NVIDIA Corp Q4 FY2026 · ended Jan 2026 minus Advanced Micro Devices, Inc. Q2 FY2026 · ended Jun 2026'],
   ])
   const cell = document.querySelector(`[data-result-id="${lead.result_id}"]`)!
   assert.equal(cell.querySelector('span')!.getAttribute('title'), `${whole}: 35 pp`)
