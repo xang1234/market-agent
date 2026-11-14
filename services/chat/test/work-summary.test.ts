@@ -113,3 +113,22 @@ test("what a turn does before its first event is timed into its start, and a bar
   }]);
   assert.deepEqual(turn.events.map((event) => event.type), ["turn.started", "tool.started", "tool.completed", "turn.completed"]);
 });
+
+test("a tool step's label, as a fetch for the turn's companies names them, is saved for the summary to show", async () => {
+  const saved: Array<{ work_summary: { events: unknown[] } }> = [];
+  const coordinator = createChatCoordinator({
+    now: () => 0,
+    saveWorkSummary: async (input) => { saved.push(input as never); },
+    runner: ({ emit }) => {
+      emit("turn.started", { bundle_id: "financial_answer" });
+      emit("tool.started", { tool_call_id: "fetch_filings-1", tool_name: "fetch_filings", label: "Fetching filings for ZETA" });
+      emit("tool.completed", { tool_call_id: "fetch_filings-1", tool_name: "fetch_filings", label: "Fetching filings for ZETA", status: "still_loading" });
+      emit("turn.completed", { message_id: MESSAGE_ID });
+    },
+  });
+  await coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" }).completed;
+  assert.deepEqual(saved[0]!.work_summary.events.slice(1), [
+    { type: "tool.started", at_ms: 0, tool_call_id: "fetch_filings-1", tool_name: "fetch_filings", label: "Fetching filings for ZETA" },
+    { type: "tool.completed", at_ms: 0, tool_call_id: "fetch_filings-1", tool_name: "fetch_filings", label: "Fetching filings for ZETA", status: "still_loading" },
+  ]);
+});

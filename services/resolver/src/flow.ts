@@ -55,11 +55,13 @@ export type SearchToSubjectRequest = {
 export type SearchToSubjectOptions = {
   tickerDiscoveryProvider?: TickerDiscoveryProvider;
   discoveryLogger?: Pick<Console, "warn">;
-  // When each CIK-less known ticker last ran discovery. Without it a known
-  // ticker never runs discovery. Resolve runs per keystroke against a
-  // rate-limited Polygon, so the ceiling is one Polygon call per CIK-less
-  // ticker per minute, whether the call succeeds or fails.
-  ciklessDiscoveryAttempts?: Map<string, number>;
+  // When each ticker last ran discovery within the cooldown: a ticker-shaped
+  // string no listing holds, or a ticker held only by issuers without a CIK.
+  // Resolve runs per keystroke against a rate-limited Polygon, so the ceiling
+  // is one Polygon call per such ticker per minute, whether the call succeeds
+  // or fails. Without it an unknown ticker runs discovery every time and a
+  // known one never does.
+  discoveryAttempts?: Map<string, number>;
   now?: () => number;
 };
 
@@ -326,7 +328,10 @@ async function resolveTickerWithDiscovery(
   const initial = await resolveByTicker(db, ticker);
   if (!options.tickerDiscoveryProvider) return initial;
   if (isNotFound(initial) && initial.reason !== "unknown_ticker") return initial;
-  if (!isNotFound(initial) && !(await claimCiklessDiscovery(db, ticker, options))) {
+  const claimed = isNotFound(initial)
+    ? TICKER_SHAPE.test(normalizedTicker(ticker)) && claimDiscovery(ticker, options)
+    : await claimCiklessDiscovery(db, ticker, options);
+  if (!claimed) {
     return initial;
   }
 
@@ -344,26 +349,47 @@ async function resolveTickerWithDiscovery(
   }
 }
 
-const CIKLESS_DISCOVERY_COOLDOWN_MS = 60_000;
+const DISCOVERY_COOLDOWN_MS = 60_000;
+const DISCOVERY_ATTEMPTS_LIMIT = 1000;
+// An unknown string runs discovery only when it could be a ticker: a letter,
+// up to five more letters or digits, and an optional share-class or
+// preferred suffix (BRK.B, BAC.PRL). Words with punctuation, URLs, and long names never reach Polygon.
+const TICKER_SHAPE = /^[A-Z][A-Z0-9]{0,5}(\.[A-Z]{1,3})?$/;
+
+// Claims a discovery when the ticker's last one was a cooldown ago. The check
+// and the set are synchronous, so of concurrent resolves of one ticker only
+// one claims it. Entries stay in claim order, so the expired ones are at the
+// front; past the limit the oldest go first, so a burst of distinct strings
+// bounds the map, not Polygon.
+function claimDiscovery(ticker: string, options: SearchToSubjectOptions): boolean {
+  const attempts = options.discoveryAttempts;
+  if (!attempts) return true;
+  const normalized = normalizedTicker(ticker);
+  const at = (options.now ?? Date.now)();
+  for (const [key, last] of attempts) {
+    if (at - last < DISCOVERY_COOLDOWN_MS) break;
+    attempts.delete(key);
+  }
+  if (attempts.has(normalized)) return false;
+  for (const key of attempts.keys()) {
+    if (attempts.size < DISCOVERY_ATTEMPTS_LIMIT) break;
+    attempts.delete(key);
+  }
+  attempts.set(normalized, at);
+  return true;
+}
 
 // A locally known ticker whose issuers all lack a CIK has no fundamentals
-// coverage (#403), so it runs discovery once per cooldown. The due check repeats
-// after the CIK query because concurrent resolves of one ticker both pass the
-// first one, and only the synchronous check-and-set lets one of them claim it.
+// coverage (#403), so it runs discovery once per cooldown.
 async function claimCiklessDiscovery(
   db: QueryExecutor,
   ticker: string,
   options: SearchToSubjectOptions,
 ): Promise<boolean> {
-  const attempts = options.ciklessDiscoveryAttempts;
+  const attempts = options.discoveryAttempts;
   if (!attempts) return false;
-  const now = options.now ?? Date.now;
-  const normalized = normalizedTicker(ticker);
-  const due = (at: number) => {
-    const last = attempts.get(normalized);
-    return last === undefined || at - last >= CIKLESS_DISCOVERY_COOLDOWN_MS;
-  };
-  if (!due(now())) return false;
+  const last = attempts.get(normalizedTicker(ticker));
+  if (last !== undefined && (options.now ?? Date.now)() - last < DISCOVERY_COOLDOWN_MS) return false;
   const result = await db.query<{ has_cik: boolean | null }>(
     `select bool_or(iss.cik is not null) as has_cik
        from listings l
@@ -372,13 +398,9 @@ async function claimCiklessDiscovery(
       where l.ticker = $1
         and (l.active_from is null or l.active_from <= now())
         and (l.active_to is null or l.active_to > now())`,
-    [normalized],
+    [normalizedTicker(ticker)],
   );
-  if (result.rows[0]?.has_cik !== false) return false;
-  const at = now();
-  if (!due(at)) return false;
-  attempts.set(normalized, at);
-  return true;
+  return result.rows[0]?.has_cik === false && claimDiscovery(ticker, options);
 }
 
 function normalizedTicker(ticker: string): string {

@@ -43,7 +43,7 @@ import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolv
 import { FundamentalsDataUnavailableError } from "../../fundamentals/src/availability.ts";
 import { hydrateSecIssuerLatestYears } from "../../fundamentals/src/sec-facts-repository.ts";
 import type { SecEdgarFetcher } from "../../fundamentals/src/sec-edgar.ts";
-import { createSecCompanyFactsHttpFetcher, withSecFairAccess } from "../../fundamentals/src/sec-edgar-http.ts";
+import { processSecFetcher } from "../../fundamentals/src/sec-edgar-http.ts";
 import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
 import { consensusRepositoryFromEnv } from "../../fundamentals/src/dev-providers.ts";
 import { createPostgresIssuerProfileRepository } from "../../fundamentals/src/issuer-repository.ts";
@@ -231,13 +231,7 @@ export async function buildAnalyzeRunSeals(input: {
 
 const ANALYZE_FINANCIAL_PEER_LIMIT = 5;
 
-// SEC's fair-access rate limits the client, not the memo, so every memo shares one limiter.
-const secFetcher = process.env.SEC_EDGAR_USER_AGENT
-  ? withSecFairAccess(createSecCompanyFactsHttpFetcher({
-      userAgent: process.env.SEC_EDGAR_USER_AGENT,
-      baseUrl: process.env.SEC_EDGAR_BASE_URL,
-    }))
-  : null;
+const secFetcher = processSecFetcher(process.env);
 
 const HYDRATION_BUDGET_MS = 15_000;
 

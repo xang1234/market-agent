@@ -75,16 +75,16 @@ export async function preResolveChatSubject(
 }
 
 /**
- * Chat's subject resolver: the resolver's flow, in-process. A ticker held only
- * by issuers without a CIK runs `discovery`, at most once a minute per ticker
- * (flow.ts claimCiklessDiscovery), so a first question about a company the
- * weekly import left without one can fill it.
+ * Chat's subject resolver: the resolver's flow, in-process. A ticker no
+ * listing holds, or one held only by issuers without a CIK, runs `discovery`
+ * at most once a minute (flow.ts claimDiscovery), so a first question about a
+ * company the weekly import missed or left without a CIK can fill it.
  */
 export function createChatSubjectPreResolver(
   db: () => QueryExecutor,
   discovery: TickerDiscoveryProvider,
 ): ChatSubjectPreResolver {
-  const options = { tickerDiscoveryProvider: discovery, ciklessDiscoveryAttempts: new Map<string, number>() };
+  const options = { tickerDiscoveryProvider: discovery, discoveryAttempts: new Map<string, number>() };
   return (request) => preResolveChatSubject({
     ...request,
     resolveSubject: (resolverRequest) => runSearchToSubjectFlow(db(), resolverRequest, options),

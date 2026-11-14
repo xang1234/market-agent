@@ -38,8 +38,8 @@ import { claimSelection } from "./evidence-packet.ts";
 import { causeFamilies, reReadExplained, type Explained } from "./filed-cause.ts";
 import { readingAsks, readsEngine, resolveResearchScope, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import { proposeScope } from "./scope-proposal.ts";
-import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin, turnNow } from "./ytd-hydration.ts";
-import { companyListings, listingTimeZones, loadPerfComparisonBlocks, priceListingsForTurn, turnCompanies } from "./perf-block.ts";
+import { frozenDataMode, hydrateYtdBars, turnNow } from "./ytd-hydration.ts";
+import { companyListings, loadPerfComparisonBlocks, priceListingsForTurn, turnCompanies } from "./perf-block.ts";
 import { loadPriorCauseClaims, loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { createLlmThreadTitleModel, type DroppedClaims } from "./llm-runtime.ts";
@@ -54,11 +54,35 @@ import {
   type ChatSubjectPreResolution,
 } from "./subjects.ts";
 import { tickerDiscoveryProviderFromEnv } from "../../resolver/src/dev-providers.ts";
+import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
+import { hydrateSecIssuerLatestYears } from "../../fundamentals/src/sec-facts-repository.ts";
+import { processSecFetcher } from "../../fundamentals/src/sec-edgar-http.ts";
+import { createTurnHydrator } from "./turn-hydration.ts";
 import { createThreadTitleGenerationJob } from "./thread-title.ts";
 
 let localPool: Pool | null = null;
 
 export const preResolveSubject = createChatSubjectPreResolver(pool, tickerDiscoveryProviderFromEnv(process.env));
+
+// The latest fiscal years a company's filings are fetched for when a turn
+// names it with none on file; one companyfacts download stores them all.
+// ponytail: annual statements only (as Analyze hydrates); a quarter still
+// comes from a backfill or the symbol page's read-through.
+const TURN_SEC_READS: ReadonlyMap<string, number> = new Map([["revenue", 5]]);
+
+// Live mode only, as hydrateYtdBars: the turn-hydration.ts gates.
+const hydrateTurn = createTurnHydrator({
+  db: { query: (text, values) => pool().query(text, values) },
+  env: process.env,
+  fetchFilings: async (issuerId) => {
+    const fetcher = processSecFetcher(process.env);
+    if (fetcher) await hydrateSecIssuerLatestYears(pool(), { issuerId, reads: TURN_SEC_READS, fetcher, sourceId: SEC_EDGAR_FILING_SOURCE_ID });
+  },
+  // ponytail: an inherited window is fetched to its own cutoff and reread from
+  // stored bars, so a provider correction since shows corrected returns;
+  // reusing the earlier snapshot's sealed observations is the upgrade if that matters.
+  fetchBars: (origin, listings, cutoff) => hydrateYtdBars({ origin, listings, now: cutoff }),
+});
 
 // Chat tolerates a missing research-claims read: a freshly-covered subject (or a
 // transient DB hiccup) should still answer from price + fundamentals rather than
@@ -123,9 +147,17 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   // What the turn asks for, keeping a follow-up's unchanged scope (#206). A
   // window asked for now is cut off at the turn's asOf, which a follow-up keeps.
   const scopeAt = await analystTurnScope(context.threadId, context.userIntent ?? "", carriedSubjects, context.reading?.() ?? Promise.resolve(null));
-  // A live YTD chart fetches its prices first, so the cutoff below covers them (#232).
+  // What the answer's companies lack is fetched before the cutoff below, so
+  // the answer reads it: a charted YTD window's prices too, to its cutoff, as
+  // an inherited window is charted at its own (#232). Prices are fetched for
+  // the listing a company was named by, as the chart reads it.
+  const named = requestedListingsOf(carriedSubjects);
   const draft = scopeAt(turnNow(process.env));
-  if (chartedWindow(draft)) await hydrateYtdWindow(draft, carriedSubjects);
+  const ytdCutoff = chartedWindow(draft)?.cutoff;
+  await hydrateTurn(
+    draft.companies.map((company) => ({ issuer_id: company.issuer_id, label: company.label, listing_id: named.get(company.issuer_id)?.listing_id })),
+    { emit: context.emit, turnId: context.turnId ?? context.runId, ...(ytdCutoff ? { ytdCutoff } : {}) },
+  ).catch((reason: unknown) => console.warn("[chat] fetching the turn's companies failed; answering from what is on file", reason));
   const asOf = turnNow(process.env);
   const scope = scopeAt(asOf);
   // A carried-forward company the scope dropped (an auto-selected peer turned
@@ -419,39 +451,6 @@ async function continuedScope(
   return prior !== null && (changesCompanies || prior.companies.some((company) => ids.has(company.issuer_id))) ? prior : null;
 }
 
-// Live mode only (marketHydrationOrigin): fetches and stores the YTD window's
-// bars for the companies the chart will cover. Never throws; a failure leaves
-// the chart to name what is missing. An inherited window is fetched again at
-// its cutoff, so a company the turn adds gets its prices and an earlier failed
-// fetch is retried.
-// ponytail: the chart rereads stored bars at the inherited cutoff, so a provider
-// correction to them since shows corrected returns; reusing the earlier
-// snapshot's sealed observations is the upgrade if that matters.
-async function hydrateYtdWindow(
-  scope: ResearchScope,
-  covered: ReadonlyArray<ChatResolvedSubjectPreResolution>,
-): Promise<void> {
-  const origin = marketHydrationOrigin(process.env);
-  if (origin === null || scope.price_window === null) return;
-  const now = scope.price_window.cutoff;
-  try {
-    const listings = await priceListingsForTurn(pool(), {
-      issuers: issuersOfScope(scope),
-      wantsPeers: false,
-      requestedListings: requestedListingsOf(covered),
-      asOf: now,
-    });
-    const zones = await listingTimeZones(pool(), listings);
-    await hydrateYtdBars({
-      origin,
-      listings: listings.map((listing) => ({ id: listing.id, timeZone: zones.get(listing.id) ?? "UTC" })),
-      now,
-    });
-  } catch (reason) {
-    console.warn("[chat] YTD price fetch skipped; charting from the bars already stored", reason);
-  }
-}
-
 // The previous answer's companies, for follow-ups ("compare it with AMD").
 export const loadPriorSubjects: ChatPriorSubjectsLoader = ({ threadId }) =>
   loadThreadPriorSubjects(pool(), { threadId });
@@ -517,6 +516,7 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
   priorSubjects: (threadId) => loadPriorSubjects({ threadId }),
   evidence: createEvidenceFinancialPort,
   researchScope: financialResearchScope,
+  hydrate: hydrateTurn,
   commentary: (db, input) => saveCommentary(db, (answer, turn, onAnswered) =>
     answerTurn(answer, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered }), input),
 });

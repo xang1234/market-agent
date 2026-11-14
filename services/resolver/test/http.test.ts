@@ -798,7 +798,7 @@ test("handler: a ticker held only by a CIK-less issuer runs discovery once and g
   const listingId = await seedCiklessListing(client, "NVIDIA Corp", "NVDA");
   const seenTickers: string[] = [];
   const options = {
-    ciklessDiscoveryAttempts: new Map<string, number>(),
+    discoveryAttempts: new Map<string, number>(),
     tickerDiscoveryProvider: {
       discoverTicker: async (ticker: string) => {
         seenTickers.push(ticker);
@@ -842,7 +842,7 @@ test("handler: a failed discovery for a CIK-less ticker returns the local listin
   let calls = 0;
   let clock = 1_000_000;
   const options = {
-    ciklessDiscoveryAttempts: new Map<string, number>(),
+    discoveryAttempts: new Map<string, number>(),
     now: () => clock,
     tickerDiscoveryProvider: {
       discoverTicker: async () => {
@@ -879,7 +879,7 @@ test("handler: a discovery that finds no CIK is not repeated within a minute, ev
   const listingId = await seedCiklessListing(client, "Arm Holdings plc", "ARM");
   let calls = 0;
   const options = {
-    ciklessDiscoveryAttempts: new Map<string, number>(),
+    discoveryAttempts: new Map<string, number>(),
     tickerDiscoveryProvider: {
       discoverTicker: async () => {
         calls += 1;
@@ -909,6 +909,41 @@ test("handler: a discovery that finds no CIK is not repeated within a minute, ev
   for (const response of [...concurrent, later]) {
     assert.deepEqual(response.subjects.map((subject) => subject.subject_ref), [{ kind: "listing", id: listingId }]);
   }
+});
+
+test("handler: a ticker no provider knows runs discovery once a minute, even by concurrent resolves", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver discovery coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "unknown-ticker-cooldown");
+  const client = await connectedClient(t, databaseUrl);
+  const seen: string[] = [];
+  let clock = 1_000_000;
+  const options = {
+    discoveryAttempts: new Map<string, number>(),
+    now: () => clock,
+    tickerDiscoveryProvider: {
+      discoverTicker: async (ticker: string) => {
+        seen.push(ticker);
+        return [];
+      },
+    },
+  };
+
+  const responses = await Promise.all([
+    handleResolveSubjects(client, { text: "ZZQX" }, options),
+    handleResolveSubjects(client, { text: "ZZQX" }, options),
+  ]);
+  clock += 59_999;
+  responses.push(await handleResolveSubjects(client, { text: "ZZQX" }, options));
+  assert.deepEqual(seen, ["ZZQX"]);
+
+  clock += 1;
+  responses.push(await handleResolveSubjects(client, { text: "ZZQX" }, options));
+  assert.deepEqual(seen, ["ZZQX", "ZZQX"]);
+  for (const response of responses) assert.deepEqual(response.subjects, []);
 });
 
 test("handler: issuer legal-name text returns an issuer subject", { timeout: 120000 }, async (t) => {

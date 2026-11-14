@@ -36,6 +36,8 @@ const PLAN_FIELDS = [
   "subject_resolution",
   "tool_call_id",
   "tool_name",
+  // A step's own name, as a fetch for the turn's companies names them (turn-hydration.ts).
+  "label",
   "status",
   "resolution_status",
   "snapshot_id",

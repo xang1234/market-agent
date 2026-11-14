@@ -99,3 +99,14 @@ export function withSecFairAccess(fetcher: SecEdgarFetcher, options: SecFairAcce
     }
   };
 }
+
+let processFetcher: SecEdgarFetcher | null | undefined;
+
+// The process's one SEC fetcher, null without a user agent. SEC's fair-access
+// rate limits the client, so every lane in the process (Analyze's memos,
+// chat's turns) queues behind one limiter.
+export function processSecFetcher(env: NodeJS.ProcessEnv): SecEdgarFetcher | null {
+  const userAgent = env.SEC_EDGAR_USER_AGENT?.trim();
+  processFetcher ??= userAgent ? withSecFairAccess(createSecCompanyFactsHttpFetcher({ userAgent, baseUrl: env.SEC_EDGAR_BASE_URL })) : null;
+  return processFetcher;
+}
