@@ -3,9 +3,9 @@ import type { ReactElement, ReactNode } from 'react'
 import { CopyButton } from '../blocks/CopyButton.tsx'
 import { isIdentifier, isTimestamp, readableDate, shortId } from './readable.ts'
 
-/** A date or timestamp in words, with the exact text it came from on hover. */
-export function Timestamp({ value }: { value: string }): ReactElement {
-  return <time dateTime={value} title={value}>{readableDate(value)}</time>
+/** A date or timestamp in words, with the exact text it came from on hover; `day` shows only the day it falls on in `timeZone`. */
+export function Timestamp({ value, timeZone, day }: { value: string; timeZone?: string; day?: boolean }): ReactElement {
+  return <time dateTime={value} title={value}>{readableDate(value, { timeZone, day })}</time>
 }
 
 /** An identifier shortened to scan, the full value on hover and one click from the clipboard. */

@@ -457,3 +457,33 @@ test('analyst commentary is labelled as such, and a result in it opens the verif
   const plain = await renderDocument(interleavedBlock)
   assert.equal(plain.querySelector('[data-analyst-commentary]'), null)
 })
+
+test('a result in commentary hands the inspector the value and period it shows', async () => {
+  const opened: unknown[] = []
+  const inspector: EvidenceInspectorContextValue = {
+    openInspection() {},
+    openBlockInspection() {},
+    openFinancialResult(resultId, shown) { opened.push([resultId, shown]) },
+    closeInspection() {},
+  }
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  try {
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        <EvidenceInspectorContext.Provider value={inspector}>
+          <RichText block={richTextBlock('rt-result', [
+            { type: 'text', text: 'Revenue reached ' },
+            { type: 'ref', ref_kind: 'result', ref_id: FACT_A, format: '$54.2B', period: 'Q4 FY2026' },
+          ])} />
+        </EvidenceInspectorContext.Provider>,
+      )
+    })
+    await act(async () => (dom.window.document.querySelector(`[data-inspect-result="${FACT_A}"]`) as HTMLElement).click())
+    assert.deepEqual(opened, [[FACT_A, { subject: null, measure: null, period: 'Q4 FY2026', value: '$54.2B' }]])
+    await act(async () => root.unmount())
+  } finally {
+    restoreGlobals()
+  }
+})

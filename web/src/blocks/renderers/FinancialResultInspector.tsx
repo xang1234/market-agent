@@ -6,7 +6,8 @@ import {
   derivationTermLabel,
   fiscalPeriodText,
   inspectableDetails,
-  OPERATIONS,
+  metricLabel,
+  OPERATION_FORMULAS,
   payloadSummary,
   type FinancialInspectedInput,
   type FinancialResultInspection,
@@ -65,9 +66,8 @@ export function FinancialResultInspector({ load, shown }: { load: FinancialInspe
 
 function ValueHeader({ details, shown }: { details: Inspected; shown?: FinancialResultShown }): ReactElement {
   const value = canonicalValue(details.payload)
-  const text = value === null ? null : valueText(value, (details.payload as { unit?: unknown }).unit, details.formula?.operation)
+  const text = value === null ? null : valueText(value, (details.payload as { unit?: unknown }).unit, details.formula?.reads_as_multiple)
   const headline = value === null ? payloadSummary(details.payload, details.formula?.operation) : shown?.value ?? text?.text ?? value
-  const exact = text?.full_text ?? value
   return (
     <section className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -77,10 +77,10 @@ function ValueHeader({ details, shown }: { details: Inspected; shown?: Financial
       <p className={`num font-semibold tracking-tight text-fg ${value === null ? 'text-lg' : 'text-3xl'}`} data-testid="financial-inspector-value">
         {headline}
       </p>
-      {value !== null && exact !== null ? (
+      {value !== null ? (
         <div className="flex min-w-0 items-center gap-2 text-xs text-muted">
           <span className="shrink-0">Exact</span>
-          <span className="num min-w-0 truncate text-fg-soft" title={exact} data-testid="financial-inspector-exact">{exact}</span>
+          <span className="num min-w-0 break-all text-fg-soft" data-testid="financial-inspector-exact">{value}</span>
           <CopyButton label="Copy" what="the exact value" purpose="to the clipboard" text={() => value} />
         </div>
       ) : null}
@@ -89,7 +89,7 @@ function ValueHeader({ details, shown }: { details: Inspected; shown?: Financial
 }
 
 function formulaText(details: Inspected): string {
-  if (details.formula) return OPERATIONS[details.formula.operation]?.formula ?? humanize(details.formula.operation)
+  if (details.formula) return OPERATION_FORMULAS[details.formula.operation] ?? humanize(details.formula.operation)
   const [input] = details.inputs
   if (input && 'fact_id' in input && input.derivation) return `Derived from filings: ${derivationFormula(input.period, input.derivation)}`
   return 'As reported in the filing'
@@ -99,7 +99,23 @@ function money(value: string, unit: unknown): string {
   return valueText(value, unit)?.text ?? value
 }
 
+// A session close stands for its session's day. ponytail: read in UTC, which is the session's own day wherever the regular close falls before midnight UTC (every listed exchange today); a listing zone from the server covers any other.
+function observedDay(observation: PriceInput['observation']): { timeZone?: string; day?: boolean } {
+  return observation.kind === 'session_close' ? { timeZone: 'UTC', day: true } : {}
+}
+
+/** The company on each input and source, only when the inputs name more than one. */
+function companyOf(details: Inspected): (input: FactInput | PriceInput) => string | null {
+  const companies = new Set(details.inputs.flatMap((input) => (input.status === 'bound' ? [input.company] : [])))
+  return (input) => (companies.size > 1 ? input.company : null)
+}
+
+function named(company: string | null, text: string): string {
+  return company === null ? text : `${company} · ${text}`
+}
+
 function Computation({ details }: { details: Inspected }): ReactElement {
+  const company = companyOf(details)
   return (
     <section className="flex flex-col gap-2" aria-labelledby="inspector-computed">
       <h3 id="inspector-computed" className={H3}>How it was computed</h3>
@@ -111,7 +127,9 @@ function Computation({ details }: { details: Inspected }): ReactElement {
           <tr><th scope="col">Input</th><th scope="col">Period or source</th><th scope="col">Value</th></tr>
         </thead>
         <tbody>
-          {details.inputs.map((input) => <InputRows key={input.input_slot} input={input} terms={details.inputs.length === 1} />)}
+          {details.inputs.map((input) => (
+            <InputRows key={input.input_slot} input={input} company={input.status === 'bound' ? company(input) : null} terms={details.inputs.length === 1} />
+          ))}
         </tbody>
       </table>
     </section>
@@ -129,7 +147,7 @@ function Cells({ label, middle, value, indent = false }: { label: ReactNode; mid
 }
 
 // A lone input lists each term it was derived from; beside other inputs its derivation is one line, and each term sits under Sources and Details.
-function InputRows({ input, terms }: { input: FinancialInspectedInput; terms: boolean }): ReactElement {
+function InputRows({ input, company, terms }: { input: FinancialInspectedInput; company: string | null; terms: boolean }): ReactElement {
   if (input.status === 'gap') {
     return <Cells label="No eligible input" middle={humanize(input.reason_code ?? 'unknown_reason')} value="n/a" />
   }
@@ -137,19 +155,19 @@ function InputRows({ input, terms }: { input: FinancialInspectedInput; terms: bo
     const { factor } = input.split_adjustment
     return (
       <>
-        <Cells label="Share price" middle={<>{humanize(input.observation.kind)} <Timestamp value={input.observation.observed_at} /></>} value={money(input.value, input.unit)} />
+        <Cells label={named(company, 'Share price')} middle={<>{humanize(input.observation.kind)} <Timestamp value={input.observation.observed_at} {...observedDay(input.observation)} /></>} value={money(input.value, input.unit)} />
         <Cells indent label="Split basis" middle={<>÷ {factor.numerator}/{factor.denominator} to {readableDate(input.split_adjustment.reference_date)}</>} value="" />
       </>
     )
   }
   return (
     <>
-      <Cells label={humanize(input.metric.metric_key)} middle={fiscalPeriodText(input.period)} value={money(input.value, input.unit)} />
+      <Cells label={named(company, metricLabel(input.metric.metric_key))} middle={fiscalPeriodText(input.period)} value={money(input.value, input.unit)} />
       {input.derivation && !terms ? (
         <tr><td colSpan={3} className="pb-1.5 pl-3 text-muted">Derived: {derivationFormula(input.period, input.derivation)}</td></tr>
       ) : null}
       {terms && input.derivation?.terms.map((term, index) => (
-        <Cells key={index} indent label={derivationTermLabel(term, index)} middle={`${term.source.form} filed ${readableDate(term.source.filed)}`} value={money(term.raw_token, input.unit)} />
+        <Cells key={index} indent label={derivationTermLabel(term, index)} middle={filingName(term)} value={money(term.raw_token, input.unit)} />
       ))}
       {input.inference ? (
         <tr><td colSpan={3} className="pb-1.5 pl-3 text-muted">Inferred: {noncontrollingInterestInferenceText(input.inference)}</td></tr>
@@ -158,26 +176,30 @@ function InputRows({ input, terms }: { input: FinancialInspectedInput; terms: bo
   )
 }
 
-type SourceEntry = { sourceId: string; name: string | null; supports: string[] }
+// A name from a filing's own form wins over a provisional one ("Filed Jan 10, 2024") for the same source.
+type SourceEntry = { sourceId: string; name: string; provisional: boolean; supports: string[] }
 
 function sourceEntries(details: Inspected): SourceEntry[] {
+  const company = companyOf(details)
   const entries = new Map<string, SourceEntry>()
-  const add = (sourceId: string, name: string | null, support: string) => {
-    const entry = entries.get(sourceId) ?? { sourceId, name: null, supports: [] }
-    entry.name ??= name
+  const add = (sourceId: string, name: string, support: string, provisional = false) => {
+    const entry = entries.get(sourceId) ?? { sourceId, name, provisional, supports: [] }
+    if (entry.provisional && !provisional) Object.assign(entry, { name, provisional })
     if (!entry.supports.includes(support)) entry.supports.push(support)
     entries.set(sourceId, entry)
   }
   for (const input of details.inputs) {
     if (input.status === 'gap') continue
     if ('observation_id' in input) {
-      add(input.source.source_id, 'Price data', `Share price, ${readableDate(input.observation.observed_at)}`)
+      add(input.source.source_id, named(company(input), 'Price data'), `Share price, ${readableDate(input.observation.observed_at, observedDay(input.observation))}`)
       continue
     }
-    const metric = humanize(input.metric.metric_key)
-    if (!input.derivation) add(input.source.source_id, null, `${metric} ${fiscalPeriodText({ ...input.period, end: null })}`)
+    const metric = metricLabel(input.metric.metric_key)
+    // A stated value's source records when it was filed, not which form.
+    const filed = input.source.filed === null ? 'Filing' : `Filed ${readableDate(input.source.filed)}`
+    if (!input.derivation) add(input.source.source_id, named(company(input), filed), `${metric} ${fiscalPeriodText({ ...input.period, end: null })}`, true)
     for (const term of input.derivation?.terms ?? []) {
-      add(term.source.source_id, filingName(term), `${metric} ${derivationTermLabel({ ...term, sign: '+' }, 0)}`)
+      add(term.source.source_id, named(company(input), filingName(term)), `${metric} ${derivationTermLabel({ ...term, sign: '+' }, 0)}`)
     }
   }
   return [...entries.values()]
@@ -197,13 +219,13 @@ function Sources({ details }: { details: Inspected }): ReactElement | null {
         {entries.map((entry) => (
           <li key={entry.sourceId} className="flex items-center justify-between gap-3 px-3 py-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-fg">{entry.name ?? 'Filing'}</p>
+              <p className="text-sm font-medium text-fg">{entry.name}</p>
               <p className="truncate text-xs text-muted" title={entry.supports.join(', ')}>{entry.supports.join(', ')}</p>
             </div>
             <InspectableRef
               snapshotId={details.publication.snapshot_id}
               inspectionRef={{ kind: 'source', id: entry.sourceId }}
-              shownAs={entry.name ?? 'Filing'}
+              shownAs={entry.name}
               className={VIEW_SOURCE}
             >
               View source
@@ -235,7 +257,7 @@ function Assumptions({ details }: { details: Inspected }): ReactElement | null {
 }
 
 function inputTitle(input: FactInput | PriceInput): string {
-  return 'observation_id' in input ? 'Share price' : `${humanize(input.metric.metric_key)} ${fiscalPeriodText({ ...input.period, end: null })}`
+  return 'observation_id' in input ? 'Share price' : `${metricLabel(input.metric.metric_key)} ${fiscalPeriodText({ ...input.period, end: null })}`
 }
 
 function AuditDetails({ details }: { details: Inspected }): ReactElement {
@@ -264,7 +286,7 @@ function AuditDetails({ details }: { details: Inspected }): ReactElement {
           ['Body hash', <Identifier value={input.source.body_sha256} label="the body hash" />],
         ] : [
           ['Precision', humanize(input.precision_status)],
-          ['Public by', <><Timestamp value={input.publication.available_no_later_than} /> ({input.publication.precision})</>],
+          ['Public by', <><Timestamp value={input.publication.available_no_later_than} {...(input.publication.precision === 'date' ? { day: true, timeZone: input.publication.source_timezone } : {})} /> ({input.publication.precision})</>],
           ['Fact', <Identifier value={input.fact_id} label="the fact ID" />],
           ['Source', <Identifier value={input.source.source_id} label="the source ID" />],
           ['Source version', <Identifier value={input.source.source_version_hash} label="the source version" />],

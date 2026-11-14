@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 
 import { FinancialResultInspector } from '../blocks/renderers/FinancialResultInspector.tsx'
-import { inspectionHeading } from '../blocks/financialInspection.ts'
+import { financialHeading } from '../blocks/financialInspection.ts'
 import { Skeleton } from '../ui/Skeleton.tsx'
 import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from './evidenceInspectorContext.ts'
 import type {
@@ -137,17 +137,14 @@ function PageBody({ page }: { page: InspectorPage }) {
 }
 
 function pageTitle(page: InspectorPage): string {
-  if (page.kind === 'financial') return page.shown?.measure ?? financialHeading(page)?.title ?? 'Verified calculation'
+  if (page.kind === 'financial') return heading(page).title
   if (page.kind === 'block') return page.inspection.title
   if (page.shownAs) return page.shownAs
   return page.load.kind === 'ready' ? page.load.inspection.title : REF_KIND_NAMES[page.ref.kind]
 }
 
 function pageSubtitle(page: InspectorPage): string {
-  if (page.kind === 'financial') {
-    if (page.shown) return joinParts([page.shown.subject, page.shown.period]) || 'Verified calculation'
-    return financialHeading(page)?.subtitle ?? 'Verified calculation'
-  }
+  if (page.kind === 'financial') return heading(page).subtitle
   if (page.kind === 'block') return joinParts(['Block', datePart(page.inspection.rows)])
   if (page.load.kind !== 'ready') return REF_KIND_NAMES[page.ref.kind]
   const { inspection } = page.load
@@ -157,8 +154,8 @@ function pageSubtitle(page: InspectorPage): string {
   return joinParts([REF_KIND_NAMES[inspection.kind], provider, datePart(inspection.rows)])
 }
 
-function financialHeading(page: Extract<InspectorPage, { kind: 'financial' }>) {
-  return page.load.kind === 'ready' ? inspectionHeading(page.load.inspection) : null
+function heading(page: Extract<InspectorPage, { kind: 'financial' }>) {
+  return financialHeading(page.shown, page.load.kind === 'ready' ? page.load.inspection : null)
 }
 
 function datePart(rows: ReadonlyArray<EvidenceInspectionRow>): string | null {
@@ -169,8 +166,9 @@ function datePart(rows: ReadonlyArray<EvidenceInspectionRow>): string | null {
   return null
 }
 
+// The day the body's Timestamp falls on, so the header and the row agree.
 function shortDate(value: string): string {
-  return /^\d{4}-\d{2}-\d{2}/.test(value) ? readableDate(value.slice(0, 10)) : value
+  return readableDate(value, { day: true })
 }
 
 function joinParts(parts: ReadonlyArray<string | null>): string {

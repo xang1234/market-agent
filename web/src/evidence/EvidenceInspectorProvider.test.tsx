@@ -340,6 +340,24 @@ test("the header names the kind, provider, and as-of date instead of the snapsho
   }
 });
 
+test("the header's date is the day the body's time falls on, in the reader's zone", async () => {
+  const previous = process.env.TZ;
+  process.env.TZ = "America/New_York";
+  const late = { ...SOURCE_INSPECTION, rows: [{ label: "Provider", value: "sec" }, { label: "Retrieved", value: "2026-05-30T02:00:00.000Z" }] };
+  const app = await mountDockedInspector(async () => jsonResponse(late));
+  try {
+    await app.click(app.opener("Filing"));
+
+    assert.equal(app.headerSubtitle(), "Source · sec · Retrieved May 29, 2026");
+    const body = [...(app.panel()?.querySelectorAll("dt") ?? [])].find((term) => term.textContent === "Retrieved")?.nextElementSibling;
+    assert.equal(body?.textContent, "May 29, 2026, 22:00");
+  } finally {
+    await app.unmount();
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+});
+
 test("related refs read as their label, or as their kind when the server sends none", async () => {
   const app = await mountDockedInspector(async () => jsonResponse(FACT_INSPECTION));
   try {
