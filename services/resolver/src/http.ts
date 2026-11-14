@@ -212,7 +212,7 @@ export function createResolverServer(
   db: QueryExecutor,
   options: SearchToSubjectOptions = {},
 ): Server {
-  const serverOptions = { ciklessDiscoveryAttempts: new Map<string, number>(), ...options };
+  const serverOptions = { discoveryAttempts: new Map<string, number>(), ...options };
   return createServer(async (req, res) => {
     try {
       const route = req.method === "POST" ? req.url : null;
