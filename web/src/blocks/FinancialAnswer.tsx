@@ -6,6 +6,7 @@ import { InspectableResult } from '../evidence/InspectableResult.tsx'
 import { BlockProofContext } from './blockProof.ts'
 import { VerificationLabel } from './VerificationLabel.tsx'
 import {
+  cellPeriod,
   columnNames,
   coverageText,
   labelText,
@@ -123,10 +124,11 @@ function ResultLine({ content, result, badge }: { content: FinancialAnswerConten
   )
 }
 
-// A cell prints its period when its row reads several, or when it is a gap for another period than the row's; a gap's reason is its title and its screen-reader text.
-function Cell({ result, period, showPeriod = false }: { result: FinancialPresentedResult | undefined; period?: string; showPeriod?: boolean }): ReactElement {
+// period names the cell to the inspector; shown is what the cell prints of it (cellPeriod), the whole period its title. A gap's reason is its title and its screen-reader text.
+function Cell({ result, period, shown }: { result: FinancialPresentedResult | undefined; period?: string; shown?: string }): ReactElement {
   if (!result) return <span className="text-muted">Not requested</span>
   const { presented } = result
+  const note = shown === undefined ? null : <span className="block text-xs text-muted" title={shown === period ? undefined : period}>{shown}</span>
   if (presented.kind === 'value') {
     return (
       <>
@@ -135,7 +137,7 @@ function Cell({ result, period, showPeriod = false }: { result: FinancialPresent
             {presented.text}
           </span>
         </InspectableResult>
-        {showPeriod && period !== undefined ? <span className="block text-xs text-muted">{period}</span> : null}
+        {note}
       </>
     )
   }
@@ -145,7 +147,7 @@ function Cell({ result, period, showPeriod = false }: { result: FinancialPresent
         <span aria-hidden="true">n/a</span>
         <span className="sr-only">{presented.text}</span>
       </span>
-      {showPeriod && period !== undefined ? <span className="block text-xs text-muted">{period}</span> : null}
+      {note}
     </>
   )
 }
@@ -201,19 +203,19 @@ function CertifiedTable({ blockId, provenance, content, results, table }: TableP
           <tbody>
             {order.map((rowIndex) => {
               const row = table.rows[rowIndex]!
-              const shared = rowPeriod(table, row, results)
+              const shared = rowPeriod(content, table, row, results)
               return (
                 <tr key={row.subject_label_id} className="border-t border-line" data-row-label={row.subject_label_id}>
                   <th scope="row" className="px-3 py-2 font-normal text-fg">
                     {labelText(content, row.subject_label_id)}
-                    {shared === null ? null : <RowPeriod label={labelText(content, shared)} />}
+                    {shared === null ? null : <RowPeriod label={shared} />}
                   </th>
                   {row.cells.map((cell, cellIndex) => {
                     const result = cell === null ? undefined : results.get(cell)
-                    const period = table.columns[cellIndex]?.period_label_id === null && result ? shortPeriod(labelText(content, result.period_label_id)) : undefined
+                    const label = table.columns[cellIndex]?.period_label_id === null && result ? labelText(content, result.period_label_id) : undefined
                     return (
                       <td key={`${row.subject_label_id}-${cellIndex}`} className="num px-3 py-2 text-right text-fg">
-                        <Cell result={result} period={period} showPeriod={shared === null || result?.period_label_id !== shared} />
+                        <Cell result={result} period={label === undefined ? undefined : shortPeriod(label)} shown={label === undefined ? undefined : cellPeriod(label, shared)} />
                       </td>
                     )
                   })}

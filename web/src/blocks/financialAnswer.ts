@@ -49,17 +49,31 @@ export function columnNames(measures: ReadonlyArray<string>): string[] {
   return short.map((name, i) => (short.some((other, j) => other === name && measures[j] !== measures[i]) ? measures[i]! : name))
 }
 
-/** The one period label every value in a row's undated columns reads, or null when they read several. */
+/** A period label read back where the engine joins a change's two: its own period and the one it is compared with ("Q4 FY2026 vs Q3 FY2026"). */
+export function periodParts(text: string): { current: string; compared?: string } {
+  const [current, compared, ...more] = text.split(' vs ')
+  return compared === undefined || more.length > 0 ? { current: text } : { current: current!, compared }
+}
+
+/** The one period every value in a row's undated columns reads, a change's being the period it changed to, or null when they read several. */
 export function rowPeriod(
+  content: FinancialAnswerContent,
   table: FinancialTablePresentation,
   row: FinancialTablePresentation['rows'][number],
   results: ReadonlyMap<string, FinancialPresentedResult>,
 ): string | null {
   const periods = new Set(row.cells.flatMap((cell, index) => {
     const result = cell == null || table.columns[index]?.period_label_id !== null ? undefined : results.get(cell)
-    return result?.presented.kind === 'value' ? [result.period_label_id] : []
+    return result?.presented.kind === 'value' ? [periodParts(labelText(content, result.period_label_id)).current] : []
   }))
   return periods.size === 1 ? [...periods][0]! : null
+}
+
+/** What a cell shows of its period under its row's: nothing for the row's period, a change of it only its base ("vs Q3 FY2026"), any other period whole. */
+export function cellPeriod(label: string, row: string | null): string | undefined {
+  const { current, compared } = periodParts(label)
+  if (current !== row) return shortPeriod(label)
+  return compared === undefined ? undefined : `vs ${compared.replace(/ \((?:ended|as of) [^()]*\)$/, '')}`
 }
 
 export type SortDirection = 'ascending' | 'descending'

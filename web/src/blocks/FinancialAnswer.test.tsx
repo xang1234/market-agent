@@ -84,7 +84,7 @@ test('a supported answer prints server strings with full values, coverage, and a
   assert.doesNotMatch(html, /figcaption/, 'no model-supplied title')
 })
 
-test('a comparison across fiscal calendars has one column per line, each cell naming its own period in visible text', () => {
+test('a comparison across fiscal calendars has one column per line, each row naming its period once and each change its base', () => {
   const inspector: EvidenceInspectorContextValue = { openInspection() {}, openBlockInspection() {}, openFinancialResult() {}, closeInspection() {} }
   const html = renderToStaticMarkup(
     <EvidenceInspectorContext.Provider value={inspector}>
@@ -105,39 +105,39 @@ test('a comparison across fiscal calendars has one column per line, each cell na
     'Year-over-year percent change in Revenue',
   ])
   const rows = [...table.querySelectorAll('tbody tr')].map((row) => [
-    row.querySelector('th')!.textContent,
+    [...row.querySelector('th')!.childNodes].map((node) => node.textContent),
     ...[...row.querySelectorAll('td')].map((cell) => [...cell.children].map((part) => part.querySelector('[aria-hidden="true"]')?.textContent ?? part.textContent)),
   ])
   assert.deepEqual(rows, [
     [
-      'NVIDIA Corp',
-      ['$68.0B', 'Q4 FY2026'],
-      ['$51.0B', 'Q4 FY2026'],
-      ['$44.2B', 'Q4 FY2026'],
-      ['$37.4B', 'Q4 FY2026'],
-      ['75.00%', 'Q4 FY2026'],
-      ['65.00%', 'Q4 FY2026'],
-      ['55.00%', 'Q4 FY2026'],
-      ['19.30%', 'Q4 FY2026 vs Q3 FY2026'],
-      ['73.20%', 'Q4 FY2026 vs Q4 FY2025'],
+      ['NVIDIA Corp', 'Q4 FY2026'],
+      ['$68.0B'],
+      ['$51.0B'],
+      ['$44.2B'],
+      ['$37.4B'],
+      ['75.00%'],
+      ['65.00%'],
+      ['55.00%'],
+      ['19.30%', 'vs Q3 FY2026'],
+      ['73.20%', 'vs Q4 FY2025'],
     ],
     [
-      'Advanced Micro Devices, Inc.',
-      ['$7.7B', 'Q2 FY2026'],
-      ['$3.1B', 'Q2 FY2026'],
-      ['$770.0M', 'Q2 FY2026'],
-      ['$693.0M', 'Q2 FY2026'],
-      ['40.00%', 'Q2 FY2026'],
-      ['10.00%', 'Q2 FY2026'],
-      ['9.00%', 'Q2 FY2026'],
-      ['4.80%', 'Q2 FY2026 vs Q1 FY2026'],
-      ['n/a', 'Q2 FY2026 vs Q2 FY2025'],
+      ['Advanced Micro Devices, Inc.', 'Q2 FY2026'],
+      ['$7.7B'],
+      ['$3.1B'],
+      ['$770.0M'],
+      ['$693.0M'],
+      ['40.00%'],
+      ['10.00%'],
+      ['9.00%'],
+      ['4.80%', 'vs Q1 FY2026'],
+      ['n/a', 'vs Q2 FY2025'],
     ],
   ])
   assert.doesNotMatch(html, /Not requested/)
   assert.equal(table.querySelector('tbody td button')!.getAttribute('aria-label'), 'Inspect the verified calculation for USD 68000000000, Q4 FY2026')
   const plain = renderToStaticMarkup(<FinancialAnswer block={financialAnswerFiscalCalendarsFixture} />)
-  assert.match(plain, /title="USD 7700000000" aria-label="USD 7700000000">\$7\.7B<\/span><span class="block text-xs text-muted">Q2 FY2026<\/span>/, 'the value keeps its own label; the period is ordinary text after it')
+  assert.match(plain, /aria-label="4\.8%">4\.80%<\/span><span class="block text-xs text-muted" title="Q2 FY2026 vs Q1 FY2026">vs Q1 FY2026<\/span>/, 'the value keeps its own label; its base is ordinary text after it, the whole period its title')
 })
 
 test('a row whose cells read one period names it once under its company, and a gap reads n/a with its reason kept', () => {
