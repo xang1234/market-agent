@@ -135,6 +135,14 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* A horizontally scrolling table shades its right edge while more columns lie
+   beyond it; the first layer scrolls with the content and covers the shade at the end. */
+.scroll-edge {
+  background:
+    linear-gradient(to left, var(--color-surface) 50%, transparent) right / 24px 100% no-repeat local,
+    linear-gradient(to left, color-mix(in srgb, var(--color-fg) 18%, transparent), transparent) right / 12px 100% no-repeat scroll;
+}
+
 /* The control whose evidence the docked inspector is showing. */
 [data-inspecting="true"] {
   outline: 2px solid var(--color-accent);
