@@ -1,10 +1,12 @@
 // Fetches what a turn's companies lack before the turn reads them: SEC
 // filings for a company with none on file, and daily bars for one whose
 // listing has none stored, so a ticker named in chat is answered from its own
-// data without first opening its page. Both fetches run together inside one
-// budget per turn; one still running past it keeps running and stores what it
-// gets, and the turn answers from what is stored by then. A frozen data mode
-// fetches nothing (ytd-hydration.ts), and SEC is fetched only with a user agent.
+// data without first opening its page. A turn that charts a YTD window has
+// every company's bars fetched to the window's cutoff (#232). Both fetches run
+// together inside one budget per turn; one still running past it keeps
+// running and stores what it gets, and the turn answers from what is stored by
+// then. A frozen data mode fetches nothing (ytd-hydration.ts), and SEC is
+// fetched only with a user agent.
 
 import type { QueryExecutor } from "../../shared/src/http.ts";
 import { labelList, MAX_TURN_SUBJECTS, type ChatTurnEmit } from "./coordinator.ts";
@@ -12,8 +14,9 @@ import { issuersWithoutFilings } from "./financial-runtime.ts";
 import { companyListings, listingsForComparison, listingTimeZones } from "./perf-block.ts";
 import { frozenDataMode, marketHydrationOrigin, type HydrationListing } from "./ytd-hydration.ts";
 
-// `listing_id` is the listing the turn named the company by, when it named one.
-export type TurnCompany = Readonly<{ issuer_id: string; label: string; listing_id?: string }>;
+// `listing_id` is the listing the turn named the company by, when it named
+// one. A company with no label (an auto-selected peer) is named by its listing.
+export type TurnCompany = Readonly<{ issuer_id: string; label?: string; listing_id?: string }>;
 
 /**
  * Returns the issuers, lowercased, whose filings are still loading: a fetch
@@ -22,7 +25,8 @@ export type TurnCompany = Readonly<{ issuer_id: string; label: string; listing_i
  */
 export type TurnHydrator = (
   companies: ReadonlyArray<TurnCompany>,
-  turn: { emit: ChatTurnEmit; turnId: string },
+  // `ytdCutoff`: the cutoff of the YTD window the turn charts, if it charts one.
+  turn: { emit: ChatTurnEmit; turnId: string; ytdCutoff?: string },
 ) => Promise<ReadonlySet<string>>;
 
 const BUDGET_MS = 15_000;
@@ -36,7 +40,7 @@ export function createTurnHydrator(deps: {
   db: QueryExecutor;
   env: NodeJS.ProcessEnv;
   fetchFilings(issuerId: string): Promise<void>;
-  fetchBars(origin: string, listings: ReadonlyArray<HydrationListing>): Promise<void>;
+  fetchBars(origin: string, listings: ReadonlyArray<HydrationListing>, cutoff: string): Promise<void>;
   budgetMs?: number;
   now?: () => number;
   logger?: Pick<Console, "warn">;
@@ -72,9 +76,10 @@ export function createTurnHydrator(deps: {
     const sec = !frozenDataMode(deps.env) && Boolean(deps.env.SEC_EDGAR_USER_AGENT?.trim());
     if (capped.length === 0 || (!sec && origin === null)) return NONE;
     const ids = capped.map((company) => company.issuer_id);
+    const cutoff = turn.ytdCutoff ?? new Date().toISOString();
     const [unfiled, unpriced] = await Promise.all([
       sec ? issuersWithoutFilings(deps.db, ids) : NONE,
-      origin === null ? [] : listingsWithoutBars(deps.db, capped),
+      origin === null ? [] : listingsToPrice(deps.db, capped, cutoff, turn.ytdCutoff === undefined),
     ]);
 
     // A company is fetched when it has no filings on file, or its last fetch
@@ -93,13 +98,14 @@ export function createTurnHydrator(deps: {
       return entry?.outcome === undefined ? [{ listing, entry }] : [];
     });
     const due = priced.flatMap(({ listing, entry }) => (entry ? [] : [listing]));
-    const batch = due.length === 0 ? [] : [start(due.map((listing) => `bars:${listing.id}`), () => deps.fetchBars(origin!, due.map(({ id, timeZone }) => ({ id, timeZone }))))];
-    const labelOf = new Map(capped.map((company) => [company.issuer_id, company.label]));
+    const batch = due.length === 0 ? [] : [start(due.map((listing) => `bars:${listing.id}`), () => deps.fetchBars(origin!, due.map(({ id, timeZone }) => ({ id, timeZone })), cutoff))];
+    const listingLabel = new Map(unpriced.map((listing) => [listing.issuer_id, listing.label]));
+    const labelOf = new Map(capped.map((company) => [company.issuer_id, company.label ?? listingLabel.get(company.issuer_id) ?? company.issuer_id]));
     const running = filings.filter(({ entry }) => entry.outcome === undefined);
 
     const steps = [
-      { tool_name: "fetch_filings", label: `Fetching filings for ${labelList(running.map(({ company }) => company.label))}`, fetches: running.map(({ entry }) => entry) },
-      { tool_name: "load_prices", label: `Loading prices for ${labelList(priced.map(({ listing }) => labelOf.get(listing.issuer_id) ?? listing.id))}`, fetches: [...priced.flatMap(({ entry }) => entry ?? []), ...batch] },
+      { tool_name: "fetch_filings", label: `Fetching filings for ${labelList(running.map(({ company }) => labelOf.get(company.issuer_id)!))}`, fetches: running.map(({ entry }) => entry) },
+      { tool_name: "load_prices", label: `Loading prices for ${labelList(priced.map(({ listing }) => labelOf.get(listing.issuer_id)!))}`, fetches: [...priced.flatMap(({ entry }) => entry ?? []), ...batch] },
     ].filter((step) => step.fetches.length > 0).map((step) => ({ ...step, tool_call_id: `${step.tool_name}-${turn.turnId}` }));
     for (const { tool_call_id, tool_name, label } of steps) turn.emit("tool.started", { tool_call_id, tool_name, label });
 
@@ -121,21 +127,26 @@ export function createTurnHydrator(deps: {
 }
 
 // Each company's listing the chart reads (perf-block.ts priceListingsForTurn):
-// the one the turn named, else its first active by ticker, when no daily bars
-// are stored for it.
-async function listingsWithoutBars(db: QueryExecutor, companies: ReadonlyArray<TurnCompany>): Promise<Array<HydrationListing & { issuer_id: string }>> {
+// the one the turn named, else its first active by ticker at the cutoff; with
+// `bareOnly`, only a listing with no daily bars stored.
+async function listingsToPrice(
+  db: QueryExecutor,
+  companies: ReadonlyArray<TurnCompany>,
+  cutoff: string,
+  bareOnly: boolean,
+): Promise<Array<HydrationListing & { issuer_id: string; label: string }>> {
   const ids = companies.map((company) => company.issuer_id);
-  const named = new Map(companies.flatMap((company) => (company.listing_id ? [[company.issuer_id, { listing_id: company.listing_id.toLowerCase(), label: company.label }] as const] : [])));
-  const listed = [...listingsForComparison(ids, named, await companyListings(db, ids, new Date().toISOString()))]
-    .flatMap(([issuer_id, listing]) => (listing.listing_id ? [{ issuer_id, id: listing.listing_id }] : []));
+  const named = new Map(companies.flatMap((company) => (company.listing_id ? [[company.issuer_id, { listing_id: company.listing_id.toLowerCase(), label: company.label ?? company.listing_id }] as const] : [])));
+  const listed = [...listingsForComparison(ids, named, await companyListings(db, ids, cutoff))]
+    .flatMap(([issuer_id, listing]) => (listing.listing_id ? [{ issuer_id, id: listing.listing_id, label: listing.label }] : []));
   if (listed.length === 0) return [];
-  const { rows } = await db.query<{ listing_id: string }>(
+  const bare = bareOnly ? new Set((await db.query<{ listing_id: string }>(
     `select listing.id::text as listing_id
        from unnest($1::uuid[]) as listing(id)
       where not exists (select 1 from market_bar_ranges r where r.listing_id = listing.id and r.interval = '1d')`,
     [listed.map((listing) => listing.id)],
-  );
-  const bare = new Set(rows.map((row) => row.listing_id));
-  const zones = await listingTimeZones(db, listed);
-  return listed.filter((listing) => bare.has(listing.id)).map((listing) => ({ ...listing, timeZone: zones.get(listing.id) ?? "UTC" }));
+  )).rows.map((row) => row.listing_id)) : null;
+  const due = bare === null ? listed : listed.filter((listing) => bare.has(listing.id));
+  const zones = await listingTimeZones(db, due);
+  return due.map((listing) => ({ ...listing, timeZone: zones.get(listing.id) ?? "UTC" }));
 }

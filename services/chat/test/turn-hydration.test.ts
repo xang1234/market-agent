@@ -159,6 +159,25 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     }
   });
 
+  await t.test("a turn charting a YTD window fetches a listing with bars stored, to the window's cutoff", async () => {
+    await db.query(
+      `insert into market_bar_ranges (listing_id, source_id, provider, interval, adjustment_basis, range_start, range_end, as_of, delay_class, currency, fetched_at, expires_at)
+       values ($1, $2, 'polygon', '1d', 'split_adjusted', '2026-01-01', '2026-02-01', '2026-02-01', 'eod', 'USD', '2026-02-01', '2126-02-01')`,
+      [LISTING, IDS.sourceV1],
+    );
+    try {
+      const calls: Array<{ listings: ReadonlyArray<HydrationListing>; cutoff: string }> = [];
+      const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => {}, fetchBars: async (_origin, listings, cutoff) => { calls.push({ listings, cutoff }); } });
+      await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn);
+      const { events, turn } = recorder();
+      await hydrate([{ issuer_id: ZETA }], { ...turn, ytdCutoff: "2026-06-30T20:00:00.000Z" });
+      assert.deepEqual(calls, [{ listings: [{ id: LISTING, timeZone: "America/New_York" }], cutoff: "2026-06-30T20:00:00.000Z" }]);
+      assert.deepEqual(events.map((event) => event.label), ["Loading prices for ZETA", "Loading prices for ZETA"], "a company with no label is named by its listing");
+    } finally {
+      await db.query(`delete from market_bar_ranges where listing_id = $1`, [LISTING]);
+    }
+  });
+
   await t.test("a frozen data mode fetches nothing, and without an SEC user agent only prices are fetched", async () => {
     const company = [{ issuer_id: ZETA, label: "ZETA" }];
     for (const env of [{ ...LIVE, DEV_NO_KEYS: "true" }, { ...LIVE, DEV_NO_KEYS: "traces" }, { ...LIVE, DEV_MODE: "analyst" }]) {
