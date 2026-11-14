@@ -8,6 +8,7 @@ import test from "node:test";
 import type { FinancialAnswerContent, FinancialPlanV1, PresentedResult } from "../../financial-core/src/index.ts";
 import type { LlmChatRequest } from "../../llm/src/index.ts";
 import { answerTurn } from "../src/answer-trace.ts";
+import type { DroppedClaims } from "../src/llm-runtime.ts";
 import { checkAssertions } from "../src/assertions.ts";
 import { enginePacket, packetForModel } from "../src/evidence-packet.ts";
 import { judgeCases } from "../src/inference-judge.ts";
@@ -531,4 +532,144 @@ test("a peer ranking is no figure of the packet: it is no one company's (#398)",
     { ...value(3, "a", "measure:m7", "period:p0", ""), subject_label_id: null, presented: { kind: "ranking", text: "NVIDIA Corporation has the highest gross margin of the 2 companies ranked", complete: true, order: [], leader_label_ids: ["subject:a"] } },
   ], ["a", "b"], { "measure:m7": { kind: "measure", text: "Gross margin (gross profit / revenue) peer ranking" } });
   assert.deepEqual(enginePacket(cohort, TICKERS, leadPlan(["a", "b"], [])).figures.map((figure) => [figure.id, figure.company]), [["F1", "NVDA"], ["F2", "AMD"]]);
+});
+
+// NVDA, AMD and AAPL, each with its revenue, gross margin and operating margin in its own latest quarter.
+const THREE = enginePacket(content([
+  value(1, "a", "measure:m0", "period:p0", "$62.1B"),
+  value(2, "a", "measure:m1", "period:p0", "74.40%"),
+  value(3, "b", "measure:m0", "period:p1", "$9.2B"),
+  value(4, "b", "measure:m1", "period:p1", "53.00%"),
+  value(5, "c", "measure:m0", "period:p6", "$94.0B"),
+  value(6, "c", "measure:m1", "period:p6", "47.06%"),
+  value(7, "a", "measure:m8", "period:p0", "64.90%"),
+  value(8, "b", "measure:m8", "period:p1", "10.80%"),
+  value(9, "c", "measure:m8", "period:p6", "31.60%"),
+], ["a", "b", "c"], { "measure:m8": { kind: "measure", text: "Operating margin (operating income / revenue)" } }), new Map([["a", "NVDA"], ["b", "AMD"], ["c", "AAPL"]]), null);
+const REVENUES = { kind: "observation", text: "Revenue: [[F1]], [[F3]], [[F5]].", evidence: ["F1", "F3", "F5"] };
+const MARGIN_ORDER = { kind: "comparison", text: "NVDA leads on margin.", evidence: ["F2", "F4", "F6"], op: "order", result: ["F2", "F4", "F6"] };
+const OPERATING_ORDER = { kind: "comparison", text: "NVDA leads on operating margin.", evidence: ["F7", "F8", "F9"], op: "order", result: ["F7", "F9", "F8"] };
+const PRICING = { kind: "analyst_inference", subject: "NVDA", text: "Its pricing power is the strongest of the three.", supports: [1] };
+const SAID = {
+  revenues: "NVDA's revenue was $62.1B; AMD's revenue was $9.2B; AAPL's revenue was $94.0B.",
+  marginOrder: "By gross margin, highest first: NVDA 74.40%, AMD 53.00%, AAPL 47.06%.",
+  operatingOrder: "By operating margin, highest first: NVDA 64.90%, AAPL 31.60%, AMD 10.80%.",
+  pricing: "> **Analyst inference on NVDA** (from the gross margin ranking): Its pricing power is the strongest of the three.",
+  periods: "Periods: NVDA Q4 FY2026, AMD Q2 FY2026, AAPL Q3 FY2026.",
+};
+
+// The commentary a reader ends with on these assertions, each inference
+// judged as verdicts names it by its text (entailed when unnamed, error a
+// reply the judge cannot read), and the last the judging streamed; with
+// dropped, as the answer reads without them.
+async function commentaryOn(packet: typeof THREE, assertions: ReadonlyArray<unknown>, verdicts: Readonly<Record<string, string>> = {}, dropped?: DroppedClaims) {
+  const reply = ["Commentary.", "```assertions", JSON.stringify(assertions), "```"].join("\n");
+  const createClient = () => async (_deployment: unknown, request: LlmChatRequest) => {
+    if (!request.messages[0]!.content.startsWith("You check the analyst inferences")) return { text: reply };
+    const [inference] = (JSON.parse(request.messages[1]!.content) as { inferences: Array<{ id: number; text: string }> }).inferences;
+    const verdict = verdicts[inference!.text] ?? "entailed";
+    if (verdict === "error") return { text: "No verdict." };
+    return { text: JSON.stringify({ verdicts: [{ id: inference!.id, verdict, worded_amount: false }] }) };
+  };
+  const skeleton = { id: "commentary-x", kind: "rich_text", snapshot_id: "s", data_ref: { kind: "rich_text", id: "commentary-x" }, source_refs: [], as_of: "2026-09-01T00:00:00.000Z", segments: [] };
+  const answer = await answerTurn(
+    { context: { userIntent: "Compare NVDA, AMD and AAPL", bundleId: "financial_answer" }, blocks: [skeleton], toolCalls: [], packet },
+    { thread_id: "t", run_id: "r", question: "Compare NVDA, AMD and AAPL" },
+    { env: { LLM_CHANNELS: "anthropic", LLM_ANTHROPIC_PROTOCOL: "anthropic", LLM_ANTHROPIC_API_KEY: "sk-test", LLM_ANTHROPIC_MODELS: "claude-sonnet-5-5,claude-haiku-5-5", LITELLM_MODEL: "anthropic/claude-sonnet-5-5", JUDGE_LITELLM_MODEL: "anthropic/claude-haiku-5-5" }, createClient },
+  );
+  const read = dropped ? answer.without(dropped) : answer;
+  const textOf = (blocks: ReadonlyArray<Record<string, unknown>>) => plainText(blocks[0]!.segments as Parameters<typeof plainText>[0]);
+  let streamed = textOf(read.blocks);
+  read.judging?.watch((blocks) => { streamed = textOf(blocks); });
+  const judged = read.judging ? await read.judging.done : { ...read, assertions: answer.assertions };
+  return { text: textOf(judged.blocks), streamed, repeated: judged.assertions?.repeated };
+}
+
+test("engine commentary leaves out the figures and rankings no shown inference rests on: the table above shows them", async () => {
+  const { text, repeated } = await commentaryOn(THREE, [REVENUES, MARGIN_ORDER, OPERATING_ORDER, PRICING]);
+  assert.equal(text, [SAID.marginOrder, SAID.pricing, SAID.periods].join("\n\n"));
+  assert.deepEqual(repeated, [0, 2]);
+});
+
+test("engine commentary keeps what an unverified inference rests on, and leaves out what only a hidden one does", async () => {
+  const scale = { kind: "analyst_inference", subject: "AAPL", text: "Its scale is unmatched.", supports: [0] };
+  const { text, repeated } = await commentaryOn(THREE, [REVENUES, MARGIN_ORDER, OPERATING_ORDER, PRICING, scale], {
+    [PRICING.text]: "unsupported",
+    [scale.text]: "contradicted",
+  });
+  assert.equal(text, [
+    SAID.marginOrder,
+    "> **Unverified analyst view on NVDA** (not backed by the figures shown): Its pricing power is the strongest of the three.",
+    SAID.periods,
+  ].join("\n\n"));
+  assert.deepEqual(repeated, [0, 2]);
+});
+
+test("engine commentary with no inference shown says every figure it was written with", async () => {
+  const all = [SAID.revenues, SAID.marginOrder, SAID.operatingOrder, SAID.periods].join("\n\n");
+  const none = await commentaryOn(THREE, [REVENUES, MARGIN_ORDER, OPERATING_ORDER]);
+  assert.deepEqual([none.text, none.repeated], [all, undefined]);
+  const hidden = await commentaryOn(THREE, [REVENUES, MARGIN_ORDER, OPERATING_ORDER, PRICING], { [PRICING.text]: "contradicted" });
+  assert.deepEqual([hidden.text, hidden.repeated], [all, undefined]);
+});
+
+test("an answer off the engine route says every figure, whatever its inferences rest on", async () => {
+  const { text, repeated } = await commentaryOn({ ...THREE, route: "company_overview" }, [REVENUES, MARGIN_ORDER, OPERATING_ORDER, PRICING]);
+  assert.equal(text, [SAID.revenues, SAID.marginOrder, SAID.operatingOrder, SAID.pricing, SAID.periods].join("\n\n"));
+  assert.equal(repeated, undefined);
+});
+
+test("leaving out a restatement neither makes the commentary one-sided nor drops the periods it read", async () => {
+  // The inference rests on NVDA's figure alone; the ranking left out is the only assertion naming AMD and AAPL.
+  const nvda = { kind: "observation", text: "NVDA's margin was [[F2]].", evidence: ["F2"] };
+  const revenueOrder = { kind: "comparison", text: "AAPL leads on revenue.", evidence: ["F1", "F3", "F5"], op: "order", result: ["F5", "F1", "F3"] };
+  const margin = { kind: "analyst_inference", subject: "NVDA", text: "Its margin reflects pricing power.", supports: [0] };
+  const { text, repeated } = await commentaryOn(THREE, [nvda, revenueOrder, margin]);
+  assert.equal(text, [
+    "NVDA's gross margin was 74.40%.",
+    "> **Analyst inference on NVDA:** Its margin reflects pricing power.",
+    SAID.periods,
+  ].join("\n\n"));
+  assert.deepEqual(repeated, [1]);
+});
+
+test("engine commentary keeps a trend no inference rests on: the table shows its figures, not their course", async () => {
+  const packet = enginePacket(QUARTERS, new Map([["a", "NVDA"]]), null);
+  const trend = { kind: "comparison", text: "Revenue rose.", evidence: ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8"], op: "trend", result: "rose_throughout" };
+  const latest = { kind: "observation", text: "Revenue was [[F7]] then [[F8]].", evidence: ["F7", "F8"] };
+  const growth = { kind: "analyst_inference", text: "Demand is broadening.", supports: [1] };
+  const { text, repeated } = await commentaryOn(packet, [trend, latest, growth]);
+  assert.equal(text, [
+    "NVDA's revenue rose in every period from Q1 FY2025 (USD 26,044,000,000.00) to Q4 FY2026 (USD 62,100,000,000.00).",
+    "NVDA's revenue was USD 57,006,000,000.00 in Q3 FY2026; NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026.",
+    "> **Analyst inference:** Demand is broadening.",
+  ].join("\n\n"));
+  assert.equal(repeated, undefined);
+});
+
+test("engine commentary keeps a ranking that says the figures of an observation an inference rests on in its place", async () => {
+  const margins = { kind: "observation", text: "Margins: [[F2]], [[F4]], [[F6]].", evidence: ["F2", "F4", "F6"] };
+  const pricing = { ...PRICING, supports: [0] };
+  const { text, repeated } = await commentaryOn(THREE, [margins, MARGIN_ORDER, OPERATING_ORDER, pricing]);
+  assert.equal(text, [
+    SAID.marginOrder,
+    "> **Analyst inference on NVDA:** Its pricing power is the strongest of the three.",
+    SAID.periods,
+  ].join("\n\n"));
+  assert.deepEqual(repeated, [0, 2]);
+});
+
+test("engine commentary whose only inference left to show rested on a claim its seal left out says every figure, streamed and at the end", async () => {
+  const claim = "c5570000-0000-4000-8000-000000000001";
+  const packet = {
+    ...THREE,
+    claims: [{ id: "C1", text: "Management raised its outlook.", predicate: "guidance.change", stance: "supporting" as const, company: "NVDA", published_at: "2026-02-25T00:00:00.000Z", claim_id: claim, source_id: "s-claim-1" }],
+    claims_status: "available" as const,
+  };
+  const outlook = { kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] };
+  const demand = { kind: "analyst_inference", subject: "NVDA", text: "Demand is ahead of supply.", supports: [3] };
+  const scale = { kind: "analyst_inference", subject: "AAPL", text: "Its scale is unmatched.", supports: [0] };
+  const { text, streamed } = await commentaryOn(packet, [REVENUES, MARGIN_ORDER, OPERATING_ORDER, outlook, demand, scale], { [scale.text]: "error" }, { withdrawn: [claim], unchecked: [] });
+  const all = [SAID.revenues, SAID.marginOrder, SAID.operatingOrder, `${SAID.periods} A claim this answer quoted is no longer citable, so it is left out.`].join("\n\n");
+  assert.deepEqual({ streamed, text }, { streamed: all, text: all });
 });

@@ -27,11 +27,11 @@ const NO_ANSWER_FALLBACK_TEXT = "No written answer is available for this questio
 // model wrote. The model's prose is never shown. An analyst inference's
 // paragraph names its assertion and carries its unverified form: which one
 // shows, if any, is the judge's verdict.
-type Paragraph = Pick<RenderedAssertion, "segments" | "fact_bindings" | "source_refs"> & {
+type Paragraph = Pick<RenderedAssertion, "index" | "segments" | "fact_bindings" | "source_refs"> & {
   inference?: { index: number; unverified: ReadonlyArray<Segment> };
 };
 type Answer =
-  | { kind: "rendered"; paragraphs: ReadonlyArray<Paragraph>; notes: ReadonlyArray<string> }
+  | { kind: "rendered"; paragraphs: ReadonlyArray<Paragraph>; notes: ReadonlyArray<string>; restating: AssertionReport["restating"] }
   | { kind: "fallback"; text: string };
 
 // What an answer shows of each accepted inference, by index: its verdict's
@@ -44,7 +44,7 @@ export type { DroppedClaims };
 // again without any dropped claims.
 export type AnswerBlocks = (inferences: Inferences, dropped?: DroppedClaims) => ReadonlyArray<Record<string, unknown>>;
 
-const PENDING_INFERENCE: Paragraph = {
+const PENDING_INFERENCE: Omit<Paragraph, "index"> = {
   segments: [{ type: "text", text: "> _Checking an analyst inference against the figures it rests on…_" }],
   fact_bindings: [],
   source_refs: [],
@@ -377,6 +377,20 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
     const factOf = (id: string) => packet.figures.find((figure) => figure.id === id)?.fact_id ?? id;
     const compared = new Set(kept.filter((entry) => entry.kind === "comparison").flatMap((entry) => entry.figure_ids.map(factOf)));
     const repeated = kept.filter((entry) => entry.kind === "observation" && entry.figure_ids.every((id) => compared.has(factOf(id)))).map((entry) => entry.index);
+    // An engine answer's table shows every figure, so its commentary says an
+    // observation or comparison only for the inferences resting on it
+    // (restated). A comparison that writes an observation left out above
+    // says it in its place, so it serves the inferences resting on that one.
+    // A trend is always said: the table shows its figures, not their course.
+    const inferences = report.accepted.filter((assertion) => assertion.kind === "analyst_inference");
+    const factsOf = (index: number) => kept.find((entry) => entry.index === index)!.figure_ids.map(factOf);
+    const restating = packet.route !== "financial_engine" || inferences.length === 0 ? [] : report.accepted
+      .filter((assertion) => !repeated.includes(assertion.index) && (assertion.kind === "observation" || (assertion.kind === "comparison" && assertion.op !== "trend")))
+      .map(({ index, kind }) => {
+        const facts = new Set(factsOf(index));
+        const writes = kind === "comparison" ? repeated.filter((n) => factsOf(n).some((fact) => facts.has(fact))) : [];
+        return { index, relied_on: inferences.filter(({ supports = [] }) => [index, ...writes].some((n) => supports.includes(n))).map((inference) => inference.index) };
+      });
     // A stored disagreement keeps both sides: a claim rendered without the
     // claim that contradicts it brings that claim along, said as such.
     const shownClaims = new Set(kept.filter((entry) => entry.kind === "management_attribution")
@@ -406,8 +420,9 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
         ...(packet.claims_status === "unavailable" ? ["Research claims could not be read for this answer."] : []),
         ...notes,
       ],
+      restating,
     };
-    return { answer, report: { ...report, rendered: true, ...(repeated.length > 0 ? { repeated } : {}) } };
+    return { answer, report: { ...report, rendered: true, ...(repeated.length > 0 ? { repeated } : {}), ...(restating.length > 0 ? { restating } : {}) } };
   };
   const namedGap = input.scope !== undefined && packet.figures.length === 0 && packet.gaps.length > 0;
   const rendering = renderAccepted();
@@ -510,6 +525,17 @@ function claimEvidence(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>)
   };
 }
 
+// What an answer leaves out of restating: each that no inference it shows
+// rests on, once any is shown, so commentary whose every inference is hidden
+// still says its figures. An inference is shown when the answer renders it
+// (rendered) and it has a state: one with a state that rests on a claim the
+// seal left out, or that its repair lost, renders nowhere.
+export function restated(restating: AssertionReport["restating"], inferences: Inferences, rendered: ReadonlyArray<number>): number[] {
+  const shown = new Set(rendered.filter((index) => inferences.has(index)));
+  if (shown.size === 0) return [];
+  return (restating ?? []).filter(({ relied_on }) => !relied_on.some((index) => shown.has(index))).map(({ index }) => index);
+}
+
 function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answer, inferences: Inferences): ReadonlyArray<Record<string, unknown>> {
   let rewritten = false;
   return Object.freeze(blocks.map((block) => {
@@ -519,7 +545,8 @@ function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answ
       return Object.freeze({ ...block, segments: Object.freeze([Object.freeze({ type: "text", text: answer.text })]) });
     }
     const { notes } = answer;
-    const paragraphs = answer.paragraphs.flatMap((entry) => {
+    const left = restated(answer.restating, inferences, answer.paragraphs.flatMap((entry) => entry.inference ? [entry.inference.index] : []));
+    const paragraphs = answer.paragraphs.filter((entry) => !left.includes(entry.index)).flatMap((entry) => {
       if (entry.inference === undefined) return [entry];
       const state = inferences.get(entry.inference.index);
       const as = { shown: entry, unverified: { ...entry, segments: entry.inference.unverified }, pending: PENDING_INFERENCE };

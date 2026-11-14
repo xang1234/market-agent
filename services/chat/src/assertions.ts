@@ -47,9 +47,17 @@ export type AssertionReport = {
   rejected: ReadonlyArray<Rejection>;
   // The answer was written from the accepted assertions (controlled rendering).
   rendered?: boolean;
-  // Accepted observations the rendered answer leaves out, since a comparison
-  // it shows writes every figure they state.
+  // Accepted assertions the rendered answer leaves out as saying again what
+  // the page shows: an observation whose every figure a comparison it shows
+  // writes, and on an engine answer, what restating lists that no inference
+  // the reader sees rests on.
   repeated?: ReadonlyArray<number>;
+  // An engine answer's observations and comparisons other than trends, each
+  // with the inferences resting on it, directly or through an observation it
+  // writes in that one's place. The table above the commentary shows every
+  // figure, so each is said only while one of those inferences is shown, or
+  // while none is (llm-runtime.ts restated).
+  restating?: ReadonlyArray<{ index: number; relied_on: ReadonlyArray<number> }>;
   // Each judged inference's verdict, in index order (answer-trace.ts); what
   // the reader sees of it is its shownAs (verdicts.ts). Absent when no
   // inference was judged.

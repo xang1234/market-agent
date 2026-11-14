@@ -521,7 +521,7 @@ export function assertionSummary(run: Pick<LiveRun, "results">): string {
   return [
     `rendered: ${rendered} of ${answered.length} answers`,
     `accepted: ${kinds.map(([kind, n]) => `${n} ${kind}`).join(", ") || "none"}`,
-    `repeated: ${repeated} observations a comparison already shows`,
+    `repeated: ${repeated} assertions left out as saying again what the page shows`,
     "rejected:",
     ...reasons.map(([reason, n]) => `  ${String(n).padStart(3)}  ${reason}`),
   ].join("\n");
