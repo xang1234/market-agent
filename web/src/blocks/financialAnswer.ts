@@ -68,15 +68,12 @@ export function shortPeriod(text: string): string {
 
 /**
  * A period without its end date ("Q2 FY2027"), and that date ("ended Jul 2026") when it names exactly one.
- * A trailing sum reads its quarters newest first, so it is named and dated by the newest ("4 quarters to Q4 FY2026").
+ * A trailing sum, or a change between two, reads its quarters newest first, so it is named and dated by the
+ * newest; its measure says how many quarters it sums, which a count of reads cannot tell apart from a change.
  */
 function datedPeriod(text: string): { fiscal: string; date: string | null } {
   const reads = text.split(' vs ')
-  if (reads.length > 2) {
-    const newest = datedPeriod(reads[0]!)
-    const unit = reads.every((read) => /^Q[1-4] /.test(read)) ? 'quarters' : 'periods'
-    return { fiscal: `${reads.length} ${unit} to ${newest.fiscal}`, date: newest.date }
-  }
+  if (reads.length > 2) return datedPeriod(reads[0]!)
   const dates = [...text.matchAll(DATE)].map(([, word, year, month]) => dateText(word!, year!, month!))
   return { fiscal: text.replace(DATE, ''), date: dates.length === 1 ? dates[0]! : null }
 }

@@ -245,16 +245,21 @@ test('margin leads between the two companies fold into a Difference column besid
   assert.equal(document.querySelector(`[data-result-id="${lead.result_id}"] button`)!.getAttribute('aria-label'), `Inspect the verified calculation for Difference in Gross margin (gross profit / revenue), ${labelOf(block, 'period:lead')}: -1 pp`)
 })
 
-test('a trailing sum is named and dated by its newest quarter', () => {
-  const block = nvidiaMicron()
-  const labels = block.financial.labels as Record<string, { kind: string; text: string }>
-  labels['period:p0'] = { kind: 'period', text: 'Q2 FY2027 (ended 2026-07-26) vs Q1 FY2027 (ended 2026-04-26) vs Q4 FY2026 (ended 2026-01-25) vs Q3 FY2026 (ended 2025-10-26)' }
-  labels['period:p3'] = { kind: 'period', text: 'Q4 FY2026 (ended 2026-09-03) vs Q3 FY2026 (ended 2026-05-29) vs Q2 FY2026 (ended 2026-02-26) vs Q1 FY2026 (ended 2025-11-27)' }
-  const table = block.financial.presentations[0] as FinancialTablePresentation
-  Object.assign(table, { columns: table.columns.slice(0, 4), rows: table.rows.map((row) => ({ ...row, cells: row.cells.slice(0, 4) })) })
-  const read = statement(render(block))
-  assert.deepEqual(read.heads, [[], ['NVIDIA', '4 quarters to Q2 FY2027'], ['Micron Technology', '4 quarters to Q4 FY2026']])
-  assert.deepEqual(read.footnotes, ['NVIDIA 4 quarters to Q2 FY2027 ended Jul 2026; Micron Technology 4 quarters to Q4 FY2026 ended Sep 2026.'])
+test('a trailing sum, or a change between two, is named and dated by its newest quarter', () => {
+  const quarters = (dates: ReadonlyArray<string>, year: number) => dates.map((date, back) => `Q${4 - (back % 4)} FY${year - Math.floor(back / 4)} (ended ${date})`).join(' vs ')
+  const nvidia = ['2026-07-26', '2026-04-26', '2026-01-25', '2025-10-26', '2025-07-27', '2025-04-27', '2025-01-26', '2024-10-27']
+  const micron = ['2026-09-03', '2026-05-29', '2026-02-26', '2025-11-27', '2025-08-28', '2025-05-29', '2025-02-27', '2024-11-28']
+  for (const reads of [4, 8]) {
+    const block = nvidiaMicron()
+    const labels = block.financial.labels as Record<string, { kind: string; text: string }>
+    labels['period:p0'] = { kind: 'period', text: quarters(nvidia.slice(0, reads), 2027) }
+    labels['period:p3'] = { kind: 'period', text: quarters(micron.slice(0, reads), 2026) }
+    const table = block.financial.presentations[0] as FinancialTablePresentation
+    Object.assign(table, { columns: table.columns.slice(0, 4), rows: table.rows.map((row) => ({ ...row, cells: row.cells.slice(0, 4) })) })
+    const read = statement(render(block))
+    assert.deepEqual(read.heads, [[], ['NVIDIA', 'Q4 FY2027'], ['Micron Technology', 'Q4 FY2026']], `${reads} reads`)
+    assert.deepEqual(read.footnotes, ['NVIDIA Q4 FY2027 ended Jul 2026; Micron Technology Q4 FY2026 ended Sep 2026.'], `${reads} reads`)
+  }
 })
 
 test('a gap whose base is unbound leaves what the values compare with in the footnote', () => {
