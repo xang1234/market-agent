@@ -525,10 +525,13 @@ function claimEvidence(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>)
   };
 }
 
-// What an answer leaves out of restating with these inferences shown: each
-// that none of them rests on, once any is shown, so commentary whose every
-// inference is hidden still says its figures.
-export function restated(restating: AssertionReport["restating"], shown: ReadonlySet<number>): number[] {
+// What an answer leaves out of restating: each that no inference it shows
+// rests on, once any is shown, so commentary whose every inference is hidden
+// still says its figures. An inference is shown when the answer renders it
+// (rendered) and it has a state: one with a state that rests on a claim the
+// seal left out, or that its repair lost, renders nowhere.
+export function restated(restating: AssertionReport["restating"], inferences: Inferences, rendered: ReadonlyArray<number>): number[] {
+  const shown = new Set(rendered.filter((index) => inferences.has(index)));
   if (shown.size === 0) return [];
   return (restating ?? []).filter(({ relied_on }) => !relied_on.some((index) => shown.has(index))).map(({ index }) => index);
 }
@@ -542,7 +545,7 @@ function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answ
       return Object.freeze({ ...block, segments: Object.freeze([Object.freeze({ type: "text", text: answer.text })]) });
     }
     const { notes } = answer;
-    const left = restated(answer.restating, new Set(inferences.keys()));
+    const left = restated(answer.restating, inferences, answer.paragraphs.flatMap((entry) => entry.inference ? [entry.inference.index] : []));
     const paragraphs = answer.paragraphs.filter((entry) => !left.includes(entry.index)).flatMap((entry) => {
       if (entry.inference === undefined) return [entry];
       const state = inferences.get(entry.inference.index);

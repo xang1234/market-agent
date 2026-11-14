@@ -8,6 +8,7 @@ import test from "node:test";
 import type { FinancialAnswerContent, FinancialPlanV1, PresentedResult } from "../../financial-core/src/index.ts";
 import type { LlmChatRequest } from "../../llm/src/index.ts";
 import { answerTurn } from "../src/answer-trace.ts";
+import type { DroppedClaims } from "../src/llm-runtime.ts";
 import { checkAssertions } from "../src/assertions.ts";
 import { enginePacket, packetForModel } from "../src/evidence-packet.ts";
 import { judgeCases } from "../src/inference-judge.ts";
@@ -558,13 +559,17 @@ const SAID = {
 };
 
 // The commentary a reader ends with on these assertions, each inference
-// judged as verdicts names it by its text (entailed when unnamed).
-async function commentaryOn(packet: typeof THREE, assertions: ReadonlyArray<unknown>, verdicts: Readonly<Record<string, string>> = {}) {
+// judged as verdicts names it by its text (entailed when unnamed, error a
+// reply the judge cannot read), and the last the judging streamed; with
+// dropped, as the answer reads without them.
+async function commentaryOn(packet: typeof THREE, assertions: ReadonlyArray<unknown>, verdicts: Readonly<Record<string, string>> = {}, dropped?: DroppedClaims) {
   const reply = ["Commentary.", "```assertions", JSON.stringify(assertions), "```"].join("\n");
   const createClient = () => async (_deployment: unknown, request: LlmChatRequest) => {
     if (!request.messages[0]!.content.startsWith("You check the analyst inferences")) return { text: reply };
     const [inference] = (JSON.parse(request.messages[1]!.content) as { inferences: Array<{ id: number; text: string }> }).inferences;
-    return { text: JSON.stringify({ verdicts: [{ id: inference!.id, verdict: verdicts[inference!.text] ?? "entailed", worded_amount: false }] }) };
+    const verdict = verdicts[inference!.text] ?? "entailed";
+    if (verdict === "error") return { text: "No verdict." };
+    return { text: JSON.stringify({ verdicts: [{ id: inference!.id, verdict, worded_amount: false }] }) };
   };
   const skeleton = { id: "commentary-x", kind: "rich_text", snapshot_id: "s", data_ref: { kind: "rich_text", id: "commentary-x" }, source_refs: [], as_of: "2026-09-01T00:00:00.000Z", segments: [] };
   const answer = await answerTurn(
@@ -572,8 +577,12 @@ async function commentaryOn(packet: typeof THREE, assertions: ReadonlyArray<unkn
     { thread_id: "t", run_id: "r", question: "Compare NVDA, AMD and AAPL" },
     { env: { LLM_CHANNELS: "anthropic", LLM_ANTHROPIC_PROTOCOL: "anthropic", LLM_ANTHROPIC_API_KEY: "sk-test", LLM_ANTHROPIC_MODELS: "claude-sonnet-5-5,claude-haiku-5-5", LITELLM_MODEL: "anthropic/claude-sonnet-5-5", JUDGE_LITELLM_MODEL: "anthropic/claude-haiku-5-5" }, createClient },
   );
-  const judged = answer.judging ? await answer.judging.done : answer;
-  return { text: plainText(judged.blocks[0]!.segments as Parameters<typeof plainText>[0]), repeated: judged.assertions?.repeated };
+  const read = dropped ? answer.without(dropped) : answer;
+  const textOf = (blocks: ReadonlyArray<Record<string, unknown>>) => plainText(blocks[0]!.segments as Parameters<typeof plainText>[0]);
+  let streamed = textOf(read.blocks);
+  read.judging?.watch((blocks) => { streamed = textOf(blocks); });
+  const judged = read.judging ? await read.judging.done : { ...read, assertions: answer.assertions };
+  return { text: textOf(judged.blocks), streamed, repeated: judged.assertions?.repeated };
 }
 
 test("engine commentary leaves out the figures and rankings no shown inference rests on: the table above shows them", async () => {
@@ -648,4 +657,19 @@ test("engine commentary keeps a ranking that says the figures of an observation 
     SAID.periods,
   ].join("\n\n"));
   assert.deepEqual(repeated, [0, 2]);
+});
+
+test("engine commentary whose only inference left to show rested on a claim its seal left out says every figure, streamed and at the end", async () => {
+  const claim = "c5570000-0000-4000-8000-000000000001";
+  const packet = {
+    ...THREE,
+    claims: [{ id: "C1", text: "Management raised its outlook.", predicate: "guidance.change", stance: "supporting" as const, company: "NVDA", published_at: "2026-02-25T00:00:00.000Z", claim_id: claim, source_id: "s-claim-1" }],
+    claims_status: "available" as const,
+  };
+  const outlook = { kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] };
+  const demand = { kind: "analyst_inference", subject: "NVDA", text: "Demand is ahead of supply.", supports: [3] };
+  const scale = { kind: "analyst_inference", subject: "AAPL", text: "Its scale is unmatched.", supports: [0] };
+  const { text, streamed } = await commentaryOn(packet, [REVENUES, MARGIN_ORDER, OPERATING_ORDER, outlook, demand, scale], { [scale.text]: "error" }, { withdrawn: [claim], unchecked: [] });
+  const all = [SAID.revenues, SAID.marginOrder, SAID.operatingOrder, `${SAID.periods} A claim this answer quoted is no longer citable, so it is left out.`].join("\n\n");
+  assert.deepEqual({ streamed, text }, { streamed: all, text: all });
 });

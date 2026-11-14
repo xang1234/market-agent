@@ -113,7 +113,7 @@ function withVerdicts(answer: ComposedAnswer, judged: ReadonlyArray<InferenceVer
   const shown = shownStates(judged, answer.path);
   const hidden = judged.filter((verdict) => !shown.has(verdict.index));
   const report = answer.assertions!;
-  const repeated = [...new Set([...report.repeated ?? [], ...restated(report.restating, new Set(shown.keys()))])].sort((a, b) => a - b);
+  const repeated = [...new Set([...report.repeated ?? [], ...restated(report.restating, shown, report.accepted.flatMap((entry) => entry.kind === "analyst_inference" ? [entry.index] : []))])].sort((a, b) => a - b);
   return {
     exchange: answer.exchange,
     assertions: {
