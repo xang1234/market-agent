@@ -333,7 +333,7 @@ test("the header names the kind, provider, and as-of date instead of the snapsho
   try {
     await app.click(app.opener("Revenue"));
 
-    assert.equal(app.headerSubtitle(), "Fact · sec · As of 2026-05-29");
+    assert.equal(app.headerSubtitle(), "Fact · sec · As of May 29, 2026");
     assert.equal(app.panel()?.querySelector("header")?.textContent?.includes(SNAPSHOT_ID), false);
   } finally {
     await app.unmount();
@@ -359,7 +359,7 @@ test("following a related ref pushes a page, and Back returns to the previous pa
     await app.click(app.relatedRef("sec"));
 
     assert.equal(app.heading(), "sec filing");
-    assert.equal(app.headerSubtitle(), "Source · sec · Retrieved 2026-05-30");
+    assert.equal(app.headerSubtitle(), "Source · sec · Retrieved May 30, 2026");
     assert.deepEqual(app.breadcrumb(), ["42 %", "sec filing"]);
     assert.equal(app.document.activeElement?.textContent, "sec filing");
     assert.equal(opener.getAttribute("data-inspecting"), "true");

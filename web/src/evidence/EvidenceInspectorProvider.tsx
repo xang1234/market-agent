@@ -7,7 +7,7 @@ import { EvidenceInspectorPanel } from './EvidenceInspectorPanel.tsx'
 import { fetchEvidenceInspection } from './inspectionClient.ts'
 import type { EvidenceInspectionRef } from './inspectionTypes.ts'
 import { CLOSED, inspectorStackReducer, type InspectorPage, type InspectorStack } from './inspectorStack.ts'
-import { fetchFinancialResultInspection } from '../blocks/financialInspection.ts'
+import { fetchFinancialResultInspection, type FinancialResultShown } from '../blocks/financialInspection.ts'
 
 const EVIDENCE_INSPECTION_UNAVAILABLE_MESSAGE = 'Evidence is not available for this artifact.'
 const INSPECTING_ATTRIBUTE = 'data-inspecting'
@@ -105,13 +105,13 @@ export function EvidenceInspectorProvider({ children }: { children: ReactNode })
         })
     }
 
-    function openFinancial(navigation: Navigation, resultId: string) {
+    function openFinancial(navigation: Navigation, resultId: string, shown?: FinancialResultShown) {
       const request = nextRequest()
       if (!session) {
-        show(navigation, { kind: 'financial', request, load: { kind: 'error', resultId, message: 'Sign in to inspect this calculation.' } })
+        show(navigation, { kind: 'financial', request, shown, load: { kind: 'error', resultId, message: 'Sign in to inspect this calculation.' } })
         return
       }
-      show(navigation, { kind: 'financial', request, load: { kind: 'loading', resultId } })
+      show(navigation, { kind: 'financial', request, shown, load: { kind: 'loading', resultId } })
       fetchFinancialResultInspection({ userId: session.userId, resultId })
         .then((inspection) => {
           dispatch({ type: 'settled', request, settlement: { kind: 'financial', load: { kind: 'ready', inspection } } })
@@ -128,13 +128,13 @@ export function EvidenceInspectorProvider({ children }: { children: ReactNode })
       outside: {
         openInspection: (input) => openEvidence('open', input),
         openBlockInspection: (inspection) => show('open', { kind: 'block', inspection }),
-        openFinancialResult: (resultId) => openFinancial('open', resultId),
+        openFinancialResult: (resultId, shown) => openFinancial('open', resultId, shown),
         closeInspection: () => close(),
       },
       inside: {
         openInspection: (input) => openEvidence('push', input),
         openBlockInspection: (inspection) => show('push', { kind: 'block', inspection }),
-        openFinancialResult: (resultId) => openFinancial('push', resultId),
+        openFinancialResult: (resultId, shown) => openFinancial('push', resultId, shown),
         closeInspection: () => close(),
       },
       back: (to) => dispatch({ type: 'back', to }),

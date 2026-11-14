@@ -59,8 +59,12 @@ test("BlockView opens local block metadata in the evidence inspector", async () 
         ?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
     });
 
-    assert.match(dom.window.document.body.innerHTML, /Block metadata/);
-    assert.match(dom.window.document.body.innerHTML, /rich_text/);
+    const panel = dom.window.document.querySelector('aside[aria-label="Evidence inspector"]');
+    assert.deepEqual(
+      [...(panel?.querySelectorAll("dt") ?? [])].map((term) => `${term.textContent}: ${term.nextElementSibling?.textContent}`).slice(0, 2),
+      ["Block id: rich-text-1", "Kind: Rich text"],
+    );
+    assert.equal(panel?.querySelector('[data-testid="inspector-details"]')?.hasAttribute("open"), false, "identifiers wait under a closed Details");
     assert.deepEqual(
       [...dom.window.document.querySelectorAll('aside[aria-label="Evidence inspector"] li > button[data-inspection-kind]')]
         .map((button) => button.textContent),

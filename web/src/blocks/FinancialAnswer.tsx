@@ -12,6 +12,7 @@ import {
   gapReasons,
   labelText,
   resultLabel,
+  resultShown,
   resultsById,
   resultTitle,
   rowPeriod,
@@ -105,7 +106,7 @@ function ResultLine({ content, result, badge }: { content: FinancialAnswerConten
     return (
       <p className={`${RESULT_ROW_CLASS} text-fg`} data-result-id={result.result_id}>
         <span className="text-muted" title={heading}>{title}: {badge}</span>
-        <InspectableResult resultId={result.result_id} label={`${label}: ${presented.full_text}`}>
+        <InspectableResult resultId={result.result_id} label={`${label}: ${presented.full_text}`} shown={resultShown(content, result)}>
           <span className="num whitespace-nowrap" title={presented.full_text} aria-label={`${label}: ${presented.full_text}`}>
             {presented.text}
           </span>
@@ -129,14 +130,14 @@ function ResultLine({ content, result, badge }: { content: FinancialAnswerConten
 }
 
 // period names the cell to the inspector; shown is what the cell prints of it (cellPeriod), the whole period its title. A gap's reason is its title and its screen-reader text.
-function Cell({ result, period, shown }: { result: FinancialPresentedResult | undefined; period?: string; shown?: string }): ReactElement {
+function Cell({ content, result, period, shown }: { content: FinancialAnswerContent; result: FinancialPresentedResult | undefined; period?: string; shown?: string }): ReactElement {
   if (!result) return <span className="text-muted">Not requested</span>
   const { presented } = result
   const note = shown === undefined ? null : <span className="block text-xs text-muted" title={shown === period ? undefined : period}>{shown}</span>
   if (presented.kind === 'value') {
     return (
       <>
-        <InspectableResult resultId={result.result_id} label={period === undefined ? presented.full_text : `${presented.full_text}, ${period}`}>
+        <InspectableResult resultId={result.result_id} label={period === undefined ? presented.full_text : `${presented.full_text}, ${period}`} shown={resultShown(content, result)}>
           <span title={presented.full_text} aria-label={presented.full_text}>
             {presented.text}
           </span>
@@ -229,7 +230,7 @@ function CertifiedTable({ blockId, provenance, content, results, table }: TableP
                     const label = table.columns[cellIndex]?.period_label_id === null && result ? labelText(content, result.period_label_id) : undefined
                     return (
                       <td key={`${row.subject_label_id}-${cellIndex}`} className="num px-3 py-2 text-right text-fg">
-                        <Cell result={result} period={label === undefined ? undefined : shortPeriod(label)} shown={label === undefined ? undefined : cellPeriod(label, shared)} />
+                        <Cell content={content} result={result} period={label === undefined ? undefined : shortPeriod(label)} shown={label === undefined ? undefined : cellPeriod(label, shared)} />
                       </td>
                     )
                   })}
@@ -265,7 +266,7 @@ function CertifiedSeries({ provenance, content, results, series }: SeriesProps):
                   {labelText(content, point.period_label_id)}
                 </th>
                 <td className="num whitespace-nowrap py-1.5 pr-4 text-right text-fg">
-                  <Cell result={points[index]} />
+                  <Cell content={content} result={points[index]} />
                 </td>
                 <td aria-hidden="true" className="w-1/2 py-1.5">
                   <div
@@ -316,7 +317,7 @@ function CertifiedScenarios({ blockId, content, results, scenarios }: ScenariosP
                 <span className="block text-xs text-muted">{row.attribution_text}</span>
               </td>
               <td className="num px-3 py-2 text-right text-fg">
-                <Cell result={results.get(row.result_id)} />
+                <Cell content={content} result={results.get(row.result_id)} />
               </td>
             </tr>
           ))}

@@ -4,6 +4,8 @@ import type { EvidenceInspectionRef } from "../evidence/inspectionTypes.ts";
 import type { GridColumn, GridCellDetail, GridRunDetail } from "./gridsTypes.ts";
 import { VerificationLabel } from "../blocks/VerificationLabel.tsx";
 import type { FinancialAnswerContent } from "../blocks/types.ts";
+import type { FinancialResultShown } from "../blocks/financialInspection.ts";
+import { resultShown } from "../blocks/financialAnswer.ts";
 
 /** A column as the table shows it: the run's frozen instance, labelled from the catalog. */
 type TableColumn = { id: string; label: string };
@@ -77,10 +79,12 @@ function cellText(cell: GridCellDetail | undefined): string {
   return cell.display?.value ?? "—";
 }
 
-/** The certified result a numerical cell shows, when its block is in a format this client knows. */
-function certifiedResultId(cell: GridCellDetail | undefined): string | null {
+/** The certified result a numerical cell shows, when its block is in a format this client knows, and what it says it is. */
+function certifiedResult(cell: GridCellDetail | undefined): { resultId: string; shown?: FinancialResultShown } | null {
   const content = cell?.financial_block?.financial as Partial<FinancialAnswerContent> | undefined;
-  return content?.results?.[0]?.result_id ?? null;
+  const result = content?.results?.[0];
+  if (!result) return null;
+  return { resultId: result.result_id, shown: content?.labels ? resultShown(content as FinancialAnswerContent, result) : undefined };
 }
 
 /** Why a cell has no value, in words, for assistive technology; the row itself never disappears. */
@@ -97,7 +101,7 @@ function gapText(cell: GridCellDetail | undefined): string | null {
 function GridCell({ cell }: { cell: GridCellDetail | undefined }): ReactElement {
   const inspector = useEvidenceInspector();
   const tone = cell?.display?.tone ? TONE_CLASS[cell.display.tone] : { text: "", bg: "" };
-  const certified = certifiedResultId(cell);
+  const certified = certifiedResult(cell);
   const shownAs = cell?.primary_ref?.kind === "fact" ? cell.display?.value : undefined;
   const evidence = cell?.snapshot_id && cell.primary_ref
     ? { snapshotId: cell.snapshot_id, ref: cell.primary_ref as EvidenceInspectionRef, ...(shownAs ? { shownAs } : {}) }
@@ -105,7 +109,7 @@ function GridCell({ cell }: { cell: GridCellDetail | undefined }): ReactElement 
   const gap = gapText(cell);
   const buttonClass = `num text-left text-fg underline decoration-dotted${tone.text}`;
   const open = certified !== null && inspector?.openFinancialResult
-    ? () => inspector.openFinancialResult?.(certified)
+    ? () => inspector.openFinancialResult?.(certified.resultId, certified.shown)
     : evidence
       ? () => inspector?.openInspection(evidence)
       : null;

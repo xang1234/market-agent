@@ -9,7 +9,7 @@ import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from '..
 import { validateBlock } from './BlockValidator.ts'
 import { BlockProofContext, type BlockProof } from './blockProof.ts'
 import { FinancialAnswer } from './FinancialAnswer.tsx'
-import { resultsById, seriesBars, sortedRowIndexes } from './financialAnswer.ts'
+import { resultShown, resultsById, seriesBars, sortedRowIndexes } from './financialAnswer.ts'
 import { readFileSync } from 'node:fs'
 import { financialAnswerFiscalCalendarsFixture, financialAnswerFixture, financialAnswerScenariosFixture } from './fixtures.ts'
 import type { FinancialAnswerBlock, FinancialAnswerContent, FinancialPresentedResult, FinancialTablePresentation } from './types.ts'
@@ -257,6 +257,13 @@ test('a lead between two companies is titled by its measure and the two companie
   assert.equal(line.textContent, 'Gross margin, NVIDIA Corp minus Advanced Micro Devices, Inc.: 35.00 pp')
   assert.equal(line.querySelector('span')!.getAttribute('title'), whole)
   assert.equal(line.querySelector('button')!.getAttribute('aria-label'), `Inspect the verified calculation for ${whole}: 35 pp`)
+  assert.deepEqual(resultShown(block.financial, lead), {
+    subject: null,
+    measure: 'Gross margin, NVIDIA Corp minus Advanced Micro Devices, Inc.',
+    period: 'NVIDIA Corp Q4 FY2026 · ended Jan 2026 minus Advanced Micro Devices, Inc. Q2 FY2026 · ended Jun 2026',
+    value: '35.00 pp',
+  }, 'the inspector heads a lead with its two companies and short periods')
+  assert.deepEqual(resultShown(block.financial, block.financial.results[0]!), { subject: 'NVIDIA Corp', measure: 'Revenue', period: 'Q4 FY2026', value: '$68.0B' })
 })
 
 test('sorting uses the server exact order; descending keeps rows without a value last', () => {
