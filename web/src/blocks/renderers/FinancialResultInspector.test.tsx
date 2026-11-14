@@ -259,6 +259,10 @@ test('inputs from two companies each name their company, and a filing a stated v
     ['Beta Holdings Corp. · Revenue', 'Q4 FY2026 · ended Sep 2026', '$200.0B'],
   ])
   assert.deepEqual(sources(spread), ['Alpha Industries Inc. · Filed Jan 10, 2024 | Revenue Q4 FY2026', 'Beta Holdings Corp. · Filed Feb 14, 2024 | Revenue Q4 FY2026'])
+  assert.deepEqual([...spread.querySelectorAll('tbody td.num [title]')].map((cell) => [cell.textContent, cell.getAttribute('title'), cell.getAttribute('aria-label')]), [
+    ['$300.0B', 'USD 300000000000', 'USD 300000000000'],
+    ['$200.0B', 'USD 200000000000', 'USD 200000000000'],
+  ], 'each rounded input keeps its exact amount for hover and assistive tech')
   const one = render(inspection({ inputs: [ALPHA] }))
   assert.deepEqual(rows(one), [['Revenue', 'Q4 FY2026 · ended Sep 2026', '$300.0B']], 'one company is not repeated on its rows')
   assert.deepEqual(sources(one), ['Filed Jan 10, 2024 | Revenue Q4 FY2026'])

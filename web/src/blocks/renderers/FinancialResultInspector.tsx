@@ -95,8 +95,11 @@ function formulaText(details: Inspected): string {
   return 'As reported in the filing'
 }
 
-function money(value: string, unit: unknown): string {
-  return valueText(value, unit)?.text ?? value
+// A rounded amount keeps its exact one for hover and assistive tech, so each operand can be checked.
+function money(value: string, unit: unknown): ReactNode {
+  const shown = valueText(value, unit)
+  if (shown === null || shown.text === shown.full_text) return shown?.text ?? value
+  return <span title={shown.full_text} aria-label={shown.full_text}>{shown.text}</span>
 }
 
 // A session close stands for its session's day. ponytail: read in UTC, which is the session's own day wherever the regular close falls before midnight UTC (every listed exchange today); a listing zone from the server covers any other.
