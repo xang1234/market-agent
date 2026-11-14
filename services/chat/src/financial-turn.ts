@@ -1,5 +1,6 @@
 // How a financial turn reaches the stream. Before commit, the stream carries
-// only the turn's start: no tool previews, values, titles, or error detail
+// only the turn's start and the fetches for its companies, which name them
+// (turn-hydration.ts): no tool previews, values, titles, or error detail
 // that could expose an unverified number. A certified answer is announced only
 // after the transaction that wrote its snapshot, certificate, and message has
 // committed, and its turn.completed carries that committed message. A company

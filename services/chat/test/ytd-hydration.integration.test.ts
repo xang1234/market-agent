@@ -112,6 +112,78 @@ test("a live YTD request with an empty cache fetches, stores, and seals the wind
   assert.equal(provider.calls(), 2, "the repeat ask is served from the cache");
 });
 
+// Before the stale-window test: the hydrator's fetch records are per process,
+// and that test's failed fetch cools NVDA and AMD down for a minute.
+test("a live YTD turn whose market never answers asks for its unpriced listings once, and waits one budget", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for YTD hydration coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-ytd-hang");
+  const pool = await connectedPool(t, databaseUrl);
+  const client = await pool.connect();
+  try {
+    await seedGoldenDataset(client as never);
+  } finally {
+    client.release();
+  }
+  await pool.query(`delete from market_bars`);
+  await pool.query(`delete from market_bar_ranges`);
+  const userId = "10000000-0000-4000-8000-000000000651";
+  await pool.query(`insert into users (user_id, email) values ($1::uuid, 'hang-ytd@chat.example.test')`, [userId]);
+  const thread = await createThread(pool as never, userId, { title: "Hanging YTD" });
+
+  // A market that reads every request and never answers.
+  const sockets: Array<{ destroy(): void }> = [];
+  const requests: string[] = [];
+  const market = createServer((socket) => {
+    sockets.push(socket);
+    socket.on("data", (chunk) => {
+      const [line] = String(chunk).split("\r\n");
+      if (line?.startsWith("POST ")) requests.push(line);
+    });
+  });
+  await new Promise<void>((resolve) => market.listen(0, "127.0.0.1", resolve));
+  registerLifoCleanup(t, () => new Promise<void>((resolve) => {
+    for (const socket of sockets) socket.destroy();
+    market.close(() => resolve());
+  }));
+  setEnv(t, {
+    CHAT_DATABASE_URL: databaseUrl,
+    MARKET_ORIGIN: `http://127.0.0.1:${(market.address() as AddressInfo).port}`,
+    SEC_EDGAR_USER_AGENT: undefined,
+    DEV_NO_KEYS: undefined,
+    DEV_MODE: undefined,
+    DEV_PROFILE: undefined,
+    LLM_CHANNELS: undefined,
+    LITELLM_MODEL: undefined,
+    LITELLM_FALLBACK_MODELS: undefined,
+    LLM_SETTINGS_ENV_FILE: undefined,
+  });
+  registerLifoCleanup(t, () => closeLocalRuntimePoolForTests());
+
+  const subject = (ticker: string) => {
+    const ref = { kind: "issuer" as const, id: company(ticker).issuer_id };
+    return { status: "resolved", subject_ref: ref, handoff: { subject_ref: ref, context: {} } };
+  };
+  const started = Date.now();
+  await analystToolRuntime({
+    threadId: thread.thread_id,
+    runId: "20000000-0000-4000-8000-000000000651",
+    turnId: "30000000-0000-4000-8000-000000000651",
+    userId,
+    bundleId: "single_subject_analysis",
+    userIntent: "Compare NVDA with AMD YTD",
+    reading: async () => proposal({ asks: ["price_window"] }),
+    emit: (() => ({})) as never,
+    subjectPreResolution: subject("NVDA") as never,
+    subjectPreResolutions: [subject("NVDA"), subject("AMD")] as never,
+  });
+  const waited = Date.now() - started;
+  assert.deepEqual(requests, ["POST /v1/market/series HTTP/1.1"], "one market request for both listings");
+  assert.ok(waited >= 14_000 && waited < 25_000, `the turn waited one 15s budget, not two (${waited}ms)`);
+});
+
 test("a live YTD turn whose refresh fails names the stale cached window as a gap, and quotes none of its returns (#256)", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for YTD hydration coverage");

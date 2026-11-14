@@ -137,6 +137,7 @@ export function chatHarness(
     persistAssistantMessage?: ChatAssistantMessagePersistence;
     evidence?: Parameters<typeof createChatFinancialRuntime>[0]["evidence"];
     commentary?: Parameters<typeof createChatFinancialRuntime>[0]["commentary"];
+    hydrate?: Parameters<typeof createChatFinancialRuntime>[0]["hydrate"];
   },
 ) {
   // The narrative messages the turns saved: clarifications and gaps.
@@ -167,6 +168,7 @@ export function chatHarness(
       ...(options.priorSubjects ? { priorSubjects: options.priorSubjects } : {}),
       ...(options.clock ? { clock: options.clock } : {}),
       ...(options.commentary ? { commentary: options.commentary } : {}),
+      ...(options.hydrate ? { hydrate: options.hydrate } : {}),
     }),
   });
   const run = async (input: Omit<ChatTurnInput, "runId" | "turnId"> & { turnId?: string; runId?: string }) => {

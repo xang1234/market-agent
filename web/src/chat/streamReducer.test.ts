@@ -8,6 +8,7 @@ import {
   type StreamingRichTextBlock,
 } from './streamReducer.ts'
 import type { ChatSseEvent } from './sseEventTypes.ts'
+import { workSteps } from './workSummary.ts'
 
 const BASE_FIELDS = {
   thread_id: 'thread-1',
@@ -430,6 +431,31 @@ test('tool and snapshot events update the streamed agent plan from real SSE payl
   assert.equal(state.plan_steps.find((step) => step.step_id === 'composer')?.status, 'running')
   state = applyChatStreamEvent(state, event('block.completed', 9, { block_id: 'b1', content_hash: 'h1' }))
   assert.equal(state.plan_steps.find((step) => step.step_id === 'composer')?.status, 'done')
+})
+
+test('a tool step the server labels shows that label, live and in the saved work summary', () => {
+  const labelled = { tool_call_id: 'fetch_filings-t1', tool_name: 'fetch_filings', label: 'Fetching filings for ZETA' }
+  let state: StreamState = applyChatStreamEvent(INITIAL_STREAM_STATE, event('turn.started', 1, { bundle_id: 'financial_answer' }))
+  state = applyChatStreamEvent(state, event('tool.started', 2, labelled))
+  assert.deepEqual(state.plan_steps.map((step) => [step.label, step.status]), [
+    ['Planner', 'running'],
+    ['Composer', 'waiting'],
+    ['Fetching filings for ZETA', 'running'],
+  ])
+  const steps = workSteps({
+    elapsed_ms: 900,
+    events: [
+      { type: 'turn.started', at_ms: 0, bundle_id: 'financial_answer' },
+      { type: 'tool.started', at_ms: 100, ...labelled },
+      { type: 'tool.completed', at_ms: 600, ...labelled, status: 'still_loading' },
+    ],
+  })
+  assert.deepEqual(steps.find((step) => step.step_id === 'tool:fetch_filings-t1'), {
+    step_id: 'tool:fetch_filings-t1',
+    label: 'Fetching filings for ZETA',
+    status: 'done',
+    elapsed_ms: 500,
+  })
 })
 
 test('the sealed snapshot id outlives the deltas that follow it, and the next turn starts without one', () => {

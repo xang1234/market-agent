@@ -106,7 +106,8 @@ function planStepForTool(
   status: StreamPlanStepStatus,
   event: ChatSseEvent,
 ): StreamPlanStep {
-  const label = toolStepLabel(toolName)
+  // A step the server names (a fetch for the turn's companies) shows that name.
+  const label = readString(event.label) ?? toolStepLabel(toolName)
   return Object.freeze({
     step_id: label === 'Planner' ? 'planner' : `tool:${toolCallId}`,
     label,
