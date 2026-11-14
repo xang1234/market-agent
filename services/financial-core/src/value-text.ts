@@ -2,11 +2,12 @@
 // canonical text behind it. Dependency-free past exact-decimal, so the web
 // inspector formats a value exactly as the answer did.
 
-import type { FinancialUnit } from "./contracts.ts";
+import type { FinancialPlan, FinancialUnit, OperationNode } from "./contracts.ts";
 import { canonicalDecimalString, compareExactDecimals, type ExactDecimal } from "./exact-decimal.ts";
 
-/** A value as the answer prints it ("$133.2B") and in full ("USD 133188000000"). */
-export function formatValue(value: ExactDecimal, unit: FinancialUnit): { text: string; full_text: string } {
+/** A value as the answer prints it ("$133.2B", "3.50x") and in full ("USD 133188000000", "3.5x"); `multiple` is readsAsMultiple's answer for the value's node. */
+export function formatValue(value: ExactDecimal, unit: FinancialUnit, multiple = false): { text: string; full_text: string } {
+  if (multiple && unit.kind === "ratio") return { text: `${fixed(value, 2)}x`, full_text: `${canonicalDecimalString(value)}x` };
   switch (unit.kind) {
     case "currency": {
       const short = compact(value);
@@ -32,6 +33,13 @@ export function formatValue(value: ExactDecimal, unit: FinancialUnit): { text: s
     case "count":
       return { text: fixed(value, 0), full_text: canonicalDecimalString(value) };
   }
+}
+
+// An approved ratio (leverage, cash conversion) and P/E are multiples, and so is a change in one; margins and percent changes are percentages.
+export function readsAsMultiple(plan: FinancialPlan, node: OperationNode): boolean {
+  return node.operation === "absolute_change"
+    ? readsAsMultiple(plan, plan.operations.find((entry) => entry.node_id === node.current)!)
+    : node.operation === "ratio" || node.operation === "pe_ratio";
 }
 
 const SCALES = [[12, "T"], [9, "B"], [6, "M"]] as const;

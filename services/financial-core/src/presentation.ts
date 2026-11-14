@@ -36,9 +36,9 @@ import type {
 import { FISCAL_PERIODS, operationDependencies, scenarioAssumption, SCENARIOS } from "./contracts.ts";
 import { coverageState } from "./coverage.ts";
 import { resolveMetricDefinition, resolveRatioDefinition } from "./definitions.ts";
-import { canonicalDecimalString, compareExactDecimals, parseDerivedDecimalText, type ExactDecimal } from "./exact-decimal.ts";
+import { compareExactDecimals, parseDerivedDecimalText, type ExactDecimal } from "./exact-decimal.ts";
 import { dependencyClosure } from "./graph.ts";
-import { fixed, formatValue } from "./value-text.ts";
+import { formatValue, readsAsMultiple } from "./value-text.ts";
 import { OPERATION_REGISTRY } from "./operation-registry.ts";
 
 export const FINANCIAL_PRESENTATION_VERSION = "financial-presentation.v2";
@@ -373,7 +373,7 @@ function presentPayload(plan: FinancialPlan, node: OperationNode, payload: unkno
   switch (record.kind) {
     case "value": {
       const unit = record.unit as FinancialUnit;
-      const text = formatNodeValue(plan, node, parseValue(record.value as string), unit);
+      const text = formatValue(parseValue(record.value as string), unit, readsAsMultiple(plan, node));
       return { kind: "value", ...text, value: record.value as string, unit, exact: record.exact as boolean };
     }
     case "predicate": {
@@ -381,7 +381,7 @@ function presentPayload(plan: FinancialPlan, node: OperationNode, payload: unkno
       const threshold = node.operation === "threshold" ? plan.thresholds.find((entry) => entry.threshold_id === node.threshold_id) : undefined;
       const subject = node.operation === "threshold" ? node.subject : node.node_id;
       const subjectNode = plan.operations.find((entry) => entry.node_id === subject)!;
-      const bound = threshold ? formatNodeValue(plan, subjectNode, parseValue(threshold.value), threshold.unit).text : "the threshold";
+      const bound = threshold ? formatValue(parseValue(threshold.value), threshold.unit, readsAsMultiple(plan, subjectNode)).text : "the threshold";
       const slot = subjectSlot(plan, subjectNode);
       const who = slot === null ? "" : `${labels[subjectLabelId(slot)]!.text} — `;
       return {
@@ -437,19 +437,6 @@ export function lowercaseUnlessAcronym(label: string): string {
 
 const COMPARISON_TEXT: Readonly<Record<Comparison, string>> = { gt: "above", gte: "at or above", lt: "below", lte: "at or below", eq: "equal to" };
 
-function formatNodeValue(plan: FinancialPlan, node: OperationNode, value: ExactDecimal, unit: FinancialUnit): { text: string; full_text: string } {
-  return unit.kind === "ratio" && readsAsMultiple(plan, node)
-    ? { text: `${fixed(value, 2)}x`, full_text: `${canonicalDecimalString(value)}x` }
-    : formatValue(value, unit);
-}
-
-// An approved ratio (leverage, cash conversion) and P/E are multiples, and so is a change in one; margins and percent changes are percentages.
-function readsAsMultiple(plan: FinancialPlan, node: OperationNode): boolean {
-  return node.operation === "absolute_change"
-    ? readsAsMultiple(plan, plan.operations.find((entry) => entry.node_id === node.current)!)
-    : node.operation === "ratio" || node.operation === "pe_ratio";
-}
-
 function parseValue(text: string): ExactDecimal {
   const parsed = parseDerivedDecimalText(text);
   if (!parsed.ok) throw new RangeError("a committed value is not a canonical decimal");
@@ -473,7 +460,8 @@ function subjectSlot(plan: FinancialPlan, node: OperationNode): LocalId | null {
   return slots.size === 1 ? [...slots][0]! : null;
 }
 
-function measureText(plan: FinancialPlan, node: OperationNode): string {
+/** What a node measures, as the answer labels its measure ("Revenue"). */
+export function measureText(plan: FinancialPlan, node: OperationNode): string {
   const of = (id: LocalId) => measureText(plan, plan.operations.find((entry) => entry.node_id === id)!);
   switch (node.operation) {
     case "reported_metric":

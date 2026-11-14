@@ -117,6 +117,10 @@ export type ClosureInput = Readonly<{
   gap_reason: string | null;
   /** Whether the fact, its source, and its publication document, or the price and its source, are still available to the owner. */
   available: boolean;
+  /** The bound subject's issuer name; display only. */
+  company: string | null;
+  /** The fact's filing date (its reported_at, read as filed); display only. */
+  filed: string | null;
 }>;
 
 /**
@@ -136,12 +140,14 @@ export async function readClosureInputs(db: SqlExecutor, ownerUserId: string, ru
                  where pa.attestation_id = i.publication_attestation_id and d.deleted_at is not null)
             ) or (
               po.observation_id is not null and (ps.user_id is null or ps.user_id = $3)
-            ) as available
+            ) as available,
+            iss.legal_name as company, to_char(f.reported_at at time zone 'UTC', 'YYYY-MM-DD') as filed
        from financial_run_inputs i
        left join facts f on f.fact_id = i.fact_id
        left join sources s on s.source_id = f.source_id
        left join price_observations po on po.observation_id = i.price_observation_id
        left join sources ps on ps.source_id = po.source_id
+       left join issuers iss on iss.issuer_id = (i.bound_payload #>> '{subject_ref,id}')::uuid
       where i.run_id = $1 and i.input_slot = any($2::text[])
       order by i.input_slot`,
     [runId, [...slots], ownerUserId],

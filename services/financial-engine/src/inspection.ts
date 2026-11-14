@@ -11,6 +11,8 @@ import {
   assumptionHash,
   BOUND_PRICE_INPUT_SCHEMA_VERSION,
   dependencyClosure,
+  measureText,
+  readsAsMultiple,
   type BoundFinancialInputV1,
   type DerivationProofV1,
   type LocalId,
@@ -35,7 +37,9 @@ export type InspectedInput = Readonly<
       input_slot: LocalId;
       status: "bound";
       fact_id: string;
-      source: Readonly<{ source_id: string; document_id: string | null; source_version_hash: string; locator: string | null }>;
+      /** The issuer's name, as the answer names its subjects. */
+      company: string | null;
+      source: Readonly<{ source_id: string; document_id: string | null; source_version_hash: string; locator: string | null; filed: string | null }>;
       metric: Readonly<{ metric_key: string; definition_version: string }>;
       /** As filed; a restated input's computed value comes from its split adjustment. */
       value: string;
@@ -45,13 +49,14 @@ export type InspectedInput = Readonly<
       precision_status: string;
       derivation: DerivationProofV1 | null;
       inference?: NoncontrollingInterestInferenceV1;
-      publication: Readonly<{ attestation_id: string; available_no_later_than: string; precision: string }>;
+      publication: Readonly<{ attestation_id: string; available_no_later_than: string; precision: string; source_timezone: string }>;
     }
   | {
       input_slot: LocalId;
       status: "bound";
       observation_id: string;
       listing_id: string;
+      company: string | null;
       source: Readonly<{ source_id: string; body_sha256: string }>;
       metric: Readonly<{ metric_key: string; definition_version: string }>;
       /** As observed; the computed value comes from its split adjustment. */
@@ -77,7 +82,9 @@ export type ResultInspection =
       coverage_state: "complete" | "partial" | "none" | null;
       time: Readonly<{ knowledge_cutoff: string; time_mode: string; finalized_at: string }>;
       publication: Readonly<{ snapshot_id: string; certificate_digest: string }>;
-      formula: Readonly<{ operation: string; operation_version: string; numeric_policy_version: string }> | null;
+      formula: Readonly<{ operation: string; operation_version: string; numeric_policy_version: string; reads_as_multiple: boolean }> | null;
+      /** What the result measures, as the answer labels it. */
+      measure: string;
       definitions: ReadonlyArray<Readonly<{ metric_key: string; definition_version: string }>>;
       inputs: ReadonlyArray<InspectedInput>;
     }> & (
@@ -97,6 +104,7 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
   const record = await readCommittedResult(db, ownerUserId, resultId);
   if (!record) return null;
   const { plan } = record;
+  const node = plan.operations.find((entry) => entry.node_id === record.node_id)!;
   const closure = dependencyClosure(plan, [record.node_id]);
   const reportedSlots = plan.operations.filter((node) => node.operation === "reported_metric" && closure.has(node.node_id)).map((node) => node.node_id);
   const inputs = await readClosureInputs(db, ownerUserId, record.run_id, reportedSlots);
@@ -136,7 +144,9 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
       operation: record.computation.formula_id,
       operation_version: record.computation.operation_version,
       numeric_policy_version: record.computation.numeric_policy_version,
+      reads_as_multiple: readsAsMultiple(plan, node),
     },
+    measure: measureText(plan, node),
     definitions: plan.metric_definitions.filter((definition) => metricKeys.has(definition.metric_key)),
     inputs: inputs.map((input): InspectedInput => {
       if (input.binding_status === "gap") return { input_slot: input.input_slot, status: "gap", reason_code: input.gap_reason };
@@ -147,6 +157,7 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
           status: "bound",
           observation_id: bound.observation_id,
           listing_id: bound.listing_id,
+          company: input.company,
           source: { source_id: bound.source.source_id, body_sha256: bound.source.body_sha256 },
           metric: bound.metric,
           value: bound.numeric.value,
@@ -159,7 +170,8 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
         input_slot: input.input_slot,
         status: "bound",
         fact_id: bound.fact_id,
-        source: { source_id: bound.source.source_id, document_id: bound.source.document_id, source_version_hash: bound.source.source_version_hash, locator: bound.source.locator },
+        company: input.company,
+        source: { source_id: bound.source.source_id, document_id: bound.source.document_id, source_version_hash: bound.source.source_version_hash, locator: bound.source.locator, filed: input.filed },
         metric: bound.metric,
         value: bound.numeric.value,
         split_adjustment: bound.split_adjustment ?? null,
@@ -168,7 +180,7 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
         precision_status: bound.precision_status,
         derivation: bound.derivation ?? null,
         ...(bound.inference ? { inference: bound.inference } : {}),
-        publication: { attestation_id: bound.publication.attestation_id, available_no_later_than: bound.publication.available_no_later_than, precision: bound.publication.precision },
+        publication: { attestation_id: bound.publication.attestation_id, available_no_later_than: bound.publication.available_no_later_than, precision: bound.publication.precision, source_timezone: bound.publication.source_timezone },
       };
     }),
   };
