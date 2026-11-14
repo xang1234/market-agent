@@ -130,6 +130,20 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(warnings, ["[chat] a fetch for the turn's companies failed; the answer names the gap", "[chat] a fetch for the turn's companies failed; the answer names the gap"]);
   });
 
+  await t.test("a fetch that fails late cools down for a minute from its failure, not its start", async () => {
+    let clock = 2_000_000;
+    let fail!: (error: Error) => void;
+    const fetch = fakes({ filings: () => new Promise<void>((_, reject) => { fail = reject; }) });
+    const hydrate = createTurnHydrator({ db: pool, env: { SEC_EDGAR_USER_AGENT: "test-agent" }, ...fetch, now: () => clock, budgetMs: 1, logger: { warn: () => {} } });
+    await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn);
+    clock += 50_000;
+    fail(new Error("sec_edgar: HTTP 503"));
+    await new Promise((resolve) => setImmediate(resolve));
+    clock += 30_000;
+    await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn);
+    assert.deepEqual(fetch.sec, [ZETA], "30s after a failure at 50s, the company is still cooling");
+  });
+
   await t.test("a frozen data mode fetches nothing, and without an SEC user agent only prices are fetched", async () => {
     const company = [{ issuer_id: ZETA, label: "ZETA" }];
     for (const env of [{ ...LIVE, DEV_NO_KEYS: "true" }, { ...LIVE, DEV_NO_KEYS: "traces" }, { ...LIVE, DEV_MODE: "analyst" }]) {

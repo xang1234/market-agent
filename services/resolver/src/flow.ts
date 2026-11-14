@@ -352,9 +352,9 @@ async function resolveTickerWithDiscovery(
 const DISCOVERY_COOLDOWN_MS = 60_000;
 const DISCOVERY_ATTEMPTS_LIMIT = 1000;
 // An unknown string runs discovery only when it could be a ticker: a letter,
-// up to five more letters or digits, and an optional share-class suffix
-// (BRK.B). Words with punctuation, URLs, and long names never reach Polygon.
-const TICKER_SHAPE = /^[A-Z][A-Z0-9]{0,5}(\.[A-Z]{1,2})?$/;
+// up to five more letters or digits, and an optional share-class or
+// preferred suffix (BRK.B, BAC.PRL). Words with punctuation, URLs, and long names never reach Polygon.
+const TICKER_SHAPE = /^[A-Z][A-Z0-9]{0,5}(\.[A-Z]{1,3})?$/;
 
 // Claims a discovery when the ticker's last one was a cooldown ago. The check
 // and the set are synchronous, so of concurrent resolves of one ticker only

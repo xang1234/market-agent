@@ -507,10 +507,10 @@ function discoveryCounter(now: () => number) {
 
 test("an unknown string not shaped like a ticker never runs discovery", async () => {
   const { seen, options } = discoveryCounter(() => 1_000_000);
-  for (const text of ["nvidia,", "ABCDEFG", "nvda's", "https://x.co", "2024", "AB-C", "BRK.B", "zzqx"]) {
+  for (const text of ["nvidia,", "ABCDEFG", "nvda's", "https://x.co", "2024", "AB-C", "BRK.B", "BAC.PRL", "zzqx"]) {
     await runSearchToSubjectFlow(emptyDb(), { text }, options);
   }
-  assert.deepEqual(seen, ["BRK.B", "ZZQX"]);
+  assert.deepEqual(seen, ["BRK.B", "BAC.PRL", "ZZQX"]);
 });
 
 test("discovery attempts a cooldown old are dropped, and at most 1000 are held, oldest first out", async () => {

@@ -50,9 +50,11 @@ export function createTurnHydrator(deps: {
   const fetches = new Map<string, Fetch>();
   const start = (keys: ReadonlyArray<string>, fetch: () => Promise<void>): Fetch => {
     const entry: Fetch = { at: now(), settled: Promise.resolve() };
-    entry.settled = fetch().then(() => { entry.outcome = "done"; }, (error: unknown) => {
+    // The minute runs from when a fetch settles, so one that fails late still cools down.
+    entry.settled = fetch().then(() => { entry.outcome = "done"; entry.at = now(); }, (error: unknown) => {
       logger.warn("[chat] a fetch for the turn's companies failed; the answer names the gap", error);
       entry.outcome = "failed";
+      entry.at = now();
     });
     for (const key of keys) fetches.set(key, entry);
     return entry;
