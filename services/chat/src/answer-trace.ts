@@ -14,7 +14,7 @@ import { assertionList, checkAssertions, type AssertionReport } from "./assertio
 import { judgeCases, judgeInferences, judgeMessages, verdictsOf, type JudgeCase, type JudgeRecord, type ModelRecord } from "./inference-judge.ts";
 import { repairRequests, repairRound, requestRepair, type RepairRequest, type RepairTrace } from "./inference-repair.ts";
 import { sentToRepair, shownAs, verdictText, type AnswerPath, type InferenceVerdict, type ShownAs } from "./verdicts.ts";
-import { composeAnalystBlocksWithLlm, renderedAnswer, turnPacket, type AnswerBlocks, type AnswerUsage, type DroppedClaims, type InferenceState, type Inferences, type ModelDeadlines } from "./llm-runtime.ts";
+import { composeAnalystBlocksWithLlm, renderedAnswer, restated, turnPacket, type AnswerBlocks, type AnswerUsage, type DroppedClaims, type InferenceState, type Inferences, type ModelDeadlines } from "./llm-runtime.ts";
 
 export type AnswerTraceInput = Omit<
   Parameters<typeof composeAnalystBlocksWithLlm>[0],
@@ -113,10 +113,12 @@ function withVerdicts(answer: ComposedAnswer, judged: ReadonlyArray<InferenceVer
   const shown = shownStates(judged, answer.path);
   const hidden = judged.filter((verdict) => !shown.has(verdict.index));
   const report = answer.assertions!;
+  const repeated = [...new Set([...report.repeated ?? [], ...restated(report.restating, new Set(shown.keys()))])].sort((a, b) => a - b);
   return {
     exchange: answer.exchange,
     assertions: {
       ...report,
+      ...(repeated.length > 0 ? { repeated } : {}),
       accepted: report.accepted.filter((entry) => !hidden.some((verdict) => verdict.index === entry.index)),
       rejected: [
         ...report.rejected,
