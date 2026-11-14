@@ -55,11 +55,12 @@ export type SearchToSubjectRequest = {
 export type SearchToSubjectOptions = {
   tickerDiscoveryProvider?: TickerDiscoveryProvider;
   discoveryLogger?: Pick<Console, "warn">;
-  // When each ticker last ran discovery: one no listing holds, or one held
-  // only by issuers without a CIK. Resolve runs per keystroke against a
-  // rate-limited Polygon, so the ceiling is one Polygon call per such ticker
-  // per minute, whether the call succeeds or fails. Without it an unknown
-  // ticker runs discovery every time and a known one never does.
+  // When each ticker last ran discovery within the cooldown: a ticker-shaped
+  // string no listing holds, or a ticker held only by issuers without a CIK.
+  // Resolve runs per keystroke against a rate-limited Polygon, so the ceiling
+  // is one Polygon call per such ticker per minute, whether the call succeeds
+  // or fails. Without it an unknown ticker runs discovery every time and a
+  // known one never does.
   discoveryAttempts?: Map<string, number>;
   now?: () => number;
 };
@@ -327,7 +328,10 @@ async function resolveTickerWithDiscovery(
   const initial = await resolveByTicker(db, ticker);
   if (!options.tickerDiscoveryProvider) return initial;
   if (isNotFound(initial) && initial.reason !== "unknown_ticker") return initial;
-  if (!(isNotFound(initial) ? claimDiscovery(ticker, options) : await claimCiklessDiscovery(db, ticker, options))) {
+  const claimed = isNotFound(initial)
+    ? TICKER_SHAPE.test(normalizedTicker(ticker)) && claimDiscovery(ticker, options)
+    : await claimCiklessDiscovery(db, ticker, options);
+  if (!claimed) {
     return initial;
   }
 
@@ -346,17 +350,31 @@ async function resolveTickerWithDiscovery(
 }
 
 const DISCOVERY_COOLDOWN_MS = 60_000;
+const DISCOVERY_ATTEMPTS_LIMIT = 1000;
+// An unknown string runs discovery only when it could be a ticker: a letter,
+// up to five more letters or digits, and an optional share-class suffix
+// (BRK.B). Words with punctuation, URLs, and long names never reach Polygon.
+const TICKER_SHAPE = /^[A-Z][A-Z0-9]{0,5}(\.[A-Z]{1,2})?$/;
 
 // Claims a discovery when the ticker's last one was a cooldown ago. The check
 // and the set are synchronous, so of concurrent resolves of one ticker only
-// one claims it.
+// one claims it. Entries stay in claim order, so the expired ones are at the
+// front; past the limit the oldest go first, so a burst of distinct strings
+// bounds the map, not Polygon.
 function claimDiscovery(ticker: string, options: SearchToSubjectOptions): boolean {
   const attempts = options.discoveryAttempts;
   if (!attempts) return true;
   const normalized = normalizedTicker(ticker);
   const at = (options.now ?? Date.now)();
-  const last = attempts.get(normalized);
-  if (last !== undefined && at - last < DISCOVERY_COOLDOWN_MS) return false;
+  for (const [key, last] of attempts) {
+    if (at - last < DISCOVERY_COOLDOWN_MS) break;
+    attempts.delete(key);
+  }
+  if (attempts.has(normalized)) return false;
+  for (const key of attempts.keys()) {
+    if (attempts.size < DISCOVERY_ATTEMPTS_LIMIT) break;
+    attempts.delete(key);
+  }
   attempts.set(normalized, at);
   return true;
 }

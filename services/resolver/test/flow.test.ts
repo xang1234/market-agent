@@ -489,3 +489,44 @@ function withFailingToolLog(db: QueryExecutor): QueryExecutor {
     },
   };
 }
+
+function discoveryCounter(now: () => number) {
+  const seen: string[] = [];
+  const options = {
+    discoveryAttempts: new Map<string, number>(),
+    now,
+    tickerDiscoveryProvider: {
+      discoverTicker: async (ticker: string) => {
+        seen.push(ticker);
+        return [];
+      },
+    },
+  };
+  return { seen, options };
+}
+
+test("an unknown string not shaped like a ticker never runs discovery", async () => {
+  const { seen, options } = discoveryCounter(() => 1_000_000);
+  for (const text of ["nvidia,", "ABCDEFG", "nvda's", "https://x.co", "2024", "AB-C", "BRK.B", "zzqx"]) {
+    await runSearchToSubjectFlow(emptyDb(), { text }, options);
+  }
+  assert.deepEqual(seen, ["BRK.B", "ZZQX"]);
+});
+
+test("discovery attempts a cooldown old are dropped, and at most 1000 are held, oldest first out", async () => {
+  let clock = 1_000_000;
+  const { seen, options } = discoveryCounter(() => clock);
+  await runSearchToSubjectFlow(emptyDb(), { text: "OLD" }, options);
+  clock += 60_000;
+  await runSearchToSubjectFlow(emptyDb(), { text: "NEW" }, options);
+  assert.deepEqual([...options.discoveryAttempts.keys()], ["NEW"]);
+
+  for (let index = 0; index < 1000; index += 1) {
+    clock += 1;
+    await runSearchToSubjectFlow(emptyDb(), { text: `T${index}` }, options);
+  }
+  assert.equal(options.discoveryAttempts.size, 1000);
+  assert.equal(options.discoveryAttempts.has("NEW"), false);
+  assert.equal(options.discoveryAttempts.has("T999"), true);
+  assert.equal(seen.length, 1002);
+});
