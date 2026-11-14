@@ -12,7 +12,7 @@ import type {
 } from "./coordinator.ts";
 import { buildEvidencePacket, figureCompanies, packetForModel, type ClaimEvidence, type ClaimRecord, type EvidencePacket } from "./evidence-packet.ts";
 import { assertionList, checkAssertions, MAX_ASSERTIONS, type AssertionReport } from "./assertions.ts";
-import { answerPeriods, plainText, renderAssertion, unverifiedInference, type RenderedAssertion } from "./render-assertions.ts";
+import { answerPeriods, inferenceWords, plainText, renderAssertion, unverifiedInference, type InferenceWords, type RenderedAssertion } from "./render-assertions.ts";
 import type { Segment } from "./prose-refs.ts";
 import type { ShownAs } from "./verdicts.ts";
 import type { ResearchScope } from "./research-scope.ts";
@@ -28,11 +28,25 @@ const NO_ANSWER_FALLBACK_TEXT = "No written answer is available for this questio
 // paragraph names its assertion and carries its unverified form: which one
 // shows, if any, is the judge's verdict.
 type Paragraph = Pick<RenderedAssertion, "index" | "segments" | "fact_bindings" | "source_refs"> & {
-  inference?: { index: number; unverified: ReadonlyArray<Segment> };
+  inference?: { index: number; unverified: ReadonlyArray<Segment>; words: InferenceWords };
 };
+// commentaryNotes: the notes its commentary parts keep, without one the page
+// already says (the periods a table beside it names).
 type Answer =
-  | { kind: "rendered"; paragraphs: ReadonlyArray<Paragraph>; notes: ReadonlyArray<string>; restating: AssertionReport["restating"] }
+  | { kind: "rendered"; paragraphs: ReadonlyArray<Paragraph>; notes: ReadonlyArray<string>; commentaryNotes: ReadonlyArray<string>; restating: AssertionReport["restating"] }
   | { kind: "fallback"; text: string };
+
+// Analyst commentary as its parts, beside its segments (the same answer as
+// one Markdown text), so a reader can lead with the inferences, badged by
+// their verdict: a statement of figures (one per comparison), an inference
+// the judge found entailed, one it found unsupported, one it is still reading,
+// or a note.
+export type CommentaryPart =
+  | { kind: "figures"; segments: ReadonlyArray<Segment> }
+  | { kind: "inference"; subject: string | null; basis: string | null; text: string }
+  | { kind: "unverified"; subject: string | null; text: string }
+  | { kind: "pending" }
+  | { kind: "note"; text: string };
 
 // What an answer shows of each accepted inference, by index: its verdict's
 // shownAs (verdicts.ts), or "pending", a line in its place while the
@@ -356,7 +370,7 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
       ...renderAssertion(assertion, packet, factBlocks, report.accepted, periods.once),
       kind: assertion.kind,
       ...(assertion.kind === "analyst_inference"
-        ? { inference: { index: assertion.index, unverified: unverifiedInference(assertion, packet) } }
+        ? { inference: { index: assertion.index, unverified: unverifiedInference(assertion, packet), words: inferenceWords(assertion, packet, report.accepted) } }
         : {}),
     }));
     // The figures the kept assertions state, and their companies: a comparison
@@ -406,20 +420,21 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
     // no value), and stale data.
     const stated = new Set(keptFigures.flatMap((figure) => figureCompanies(figure, packet)));
     const notShown = packet.coverage.filter((entry) => entry.status === "not_shown" && !stated.has(entry.company)).map((entry) => entry.company);
+    const others = [
+      ...(notShown.length > 0 ? [`No figures are shown for ${new Intl.ListFormat("en").format(notShown)}.`] : []),
+      // The claims as selected: more matched than were read, or none could be.
+      ...(packet.claims_truncated ? ["More sources matched than are shown here."] : []),
+      ...(packet.claims_status === "unavailable" ? ["Research claims could not be read for this answer."] : []),
+      ...notes,
+    ];
     const answer = {
       kind: "rendered" as const,
       paragraphs: [
         ...kept.filter((entry) => !repeated.includes(entry.index)),
         ...otherSides,
       ],
-      notes: [
-        ...(periods.note === undefined ? [] : [periods.note]),
-        ...(notShown.length > 0 ? [`No figures are shown for ${new Intl.ListFormat("en").format(notShown)}.`] : []),
-        // The claims as selected: more matched than were read, or none could be.
-        ...(packet.claims_truncated ? ["More sources matched than are shown here."] : []),
-        ...(packet.claims_status === "unavailable" ? ["Research claims could not be read for this answer."] : []),
-        ...notes,
-      ],
+      notes: [...(periods.note === undefined ? [] : [periods.note]), ...others],
+      commentaryNotes: [...(periods.note === undefined || packet.periods_shown ? [] : [periods.note]), ...others],
       restating,
     };
     return { answer, report: { ...report, rendered: true, ...(repeated.length > 0 ? { repeated } : {}), ...(restating.length > 0 ? { restating } : {}) } };
@@ -539,6 +554,17 @@ export function restated(restating: AssertionReport["restating"], inferences: In
   return (restating ?? []).filter(({ relied_on }) => !relied_on.some((index) => backing.has(index))).map(({ index }) => index);
 }
 
+// A paragraph of figures as its statements: a comparison over several metrics
+// says each apart, after a blank line (render-assertions.ts).
+function statements(segments: ReadonlyArray<Segment>): CommentaryPart[] {
+  const parts: Segment[][] = [[]];
+  for (const segment of segments) {
+    if (segment.type === "text" && segment.text === "\n\n") parts.push([]);
+    else parts.at(-1)!.push({ ...segment });
+  }
+  return parts.filter((part) => part.length > 0).map((part) => ({ kind: "figures", segments: part }));
+}
+
 function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answer, inferences: Inferences): ReadonlyArray<Record<string, unknown>> {
   let rewritten = false;
   return Object.freeze(blocks.map((block) => {
@@ -549,21 +575,32 @@ function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answ
     }
     const { notes } = answer;
     const left = restated(answer.restating, inferences, answer.paragraphs.flatMap((entry) => entry.inference ? [entry.inference.index] : []));
-    const paragraphs = answer.paragraphs.filter((entry) => !left.includes(entry.index)).flatMap((entry) => {
-      if (entry.inference === undefined) return [entry];
+    // Each paragraph shown, as its segments and its commentary part.
+    const paragraphs = answer.paragraphs.filter((entry) => !left.includes(entry.index)).flatMap((entry): Array<Omit<Paragraph, "index"> & { part: CommentaryPart }> => {
+      if (entry.inference === undefined) return [{ ...entry, part: { kind: "figures", segments: entry.segments } }];
       const state = inferences.get(entry.inference.index);
-      const as = { shown: entry, unverified: { ...entry, segments: entry.inference.unverified }, pending: PENDING_INFERENCE };
+      const { subject, basis, text } = entry.inference.words;
+      const as = {
+        shown: { ...entry, part: { kind: "inference" as const, subject, basis, text } },
+        unverified: { ...entry, segments: entry.inference.unverified, part: { kind: "unverified" as const, subject, text } },
+        pending: { ...PENDING_INFERENCE, part: { kind: "pending" as const } },
+      };
       return state === undefined ? [] : [as[state]];
     });
     const segments = [
       ...paragraphs.flatMap((entry, i) => [...(i === 0 ? [] : [{ type: "text", text: "\n\n" }]), ...entry.segments]),
       ...(notes.length > 0 ? [{ type: "text", text: `\n\n${notes.join(" ")}` }] : []),
     ];
+    const commentary = block.analyst_commentary !== true ? [] : [
+      ...paragraphs.flatMap(({ part }) => (part.kind === "figures" ? statements(part.segments) : [part])),
+      ...answer.commentaryNotes.map((text): CommentaryPart => ({ kind: "note", text })),
+    ];
     const factBindings = [...new Map(paragraphs.flatMap((entry) => entry.fact_bindings).map((binding) => [binding.fact_id, binding])).values()];
     const dataRef = (block.data_ref ?? {}) as Record<string, unknown>;
     return Object.freeze({
       ...block,
       segments: Object.freeze(segments.map((segment) => Object.freeze({ ...segment }))),
+      ...(commentary.length > 0 ? { commentary: Object.freeze(commentary.map((part) => Object.freeze(part))) } : {}),
       ...(factBindings.length > 0 ? { data_ref: { ...dataRef, params: { fact_bindings: factBindings } } } : {}),
       source_refs: [...new Set(paragraphs.flatMap((entry) => entry.source_refs))],
     });

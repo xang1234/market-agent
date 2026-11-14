@@ -32,3 +32,18 @@ export const VERIFICATION_TEXT: Readonly<Record<VerificationKind, string>> = {
   user_supplied: 'Your assumption',
   conditional_comparison: 'Conditional scenario comparison',
 }
+
+export const VERIFICATION_CLASSES: Readonly<Record<VerificationKind, string>> = {
+  verified: 'border-positive/40 bg-positive-soft text-positive',
+  public_by_cutoff: 'border-positive/40 bg-positive-soft text-positive',
+  source_linked: 'border-line bg-surface text-muted',
+  not_verified: 'border-line bg-surface text-muted',
+  partial: 'border-line-strong bg-surface-2 text-fg-soft',
+  narrative: 'border-line bg-surface text-muted',
+  legacy: 'border-line bg-surface text-muted',
+  unverified: 'border-negative/40 bg-negative-soft text-negative',
+  user_supplied: 'border-line-strong bg-surface-2 text-fg-soft',
+  conditional_comparison: 'border-line-strong bg-surface-2 text-fg-soft',
+}
+
+export const PILL_CLASS = 'inline-block rounded border px-1.5 py-0.5 text-[11px] font-medium'

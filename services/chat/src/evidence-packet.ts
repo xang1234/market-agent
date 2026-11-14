@@ -134,6 +134,10 @@ export type EvidencePacket = {
   // Metrics the question asked for that no reader serves (#206): named gaps
   // no other figure may stand in for (#208).
   unavailable_metrics?: ReadonlyArray<string>;
+  // The answer the figures come from presents them in a table, whose header
+  // and footnote name every company's period, so commentary beside it need
+  // not say them again.
+  periods_shown?: true;
 };
 
 // The claims a route reads first (#207): its predicate families, from the
@@ -387,6 +391,7 @@ export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyM
     disagreements: [],
     claims_status: "none",
     claims_truncated: false,
+    ...(content.presentations.some((presentation) => presentation.kind === "table") ? { periods_shown: true as const } : {}),
   };
 }
 

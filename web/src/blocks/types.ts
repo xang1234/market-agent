@@ -93,11 +93,24 @@ export type RefSegment =
 
 export type RichTextSegment = TextSegment | RefSegment
 
+// One part of analyst commentary: a statement of figures, an inference the
+// judge found entailed, one it found unsupported, one it is still checking,
+// or a note. An inference's words are plain text, never Markdown.
+export type CommentaryPart =
+  | { kind: 'figures'; segments: ReadonlyArray<RichTextSegment> }
+  | { kind: 'inference'; subject: string | null; basis: string | null; text: string }
+  | { kind: 'unverified'; subject: string | null; text: string }
+  | { kind: 'pending' }
+  | { kind: 'note'; text: string }
+
 export type RichTextBlock = BaseBlock & {
   kind: 'rich_text'
   segments: ReadonlyArray<RichTextSegment>
   // Commentary written on a financial answer's results, shown apart from it.
   analyst_commentary?: true
+  // The same commentary as its parts, so it can lead with its inferences.
+  // Messages saved before it have only segments.
+  commentary?: ReadonlyArray<CommentaryPart>
   // The options a financial clarification offered (#626).
   clarification_choices?: ReadonlyArray<string>
 }

@@ -487,3 +487,79 @@ test('a result in commentary hands the inspector the value and period it shows',
     restoreGlobals()
   }
 })
+
+// The MU commentary as its text and its parts, the parts in the order the
+// answer wrote them: a ranking first, then the takeaways and a note.
+const MU_TEXT: RichTextBlock['segments'] = [
+  { type: 'text', text: 'By revenue, highest first: MU ' },
+  { type: 'ref', ref_kind: 'result', ref_id: RESULT, format: '$133.2B', period: 'FY2026' },
+  { type: 'text', text: '.\n\n> **Analyst inference on MU** (from the revenue ranking): It leads on revenue.' },
+]
+const partsBlock: RichTextBlock = {
+  ...richTextBlock('commentary-mu', MU_TEXT),
+  analyst_commentary: true,
+  commentary: [
+    { kind: 'figures', segments: [MU_TEXT[0]!, MU_TEXT[1]!, { type: 'text', text: '.' }] },
+    { kind: 'inference', subject: 'MU', basis: 'the revenue ranking', text: 'It leads on *revenue*.' },
+    { kind: 'unverified', subject: 'WDC', text: 'Its margin comes from below the operating line.' },
+    { kind: 'inference', subject: null, basis: null, text: 'Scale wins.' },
+    { kind: 'pending' },
+    { kind: 'note', text: 'More sources matched than are shown here.' },
+  ],
+}
+
+test('commentary with parts reads as one card: badged takeaways first, plain words, then its figures and notes', async () => {
+  const opened: string[] = []
+  const inspector: EvidenceInspectorContextValue = {
+    openInspection() {},
+    openBlockInspection() {},
+    openFinancialResult(resultId) { opened.push(resultId) },
+    closeInspection() {},
+  }
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  try {
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        <EvidenceInspectorContext.Provider value={inspector}>
+          <RichText block={partsBlock} />
+        </EvidenceInspectorContext.Provider>,
+      )
+    })
+    const doc = dom.window.document
+    const card = doc.querySelector('[data-testid="block-rich-text-commentary-mu"]')!
+    assert.equal(card.querySelector('h3')!.textContent, 'Analysis')
+    assert.equal(doc.body.textContent!.includes('Analyst commentary'), false)
+    assert.deepEqual([...card.querySelectorAll('[data-commentary-part]')].map((item) => {
+      const badge = item.querySelector('span[title]')!
+      return [item.getAttribute('data-commentary-part'), badge.textContent, badge.getAttribute('title'), item.textContent]
+    }), [
+      ['inference', 'Inference', 'Checked against the figures shown', 'InferenceMUIt leads on *revenue*.Based on the revenue ranking.'],
+      ['unverified', 'Unverified', 'Not backed by the figures shown', 'UnverifiedWDCIts margin comes from below the operating line.'],
+      ['inference', 'Inference', 'Checked against the figures shown', 'InferenceScale wins.'],
+      ['pending', 'Checking', 'Being checked against the figures shown', 'CheckingAn analyst inference is being checked against the figures it rests on.'],
+    ])
+    assert.equal(card.querySelector('[data-commentary-part] .font-semibold')!.textContent, 'MU')
+    const figures = [...card.querySelectorAll('h4')].find((heading) => heading.textContent === 'Supporting figures')!
+    assert.equal(card.querySelector('ul')!.compareDocumentPosition(figures) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING, dom.window.Node.DOCUMENT_POSITION_FOLLOWING, 'the takeaways lead')
+    assert.deepEqual([...figures.parentElement!.querySelectorAll('li')].map((item) => item.textContent), ['By revenue, highest first: MU $133.2B.'])
+    assert.equal(card.lastElementChild!.textContent, 'More sources matched than are shown here.')
+    assert.equal(card.querySelectorAll('blockquote, em, i, [class*="italic"]').length, 0, 'nothing is italic or quoted')
+    await act(async () => card.querySelector<HTMLButtonElement>(`[data-inspect-result="${RESULT}"]`)!.click())
+    assert.deepEqual(opened, [RESULT])
+    await act(async () => root.unmount())
+  } finally {
+    restoreGlobals()
+  }
+})
+
+test('commentary with only figures shows them alone, and one saved before parts renders its Markdown as before', async () => {
+  const figuresOnly = await renderDocument({ ...partsBlock, commentary: [partsBlock.commentary![0]!] })
+  assert.deepEqual([...figuresOnly.querySelectorAll('h3, h4, [data-commentary-part]')].map((el) => el.textContent), ['Analysis', 'Supporting figures'])
+
+  const saved = await renderDocument({ ...partsBlock, commentary: undefined })
+  assert.equal(saved.querySelector('[data-analyst-commentary]')!.textContent, 'Analyst commentary')
+  assert.equal(saved.querySelector('blockquote')!.textContent!.trim(), 'Analyst inference on MU (from the revenue ranking): It leads on revenue.')
+  assert.equal(saved.querySelector('h3'), null)
+})

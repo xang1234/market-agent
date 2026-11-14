@@ -127,8 +127,8 @@ function templateSegments(
     }
     case "analyst_inference": {
       // Words only: the check rejected any figure or reference in it.
-      const basis = inferenceBasis(assertion, packet, accepted);
-      text(`> **Analyst inference${subjectClause(assertion, packet)}${basis ? `** (from ${basis}):` : ":**"} ${literal(assertion.text)}`);
+      const { subject, basis, text: words } = inferenceWords(assertion, packet, accepted);
+      text(`> **Analyst inference${onSubject(subject)}${basis ? `** (from ${basis}):` : ":**"} ${literal(words)}`);
       break;
     }
   }
@@ -153,8 +153,28 @@ export function attributionSegments(claims: ReadonlyArray<AttributedClaim>, quot
 // An inference the judge found unsupported, or flagged as stating an amount
 // in words (verdicts.ts shownAs), with no checked results to lend it weight.
 export function unverifiedInference(assertion: Assertion, packet: EvidencePacket): Segment[] {
-  return [{ type: "text", text: `> **Unverified analyst view${subjectClause(assertion, packet)}** (not backed by the figures shown): ${literal(assertion.text)}` }];
+  const { subject, text } = inferenceWords(assertion, packet);
+  return [{ type: "text", text: `> **Unverified analyst view${onSubject(subject)}** (not backed by the figures shown): ${literal(text)}` }];
 }
+
+// What an inference's label names and its words, apart: the company it is on
+// (null in a one-company answer, where it goes without saying), what it rests
+// on (null when nothing), and its words on one line, as written.
+export type InferenceWords = { subject: string | null; basis: string | null; text: string };
+
+export function inferenceWords(
+  assertion: Assertion,
+  packet: EvidencePacket,
+  accepted: ReadonlyArray<Assertion & { index: number }> = [],
+): InferenceWords {
+  return {
+    subject: assertion.subject && packet.companies.length > 1 ? assertion.subject : null,
+    basis: inferenceBasis(assertion, packet, accepted) || null,
+    text: assertion.text.replace(/\s+/g, " ").trim(),
+  };
+}
+
+const onSubject = (subject: string | null): string => (subject ? ` on ${subject}` : "");
 
 // An inference's words as Markdown that renders them as written (#477 review):
 // after its label with no CommonMark line ending, so no quote, list or heading
@@ -162,12 +182,7 @@ export function unverifiedInference(assertion: Assertion, packet: EvidencePacket
 // A link the page would make of a bare address is refused by the check
 // (assertions.ts).
 function literal(text: string): string {
-  return text.replace(/\s+/g, " ").trim().replace(/[\\`*_~[\]<>]/g, "\\$&");
-}
-
-// A one-company answer's subject goes without saying.
-function subjectClause(assertion: Assertion, packet: EvidencePacket): string {
-  return assertion.subject && packet.companies.length > 1 ? ` on ${assertion.subject}` : "";
+  return text.replace(/[\\`*_~[\]<>]/g, "\\$&");
 }
 
 // What an inference's comparisons checked, for the judge, from their results.
