@@ -14,13 +14,13 @@ export async function buildDevApiDevServer(
   for (const warning of removedModeFlagWarnings(env, ["ANALYZE_FINANCIAL_MODE", "GRID_FINANCIAL_MODE", "THESIS_FINANCIAL_MODE"])) console.warn(`dev-api: ${warning}`);
   // Relative DEV_API_*_MODULE settings resolve from services/dev-api, as they do
   // standalone, even when the one-process app (cwd services/app) builds this server.
-  const { adapters, worker } = await createDevApiRuntimeFromEnv(env, SERVICE_DIR);
+  const { adapters, worker, scheduler } = await createDevApiRuntimeFromEnv(env, SERVICE_DIR);
   const server = createDevApiServer(env, adapters ? { adapters } : undefined);
   return {
     server,
     // Bounded: an in-flight financial tick gets 10s, then its lease expires and recovery resumes it.
     close: async () => {
-      await worker?.stop({ timeoutMs: 10_000 });
+      await Promise.all([worker?.stop({ timeoutMs: 10_000 }), scheduler?.stop()]);
     },
   };
 }

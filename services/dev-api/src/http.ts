@@ -886,12 +886,13 @@ function readUniverse(value: unknown): AgentUniverse {
   }
   if (universe.mode === "screen") return readDynamicUniverse(universe, "screen_id");
   if (universe.mode === "theme") return readDynamicUniverse(universe, "theme_id");
+  if (universe.mode === "watchlist") return readDynamicUniverse(universe, "watchlist_id");
   if (universe.mode === "portfolio") return readDynamicUniverse(universe, "portfolio_id");
   if (universe.mode === "agent") return readDynamicUniverse(universe, "agent_id");
   throw new DevApiHttpError(400, "universe.mode is invalid");
 }
 
-function readDynamicUniverse<T extends "screen_id" | "theme_id" | "portfolio_id" | "agent_id">(
+function readDynamicUniverse<T extends "screen_id" | "theme_id" | "watchlist_id" | "portfolio_id" | "agent_id">(
   universe: Record<string, unknown>,
   key: T,
 ): Extract<AgentUniverse, Record<T, string>> {

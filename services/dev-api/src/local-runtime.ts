@@ -1,4 +1,9 @@
 import { getCurrentThesis } from "../../agents/src/thesis-repo.ts";
+import { getAgent, type AgentUniverse } from "../../agents/src/agent-repo.ts";
+import type { AgentLoopStages } from "../../agents/src/agent-loop.ts";
+import { resolveUniverse, type UniverseResolverDeps } from "../../analyst-grids/src/universe.ts";
+import { createUniverseResolverDeps } from "../../analyst-grids/src/universe-wiring.ts";
+import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import { createDiscoveryRepository } from "../../discovery/src/repository.ts";
 import { createDiscoveryReadModel } from "../../discovery/src/read-model.ts";
 import { createDiscoveryService as createDiscoveryCampaignService } from "../../discovery/src/service.ts";
@@ -254,11 +259,42 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = async (input) 
         thesis,
         financial: { pool: pool(), evidence: createEvidenceFinancialPort },
       })
-    : createLegacyAgentLoopStages(input);
+    : createLegacyAgentLoopStages(input, await agentUniverseSubjectRefs(pool(), input.userId, input.agent.universe));
 };
 
-const createLegacyAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId, agent, trigger = "scheduled" }) => {
-  const subjectRefs = normalizeSubjectRefs(subjectRefsFromUniverse(agent.universe));
+// Screen, watchlist, and portfolio universes expand into the companies they hold
+// at run time; a mirror universe borrows one other agent's universe.
+export async function agentUniverseSubjectRefs(
+  db: QueryExecutor,
+  userId: string,
+  universe: AgentUniverse,
+  resolvers: UniverseResolverDeps = createUniverseResolverDeps(db),
+): Promise<ReadonlyArray<SubjectRef>> {
+  switch (universe.mode) {
+    case "static":
+      return resolveUniverse(resolvers, userId, { source: "manual", subject_refs: universe.subject_refs });
+    case "screen":
+      return resolveUniverse(resolvers, userId, { source: "screen", screen_id: universe.screen_id });
+    case "watchlist":
+      return resolveUniverse(resolvers, userId, { source: "watchlist", watchlist_id: universe.watchlist_id });
+    case "portfolio":
+      return resolveUniverse(resolvers, userId, { source: "portfolio", portfolio_id: universe.portfolio_id });
+    case "theme":
+      return [{ kind: "theme", id: universe.theme_id }];
+    case "agent": {
+      const mirrored = await getAgent(db, universe.agent_id);
+      return mirrored?.user_id === userId && mirrored.universe.mode !== "agent"
+        ? agentUniverseSubjectRefs(db, userId, mirrored.universe, resolvers)
+        : [];
+    }
+  }
+}
+
+function createLegacyAgentLoopStages(
+  { userId, runId, agent, trigger = "scheduled" }: Parameters<DevApiAgentLoopStageFactory>[0],
+  universeRefs: ReadonlyArray<SubjectRef>,
+): AgentLoopStages {
+  const subjectRefs = normalizeSubjectRefs(universeRefs);
   const asOf = new Date().toISOString();
   const activityClock = activityClockFrom(asOf);
   let findings: ReadonlyArray<FindingRow> = [];
@@ -393,7 +429,7 @@ const createLegacyAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runI
     },
     alertFindings: async () => findings,
   };
-};
+}
 
 async function sealAgentEvidenceSnapshot(input: {
   tx: QueryExecutor;
@@ -746,19 +782,6 @@ function subjectRefsFromBlocks(blocks: ReadonlyArray<Record<string, unknown>>): 
     }
   }
   return normalizeSubjectRefs(refs);
-}
-
-function subjectRefsFromUniverse(universe: unknown): ReadonlyArray<SnapshotSubjectRef> {
-  if (!isJsonObject(universe)) return [];
-  if (universe.mode === "static" && Array.isArray(universe.subject_refs)) {
-    return universe.subject_refs.filter(isSnapshotSubjectRef);
-  }
-  if (typeof universe.mode === "string" && typeof universe[`${universe.mode}_id`] === "string") {
-    const kind = universe.mode === "agent" ? "screen" : universe.mode;
-    const id = universe[`${universe.mode}_id`];
-    if (isSnapshotSubjectKind(kind) && typeof id === "string" && isUuid(id)) return [{ kind, id }];
-  }
-  return [];
 }
 
 function normalizeSubjectRefs(
