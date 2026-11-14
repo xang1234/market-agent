@@ -9,6 +9,7 @@ import {
   cellPeriod,
   columnNames,
   coverageText,
+  gapReasons,
   labelText,
   resultLabel,
   resultsById,
@@ -207,13 +208,22 @@ function CertifiedTable({ blockId, provenance, content, results, table }: TableP
             {order.map((rowIndex) => {
               const row = table.rows[rowIndex]!
               const shared = rowPeriod(content, table, row, results)
+              // A row of gaps reads n/a once, unless its gaps differ in period and so need a cell each.
+              const reasons = gapReasons(row, results)
+              const gapped = reasons !== null && (shared !== null || table.columns.every((column) => column.period_label_id !== null))
               return (
                 <tr key={row.subject_label_id} className="border-t border-line" data-row-label={row.subject_label_id}>
                   <th scope="row" className="px-3 py-2 font-normal text-fg">
                     {labelText(content, row.subject_label_id)}
                     {shared === null ? null : <RowPeriod label={shared} />}
                   </th>
-                  {row.cells.map((cell, cellIndex) => {
+                  {gapped ? (
+                    <td colSpan={row.cells.length} className="px-3 py-2 text-muted">
+                      <span aria-hidden="true">n/a</span>
+                      <span className="sr-only">Not available.</span>
+                      <span className="block text-xs">{reasons.join(' ')}</span>
+                    </td>
+                  ) : row.cells.map((cell, cellIndex) => {
                     const result = cell === null ? undefined : results.get(cell)
                     const label = table.columns[cellIndex]?.period_label_id === null && result ? labelText(content, result.period_label_id) : undefined
                     return (

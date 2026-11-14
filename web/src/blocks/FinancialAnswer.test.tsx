@@ -195,6 +195,27 @@ test('a gap for another period than its row names that period, so the missing fi
   assert.deepEqual(cells[2], ['$770.0M'], 'a value of the row period names none')
 })
 
+test('a row with no value reads n/a once across its columns, with each distinct reason and its period said once', () => {
+  const block = structuredClone(financialAnswerFiscalCalendarsFixture) as FinancialAnswerBlock & { financial: FinancialAnswerContent }
+  const cutoff = 'No eligible input was public before the knowledge cutoff.'
+  const unavailable = 'A required input or calculation is unavailable.'
+  const amd = (block.financial.presentations[0] as FinancialTablePresentation).rows[1]!.cells
+  amd.forEach((id, index) => {
+    const result = block.financial.results.find((entry) => entry.result_id === id)!
+    Object.assign(result, { disposition: 'missing', presented: { kind: 'gap', text: index < 7 ? cutoff : unavailable, reason_code: 'missing_input' } })
+  })
+  const document = new JSDOM(renderToStaticMarkup(<FinancialAnswer block={block} />)).window.document
+  const [nvda, row] = [...document.querySelectorAll('tbody tr')]
+  assert.deepEqual([...row!.querySelector('th')!.childNodes].map((node) => node.textContent), ['Advanced Micro Devices, Inc.', 'Q2 FY2026'])
+  const cells = [...row!.querySelectorAll('td')]
+  assert.deepEqual(cells.map((cell) => [cell.getAttribute('colspan'), [...cell.children].map((child) => child.textContent)]), [
+    ['9', ['n/a', 'Not available.', `${cutoff} ${unavailable}`]],
+  ])
+  assert.equal(cells[0]!.querySelector('[aria-hidden="true"]')!.textContent, 'n/a')
+  assert.equal(cells[0]!.querySelector('.sr-only')!.textContent, 'Not available.')
+  assert.equal(nvda!.querySelectorAll('td').length, 9, 'a row with values keeps a cell per column')
+})
+
 test('a lead between two companies is titled by its measure and the two companies, its whole label kept for hover and the inspector', () => {
   const block = structuredClone(financialAnswerFiscalCalendarsFixture) as FinancialAnswerBlock & { financial: FinancialAnswerContent }
   const labels = block.financial.labels as Record<string, { kind: string; text: string }>

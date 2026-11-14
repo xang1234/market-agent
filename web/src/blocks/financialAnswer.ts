@@ -64,18 +64,33 @@ export function periodParts(text: string): { current: string; compared?: string 
   return compared === undefined || more.length > 0 ? { current: text } : { current: current!, compared }
 }
 
-/** The one period every value in a row's undated columns reads, a change's being the period it changed to, or null when they read several. */
+/**
+ * The one period every value in a row's undated columns reads, a change's
+ * being the period it changed to, or null when they read several. A row with
+ * no value reads its gaps' period.
+ */
 export function rowPeriod(
   content: FinancialAnswerContent,
   table: FinancialTablePresentation,
   row: FinancialTablePresentation['rows'][number],
   results: ReadonlyMap<string, FinancialPresentedResult>,
 ): string | null {
-  const periods = new Set(row.cells.flatMap((cell, index) => {
+  const read = (kind: 'value' | 'gap') => new Set(row.cells.flatMap((cell, index) => {
     const result = cell == null || table.columns[index]?.period_label_id !== null ? undefined : results.get(cell)
-    return result?.presented.kind === 'value' ? [periodParts(labelText(content, result.period_label_id)).current] : []
+    return result?.presented.kind === kind ? [periodParts(labelText(content, result.period_label_id)).current] : []
   }))
+  const values = read('value')
+  const periods = values.size > 0 ? values : read('gap')
   return periods.size === 1 ? [...periods][0]! : null
+}
+
+/** The distinct reasons of a row whose every cell is a gap, or null when one is not. */
+export function gapReasons(row: FinancialTablePresentation['rows'][number], results: ReadonlyMap<string, FinancialPresentedResult>): string[] | null {
+  const reasons = row.cells.map((cell) => {
+    const presented = cell == null ? undefined : results.get(cell)?.presented
+    return presented?.kind === 'gap' ? presented.text : null
+  })
+  return reasons.length > 0 && !reasons.includes(null) ? [...new Set(reasons as string[])] : null
 }
 
 /** What a cell shows of its period under its row's: nothing for the row's period, a change of it only its base ("vs Q3 FY2026"), any other period whole. */
