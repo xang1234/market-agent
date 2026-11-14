@@ -39,12 +39,12 @@ const ENV = {
 const JUDGED_ENV = { ...ENV, JUDGE_LITELLM_MODEL: "anthropic/claude-haiku-5-5" };
 
 const PENDING = "> _Checking an analyst inference against the figures it rests on…_";
-const FISCAL_FIGURES = [
+const FISCAL_RANKINGS = [
   "By revenue, highest first: AAPL $416.2B (FY2025, ended Sep 2025), NVDA $130.5B (FY2025, ended Jan 2025).",
   "By gross margin, highest first: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025).",
   "By net margin, highest first: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025).",
-  "AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025).",
 ].join("\n\n");
+const FISCAL_GROWTH = "AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025).";
 const FISCAL_PRICES = "By price return, highest first: NVDA 6.6%, AAPL 6.05% (Dec 2025 to Aug 2026).";
 const FISCAL_NOTE = "The periods compared end at different times, so they do not line up: NVDA's FY2025 ended Jan 2025 and AAPL's FY2025 ended Sep 2025.";
 const PROFITABILITY_TEXT = "It has the larger revenue base, while the other company converts far more of its sales into profit.";
@@ -54,13 +54,16 @@ const GAP_REASON = "The figures show NVDA's fiscal year ended Jan 2025 and AAPL'
 const ENDS_TEXT = "The different fiscal year ends limit direct comparability of the two revenue figures.";
 const ENDS = `> **Analyst inference on NVDA** (from the revenue ranking): ${ENDS_TEXT}`;
 const UNVERIFIED_GAP = `> **Unverified analyst view on NVDA** (not backed by the figures shown): ${GAP_TEXT}`;
-const fiscal = (takeaway: string, ...rest: string[]) => [FISCAL_FIGURES, takeaway, FISCAL_PRICES, ...rest, FISCAL_NOTE].join("\n\n");
+// As commentary, the growth figure and price ranking no inference rests on are left out: the table shows them.
+const fiscal = (takeaway: string, ...rest: string[]) => [FISCAL_RANKINGS, takeaway, ...rest, FISCAL_NOTE].join("\n\n");
+const analystFiscal = (takeaway: string, ...rest: string[]) => [FISCAL_RANKINGS, FISCAL_GROWTH, takeaway, FISCAL_PRICES, ...rest, FISCAL_NOTE].join("\n\n");
 
+const QUARTER_TREND = "NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B).";
 const QUARTER_FIGURES = [
   "NVDA's revenue was $62.1B, gross profit $46.2B, operating income $40.3B and net income $35.4B in Q4 2026 (ended Jan 2026).",
   "NVDA's gross margin was 74.4%, operating margin 64.9% and net margin 57.0% in Q4 2026 (ended Jan 2026).",
   "NVDA's revenue growth (QoQ) was 8.9% and revenue growth (YoY) 57.9% in Q4 2026 (ended Jan 2026).",
-  "NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B).",
+  QUARTER_TREND,
 ].join("\n\n");
 const TAKEAWAY_TEXT = "Its latest quarter shows very strong scale and profitability, with revenue still climbing and margins at a high level.";
 const TAKEAWAY = `> **Analyst inference:** ${TAKEAWAY_TEXT}`;
@@ -236,7 +239,8 @@ test("every inference sent to repair goes in one call, once every first verdict 
     { index: 0, text: TAKEAWAY_TEXT, check: "judge", verdict: "contradicted", worded_amount: false, reason: "QoQ growth rose." },
     { index: 6, text: DIGIT_TEXT, check: "binding", reason: "an inference rests on its supports; it writes no figure" },
   ]);
-  assert.equal(text(done.blocks), quarter(null, "> **Unverified analyst view** (not backed by the figures shown): Growth is a third smaller than before."));
+  // The figures only the hidden takeaway rested on are left out; the trend the shown view rests on stays.
+  assert.equal(text(done.blocks), [QUARTER_TREND, "> **Unverified analyst view** (not backed by the figures shown): Growth is a third smaller than before."].join("\n\n"));
   assert.deepEqual(calls.sort(), ["answer", "judge 0", "judge 0", "judge 6", "repair"]);
   assert.deepEqual(done.assertions?.repaired, [0, 6]);
   assert.deepEqual(rejections(done.assertions).filter(([index]) => index === 0 || index === 6), [
@@ -436,9 +440,9 @@ test("in an analyst answer a worded amount is hidden: its repair shows only when
     const answer = await answerTurn(ANALYST_FISCAL.input, turn(ANALYST_FISCAL), { env: JUDGED_ENV, createClient });
     return text((await answer.judging!.done).blocks);
   };
-  assert.equal(await answered(() => fenced([inference(6, ENDS_TEXT)])), fiscal(PROFITABILITY, ENDS), "repaired with no amount, and entailed");
-  assert.equal(await answered(() => fenced([])), fiscal(PROFITABILITY), "left out by its repair");
-  assert.equal(await answered(() => fenced([inference(6, ENDS_TEXT)]), (ask) => verdict(ask.id, "entailed", true, "w.")), fiscal(PROFITABILITY), "repaired, and still worded");
+  assert.equal(await answered(() => fenced([inference(6, ENDS_TEXT)])), analystFiscal(PROFITABILITY, ENDS), "repaired with no amount, and entailed");
+  assert.equal(await answered(() => fenced([])), analystFiscal(PROFITABILITY), "left out by its repair");
+  assert.equal(await answered(() => fenced([inference(6, ENDS_TEXT)]), (ask) => verdict(ask.id, "entailed", true, "w.")), analystFiscal(PROFITABILITY), "repaired, and still worded");
 });
 
 test("a trace recorded before repairs replays with none: its worded inference stays unverified; one recorded with a repair replays it with no model", async () => {
