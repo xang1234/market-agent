@@ -73,10 +73,3 @@ test('a column mixing currencies names each row\'s unit instead of one header un
     ['Apple Inc.', '250000000000', 'EUR'],
   ])
 })
-
-test('a sorted table copies in the order it is shown', () => {
-  const content = supportedFinancialContent(financialAnswerFixture)!
-  const table = content.presentations.find((presentation) => presentation.kind === 'table')!
-  if (table.kind !== 'table') return
-  assert.deepEqual(tableCopyRows(content, table, resultsById(content), [1, 0]).map((row) => row[0]), ['Company', 'Microsoft Corp.', 'Apple Inc.'])
-})

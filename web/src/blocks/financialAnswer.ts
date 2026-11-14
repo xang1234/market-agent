@@ -1,7 +1,6 @@
 // View helpers for certified financial answers. Nothing here formats, rounds,
-// or compares financial values: labels come from the server, table order comes
-// from the server's exact-decimal `ascending` permutation, and chart geometry
-// is a bounded display projection that never feeds a calculation.
+// or compares financial values: labels come from the server, and chart
+// geometry is a bounded display projection that never feeds a calculation.
 
 import {
   FINANCIAL_PRESENTATION_V1,
@@ -59,9 +58,18 @@ export function leadParts(content: FinancialAnswerContent, result: FinancialPres
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
+const DATE = / \((ended|as of) (\d{4})-(\d{2})-\d{2}\)/g
+const dateText = (word: string, year: string, month: string) => `${word} ${MONTHS[Number(month) - 1]} ${year}`
+
 /** "FY2026 (ended 2026-09-03)" reads "FY2026 · ended Sep 2026"; the full label stays in the title. */
 export function shortPeriod(text: string): string {
-  return text.replace(/ \((ended|as of) (\d{4})-(\d{2})-\d{2}\)/g, (_, word: string, year: string, month: string) => ` · ${word} ${MONTHS[Number(month) - 1]} ${year}`)
+  return text.replace(DATE, (_, word: string, year: string, month: string) => ` · ${dateText(word, year, month)}`)
+}
+
+/** A period without its end date ("Q2 FY2027"), and that date ("ended Jul 2026") when it names exactly one. */
+function datedPeriod(text: string): { fiscal: string; date: string | null } {
+  const dates = [...text.matchAll(DATE)].map(([, word, year, month]) => dateText(word!, year!, month!))
+  return { fiscal: text.replace(DATE, ''), date: dates.length === 1 ? dates[0]! : null }
 }
 
 /** Each text through shorten, unless two different texts would then read alike, which keep their whole text. */
@@ -97,18 +105,11 @@ export function shortNames(names: ReadonlyArray<string>): string[] {
   return distinct(names, (name) => name.replace(/,?(?: &)? (?:Inc|Incorporated|Corp|Corporation|Co|Company|Ltd|Limited|plc|PLC|LLC|N\.V|S\.A|SE|AG)\.?$/, ''))
 }
 
-/** Whether each column starts a new kind of figure (amounts, ratios, changes), so the table can set kinds apart. */
-export function groupStarts(
-  content: FinancialAnswerContent,
-  table: FinancialTablePresentation,
-  results: ReadonlyMap<string, FinancialPresentedResult>,
-): boolean[] {
-  const kinds = table.columns.map((column, index) => {
-    if (/change in /i.test(labelText(content, column.measure_label_id))) return 'change'
-    const value = table.rows.map((row) => results.get(row.cells[index] ?? '')?.presented).find((presented) => presented?.kind === 'value')
-    return value?.kind === 'value' ? value.unit.kind : 'none'
-  })
-  return kinds.map((kind, index) => index > 0 && kind !== kinds[index - 1])
+/** Each company's full name to the short one the screen shows. */
+export function companyNames(content: FinancialAnswerContent): ReadonlyMap<string, string> {
+  const subjects = Object.values(content.labels).flatMap((label) => (label.kind === 'subject' ? [label.text] : []))
+  const short = shortNames(subjects)
+  return new Map(subjects.map((name, index) => [name, short[index]!]))
 }
 
 /** A period label read back where the engine joins a change's two: its own period and the one it is compared with ("Q4 FY2026 vs Q3 FY2026"). */
@@ -117,69 +118,164 @@ export function periodParts(text: string): { current: string; compared?: string 
   return compared === undefined || more.length > 0 ? { current: text } : { current: current!, compared }
 }
 
-/**
- * The one period every value in a row's undated columns reads, a change's
- * being the period it changed to, or null when they read several. A row with
- * no value reads its gaps' period.
- */
-export function rowPeriod(
+/** What a change compares with: "the prior quarter", "the same quarter a year earlier", "the prior year", or else the base period itself. */
+function baseOf(current: string, compared: string): string {
+  const base = datedPeriod(compared).fiscal
+  const [now, then] = [current, compared].map((text) => /^(?:Q([1-4]) )?(?:FY)?(\d{4})$/.exec(datedPeriod(text).fiscal))
+  if (!now || !then || (now[1] === undefined) !== (then[1] === undefined)) return base
+  const quarterly = now[1] !== undefined
+  const index = (match: RegExpExecArray) => Number(match[2]) * 4 + Number(match[1] ?? 0)
+  const step = index(now) - index(then)
+  if (quarterly && step === 1) return 'the prior quarter'
+  if (step === 4) return quarterly ? 'the same quarter a year earlier' : 'the prior year'
+  return base
+}
+
+export type StatementCell = {
+  result: FinancialPresentedResult | undefined
+  // The cell's fiscal period, only where it differs from its company's.
+  period: string | null
+}
+
+export type StatementRow = { key: string; label: string; measure: string; cells: ReadonlyArray<StatementCell>; difference?: FinancialPresentedResult }
+
+/** A table pivoted to read like a financial statement: companies across, measures down in sections, every date in the footnotes. */
+export type Statement = {
+  companies: ReadonlyArray<{ subjectId: string; name: string; short: string; period: string | null }>
+  // The one fiscal period every company reads, said once above the table instead of under each company.
+  sharedPeriod: string | null
+  sections: ReadonlyArray<{ title: string | null; rows: ReadonlyArray<StatementRow> }>
+  // The short names a Difference column subtracts, in order, when the answer's leads fold into one.
+  differenceSides: readonly [string, string] | null
+  footnotes: ReadonlyArray<string>
+  foldedLeads: ReadonlySet<string>
+}
+
+type FigureKind = 'amount' | 'ratio' | 'change'
+
+const RATIO_UNITS: ReadonlySet<FinancialUnit['kind']> = new Set(['percent', 'ratio', 'percentage_points', 'basis_points'])
+
+function figureKind(row: StatementRow): FigureKind {
+  if (/change in /i.test(row.measure)) return 'change'
+  const value = row.cells.map((cell) => cell.result?.presented).find((presented) => presented?.kind === 'value')
+  if (value?.kind === 'value') return RATIO_UNITS.has(value.unit.kind) ? 'ratio' : 'amount'
+  return /margin|ratio/i.test(row.measure) ? 'ratio' : 'amount'
+}
+
+function sectionTitle(kind: FigureKind, rows: ReadonlyArray<StatementRow>): string {
+  if (kind === 'change') return 'Growth'
+  if (kind === 'amount') return 'Amounts'
+  return rows.every((row) => /\bmargin\b/i.test(row.measure)) ? 'Margins' : 'Ratios'
+}
+
+export function statementOf(
   content: FinancialAnswerContent,
   table: FinancialTablePresentation,
-  row: FinancialTablePresentation['rows'][number],
   results: ReadonlyMap<string, FinancialPresentedResult>,
-): string | null {
-  const read = (kind: 'value' | 'gap') => new Set(row.cells.flatMap((cell, index) => {
-    const result = cell == null || table.columns[index]?.period_label_id !== null ? undefined : results.get(cell)
-    return result?.presented.kind === kind ? [periodParts(labelText(content, result.period_label_id)).current] : []
-  }))
-  const values = read('value')
-  const periods = values.size > 0 ? values : read('gap')
-  return periods.size === 1 ? [...periods][0]! : null
-}
-
-/** The distinct reasons of a row whose every cell is a gap, or null when one is not. */
-export function gapReasons(row: FinancialTablePresentation['rows'][number], results: ReadonlyMap<string, FinancialPresentedResult>): string[] | null {
-  const reasons = row.cells.map((cell) => {
-    const presented = cell == null ? undefined : results.get(cell)?.presented
-    return presented?.kind === 'gap' ? presented.text : null
+  // The answer's leads between two companies, which fold into a Difference column when they all fit this table.
+  leads: ReadonlyArray<FinancialPresentedResult>,
+): Statement {
+  const shortOf = companyNames(content)
+  const periodOf = (result: FinancialPresentedResult) => labelText(content, result.period_label_id)
+  const resultAt = (cell: string | null | undefined) => (cell == null ? undefined : results.get(cell))
+  // Each company's one period across its undated values (its gaps' when it has none), or null when they read several.
+  const own = table.rows.map((row) => {
+    const read = (kind: 'value' | 'gap') => new Set(row.cells.flatMap((cell, index) => {
+      const result = table.columns[index]?.period_label_id === null ? resultAt(cell) : undefined
+      return result?.presented.kind === kind ? [periodParts(periodOf(result)).current] : []
+    }))
+    const values = read('value')
+    const periods = values.size > 0 ? values : read('gap')
+    return periods.size === 1 ? [...periods][0]! : null
   })
-  return reasons.length > 0 && !reasons.includes(null) ? [...new Set(reasons as string[])] : null
-}
+  const companies = table.rows.map((row, index) => {
+    const name = labelText(content, row.subject_label_id)
+    const period = own[index]
+    return { subjectId: row.subject_label_id, name, short: shortOf.get(name) ?? name, period: period === null ? null : datedPeriod(period).fiscal }
+  })
+  const periods = new Set(companies.map((company) => company.period))
+  const sharedPeriod = periods.size === 1 ? [...periods][0]! : null
 
-/** What a cell shows of its period under its row's: nothing for the row's period, a change of it only its base ("vs Q3 FY2026"), any other period whole. */
-export function cellPeriod(label: string, row: string | null): string | undefined {
-  const { current, compared } = periodParts(label)
-  if (current !== row) return shortPeriod(label)
-  return compared === undefined ? undefined : `vs ${compared.replace(/ \((?:ended|as of) [^()]*\)$/, '')}`
-}
+  const measures = table.columns.map((column) => labelText(content, column.measure_label_id))
+  const names = columnNames(measures)
+  const rows: StatementRow[] = table.columns.map((column, index) => ({
+    key: column.column_id,
+    label: column.period_label_id === null ? names[index]! : `${names[index]}, ${datedPeriod(labelText(content, column.period_label_id)).fiscal}`,
+    measure: measures[index]!,
+    cells: table.rows.map((row, company) => {
+      const result = resultAt(row.cells[index])
+      const current = result === undefined || column.period_label_id !== null ? null : periodParts(periodOf(result)).current
+      return { result, period: current === null || current === own[company] ? null : datedPeriod(current).fiscal }
+    }),
+  }))
 
-export type SortDirection = 'ascending' | 'descending'
+  // Leads fold only all together, each beside the two values it subtracts.
+  const sides = leads[0] === undefined ? undefined : leadParts(content, leads[0])?.sides
+  const fullNames = companies.map((company) => company.name)
+  const spots = companies.length === 2 && sides !== undefined && new Set(sides).size === 2 && sides.every((side) => fullNames.includes(side))
+    ? leads.map((lead) => {
+      const parts = leadParts(content, lead)
+      if (parts === null || parts.sides.join('\n') !== sides.join('\n')) return -1
+      const sideTexts = periodOf(lead).split(' minus ')
+      return rows.findIndex((row) => row.measure === parts.measure && parts.sides.every((side, at) => {
+        const result = row.cells[fullNames.indexOf(side)]?.result
+        return result !== undefined && sideTexts[at] === `${side} ${periodOf(result)}`
+      }))
+    })
+    : []
+  const folds = spots.length > 0 && !spots.includes(-1) && new Set(spots).size === spots.length
+  if (folds) spots.forEach((spot, index) => { rows[spot]!.difference = leads[index] })
 
-/**
- * Row indexes for a column sort. Descending reverses only the rows that hold a
- * value; rows without one (gaps, missing cells) stay last either way. An
- * invalid server permutation falls back to the server's row order.
- */
-export function sortedRowIndexes(
-  table: FinancialTablePresentation,
-  results: ReadonlyMap<string, FinancialPresentedResult>,
-  columnId: string,
-  direction: SortDirection,
-): ReadonlyArray<number> {
-  const natural = table.rows.map((_, index) => index)
-  const order = table.ascending[columnId]
-  if (!order || order.length !== natural.length || [...order].sort((a, b) => a - b).some((value, index) => value !== index)) {
-    return natural
+  const kinds = new Map<FigureKind, StatementRow[]>()
+  for (const row of rows) {
+    const kind = figureKind(row)
+    kinds.set(kind, [...(kinds.get(kind) ?? []), row])
   }
-  if (direction === 'ascending') return order
-  const columnIndex = table.columns.findIndex((column) => column.column_id === columnId)
-  const hasValue = (rowIndex: number) => {
-    const cell = table.rows[rowIndex]?.cells[columnIndex]
-    return cell != null && results.get(cell)?.presented.kind === 'value'
+  const sections = [...kinds].map(([kind, members]) => ({ title: kinds.size === 1 ? null : sectionTitle(kind, members), rows: members }))
+
+  return {
+    companies,
+    sharedPeriod,
+    sections,
+    differenceSides: folds ? [shortOf.get(sides![0]) ?? sides![0], shortOf.get(sides![1]) ?? sides![1]] : null,
+    footnotes: footnotesOf(companies, rows, own, periodOf),
+    foldedLeads: new Set(folds ? leads.map((lead) => lead.result_id) : []),
   }
-  return [...order.filter(hasValue).reverse(), ...order.filter((rowIndex) => !hasValue(rowIndex))]
 }
 
+/** Each company's end dates, what its changes compare with, and each distinct gap reason, each said once. */
+function footnotesOf(
+  companies: Statement['companies'],
+  rows: ReadonlyArray<StatementRow>,
+  own: ReadonlyArray<string | null>,
+  periodOf: (result: FinancialPresentedResult) => string,
+): string[] {
+  const dates = companies.flatMap((company, index) => {
+    const periods = [own[index], ...rows.map((row) => row.cells[index]?.result).map((result) => result && periodParts(periodOf(result)).current)]
+    const dated = new Set(periods.flatMap((period) => {
+      const { fiscal, date } = period ? datedPeriod(period) : { fiscal: '', date: null }
+      return date === null ? [] : [`${fiscal} ${date}`]
+    }))
+    return dated.size === 0 ? [] : [`${company.short} ${[...dated].join(', ')}`]
+  })
+  const bases = new Map<string, Set<string>>()
+  for (const row of rows) {
+    const horizon = /^(Quarter-over-quarter|Year-over-year) /.exec(row.measure)?.[1]
+    const subject = horizon === undefined ? row.label : HORIZON[horizon]!
+    for (const { result } of row.cells) {
+      const { current, compared } = result ? periodParts(periodOf(result)) : { current: '' }
+      if (compared !== undefined) bases.set(subject, (bases.get(subject) ?? new Set()).add(baseOf(current, compared)))
+    }
+  }
+  const compares = [...bases].flatMap(([subject, phrases]) => (phrases.size === 1 ? [[subject, [...phrases][0]!] as const] : []))
+    .map(([subject, phrase], index) => `${subject} ${index === 0 ? 'compares ' : ''}with ${phrase}`)
+  const reasons = new Set(rows.flatMap((row) => [...row.cells.map((cell) => cell.result), row.difference])
+    .flatMap((result) => (result?.presented.kind === 'gap' ? [result.presented.text] : [])))
+  return [
+    [dates.length === 0 ? '' : `${dates.join('; ')}.`, compares.length === 0 ? '' : `${compares.join(', ')}.`].filter(Boolean).join(' '),
+    ...[...reasons].map((reason) => `— ${reason}`),
+  ].filter(Boolean)
+}
 /**
  * Bar sizes in [0, 1] for a series, relative to the largest magnitude, and
  * each value's sign. Display-only: the canonical decimal is converted with
@@ -250,8 +346,6 @@ export function tableCopyRows(
   content: FinancialAnswerContent,
   table: FinancialTablePresentation,
   results: ReadonlyMap<string, FinancialPresentedResult>,
-  // The row order on screen, so a sorted table copies as it is shown.
-  order: ReadonlyArray<number> = table.rows.map((_, index) => index),
 ): string[][] {
   const resultAt = (row: FinancialTablePresentation['rows'][number], columnIndex: number) => {
     const id = row.cells[columnIndex]
@@ -268,7 +362,7 @@ export function tableCopyRows(
   })
   return [
     ['Company', ...columns.flat().map((column) => column.header)],
-    ...order.map((index) => table.rows[index]!).map((row) => [
+    ...table.rows.map((row) => [
       labelText(content, row.subject_label_id),
       ...columns.flatMap((csvColumns, index) => csvColumns.map((column) => column.cell(resultAt(row, index)))),
     ]),
