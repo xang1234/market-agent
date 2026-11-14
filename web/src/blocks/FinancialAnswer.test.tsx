@@ -195,6 +195,33 @@ test('a gap for another period than its row names that period, so the missing fi
   assert.deepEqual(cells[2], ['$770.0M'], 'a value of the row period names none')
 })
 
+test('a lead between two companies is titled by its measure and the two companies, its whole label kept for hover and the inspector', () => {
+  const block = structuredClone(financialAnswerFiscalCalendarsFixture) as FinancialAnswerBlock & { financial: FinancialAnswerContent }
+  const labels = block.financial.labels as Record<string, { kind: string; text: string }>
+  labels['measure:lead'] = { kind: 'measure', text: 'Difference in Gross margin (gross profit / revenue)' }
+  labels['period:lead'] = { kind: 'period', text: 'NVIDIA Corp Q4 FY2026 (ended 2026-01-25) minus Advanced Micro Devices, Inc. Q2 FY2026 (ended 2026-06-27)' }
+  const whole = 'Difference in Gross margin (gross profit / revenue), NVIDIA Corp Q4 FY2026 (ended 2026-01-25) minus Advanced Micro Devices, Inc. Q2 FY2026 (ended 2026-06-27)'
+  const lead = {
+    ...block.financial.results[0]!,
+    result_id: '5e000000-0000-4000-8000-0000000000ff',
+    subject_label_id: null,
+    measure_label_id: 'measure:lead',
+    period_label_id: 'period:lead',
+    presented: { kind: 'value', text: '35.00 pp', full_text: '35 pp', value: '35', unit: { kind: 'percentage_points' }, exact: true },
+  } as FinancialPresentedResult
+  Object.assign(block.financial, { results: [...block.financial.results, lead], presentations: [{ kind: 'scalar', result_id: lead.result_id }] })
+  const inspector: EvidenceInspectorContextValue = { openInspection() {}, openBlockInspection() {}, openFinancialResult() {}, closeInspection() {} }
+  const document = new JSDOM(renderToStaticMarkup(
+    <EvidenceInspectorContext.Provider value={inspector}>
+      <FinancialAnswer block={block} />
+    </EvidenceInspectorContext.Provider>,
+  )).window.document
+  const line = document.querySelector(`[data-result-id="${lead.result_id}"]`)!
+  assert.equal(line.textContent, 'Gross margin, NVIDIA Corp minus Advanced Micro Devices, Inc.: 35.00 pp')
+  assert.equal(line.querySelector('span')!.getAttribute('title'), whole)
+  assert.equal(line.querySelector('button')!.getAttribute('aria-label'), `Inspect the verified calculation for ${whole}: 35 pp`)
+})
+
 test('sorting uses the server exact order; descending keeps rows without a value last', () => {
   const block = clone()
   const presentation: FinancialTablePresentation = {

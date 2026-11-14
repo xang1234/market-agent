@@ -12,6 +12,7 @@ import {
   labelText,
   resultLabel,
   resultsById,
+  resultTitle,
   rowPeriod,
   seriesBars,
   shortPeriod,
@@ -96,11 +97,13 @@ const RESULT_ROW_CLASS = 'flex items-baseline justify-between gap-4 border-t bor
 
 function ResultLine({ content, result, badge }: { content: FinancialAnswerContent; result: FinancialPresentedResult; badge?: ReactNode }): ReactElement {
   const { presented } = result
+  const label = resultLabel(content, result)
+  const title = resultTitle(content, result)
+  const heading = title === label ? undefined : label
   if (presented.kind === 'value') {
-    const label = resultLabel(content, result)
     return (
       <p className={`${RESULT_ROW_CLASS} text-fg`} data-result-id={result.result_id}>
-        <span className="text-muted">{label}: {badge}</span>
+        <span className="text-muted" title={heading}>{title}: {badge}</span>
         <InspectableResult resultId={result.result_id} label={`${label}: ${presented.full_text}`}>
           <span className="num whitespace-nowrap" title={presented.full_text} aria-label={`${label}: ${presented.full_text}`}>
             {presented.text}
@@ -112,7 +115,7 @@ function ResultLine({ content, result, badge }: { content: FinancialAnswerConten
   if (presented.kind === 'gap') {
     return (
       <p className={`${RESULT_ROW_CLASS} text-muted`} data-result-id={result.result_id} data-result-kind="gap">
-        <span>{resultLabel(content, result)}: {badge}</span>
+        <span title={heading}>{title}: {badge}</span>
         <span className="italic">{presented.text}</span>
       </p>
     )

@@ -36,6 +36,15 @@ export function resultLabel(content: FinancialAnswerContent, result: FinancialPr
   return ids.flatMap((id) => (id === null ? [] : [labelText(content, id)])).join(', ')
 }
 
+/** A lead's title, its measure and its two companies ("Gross margin, NVIDIA Corp minus Apple Inc."); any other result's is its resultLabel. */
+export function resultTitle(content: FinancialAnswerContent, result: FinancialPresentedResult): string {
+  const measure = labelText(content, result.measure_label_id)
+  const names = Object.values(content.labels).flatMap((label) => (label.kind === 'subject' ? [label.text] : [])).sort((a, b) => b.length - a.length)
+  const sides = labelText(content, result.period_label_id).split(' minus ').map((side) => names.find((name) => side.startsWith(`${name} `)))
+  if (result.subject_label_id !== null || !measure.startsWith('Difference in ') || sides.length !== 2 || sides.includes(undefined)) return resultLabel(content, result)
+  return `${columnNames([measure.slice('Difference in '.length)])[0]}, ${sides.join(' minus ')}`
+}
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 /** "FY2026 (ended 2026-09-03)" reads "FY2026 · ended Sep 2026"; the full label stays in the title. */
