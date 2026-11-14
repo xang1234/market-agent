@@ -79,7 +79,7 @@ test("a live sample's answer reads as the user sees it: text as written, each re
   assert.equal(answerText(blocks), "NVDA's revenue was $62.1B.\n\nSecond block.");
 });
 
-test("a live run's summary counts rendered answers, accepted kinds, repeated observations and rejections by reason", () => {
+test("a live run's summary counts rendered answers, accepted kinds, repeated assertions and rejections by reason", () => {
   const metrics = { figure_refs: 0, plain_numbers: 0, fallback: false, accepted: 0, rejected: 0, inferences_shown: 0, inferences_unverified: 0, inferences_hidden: 0, inferences_sent_to_repair: 0, inferences_repaired: 0, inferences_recovered: 0, repair_latency_ms: 0, repair_input_tokens: 0, repair_output_tokens: 0, output_tokens: 0, latency_ms: 0 };
   const summary = assertionSummary({
     results: [
@@ -91,7 +91,7 @@ test("a live run's summary counts rendered answers, accepted kinds, repeated obs
   assert.equal(summary, [
     "rendered: 1 of 2 answers",
     "accepted: 2 observation, 1 analyst_inference, 1 comparison",
-    "repeated: 2 observations a comparison already shows",
+    "repeated: 2 assertions left out as saying again what the page shows",
     "rejected:",
     "    2  y",
     "    1  x",
