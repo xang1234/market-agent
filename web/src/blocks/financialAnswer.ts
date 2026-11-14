@@ -36,13 +36,13 @@ export function resultLabel(content: FinancialAnswerContent, result: FinancialPr
   return ids.flatMap((id) => (id === null ? [] : [labelText(content, id)])).join(', ')
 }
 
-/** A lead's measure heading and its two companies ("Gross margin", ["NVIDIA Corp", "Apple Inc."]), or null for any other result. */
+/** A lead's measure and its two companies ("Gross margin (gross profit / revenue)", ["NVIDIA Corp", "Apple Inc."]), or null for any other result. */
 export function leadParts(content: FinancialAnswerContent, result: FinancialPresentedResult): { measure: string; sides: [string, string] } | null {
   const measure = labelText(content, result.measure_label_id)
   const names = Object.values(content.labels).flatMap((label) => (label.kind === 'subject' ? [label.text] : [])).sort((a, b) => b.length - a.length)
   const sides = labelText(content, result.period_label_id).split(' minus ').map((side) => names.find((name) => side.startsWith(`${name} `)))
   if (result.subject_label_id !== null || !measure.startsWith('Difference in ') || sides.length !== 2 || sides.includes(undefined)) return null
-  return { measure: columnNames([measure.slice('Difference in '.length)])[0]!, sides: sides as [string, string] }
+  return { measure: measure.slice('Difference in '.length), sides: sides as [string, string] }
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -54,8 +54,13 @@ export function shortPeriod(text: string): string {
 
 /** Each text through shorten, unless two different texts would then read alike, which keep their whole text. */
 function distinct(texts: ReadonlyArray<string>, shorten: (text: string) => string): string[] {
-  const short = texts.map(shorten)
-  return short.map((name, i) => (short.some((other, j) => other === name && texts[j] !== texts[i]) ? texts[i]! : name))
+  let shown = texts.map(shorten)
+  for (;;) {
+    // A text kept whole can read as another's short form ("Acme Inc" beside "Acme Inc Ltd"), so repeat until none collide.
+    const next = shown.map((name, i) => (shown.some((other, j) => other === name && texts[j] !== texts[i]) ? texts[i]! : name))
+    if (next.every((name, i) => name === shown[i])) return next
+    shown = next
+  }
 }
 
 const HORIZON: Readonly<Record<string, string>> = { 'Quarter-over-quarter': 'QoQ', 'Year-over-year': 'YoY' }

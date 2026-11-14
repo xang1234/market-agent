@@ -164,11 +164,18 @@ function LeadValue({ content, result }: { content: FinancialAnswerContent; resul
 }
 
 // Leads between two companies, laid out as measures against pairs ("Gross margin" by "Micron Technology − NVIDIA").
+// When they do not fill such a grid once each, every lead takes a row naming its own periods.
 function Leads({ content, names, leads }: { content: FinancialAnswerContent; names: Names; leads: ReadonlyArray<FinancialPresentedResult> }): ReactElement {
   const parts = leads.map((result) => leadParts(content, result)!)
-  const key = (sides: readonly [string, string]) => sides.join(' minus ')
-  const pairs = [...new Map(parts.map((part) => [key(part.sides), part.sides])).values()]
-  const measures = [...new Set(parts.map((part) => part.measure))]
+  const pairOf = (index: number) => parts[index]!.sides.join(' minus ')
+  const measureIds = [...new Set(leads.map((result) => result.measure_label_id))]
+  const headings = columnNames(measureIds.map((id) => parts[leads.findIndex((result) => result.measure_label_id === id)]!.measure))
+  const heading = (result: FinancialPresentedResult) => headings[measureIds.indexOf(result.measure_label_id)]
+  const count = (keys: ReadonlyArray<string>) => new Set(keys).size
+  // A period label names its pair, so a pair reads one period exactly when the two counts match.
+  const grid = count(leads.map((result) => `${result.measure_label_id} ${result.period_label_id}`)) === leads.length
+    && count(leads.map((result) => result.period_label_id)) === count(leads.map((_, index) => pairOf(index)))
+  const pairs = [...new Map(leads.map((_, index) => [pairOf(index), parts[index]!.sides])).entries()]
   return (
     <div className="mt-3 overflow-x-auto">
       <table className="border-separate border-spacing-0 text-left text-sm tabular-nums">
@@ -176,26 +183,38 @@ function Leads({ content, names, leads }: { content: FinancialAnswerContent; nam
         <thead>
           <tr>
             <th scope="col" className={`${HEAD} pr-8`}>Difference</th>
-            {pairs.map((sides) => (
-              <th key={key(sides)} scope="col" className={`${HEAD} pl-8 text-right`} title={key(sides)}>
+            {grid ? pairs.map(([pair, sides]) => (
+              <th key={pair} scope="col" className={`${HEAD} pl-8 text-right`} title={pair}>
                 {sides.map((side) => names.get(side) ?? side).join(' − ')}
               </th>
-            ))}
+            )) : (
+              <>
+                <th scope="col" className={`${HEAD} pl-8`}>Between</th>
+                <th scope="col" className={`${HEAD} pl-8 text-right`}>Value</th>
+              </>
+            )}
           </tr>
         </thead>
         <tbody>
-          {measures.map((measure) => (
-            <tr key={measure} className="group/row">
-              <th scope="row" className={`${CELL} pr-8 font-medium text-fg`}>{measure}</th>
-              {pairs.map((sides) => {
-                const index = parts.findIndex((part) => part.measure === measure && key(part.sides) === key(sides))
-                const result = leads[index]
+          {grid ? measureIds.map((id, row) => (
+            <tr key={id} className="group/row">
+              <th scope="row" className={`${CELL} pr-8 font-medium text-fg`}>{headings[row]}</th>
+              {pairs.map(([pair]) => {
+                const result = leads.find((lead, index) => lead.measure_label_id === id && pairOf(index) === pair)
                 return (
-                  <td key={key(sides)} className={`${CELL} whitespace-nowrap pl-8 text-right text-fg`} data-result-id={result?.result_id}>
+                  <td key={pair} className={`${CELL} whitespace-nowrap pl-8 text-right text-fg`} data-result-id={result?.result_id}>
                     {result ? <LeadValue content={content} result={result} /> : null}
                   </td>
                 )
               })}
+            </tr>
+          )) : leads.map((result) => (
+            <tr key={result.result_id} className="group/row">
+              <th scope="row" className={`${CELL} pr-8 font-medium text-fg`}>{heading(result)}</th>
+              <td className={`${CELL} pl-8 text-muted`}>{shortPeriod(labelText(content, result.period_label_id))}</td>
+              <td className={`${CELL} whitespace-nowrap pl-8 text-right text-fg`} data-result-id={result.result_id}>
+                <LeadValue content={content} result={result} />
+              </td>
             </tr>
           ))}
         </tbody>
@@ -235,11 +254,11 @@ function Cell({ result, period, shown }: { result: FinancialPresentedResult | un
 // The fiscal period, then its end date on a line of its own, so the company column stays narrow.
 function RowPeriod({ label }: { label: string }): ReactElement {
   const short = shortPeriod(label)
-  const [period, ended] = short.split(' · ')
+  const [period, ...rest] = short.split(' · ')
   return (
     <span className="block text-xs font-normal text-muted" title={short === label ? undefined : label}>
       {period}
-      {ended === undefined ? null : <><span className="sr-only"> · </span><span className="block">{ended}</span></>}
+      {rest.length === 0 ? null : <><span className="sr-only"> · </span><span className="block">{rest.join(' · ')}</span></>}
     </span>
   )
 }
