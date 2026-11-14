@@ -8,6 +8,7 @@ import type { ChatAnalystToolRuntime, ChatAssistantMessagePersistence } from "..
 import { financialMessageId } from "../src/chat-ids.ts";
 import { persistUserChatMessage } from "../src/messages.ts";
 import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
+import { createTurnHydrator } from "../src/turn-hydration.ts";
 import { SCOPE_METRICS } from "../src/scope-figures.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
 import { proposedMetric, resolveResearchScope, type CompanyChange, type ScopeProposal } from "../src/research-scope.ts";
@@ -40,11 +41,11 @@ async function savingMessages(t: TestContext, url: string): Promise<ChatAssistan
   return runtime.persistAssistantMessage;
 }
 
-// A fiscal-year fact on file for each issuer while `run` runs, so a turn about
-// companies the fixtures give no data plans them instead of naming them in the
-// no-filings line. With `uploadedBy`, the facts come from that user's private
-// copy of the source, as an upload's would.
-async function withFiledFacts<T>(db: { query: (text: string, values?: unknown[]) => Promise<{ rows: Array<{ fact_id: string; source_id: string }> }> }, issuers: ReadonlyArray<string>, run: () => Promise<T>, uploadedBy: string | null = null): Promise<T> {
+// A fiscal-year fact on file for each issuer until the returned removal runs,
+// so a turn about companies the fixtures give no data plans them instead of
+// naming them in the no-filings line. With `uploadedBy`, the facts come from
+// that user's private copy of the source, as an upload's would.
+async function fileFacts(db: { query: (text: string, values?: unknown[]) => Promise<{ rows: Array<{ fact_id: string; source_id: string }> }> }, issuers: ReadonlyArray<string>, uploadedBy: string | null = null): Promise<() => Promise<void>> {
   const { rows } = await db.query(
     `with private_source as (
        insert into sources
@@ -60,11 +61,18 @@ async function withFiledFacts<T>(db: { query: (text: string, values?: unknown[])
      returning fact_id::text, source_id::text`,
     [issuers, IDS.grossProfit2023, uploadedBy],
   );
+  return async () => {
+    await db.query(`delete from facts where fact_id = any($1::uuid[])`, [rows.map((row) => row.fact_id)]);
+    if (uploadedBy !== null) await db.query(`delete from sources where source_id = any($1::uuid[])`, [rows.map((row) => row.source_id)]);
+  };
+}
+
+async function withFiledFacts<T>(db: Parameters<typeof fileFacts>[0], issuers: ReadonlyArray<string>, run: () => Promise<T>, uploadedBy: string | null = null): Promise<T> {
+  const remove = await fileFacts(db, issuers, uploadedBy);
   try {
     return await run();
   } finally {
-    await db.query(`delete from facts where fact_id = any($1::uuid[])`, [rows.map((row) => row.fact_id)]);
-    if (uploadedBy !== null) await db.query(`delete from sources where source_id = any($1::uuid[])`, [rows.map((row) => row.source_id)]);
+    await remove();
   }
 }
 
@@ -317,6 +325,56 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const [block, note] = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0].blocks;
     assert.deepEqual(Object.values(block.financial.labels as Record<string, { kind: string; text: string }>).filter((label) => label.kind === "subject").map((label) => label.text), ["Alpha Industries Inc."]);
     assert.deepEqual(note.segments, [{ type: "text", text: "No SEC filings are on file for CCC yet." }]);
+  });
+
+  await t.test("a company with no filings on file is fetched before the run, and planned with what the fetch stored", async () => {
+    const removals: Array<() => Promise<void>> = [];
+    const fetched: string[] = [];
+    const hydrate = createTurnHydrator({
+      db: pool,
+      env: { SEC_EDGAR_USER_AGENT: "test-agent" },
+      fetchFilings: async (issuerId) => {
+        fetched.push(issuerId);
+        removals.push(await fileFacts(db, [issuerId]));
+      },
+      fetchBars: async () => assert.fail("no market origin is configured"),
+    });
+    try {
+      // CCC's filed fact is one the verifier refuses (as below), so a run that read it fails verification.
+      const model = revenueModel(["CCC"]);
+      const { events } = await chatHarness(pool, { model, researchScope: scopeOver as never, hydrate }).run({ ...base, userIntent: "Revenue for CCC" });
+      assert.deepEqual(completed(events).financial_gap, { reason_code: "verification_failed" }, "planned, not left out for having no filings");
+      assert.equal(model.calls, 1);
+      assert.deepEqual(events.slice(0, 3).map((event) => [event.type, event.tool_name ?? event.bundle_id, event.status ?? null]), [
+        ["turn.started", "financial_answer", null],
+        ["tool.started", "fetch_filings", null],
+        ["tool.completed", "fetch_filings", "ok"],
+      ]);
+      // A company already on file is not fetched.
+      await chatHarness(pool, { model: revenueModel(["AAA"]), researchScope: scopeOver as never, hydrate }).run({ ...base, userIntent: "Revenue for AAA" });
+      assert.deepEqual(fetched, [MISSING_ISSUER]);
+    } finally {
+      for (const remove of removals) await remove();
+    }
+  });
+
+  await t.test("a company whose filings are still loading at the budget is named so, and the turn completes", async () => {
+    let finish!: () => void;
+    const hydrate = createTurnHydrator({
+      db: pool,
+      env: { SEC_EDGAR_USER_AGENT: "test-agent" },
+      fetchFilings: () => new Promise<void>((resolve) => { finish = resolve; }),
+      fetchBars: async () => assert.fail("no market origin is configured"),
+      budgetMs: 30,
+    });
+    const loading = "Filings for CCC are still loading; ask again in a minute.";
+    const harness = chatHarness(pool, { model: revenueModel(["CCC"]), researchScope: scopeOver as never, hydrate });
+    assert.deepEqual(completed((await harness.run({ ...base, userIntent: "Revenue for CCC" })).events).financial_gap, { reason_code: "no_sec_filings" });
+    assert.deepEqual((harness.persisted.at(-1)!.blocks[0] as { segments: unknown }).segments, [{ type: "text", text: loading }]);
+    const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion: comparing("AAA", "CCC"), hydrate }).run({ ...base, userIntent: "Compare revenue for AAA and CCC" });
+    const [, note] = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0].blocks;
+    assert.deepEqual(note.segments, [{ type: "text", text: loading }]);
+    finish();
   });
 
   await t.test("another user's private fiscal-period facts never stand in for SEC filings, nor show they exist", () => withFiledFacts(db, [MISSING_ISSUER], async () => {

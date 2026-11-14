@@ -149,6 +149,12 @@ export type ChatFinancialRuntimeDeps = Readonly<{
    * model client.
    */
   commentary?: (db: SqlExecutor, input: CommentaryRequest) => Promise<void>;
+  /**
+   * Fetches what the turn's companies lack before the run (turn-hydration.ts)
+   * and returns the issuers whose filings were still loading at its budget;
+   * absent, nothing is fetched. Injected, like commentary.
+   */
+  hydrate?: (companies: ReadonlyArray<{ issuer_id: string; label: string }>, turn: { emit: ChatTurnRunContext["emit"]; turnId: string }) => Promise<ReadonlySet<string>>;
 }>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -211,7 +217,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // ponytail: a retry that resumes a reserved run does not plan, so it
       // names the companies the message resolved, without a pick or peers.
       const askedRefs = () => asked.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
-      const note = leftOutNotes(requested.notFound, requested.noFilings ?? []).join(" ");
+      const note = leftOutNotes(requested).join(" ");
       const noted = note === "" ? {} : { note };
       const declinedGap = (reason: ChatGap) => {
         const refs = askedRefs();
@@ -291,6 +297,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           carried: requested.carried,
           notFound: requested.notFound,
           noFilings: requested.noFilings ?? [],
+          loadingFilings: requested.loadingFilings ?? [],
           labels: requested.labels,
         }, { authority, request_key: turnId }),
       });
@@ -367,21 +374,30 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     if (choice.kind === "analyst") return null;
     const kept = withinScope(requested, scope);
     if (kept.subjects.length === 0) return declined;
-    const filed = await withSecFilings(deps.pool, kept);
-    if (filed.subjects.length > 0) return run(filed, reading, scope, choice);
-    // Every company has none, so the answer is that line alone, saved with
-    // the companies so a follow-up asks about them again.
     const refs = kept.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
-    return async () => ({
-      kind: "gap",
-      reason_code: "no_sec_filings",
-      text: leftOutNotes(kept.notFound, filed.noFilings!).join(" "),
-      message_id: messageId,
-      subject_refs: refs,
-      ...(scope === null ? {} : {
-        research_scope: { ...scope, route: "financial_gap" as const, reads: "financial_gap" as const, companies: answeredCompanies(refs.map((ref) => ref.id), scope, kept.labels) },
-      }),
-    });
+    return async () => {
+      // What a company lacks is fetched before its filings are counted, and
+      // before the run takes its cutoff, so what the fetch stored is read.
+      const companies = refs.map((ref) => ({ issuer_id: ref.id, label: kept.labels.get(ref.id.toLowerCase()) ?? ref.id }));
+      const loading = deps.hydrate ? await deps.hydrate(companies, { emit: context.emit, turnId }).catch((reason: unknown) => {
+        console.warn("[chat] fetching the turn's companies failed; answering from what is on file", reason);
+        return NOTHING_LOADING;
+      }) : NOTHING_LOADING;
+      const filed = await withSecFilings(deps.pool, kept, loading);
+      if (filed.subjects.length > 0) return run(filed, reading, scope, choice)();
+      // Every company has none, so the answer is that line alone, saved with
+      // the companies so a follow-up asks about them again.
+      return {
+        kind: "gap",
+        reason_code: "no_sec_filings",
+        text: leftOutNotes(filed).join(" "),
+        message_id: messageId,
+        subject_refs: refs,
+        ...(scope === null ? {} : {
+          research_scope: { ...scope, route: "financial_gap" as const, reads: "financial_gap" as const, companies: answeredCompanies(refs.map((ref) => ref.id), scope, kept.labels) },
+        }),
+      };
+    };
   };
   const everyOfferedChoice = async (context: ChatTurnRunContext): Promise<string | null> => {
     const words = replyWords(context.userIntent ?? "");
@@ -438,6 +454,8 @@ type TurnCompanies = Readonly<{
   notFound: ReadonlyArray<string>;
   // Labels of the companies left out for having no fiscal-period facts on file (withSecFilings).
   noFilings?: ReadonlyArray<string>;
+  // Of those, the ones whose filings were still being fetched.
+  loadingFilings?: ReadonlyArray<string>;
   // By issuer, the label each company the turn may answer for takes in its saved scope.
   labels: ReadonlyMap<string, string>;
   // A change to the compared companies too unclear to plan: the question to ask.
@@ -546,31 +564,43 @@ function withinScope(requested: TurnCompanies, scope: ResearchScope | null): Tur
 // (evidence-adapter.ts), and the reference import's are points in time. It is
 // left out of the plan, and the answer names it in one line. Only public
 // sources count, so another user's upload neither changes nor reveals this.
-async function withSecFilings(db: SqlExecutor, requested: TurnCompanies): Promise<TurnCompanies> {
-  const issuers = requested.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref.id] : []);
-  const { rows } = issuers.length === 0 ? { rows: [] } : await db.query<{ issuer_id: string }>(
-    `select issuer.id::text as issuer_id
-       from unnest($1::uuid[]) as issuer(id)
-      where exists (select 1 from facts f join sources s on s.source_id = f.source_id
-                     where f.subject_kind = 'issuer' and f.subject_id = issuer.id and f.fiscal_year is not null and ${PUBLIC_SOURCE_SQL})`,
-    [issuers],
-  );
-  const filed = new Set(rows.map((row) => row.issuer_id.toLowerCase()));
-  const without = requested.subjects.filter((subject) => subject.resolution.status === "resolved" && !filed.has(subject.resolution.subject_ref.id.toLowerCase()));
+async function withSecFilings(db: SqlExecutor, requested: TurnCompanies, loading: ReadonlySet<string>): Promise<TurnCompanies> {
+  const issuerOf = (subject: RequestedSubject) => subject.resolution.status === "resolved" ? subject.resolution.subject_ref.id.toLowerCase() : null;
+  const unfiled = await issuersWithoutFilings(db, requested.subjects.flatMap((subject) => issuerOf(subject) ?? []));
+  const without = requested.subjects.filter((subject) => unfiled.has(issuerOf(subject) ?? ""));
   if (without.length === 0) return requested;
+  const fetching = new Set([...loading].map((id) => id.toLowerCase()));
+  const labelOf = (subject: RequestedSubject) => requested.labels.get(issuerOf(subject)!) ?? subject.mention;
   return {
     ...requested,
     subjects: requested.subjects.filter((subject) => !without.includes(subject)),
-    noFilings: without.map((subject) => subject.resolution.status === "resolved" ? requested.labels.get(subject.resolution.subject_ref.id.toLowerCase()) ?? subject.mention : subject.mention),
+    noFilings: without.filter((subject) => !fetching.has(issuerOf(subject)!)).map(labelOf),
+    loadingFilings: without.filter((subject) => fetching.has(issuerOf(subject)!)).map(labelOf),
   };
+}
+
+const NOTHING_LOADING: ReadonlySet<string> = new Set();
+
+/** Of these issuers, the ones with no fiscal-period fact from a public source, lowercased. */
+export async function issuersWithoutFilings(db: Pick<SqlExecutor, "query">, issuerIds: ReadonlyArray<string>): Promise<Set<string>> {
+  if (issuerIds.length === 0) return new Set();
+  const { rows } = await db.query<{ issuer_id: string }>(
+    `select issuer.id::text as issuer_id
+       from unnest($1::uuid[]) as issuer(id)
+      where not exists (select 1 from facts f join sources s on s.source_id = f.source_id
+                         where f.subject_kind = 'issuer' and f.subject_id = issuer.id and f.fiscal_year is not null and ${PUBLIC_SOURCE_SQL})`,
+    [issuerIds],
+  );
+  return new Set(rows.map((row) => row.issuer_id.toLowerCase()));
 }
 
 const noFilingsLine = (labels: ReadonlyArray<string>): string => `No SEC filings are on file for ${labelList(labels)} yet.`;
 
-/** What a turn says of the companies it left out: names that matched none, and companies with no filings. */
-const leftOutNotes = (notFound: ReadonlyArray<string>, noFilings: ReadonlyArray<string>): string[] => [
+/** What a turn says of the companies it left out: names that matched none, companies with no filings, and ones whose filings are still being fetched. */
+const leftOutNotes = ({ notFound, noFilings = [], loadingFilings = [] }: Pick<TurnCompanies, "notFound" | "noFilings" | "loadingFilings">): string[] => [
   ...(notFound.length === 0 ? [] : [`No company matched ${labelList(notFound)}.`]),
   ...(noFilings.length === 0 ? [] : [noFilingsLine(noFilings)]),
+  ...(loadingFilings.length === 0 ? [] : [`Filings for ${labelList(loadingFilings)} are still loading; ask again in a minute.`]),
 ];
 
 /**
@@ -908,6 +938,7 @@ function persistAssistantMessage(
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;
     noFilings: ReadonlyArray<string>;
+    loadingFilings: ReadonlyArray<string>;
     labels: ReadonlyMap<string, string>;
   }>,
   request: { authority: FinancialRuntimeAuthority; request_key: string },
@@ -947,7 +978,7 @@ function persistAssistantMessage(
     const defaults = chosen === null || reading === null || scope === null || plan === null ? [] : defaultsNote(chosen, reading, scope, shownPeriod, plan.subjects.members.length);
     const later = await laterFigures(tx.client, publication.run_id, companyNames);
     const note = [
-      ...leftOutNotes(turn.notFound, turn.noFilings),
+      ...leftOutNotes(turn),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
       ...(unquartered ? [`A margin trend is charted over reported quarters, and none could be read for ${labelList([...companyNames.values()])}, so its margins are shown for a fiscal year.`] : []),
       ...(replaced === null ? [] : [replaced]),
