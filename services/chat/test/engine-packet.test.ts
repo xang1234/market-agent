@@ -591,15 +591,26 @@ test("engine commentary leaves out the figures and rankings no shown inference r
   assert.deepEqual(repeated, [0, 2]);
 });
 
-test("engine commentary keeps what an unverified inference rests on, and leaves out what only a hidden one does", async () => {
+test("engine commentary leaves out what only an unverified or hidden inference rests on", async () => {
   const scale = { kind: "analyst_inference", subject: "AAPL", text: "Its scale is unmatched.", supports: [0] };
   const { text, repeated } = await commentaryOn(THREE, [REVENUES, MARGIN_ORDER, OPERATING_ORDER, PRICING, scale], {
     [PRICING.text]: "unsupported",
     [scale.text]: "contradicted",
   });
   assert.equal(text, [
-    SAID.marginOrder,
     "> **Unverified analyst view on NVDA** (not backed by the figures shown): Its pricing power is the strongest of the three.",
+    SAID.periods,
+  ].join("\n\n"));
+  assert.deepEqual(repeated, [0, 1, 2]);
+});
+
+test("engine commentary keeps what a verified inference rests on beside an unverified one", async () => {
+  const scale = { kind: "analyst_inference", subject: "AAPL", text: "Its scale is unmatched.", supports: [0] };
+  const { text, repeated } = await commentaryOn(THREE, [REVENUES, MARGIN_ORDER, OPERATING_ORDER, PRICING, scale], { [scale.text]: "unsupported" });
+  assert.equal(text, [
+    SAID.marginOrder,
+    SAID.pricing,
+    "> **Unverified analyst view on AAPL** (not backed by the figures shown): Its scale is unmatched.",
     SAID.periods,
   ].join("\n\n"));
   assert.deepEqual(repeated, [0, 2]);

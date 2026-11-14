@@ -46,6 +46,9 @@ const ALFA_TEXT = [
   "ALFA's gross margin was 60.00%, operating margin 25.00% and net margin 20.00% in Q4 FY2023 (ended Dec 2023).",
   "ALFA's revenue rose in every period from Q1 FY2022 (ended Mar 2022) (USD 800.00) to Q4 FY2023 (ended Dec 2023) (USD 2,000.00).",
 ].join("\n\n");
+// ALFA's commentary beside an unverified view: the margins only that view
+// rests on are left out, as the table shows them.
+const ALFA_TREND = "ALFA's revenue rose in every period from Q1 FY2022 (ended Mar 2022) (USD 800.00) to Q4 FY2023 (ended Dec 2023) (USD 2,000.00).";
 const JUDGE = "You check the analyst inferences";
 // Every one of ALFA's overview results, as the judge reads them beside an inference.
 const ALFA_FIGURES = [
@@ -235,9 +238,9 @@ test("a company overview carries analyst commentary on its published results (#3
     const verdict = (fields: string) => `{"verdicts":[{"id":2,${fields}}]}`;
     const cases: ReadonlyArray<readonly [string, string | (() => Promise<string>), string]> = [
       ["entailed", verdict('"verdict":"entailed","worded_amount":false'), `${ALFA_TEXT}\n\n> **Analyst inference:** It keeps most of what it sells.`],
-      ["unsupported", verdict('"verdict":"unsupported","worded_amount":false,"reason":"No support says what it keeps."'), `${ALFA_TEXT}\n\n> **Unverified analyst view** (not backed by the figures shown): It keeps most of what it sells.`],
+      ["unsupported", verdict('"verdict":"unsupported","worded_amount":false,"reason":"No support says what it keeps."'), `${ALFA_TREND}\n\n> **Unverified analyst view** (not backed by the figures shown): It keeps most of what it sells.`],
       ["contradicted", verdict('"verdict":"contradicted","worded_amount":false,"reason":"The margins say otherwise."'), ALFA_TEXT],
-      ["a worded amount", verdict('"verdict":"entailed","worded_amount":true'), `${ALFA_TEXT}\n\n> **Unverified analyst view** (not backed by the figures shown): It keeps most of what it sells.`],
+      ["a worded amount", verdict('"verdict":"entailed","worded_amount":true'), `${ALFA_TREND}\n\n> **Unverified analyst view** (not backed by the figures shown): It keeps most of what it sells.`],
       ["no verdict", "I cannot judge this.", ALFA_TEXT],
       ["a verdict list the reply does not end with", `${verdict('"verdict":"entailed","worded_amount":false')} On reflection, I am not sure.`, ALFA_TEXT],
       ["a judge that times out", () => Promise.reject(new LlmProviderError("timeout", "LLM provider attempt timed out")), ALFA_TEXT],
