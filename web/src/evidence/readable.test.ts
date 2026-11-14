@@ -14,7 +14,8 @@ test('dates read in words, a timestamp in the given time zone, anything else as 
 
 test('a day-precision instant reads as its day, in the zone that day belongs to, never as a time that moves it', () => {
   assert.equal(readableDate('2026-02-28T04:59:59.999Z', { timeZone: 'America/New_York', day: true }), 'Feb 27, 2026', 'the end of a New York day is that day')
-  assert.equal(readableDate('2024-01-10T00:00:00.000Z', { timeZone: 'America/Los_Angeles' }), 'Jan 10, 2024', 'a stored midnight UTC is a date wherever it is read')
+  assert.equal(readableDate('2024-01-10T00:00:00.000Z', { timeZone: 'America/Los_Angeles', storedDate: true }), 'Jan 10, 2024', 'a stored filing date is that date wherever it is read')
+  assert.equal(readableDate('2026-11-14T00:00:00.000Z', { timeZone: 'America/New_York' }), 'Nov 13, 2026, 19:00', 'a cutoff at midnight UTC is an instant, not a date')
   assert.equal(readableDate('2026-11-14T01:50:04.131Z', { timeZone: 'America/New_York', day: true }), 'Nov 13, 2026')
 })
 

@@ -196,7 +196,7 @@ function sourceEntries(details: Inspected): SourceEntry[] {
     }
     const metric = metricLabel(input.metric.metric_key)
     // A stated value's source records when it was filed, not which form.
-    const filed = input.source.filed === null ? 'Filing' : `Filed ${readableDate(input.source.filed)}`
+    const filed = input.source.filed === null ? 'Filing' : `Filed ${readableDate(input.source.filed, { storedDate: true })}`
     if (!input.derivation) add(input.source.source_id, named(company(input), filed), `${metric} ${fiscalPeriodText({ ...input.period, end: null })}`, true)
     for (const term of input.derivation?.terms ?? []) {
       add(term.source.source_id, named(company(input), filingName(term)), `${metric} ${derivationTermLabel({ ...term, sign: '+' }, 0)}`)
@@ -206,7 +206,7 @@ function sourceEntries(details: Inspected): SourceEntry[] {
 }
 
 function filingName(term: Term): string {
-  return `${term.source.form} filed ${readableDate(term.source.filed)}`
+  return `${term.source.form} filed ${readableDate(term.source.filed, { storedDate: true })}`
 }
 
 function Sources({ details }: { details: Inspected }): ReactElement | null {

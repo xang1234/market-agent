@@ -31,7 +31,7 @@ export function isTimestamp(text: string): boolean {
   return DATE_ONLY.test(text) || TIMESTAMP.test(text)
 }
 
-// A stored midnight UTC is how a date is kept as an instant (sec-facts-repository.ts reported_at), so it reads as that date.
+// A filed date is kept as midnight UTC (sec-facts-repository.ts reported_at), so with `storedDate` it reads as that date.
 const MIDNIGHT_UTC = /T00:00(:00(\.0+)?)?Z$/u
 
 /**
@@ -39,15 +39,16 @@ const MIDNIGHT_UTC = /T00:00(:00(\.0+)?)?Z$/u
  * `timeZone` (the viewer's by default), or with `day` only the day it falls on
  * there. Anything else is returned as given.
  */
-export function readableDate(text: string, { timeZone, day = false }: { timeZone?: string; day?: boolean } = {}): string {
+export function readableDate(text: string, { timeZone, day = false, storedDate = false }: { timeZone?: string; day?: boolean; storedDate?: boolean } = {}): string {
   const date = DATE_ONLY.exec(text)
   if (date) return `${MONTHS[Number(date[2]) - 1]} ${Number(date[3])}, ${date[1]}`
   if (!TIMESTAMP.test(text)) return text
   const at = new Date(text)
   if (Number.isNaN(at.getTime())) return text
-  const dateOnly = day || MIDNIGHT_UTC.test(text)
+  const stored = storedDate && MIDNIGHT_UTC.test(text)
+  const dateOnly = day || stored
   return new Intl.DateTimeFormat('en-US', {
-    timeZone: MIDNIGHT_UTC.test(text) ? 'UTC' : timeZone,
+    timeZone: stored ? 'UTC' : timeZone,
     month: 'short', day: 'numeric', year: 'numeric',
     ...(dateOnly ? {} : { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }),
   }).format(at)

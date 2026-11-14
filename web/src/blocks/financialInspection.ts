@@ -207,11 +207,13 @@ export function financialHeading(shown: FinancialResultShown | undefined, inspec
   const details = inspection === null ? null : inspectableDetails(inspection)
   const bound = details?.inputs.filter((input): input is Exclude<FinancialInspectedInput, { status: 'gap' }> => input.status === 'bound') ?? []
   const facts = bound.filter((input): input is Extract<FinancialInspectedInput, { fact_id: string }> => 'fact_id' in input)
-  const only = (values: ReadonlyArray<string | null>) => (new Set(values).size === 1 ? values[0]! : null)
+  // A gap input may be another company or period, and a price is dated by its session, not a fiscal period.
+  const whole = bound.length === (details?.inputs.length ?? 0)
+  const only = (values: ReadonlyArray<string | null | undefined>) => (whole && new Set(values).size === 1 ? values[0] ?? null : null)
   const subject = shown?.subject ?? only(bound.map((input) => input.company))
-  const period = shown?.period ?? only(facts.map((input) => fiscalPeriodText(input.period)))
+  const period = shown?.period ?? (facts.length === bound.length ? only(facts.map((input) => fiscalPeriodText(input.period))) : null)
   return {
     title: shown?.measure ?? details?.measure ?? 'Verified calculation',
-    subtitle: [subject, period].filter((part) => part !== null).join(' · ') || 'Verified calculation',
+    subtitle: [subject, period].filter((part) => part != null).join(' · ') || 'Verified calculation',
   }
 }

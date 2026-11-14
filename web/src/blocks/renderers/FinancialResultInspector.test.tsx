@@ -281,6 +281,8 @@ test('the heading fills what a click did not say from the inspection, and names 
   assert.equal(financialHeading(undefined, leverage).title, 'Net debt / EBITDA', 'a named ratio is titled by its name')
   const spread = inspection({ measure: 'Difference in Revenue', inputs: [ALPHA, { ...BETA, period: { ...BETA.period, fiscal_year: 2025 } }] })
   assert.deepEqual(financialHeading(undefined, spread), { title: 'Difference in Revenue', subtitle: 'Verified calculation' }, 'two companies and two periods: neither is one of them')
+  const halfGap = inspection({ measure: 'Difference in Revenue', inputs: [ALPHA, { input_slot: 'b_rev', status: 'gap', reason_code: 'not_public_at_cutoff' }] })
+  assert.deepEqual(financialHeading(undefined, halfGap), { title: 'Difference in Revenue', subtitle: 'Verified calculation' }, 'a gap input may be another company or period, so none is named')
   assert.deepEqual(
     financialHeading({ subject: null, measure: null, period: 'Q4 FY2026', value: '$54.2B' }, inspection()),
     { title: 'Revenue', subtitle: 'Micron Technology Inc · Q4 FY2026' },
