@@ -9,7 +9,7 @@ import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from '..
 import { validateBlock } from './BlockValidator.ts'
 import { BlockProofContext, type BlockProof } from './blockProof.ts'
 import { FinancialAnswer } from './FinancialAnswer.tsx'
-import { columnNames, resultShown, seriesBars, shortNames } from './financialAnswer.ts'
+import { columnNames, resultsById, resultShown, seriesBars, shortNames, statementOf, tableCopyRows } from './financialAnswer.ts'
 import { readFileSync } from 'node:fs'
 import { financialAnswerFiscalCalendarsFixture, financialAnswerFixture, financialAnswerScenariosFixture } from './fixtures.ts'
 import type { FinancialAnswerBlock, FinancialAnswerContent, FinancialPresentedResult, FinancialTablePresentation } from './types.ts'
@@ -243,6 +243,40 @@ test('margin leads between the two companies fold into a Difference column besid
   assert.deepEqual(read.rows[1], ['Revenue', '$68.0B', '$7.7B', ''])
   const lead = block.financial.results.at(-3)!
   assert.equal(document.querySelector(`[data-result-id="${lead.result_id}"] button`)!.getAttribute('aria-label'), `Inspect the verified calculation for Difference in Gross margin (gross profit / revenue), ${labelOf(block, 'period:lead')}: -1 pp`)
+})
+
+test('a trailing sum is named and dated by its newest quarter', () => {
+  const block = nvidiaMicron()
+  const labels = block.financial.labels as Record<string, { kind: string; text: string }>
+  labels['period:p0'] = { kind: 'period', text: 'Q2 FY2027 (ended 2026-07-26) vs Q1 FY2027 (ended 2026-04-26) vs Q4 FY2026 (ended 2026-01-25) vs Q3 FY2026 (ended 2025-10-26)' }
+  labels['period:p3'] = { kind: 'period', text: 'Q4 FY2026 (ended 2026-09-03) vs Q3 FY2026 (ended 2026-05-29) vs Q2 FY2026 (ended 2026-02-26) vs Q1 FY2026 (ended 2025-11-27)' }
+  const table = block.financial.presentations[0] as FinancialTablePresentation
+  Object.assign(table, { columns: table.columns.slice(0, 4), rows: table.rows.map((row) => ({ ...row, cells: row.cells.slice(0, 4) })) })
+  const read = statement(render(block))
+  assert.deepEqual(read.heads, [[], ['NVIDIA', '4 quarters to Q2 FY2027'], ['Micron Technology', '4 quarters to Q4 FY2026']])
+  assert.deepEqual(read.footnotes, ['NVIDIA 4 quarters to Q2 FY2027 ended Jul 2026; Micron Technology 4 quarters to Q4 FY2026 ended Sep 2026.'])
+})
+
+test('a gap whose base is unbound leaves what the values compare with in the footnote', () => {
+  const block = nvidiaMicron()
+  const labels = block.financial.labels as Record<string, { kind: string; text: string }>
+  labels['period:p5'] = { kind: 'period', text: 'Q4 FY2026 (ended 2026-09-03) vs fiscal quarter 4 before latest' }
+  assert.equal(statement(render(block)).footnotes[0], 'NVIDIA Q2 FY2027 ended Jul 2026; Micron Technology Q4 FY2026 ended Sep 2026. QoQ compares with the prior quarter, YoY with the same quarter a year earlier.')
+})
+
+test('a copied table carries its Difference column as a row', () => {
+  const block = nvidiaMicron(['Gross margin (gross profit / revenue)', 'Operating margin (operating income / revenue)', 'Net margin (net income / revenue)'])
+  const content = block.financial
+  const results = resultsById(content)
+  const table = content.presentations[0] as FinancialTablePresentation
+  const leads = content.results.slice(-3)
+  const folded = statementOf(content, table, results, leads)
+  const differences = new Map(folded.sections.flatMap((section) => section.rows.flatMap((row) => (row.difference ? [[row.key, row.difference] as const] : []))))
+  const rows = tableCopyRows(content, table, results, differences)
+  const last = rows.at(-1)!
+  assert.equal(last[0], 'Difference (NVIDIA Corp minus Micron Technology Inc)')
+  assert.deepEqual(['-1', '-2', '-3'].map((value) => last.includes(value)), [true, true, true])
+  assert.equal(rows[0]!.filter((header) => /^Gross margin.* unit$/.test(header)).length, 1, 'a margin beside its difference in pp copies its unit per cell')
 })
 
 test('a lead that does not fit the table keeps the separate table of differences', () => {

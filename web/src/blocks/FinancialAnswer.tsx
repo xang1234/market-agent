@@ -266,6 +266,10 @@ const VALUE_BUTTON = '-mx-1 cursor-pointer rounded px-1 transition-colors hover:
 const HEAD = 'border-b border-line-strong px-3 pb-1.5 align-bottom text-xs font-medium text-muted first:pl-0'
 const CELL = 'border-b border-line px-3 py-1.5 align-top first:pl-0 group-hover/row:bg-surface-hover'
 
+function differencesOf(statement: Statement): ReadonlyMap<string, FinancialPresentedResult> {
+  return new Map(statement.sections.flatMap((section) => section.rows.flatMap((row) => (row.difference ? [[row.key, row.difference] as const] : []))))
+}
+
 type TableProps = { blockId: string; provenance: ReadonlyArray<string>; content: FinancialAnswerContent; results: Results; statement: Statement; table: FinancialTablePresentation }
 
 function CertifiedTable({ blockId, provenance, content, results, statement, table }: TableProps): ReactElement {
@@ -275,7 +279,7 @@ function CertifiedTable({ blockId, provenance, content, results, statement, tabl
     <div className="flex flex-col gap-1">
       <div className="flex items-end justify-between gap-2">
         {sharedPeriod === null ? <span /> : <p className="text-xs text-muted" data-testid={`block-financial-answer-${blockId}-period`}>{sharedPeriod}</p>}
-        <CopyButton label="Copy table" what={table.caption || 'this table'} purpose="for a spreadsheet" text={() => toTsv([...tableCopyRows(content, table, results), provenance])} />
+        <CopyButton label="Copy table" what={table.caption || 'this table'} purpose="for a spreadsheet" text={() => toTsv([...tableCopyRows(content, table, results, differencesOf(statement)), provenance])} />
       </div>
       <div className="scroll-edge overflow-x-auto" data-testid={`block-financial-answer-${blockId}-table`}>
         <table className="w-full border-separate border-spacing-0 text-left text-sm tabular-nums">

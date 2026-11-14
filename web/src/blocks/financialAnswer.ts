@@ -66,8 +66,17 @@ export function shortPeriod(text: string): string {
   return text.replace(DATE, (_, word: string, year: string, month: string) => ` · ${dateText(word, year, month)}`)
 }
 
-/** A period without its end date ("Q2 FY2027"), and that date ("ended Jul 2026") when it names exactly one. */
+/**
+ * A period without its end date ("Q2 FY2027"), and that date ("ended Jul 2026") when it names exactly one.
+ * A trailing sum reads its quarters newest first, so it is named and dated by the newest ("4 quarters to Q4 FY2026").
+ */
 function datedPeriod(text: string): { fiscal: string; date: string | null } {
+  const reads = text.split(' vs ')
+  if (reads.length > 2) {
+    const newest = datedPeriod(reads[0]!)
+    const unit = reads.every((read) => /^Q[1-4] /.test(read)) ? 'quarters' : 'periods'
+    return { fiscal: `${reads.length} ${unit} to ${newest.fiscal}`, date: newest.date }
+  }
   const dates = [...text.matchAll(DATE)].map(([, word, year, month]) => dateText(word!, year!, month!))
   return { fiscal: text.replace(DATE, ''), date: dates.length === 1 ? dates[0]! : null }
 }
@@ -262,8 +271,9 @@ function footnotesOf(
   for (const row of rows) {
     const horizon = /^(Quarter-over-quarter|Year-over-year) /.exec(row.measure)?.[1]
     const subject = horizon === undefined ? row.label : HORIZON[horizon]!
+    // A gap may name an unbound base ("fiscal quarter 1 before latest"), so only values say what a change compares with.
     for (const { result } of row.cells) {
-      const { current, compared } = result ? periodParts(periodOf(result)) : { current: '' }
+      const { current, compared } = result?.presented.kind === 'value' ? periodParts(periodOf(result)) : { current: '' }
       if (compared !== undefined) bases.set(subject, (bases.get(subject) ?? new Set()).add(baseOf(current, compared)))
     }
   }
@@ -346,6 +356,8 @@ export function tableCopyRows(
   content: FinancialAnswerContent,
   table: FinancialTablePresentation,
   results: ReadonlyMap<string, FinancialPresentedResult>,
+  // The leads shown in the table's Difference column, by column, copied as one more row.
+  differences: ReadonlyMap<string, FinancialPresentedResult> = new Map(),
 ): string[][] {
   const resultAt = (row: FinancialTablePresentation['rows'][number], columnIndex: number) => {
     const id = row.cells[columnIndex]
@@ -354,7 +366,7 @@ export function tableCopyRows(
   const columns = table.columns.map((column, index) => {
     const measure = labelText(content, column.measure_label_id)
     const heading = column.period_label_id === null ? measure : `${measure}, ${labelText(content, column.period_label_id)}`
-    const csvColumns = valueColumns(heading, table.rows.map((row) => resultAt(row, index)))
+    const csvColumns = valueColumns(heading, [...table.rows.map((row) => resultAt(row, index)), differences.get(column.column_id)])
     if (column.period_label_id === null) {
       csvColumns.push({ header: `${measure} period`, cell: (result) => (result ? labelText(content, result.period_label_id) : '') })
     }
@@ -366,7 +378,18 @@ export function tableCopyRows(
       labelText(content, row.subject_label_id),
       ...columns.flatMap((csvColumns, index) => csvColumns.map((column) => column.cell(resultAt(row, index)))),
     ]),
+    ...differenceRow(),
   ]
+
+  function differenceRow(): string[][] {
+    const [first] = differences.values()
+    const sides = first === undefined ? null : leadParts(content, first)?.sides
+    if (!sides) return []
+    return [[
+      `Difference (${sides.join(' minus ')})`,
+      ...columns.flatMap((csvColumns, index) => csvColumns.map((column) => column.cell(differences.get(table.columns[index]!.column_id)))),
+    ]]
+  }
 }
 
 export function seriesCopyRows(
