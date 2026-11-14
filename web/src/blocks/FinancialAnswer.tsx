@@ -208,9 +208,10 @@ function CertifiedTable({ blockId, provenance, content, results, table }: TableP
             {order.map((rowIndex) => {
               const row = table.rows[rowIndex]!
               const shared = rowPeriod(content, table, row, results)
-              // A row of gaps reads n/a once, unless its gaps differ in period and so need a cell each.
+              // A row of gaps reads n/a once, unless a gap names a period beyond the row's (another period, or a change's base) and so needs its own cell.
               const reasons = gapReasons(row, results)
-              const gapped = reasons !== null && (shared !== null || table.columns.every((column) => column.period_label_id !== null))
+              const gapped = reasons !== null && row.cells.every((cell, index) =>
+                table.columns[index]?.period_label_id !== null || cellPeriod(labelText(content, results.get(cell!)!.period_label_id), shared) === undefined)
               return (
                 <tr key={row.subject_label_id} className="border-t border-line" data-row-label={row.subject_label_id}>
                   <th scope="row" className="px-3 py-2 font-normal text-fg">

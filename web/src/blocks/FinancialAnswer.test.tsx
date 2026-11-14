@@ -195,16 +195,32 @@ test('a gap for another period than its row names that period, so the missing fi
   assert.deepEqual(cells[2], ['$770.0M'], 'a value of the row period names none')
 })
 
-test('a row with no value reads n/a once across its columns, with each distinct reason and its period said once', () => {
+function amdGaps(onePeriod: boolean): Document {
   const block = structuredClone(financialAnswerFiscalCalendarsFixture) as FinancialAnswerBlock & { financial: FinancialAnswerContent }
-  const cutoff = 'No eligible input was public before the knowledge cutoff.'
-  const unavailable = 'A required input or calculation is unavailable.'
   const amd = (block.financial.presentations[0] as FinancialTablePresentation).rows[1]!.cells
+  const own = block.financial.results.find((entry) => entry.result_id === amd[0])!.period_label_id
   amd.forEach((id, index) => {
     const result = block.financial.results.find((entry) => entry.result_id === id)!
-    Object.assign(result, { disposition: 'missing', presented: { kind: 'gap', text: index < 7 ? cutoff : unavailable, reason_code: 'missing_input' } })
+    Object.assign(result, {
+      disposition: 'missing',
+      presented: { kind: 'gap', text: index < 7 ? 'No eligible input was public before the knowledge cutoff.' : 'A required input or calculation is unavailable.', reason_code: 'missing_input' },
+      ...(onePeriod ? { period_label_id: own } : {}),
+    })
   })
-  const document = new JSDOM(renderToStaticMarkup(<FinancialAnswer block={block} />)).window.document
+  return new JSDOM(renderToStaticMarkup(<FinancialAnswer block={block} />)).window.document
+}
+
+test('a row of gaps whose changes name other bases keeps a cell per gap, so each missing comparison keeps its base', () => {
+  const row = [...amdGaps(false).querySelectorAll('tbody tr')][1]!
+  const cells = [...row.querySelectorAll('td')]
+  assert.equal(cells.length, 9)
+  assert.deepEqual(cells.slice(7).map((cell) => cell.textContent), ['n/aA required input or calculation is unavailable.vs Q1 FY2026', 'n/aA required input or calculation is unavailable.vs Q2 FY2025'])
+})
+
+test('a row with no value reads n/a once across its columns, with each distinct reason and its period said once', () => {
+  const cutoff = 'No eligible input was public before the knowledge cutoff.'
+  const unavailable = 'A required input or calculation is unavailable.'
+  const document = amdGaps(true)
   const [nvda, row] = [...document.querySelectorAll('tbody tr')]
   assert.deepEqual([...row!.querySelector('th')!.childNodes].map((node) => node.textContent), ['Advanced Micro Devices, Inc.', 'Q2 FY2026'])
   const cells = [...row!.querySelectorAll('td')]
