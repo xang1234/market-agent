@@ -6,11 +6,14 @@ import { InspectableResult } from '../evidence/InspectableResult.tsx'
 import { BlockProofContext } from './blockProof.ts'
 import { VerificationLabel } from './VerificationLabel.tsx'
 import {
+  columnNames,
   coverageText,
   labelText,
   resultLabel,
   resultsById,
+  rowPeriod,
   seriesBars,
+  shortPeriod,
   seriesCopyRows,
   tableCopyRows,
   sortedRowIndexes,
@@ -120,28 +123,36 @@ function ResultLine({ content, result, badge }: { content: FinancialAnswerConten
   )
 }
 
-function Cell({ result, ownPeriod }: { result: FinancialPresentedResult | undefined; ownPeriod?: string }): ReactElement {
+// A cell prints its period when its row reads several, or when it is a gap for another period than the row's; a gap's reason is its title and its screen-reader text.
+function Cell({ result, period, showPeriod = false }: { result: FinancialPresentedResult | undefined; period?: string; showPeriod?: boolean }): ReactElement {
   if (!result) return <span className="text-muted">Not requested</span>
   const { presented } = result
-  const period = ownPeriod === undefined ? null : <span className="block text-xs text-muted">{ownPeriod}</span>
   if (presented.kind === 'value') {
     return (
       <>
-        <InspectableResult resultId={result.result_id} label={ownPeriod === undefined ? presented.full_text : `${presented.full_text}, ${ownPeriod}`}>
+        <InspectableResult resultId={result.result_id} label={period === undefined ? presented.full_text : `${presented.full_text}, ${period}`}>
           <span title={presented.full_text} aria-label={presented.full_text}>
             {presented.text}
           </span>
         </InspectableResult>
-        {period}
+        {showPeriod && period !== undefined ? <span className="block text-xs text-muted">{period}</span> : null}
       </>
     )
   }
   return (
     <>
-      <span className="text-muted italic">{presented.text}</span>
-      {period}
+      <span className="text-muted" title={presented.text}>
+        <span aria-hidden="true">n/a</span>
+        <span className="sr-only">{presented.text}</span>
+      </span>
+      {showPeriod && period !== undefined ? <span className="block text-xs text-muted">{period}</span> : null}
     </>
   )
+}
+
+function RowPeriod({ label }: { label: string }): ReactElement {
+  const short = shortPeriod(label)
+  return <span className="block text-xs text-muted" title={short === label ? undefined : label}>{short}</span>
 }
 
 type TableProps = { blockId: string; provenance: ReadonlyArray<string>; content: FinancialAnswerContent; results: Results; table: FinancialTablePresentation }
@@ -153,59 +164,65 @@ function CertifiedTable({ blockId, provenance, content, results, table }: TableP
     setSort((current) =>
       current?.columnId === columnId && current.direction === 'ascending' ? { columnId, direction: 'descending' } : { columnId, direction: 'ascending' },
     )
+  const measures = table.columns.map((column) => labelText(content, column.measure_label_id))
+  const names = columnNames(measures)
   return (
-    <div className="relative overflow-x-auto rounded-lg border border-line" data-testid={`block-financial-answer-${blockId}-table`}>
-      <div className="absolute right-1.5 top-1.5">
+    <div className="flex flex-col gap-1">
+      <div className="flex justify-end">
         <CopyButton label="Copy table" what={table.caption || 'this table'} purpose="for a spreadsheet" text={() => toTsv([...tableCopyRows(content, table, results, order), provenance])} />
       </div>
-      <table className="w-full border-collapse text-left text-sm">
-        <caption className="py-2 pl-3 pr-28 text-left text-xs text-muted">{table.caption}</caption>
-        <thead className="bg-surface-2">
-          <tr>
-            <th scope="col" className="border-b border-line px-3 py-2 text-xs font-medium text-muted">
-              Company
-            </th>
-            {table.columns.map((column) => {
-              const measure = labelText(content, column.measure_label_id)
-              const heading = column.period_label_id === null ? measure : `${measure}, ${labelText(content, column.period_label_id)}`
-              const active = sort?.columnId === column.column_id
+      <div className="overflow-x-auto rounded-lg border border-line" data-testid={`block-financial-answer-${blockId}-table`}>
+        <table className="w-full border-collapse text-left text-sm">
+          <caption className="sr-only">{table.caption}</caption>
+          <thead className="bg-surface-2">
+            <tr>
+              <th scope="col" className="border-b border-line px-3 py-2 text-xs font-medium text-muted">
+                Company
+              </th>
+              {table.columns.map((column, index) => {
+                const name = names[index]!
+                const heading = column.period_label_id === null ? name : `${name}, ${shortPeriod(labelText(content, column.period_label_id))}`
+                const active = sort?.columnId === column.column_id
+                return (
+                  <th
+                    key={column.column_id}
+                    scope="col"
+                    aria-sort={active ? sort.direction : 'none'}
+                    className="border-b border-line px-3 py-2 text-right text-xs font-medium text-muted"
+                  >
+                    <button type="button" className="text-right hover:text-fg" title={name === measures[index] ? undefined : measures[index]} onClick={() => toggle(column.column_id)}>
+                      {heading}
+                    </button>
+                  </th>
+                )
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {order.map((rowIndex) => {
+              const row = table.rows[rowIndex]!
+              const shared = rowPeriod(table, row, results)
               return (
-                <th
-                  key={column.column_id}
-                  scope="col"
-                  aria-sort={active ? sort.direction : 'none'}
-                  className="border-b border-line px-3 py-2 text-right text-xs font-medium text-muted"
-                >
-                  <button type="button" className="text-right hover:text-fg" onClick={() => toggle(column.column_id)}>
-                    {heading}
-                  </button>
-                </th>
+                <tr key={row.subject_label_id} className="border-t border-line" data-row-label={row.subject_label_id}>
+                  <th scope="row" className="px-3 py-2 font-normal text-fg">
+                    {labelText(content, row.subject_label_id)}
+                    {shared === null ? null : <RowPeriod label={labelText(content, shared)} />}
+                  </th>
+                  {row.cells.map((cell, cellIndex) => {
+                    const result = cell === null ? undefined : results.get(cell)
+                    const period = table.columns[cellIndex]?.period_label_id === null && result ? shortPeriod(labelText(content, result.period_label_id)) : undefined
+                    return (
+                      <td key={`${row.subject_label_id}-${cellIndex}`} className="num px-3 py-2 text-right text-fg">
+                        <Cell result={result} period={period} showPeriod={shared === null || result?.period_label_id !== shared} />
+                      </td>
+                    )
+                  })}
+                </tr>
               )
             })}
-          </tr>
-        </thead>
-        <tbody>
-          {order.map((rowIndex) => {
-            const row = table.rows[rowIndex]!
-            return (
-              <tr key={row.subject_label_id} className="border-t border-line" data-row-label={row.subject_label_id}>
-                <th scope="row" className="px-3 py-2 font-normal text-fg">
-                  {labelText(content, row.subject_label_id)}
-                </th>
-                {row.cells.map((cell, cellIndex) => {
-                  const result = cell === null ? undefined : results.get(cell)
-                  const ownPeriod = table.columns[cellIndex]?.period_label_id === null && result ? labelText(content, result.period_label_id) : undefined
-                  return (
-                    <td key={`${row.subject_label_id}-${cellIndex}`} className="num px-3 py-2 text-right text-fg">
-                      <Cell result={result} ownPeriod={ownPeriod} />
-                    </td>
-                  )
-                })}
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

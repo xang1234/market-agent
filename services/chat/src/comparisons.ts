@@ -13,7 +13,9 @@
 // standing for the interval its rounding covers ("74.4%" is 74.35-74.45). Two
 // values are ordered only when their intervals do not overlap, so rounding
 // cannot make a false winner; values too close to separate at the precision
-// shown are a tie. Upgrade path: carry each fact's unrounded value in the packet.
+// shown are a tie. An engine amount, shown at its scale, carries its exact
+// value (PacketFigure.exact) and compares by that. Upgrade path: carry each
+// other fact's unrounded value in the packet.
 //
 // A claim citing several metrics is one comparison per metric (claimParts), so
 // checkComparison only ever sees one.
@@ -183,7 +185,7 @@ export function checkComparison(
   }
   // The cited figure stands for its fact, so the model's id is the one named.
   const figures = eligible.map((figure) => cited.find((entry) => keyOf(entry) === keyOf(figure))!);
-  const values = figures.map((figure) => interval(figure.value));
+  const values = figures.map((figure) => (figure.exact === undefined ? interval(figure.value) : point(interval(figure.exact))));
   if (values.some((value) => value === undefined) || new Set(values.map((value) => value!.kind)).size > 1) {
     return fail("the values are in different units or currencies");
   }
@@ -379,11 +381,19 @@ function interval(value: string): Interval | undefined {
   return { kind: `${prefix!.trim()}|${unit}`, low: mid - half, high: mid + half, mid };
 }
 
+// An exact value has no rounding to stand for: canonical "USD 100" is 100, not 99.5-100.5.
+// ponytail: compared as floats, so amounts within one part in a billion tie; a decimal compare if that ever matters.
+function point(value: Interval | undefined): Interval | undefined {
+  return value === undefined ? undefined : { ...value, low: value.mid, high: value.mid };
+}
+
 // Ordered only when the intervals do not overlap; a shared edge is two
 // different displayed values, so it orders (within float error: 14.1% and
 // 14.2% share 14.15%).
 function compareIntervals(a: Interval, b: Interval): Direction {
   const epsilon = 1e-9 * Math.max(Math.abs(a.mid), Math.abs(b.mid), 1);
+  // Equal values tie: two equal exact points would otherwise share an edge and order.
+  if (Math.abs(a.mid - b.mid) <= epsilon) return 0;
   if (a.low >= b.high - epsilon) return 1;
   if (a.high <= b.low + epsilon) return -1;
   return 0;

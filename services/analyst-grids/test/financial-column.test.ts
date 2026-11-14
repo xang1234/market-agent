@@ -131,7 +131,7 @@ test("grid financial columns", { timeout: 300_000 }, async (t) => {
       return [cell.status, cell.display?.value, block.financial.results.map((result) =>
         [block.financial.labels[result.measure_label_id]!.text, result.presented.value ?? result.presented.reason_code])];
     };
-    assert.deepEqual(shown(cells["0:c0"]!), ["ok", "USD 2,956,800,000,000.00", [
+    assert.deepEqual(shown(cells["0:c0"]!), ["ok", "$3.0T", [
       ["Market capitalization (share price × shares outstanding)", "2956800000000"], ["Share price", "120"], ["Shares outstanding", "24640000000"],
     ]]);
     assert.deepEqual(shown(cells["0:c1"]!), ["ok", "100.59x", [

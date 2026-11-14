@@ -75,9 +75,9 @@ test('a supported answer prints server strings with full values, coverage, and a
   assert.match(html, /data-coverage="partial"[^>]*>4 of 5 requested results verified</)
   assert.match(html, /<caption[^>]*>Revenue, Gross margin \(gross profit \/ revenue\) by company<\/caption>/)
   assert.match(html, /<th scope="col"[^>]*>Company<\/th>/)
-  assert.match(html, /<th scope="row"[^>]*>Apple Inc\.<\/th>/)
+  assert.match(html, /<th scope="row"[^>]*>Apple Inc\.<span class="block text-xs text-muted">FY2023<\/span><\/th>/, 'the row names its one period once')
   assert.match(html, /title="46\.206%" aria-label="46\.206%">46\.21%</, 'rounded label with the exact value for tooltips and assistive tech')
-  assert.match(html, /A required input or calculation is unavailable\./, 'a gap is shown as a gap')
+  assert.match(html, /title="A required input or calculation is unavailable\."><span aria-hidden="true">n\/a<\/span>/, 'a gap is shown as a gap')
   assert.match(html, /Not requested/, 'a cell outside the request is explicit')
   assert.match(html, /Ranked 1 of 2 companies; no overall highest can be stated for an incomplete group/)
   assert.match(html, /at or above 40\.00%: yes/)
@@ -98,23 +98,23 @@ test('a comparison across fiscal calendars has one column per line, each cell na
     'Gross profit',
     'Operating income',
     'Net income',
-    'Gross margin (gross profit / revenue)',
-    'Operating margin (operating income / revenue)',
-    'Net margin (net income / revenue)',
+    'Gross margin',
+    'Operating margin',
+    'Net margin',
     'Quarter-over-quarter percent change in Revenue',
     'Year-over-year percent change in Revenue',
   ])
   const rows = [...table.querySelectorAll('tbody tr')].map((row) => [
     row.querySelector('th')!.textContent,
-    ...[...row.querySelectorAll('td')].map((cell) => [...cell.children].map((part) => part.textContent)),
+    ...[...row.querySelectorAll('td')].map((cell) => [...cell.children].map((part) => part.querySelector('[aria-hidden="true"]')?.textContent ?? part.textContent)),
   ])
   assert.deepEqual(rows, [
     [
       'NVIDIA Corp',
-      ['USD 68,000,000,000.00', 'Q4 FY2026'],
-      ['USD 51,000,000,000.00', 'Q4 FY2026'],
-      ['USD 44,200,000,000.00', 'Q4 FY2026'],
-      ['USD 37,400,000,000.00', 'Q4 FY2026'],
+      ['$68.0B', 'Q4 FY2026'],
+      ['$51.0B', 'Q4 FY2026'],
+      ['$44.2B', 'Q4 FY2026'],
+      ['$37.4B', 'Q4 FY2026'],
       ['75.00%', 'Q4 FY2026'],
       ['65.00%', 'Q4 FY2026'],
       ['55.00%', 'Q4 FY2026'],
@@ -123,21 +123,76 @@ test('a comparison across fiscal calendars has one column per line, each cell na
     ],
     [
       'Advanced Micro Devices, Inc.',
-      ['USD 7,700,000,000.00', 'Q2 FY2026'],
-      ['USD 3,080,000,000.00', 'Q2 FY2026'],
-      ['USD 770,000,000.00', 'Q2 FY2026'],
-      ['USD 693,000,000.00', 'Q2 FY2026'],
+      ['$7.7B', 'Q2 FY2026'],
+      ['$3.1B', 'Q2 FY2026'],
+      ['$770.0M', 'Q2 FY2026'],
+      ['$693.0M', 'Q2 FY2026'],
       ['40.00%', 'Q2 FY2026'],
       ['10.00%', 'Q2 FY2026'],
       ['9.00%', 'Q2 FY2026'],
       ['4.80%', 'Q2 FY2026 vs Q1 FY2026'],
-      ['A required input or calculation is unavailable.', 'Q2 FY2026 vs Q2 FY2025'],
+      ['n/a', 'Q2 FY2026 vs Q2 FY2025'],
     ],
   ])
   assert.doesNotMatch(html, /Not requested/)
   assert.equal(table.querySelector('tbody td button')!.getAttribute('aria-label'), 'Inspect the verified calculation for USD 68000000000, Q4 FY2026')
   const plain = renderToStaticMarkup(<FinancialAnswer block={financialAnswerFiscalCalendarsFixture} />)
-  assert.match(plain, /title="USD 7700000000" aria-label="USD 7700000000">USD 7,700,000,000\.00<\/span><span class="block text-xs text-muted">Q2 FY2026<\/span>/, 'the value keeps its own label; the period is ordinary text after it')
+  assert.match(plain, /title="USD 7700000000" aria-label="USD 7700000000">\$7\.7B<\/span><span class="block text-xs text-muted">Q2 FY2026<\/span>/, 'the value keeps its own label; the period is ordinary text after it')
+})
+
+test('a row whose cells read one period names it once under its company, and a gap reads n/a with its reason kept', () => {
+  const block = structuredClone(financialAnswerFiscalCalendarsFixture) as FinancialAnswerBlock & { financial: FinancialAnswerContent }
+  const reason = 'No eligible input was public before the knowledge cutoff.'
+  const labels = block.financial.labels as Record<string, { kind: string; text: string }>
+  labels['period:p0'] = { kind: 'period', text: 'FY2026 (ended 2026-09-03)' }
+  labels['period:p3'] = { kind: 'period', text: 'FY2026 (ended 2026-07-03)' }
+  const net = block.financial.results.find((result) => result.result_id.endsWith('000000000013'))!
+  Object.assign(net, { disposition: 'missing', presented: { kind: 'gap', text: reason, reason_code: 'missing_input' } })
+  const table = block.financial.presentations[0] as FinancialTablePresentation
+  Object.assign(table, { columns: table.columns.slice(0, 7), rows: table.rows.map((row) => ({ ...row, cells: row.cells.slice(0, 7) })) })
+  const html = renderToStaticMarkup(<FinancialAnswer block={block} />)
+  const document = new JSDOM(html).window.document
+  const visible = (element: Element) => [...element.childNodes].map((node) => (node as Element).classList?.contains('sr-only') ? '' : node.textContent).join('')
+  assert.equal(document.querySelector('caption')!.className, 'sr-only', 'the caption is for screen readers')
+  assert.deepEqual([...document.querySelectorAll('thead th')].map((heading) => [heading.textContent, heading.querySelector('button')?.getAttribute('title') ?? null]), [
+    ['Company', null],
+    ['Revenue', null],
+    ['Gross profit', null],
+    ['Operating income', null],
+    ['Net income', null],
+    ['Gross margin', 'Gross margin (gross profit / revenue)'],
+    ['Operating margin', 'Operating margin (operating income / revenue)'],
+    ['Net margin', 'Net margin (net income / revenue)'],
+  ])
+  const rows = [...document.querySelectorAll('tbody tr')].map((row) => [
+    [...row.querySelector('th')!.childNodes].map((node) => node.textContent),
+    ...[...row.querySelectorAll('td')].map((cell) => visible(cell.firstElementChild!)),
+  ])
+  assert.deepEqual(rows, [
+    [['NVIDIA Corp', 'FY2026 · ended Sep 2026'], '$68.0B', '$51.0B', '$44.2B', '$37.4B', '75.00%', '65.00%', '55.00%'],
+    [['Advanced Micro Devices, Inc.', 'FY2026 · ended Jul 2026'], '$7.7B', '$3.1B', '$770.0M', 'n/a', '40.00%', '10.00%', '9.00%'],
+  ])
+  const gap = document.querySelectorAll('tbody tr')[1]!.querySelectorAll('td')[3]!.firstElementChild!
+  assert.equal(gap.getAttribute('title'), reason)
+  assert.equal(gap.querySelector('.sr-only')!.textContent, reason, 'a screen reader hears the reason')
+  assert.equal(gap.querySelector('[aria-hidden="true"]')!.textContent, 'n/a')
+})
+
+test('a gap for another period than its row names that period, so the missing figure is identified', () => {
+  const block = structuredClone(financialAnswerFiscalCalendarsFixture) as FinancialAnswerBlock & { financial: FinancialAnswerContent }
+  const labels = block.financial.labels as Record<string, { kind: string; text: string }>
+  labels['period:p3'] = { kind: 'period', text: 'FY2026 (ended 2026-07-03)' }
+  labels['period:p9'] = { kind: 'period', text: 'FY2025 (ended 2025-06-27)' }
+  const net = block.financial.results.find((result) => result.result_id.endsWith('000000000013'))!
+  Object.assign(net, { disposition: 'missing', period_label_id: 'period:p9', presented: { kind: 'gap', text: 'No eligible input was public before the knowledge cutoff.', reason_code: 'missing_input' } })
+  const table = block.financial.presentations[0] as FinancialTablePresentation
+  Object.assign(table, { columns: table.columns.slice(0, 7), rows: table.rows.map((row) => ({ ...row, cells: row.cells.slice(0, 7) })) })
+  const document = new JSDOM(renderToStaticMarkup(<FinancialAnswer block={block} />)).window.document
+  const row = document.querySelectorAll('tbody tr')[1]!
+  assert.deepEqual([...row.querySelector('th')!.childNodes].map((node) => node.textContent), ['Advanced Micro Devices, Inc.', 'FY2026 · ended Jul 2026'])
+  const cells = [...row.querySelectorAll('td')].map((cell) => [...cell.children].map((child) => child.querySelector('[aria-hidden="true"]')?.textContent ?? child.textContent))
+  assert.deepEqual(cells[3], ['n/a', 'FY2025 · ended Jun 2025'])
+  assert.deepEqual(cells[2], ['$770.0M'], 'a value of the row period names none')
 })
 
 test('sorting uses the server exact order; descending keeps rows without a value last', () => {

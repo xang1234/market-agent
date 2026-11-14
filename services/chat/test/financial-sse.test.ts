@@ -59,7 +59,7 @@ test("financial answers over SSE", { timeout: 300_000 }, async (t) => {
     try {
       const { status, transcript, events } = await stream(randomUUID());
       assert.equal(status, 200);
-      for (const leaked of ["987654321", ORIGINAL_REVENUE, "383,285", RESTATED_REVENUE, "383,000"]) assert.ok(!transcript.includes(leaked), `the stream carries ${leaked}`);
+      for (const leaked of ["987654321", ORIGINAL_REVENUE, "383,285", RESTATED_REVENUE, "$383.0B"]) assert.ok(!transcript.includes(leaked), `the stream carries ${leaked}`);
       assert.deepEqual(events.at(-1)!.data.financial_gap, { reason_code: "verification_failed" });
       assert.equal((await db.query(`select count(*)::int as n from chat_messages m where m.thread_id = $1 and m.blocks @> '[{"kind":"financial_answer"}]'`, [threadId])).rows[0].n, 0);
     } finally {
@@ -76,8 +76,8 @@ test("financial answers over SSE", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(events.map((event) => event.event), ["turn.started", "snapshot.sealed", "block.began", "block.completed", "turn.completed"]);
     for (const event of events) assert.ok((CHAT_SSE_EVENT_TYPES as ReadonlyArray<string>).includes(event.event!), "older clients know every event type");
     const completion = transcript.indexOf("event: turn.completed");
-    assert.ok(!transcript.slice(0, completion).includes("383,000"), "values arrive with the committed message, not before it");
-    assert.ok(transcript.slice(completion).includes("383,000"), "the committed message carries the value");
+    assert.ok(!transcript.slice(0, completion).includes("$383.0B"), "values arrive with the committed message, not before it");
+    assert.ok(transcript.slice(completion).includes("$383.0B"), "the committed message carries the value");
     const done = events.at(-1)!.data;
     const message = done.message as { message_id: string; snapshot_id: string; blocks: Array<{ id: string; kind: string }> };
     assert.equal(message.message_id, done.message_id);

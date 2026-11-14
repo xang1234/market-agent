@@ -22,7 +22,7 @@ test('a certified answer copies the figures as it shows them, with each cell\'s 
     answerText([financialAnswerFixture]),
     [
       'Revenue, Gross margin (gross profit / revenue) by company',
-      '| Company | Revenue | Gross margin (gross profit / revenue), FY2023 |\n| --- | --- | --- |\n| Apple Inc. | USD 391,035,000,000.00 (FY2023) | 46.21% |\n| Microsoft Corp. |  | A required input or calculation is unavailable. |',
+      '| Company | Revenue | Gross margin (gross profit / revenue), FY2023 |\n| --- | --- | --- |\n| Apple Inc. | $391.0B (FY2023) | 46.21% |\n| Microsoft Corp. |  | A required input or calculation is unavailable. |',
       'Apple Inc. — Gross margin (gross profit / revenue), FY2023, at or above 40.00%: yes',
       'Ranked 1 of 2 companies; no overall highest can be stated for an incomplete group',
     ].join('\n\n'),

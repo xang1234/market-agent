@@ -74,7 +74,7 @@ test("a two-company plan presents labels, formatted exact values, a table, a pre
 
   const revenue = content.results.find((result) => result.output_id === "out_a_rev")!;
   assert.deepEqual(revenue.presented, {
-    kind: "value", text: "USD 1,234,567.89", full_text: "USD 1234567.891", value: "1234567.891", unit: { kind: "currency", currency: "USD" }, exact: true,
+    kind: "value", text: "$1.2M", full_text: "USD 1234567.891", value: "1234567.891", unit: { kind: "currency", currency: "USD" }, exact: true,
   });
   assert.deepEqual(labelTexts(content, "out_a_rev"), ["Alpha Corp", "Revenue", "FY2023"]);
   assert.equal(revenue.disposition, "verified", "a computed result presents as verified");
@@ -97,6 +97,25 @@ test("a two-company plan presents labels, formatted exact values, a table, a pre
     content.presentations.filter((presentation) => presentation.kind !== "table").map((presentation) => [presentation.kind, "result_id" in presentation ? presentation.result_id : null]),
     [["predicate", "r-out_check"], ["predicate", "r-out_rank"]],
   );
+});
+
+test("an amount of a million or more reads at its scale, with the exact amount kept in full", () => {
+  const shown = (value: string, unit: unknown) => {
+    const presented = result(present(planFixture(), comparisonResults({ out_a_rev: committed("out_a_rev", "a_rev", valueOf(value, unit)) })), "out_a_rev").presented;
+    assert.ok(presented.kind === "value");
+    return [presented.text, presented.full_text];
+  };
+  const usd = { kind: "currency", currency: "USD" };
+  assert.deepEqual(shown("133188000000", usd), ["$133.2B", "USD 133188000000"]);
+  assert.deepEqual(shown("12919000000", usd), ["$12.9B", "USD 12919000000"]);
+  assert.deepEqual(shown("950000000", usd), ["$950.0M", "USD 950000000"]);
+  assert.deepEqual(shown("1234567890123", usd), ["$1.2T", "USD 1234567890123"]);
+  assert.deepEqual(shown("999960000000", usd), ["$1.0T", "USD 999960000000"], "a rounding that reaches the next scale moves to it");
+  assert.deepEqual(shown("-1234567890", usd), ["-$1.2B", "USD -1234567890"]);
+  assert.deepEqual(shown("1234567890", { kind: "currency", currency: "EUR" }), ["EUR 1.2B", "EUR 1234567890"]);
+  assert.deepEqual(shown("950000.5", usd), ["USD 950,000.50", "USD 950000.5"], "under a million keeps every digit");
+  assert.deepEqual(shown("11.934", { kind: "currency_per_share", currency: "USD" }), ["USD 11.93 per share", "USD 11.934 per share"]);
+  assert.deepEqual(shown("24640000000", { kind: "shares" }), ["24.6B shares", "24640000000 shares"]);
 });
 
 test("table sorting compares exact decimals, not display text or floats", () => {
@@ -767,7 +786,7 @@ test("a fiscal year the companies end on different dates names each cell's end, 
   assert.deepEqual(readTable(content), {
     columns: [["Revenue", null], ["Gross margin (gross profit / revenue)", null]],
     rows: [
-      ["Alpha Corp", ["out_a_rev", "USD 1,234,567.89", "FY2023 (ended 2023-01-29)"], ["out_a_gm", "41.24%", "FY2023 (ended 2023-01-29)"]],
+      ["Alpha Corp", ["out_a_rev", "$1.2M", "FY2023 (ended 2023-01-29)"], ["out_a_gm", "41.24%", "FY2023 (ended 2023-01-29)"]],
       ["Beta Inc", null, ["out_b_gm", "38.00%", "FY2023 (ended 2023-09-30)"]],
     ],
   });

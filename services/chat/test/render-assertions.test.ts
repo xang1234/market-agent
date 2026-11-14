@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { calendarNote, plainText, renderAssertion, unverifiedInference } from "../src/render-assertions.ts";
+import { answerPeriods, calendarNote, plainText, renderAssertion, unverifiedInference } from "../src/render-assertions.ts";
 import type { Assertion } from "../src/assertions.ts";
 import type { EvidencePacket } from "../src/evidence-packet.ts";
 
@@ -176,6 +176,37 @@ test("a ranking across companies lists every company's value and period, and nam
     "By gross margin, highest first: NVDA 74.6% (FY2026), AMD 49.2% (FY2025). No gross margin is shown for AAPL.");
 });
 
+test("across companies, each company's one period is said once for the answer, and a company with two keeps them by its figures", () => {
+  const engine = (id: string, company: string, metric: string, period: string, value: string) => ({ id, company, metric, period, value, source_ids: [] });
+  const storage: EvidencePacket = { ...PACKET, companies: ["MU", "WDC", "STX"], claims: [], figures: [
+    engine("F1", "MU", "Revenue", "FY2026 (ended 2026-09-03)", "$133.2B"),
+    engine("F2", "WDC", "Revenue", "FY2026 (ended 2026-07-03)", "$12.9B"),
+    engine("F3", "STX", "Revenue", "FY2027 (ended 2025-06-27)", "$9.1B"),
+    engine("F4", "MU", "Net income", "FY2025 (ended 2025-08-28)", "$8.5B"),
+    engine("F5", "WDC", "Net income", "FY2026 (ended 2026-07-03)", "$1.9B"),
+  ] };
+  const order: Assertion & { index: number } = { index: 0, kind: "comparison", op: "order", result: ["F1", "F2", "F3"], text: "x", evidence: ["F1", "F2", "F3"] };
+  const wdc: Assertion & { index: number } = { index: 1, kind: "observation", text: "x", evidence: ["F5"] };
+  const mu: Assertion & { index: number } = { index: 2, kind: "observation", text: "x", evidence: ["F4"] };
+  const say = (assertion: Assertion & { index: number }, assertions: ReadonlyArray<Assertion>) =>
+    plainText(renderAssertion(assertion, storage, [], [], answerPeriods(assertions, storage).once).segments);
+
+  assert.equal(say(order, [order, wdc]), "By revenue, highest first: MU $133.2B, WDC $12.9B, STX $9.1B.");
+  assert.equal(say(wdc, [order, wdc]), "WDC's net income was $1.9B.");
+  assert.equal(answerPeriods([order, wdc], storage).note, "Periods: MU FY2026 (ended Sep 2026), WDC FY2026 (ended Jul 2026), STX FY2027 (ended Jun 2025).");
+
+  assert.equal(say(order, [order, wdc, mu]), "By revenue, highest first: MU $133.2B (FY2026, ended Sep 2026), WDC $12.9B, STX $9.1B.");
+  assert.equal(say(mu, [order, wdc, mu]), "MU's net income was $8.5B in FY2025 (ended Aug 2025).");
+  assert.equal(answerPeriods([order, wdc, mu], storage).note, "Periods: WDC FY2026 (ended Jul 2026), STX FY2027 (ended Jun 2025).");
+
+  const together = { ...storage, figures: storage.figures.map((figure) => ({ ...figure, period: "FY2026 (ended 2026-09-03)" })) };
+  assert.equal(answerPeriods([order, wdc], together).note, "Period: FY2026 (ended Sep 2026).", "one period every company shares is said once");
+
+  assert.equal(plainText(renderAssertion(order, storage, []).segments),
+    "By revenue, highest first: MU $133.2B (FY2026, ended Sep 2026), WDC $12.9B (FY2026, ended Jul 2026), STX $9.1B (FY2027, ended Jun 2025).",
+    "rendered alone, each figure keeps its period, in one pair of parentheses");
+});
+
 test("a ranking over a price window writes its dates by month and year (#301), each return a chip on its chart line (#317)", () => {
   const window = "YTD 2026: 2025-12-31 close to 2026-08-31 close";
   const NVDA_LINE = "d1000000-0000-4000-8000-000000000001";
@@ -212,7 +243,7 @@ test("an observation names each period once, and segments and acronyms read as w
   );
 });
 
-test("an inference's label states each supporting comparison's checked result; one on observations alone keeps the plain label (#288)", () => {
+test("an inference's label names the metrics its comparisons rank or trace, not their results, which are said above it; one on observations alone keeps the plain label (#288)", () => {
   const comparisons = [
     { index: 0, kind: "comparison" as const, op: "trend" as const, result: "rebounded", text: "x", evidence: ALL },
     { index: 1, kind: "comparison" as const, op: "lowest" as const, result: "T2", text: "x", evidence: ALL },
@@ -222,28 +253,36 @@ test("an inference's label states each supporting comparison's checked result; o
   const label = (packet: EvidencePacket, supports: number[], accepted: ReadonlyArray<Assertion & { index: number }> = comparisons) =>
     plainText(renderAssertion({ index: 9, kind: "analyst_inference", text: "The loss quarter was a one-off.", evidence: [], supports }, packet, [], accepted).segments);
   assert.equal(label(AMD_QUARTERS, [0, 1, 3]),
-    "> **Analyst inference** (AMD's operating margin fell, then rebounded; AMD's operating margin lowest in Q2 2025): The loss quarter was a one-off.");
+    "> **Analyst inference** (from AMD's operating margin trend and AMD's operating margin ranking): The loss quarter was a one-off.");
   assert.equal(label(AMD_QUARTERS, [2]),
-    "> **Analyst inference** (AMD's operating margin highest first: Q4 2025, Q3 2025, Q1 2025, Q2 2025): The loss quarter was a one-off.");
+    "> **Analyst inference** (from AMD's operating margin ranking): The loss quarter was a one-off.");
   assert.equal(label(AMD_QUARTERS, [3]), "> **Analyst inference:** The loss quarter was a one-off.");
   const peers: EvidencePacket = { ...PACKET, companies: ["NVDA", "AMD"], figures: PACKET.figures.slice(0, 2) };
   assert.equal(label(peers, [0], [{ index: 0, kind: "comparison", op: "order", result: ["F1", "F2"], text: "x", evidence: ["F1", "F2"] }]),
-    "> **Analyst inference** (gross margin highest first: NVDA, AMD): The loss quarter was a one-off.");
-  // One company highest on several metrics is said once.
+    "> **Analyst inference** (from the gross margin ranking): The loss quarter was a one-off.");
+  // Several metrics are one list, each without its formula.
   const margins: EvidencePacket = { ...peers, figures: [
     ...peers.figures,
-    { id: "F4", company: "NVDA", metric: "Net margin", period: "FY2026", value: "55.0%", source_ids: [] },
-    { id: "F5", company: "AMD", metric: "Net margin", period: "FY2025", value: "12.0%", source_ids: [] },
+    { id: "F4", company: "NVDA", metric: "Net margin (net income / revenue)", period: "FY2026", value: "55.0%", source_ids: [] },
+    { id: "F5", company: "AMD", metric: "Net margin (net income / revenue)", period: "FY2025", value: "12.0%", source_ids: [] },
+    { id: "F6", company: "NVDA", metric: "Revenue", period: "FY2026", value: "$130.5B", source_ids: [] },
+    { id: "F7", company: "AMD", metric: "Revenue", period: "FY2025", value: "$25.8B", source_ids: [] },
   ] };
   assert.equal(label(margins, [0, 1], [
     { index: 0, kind: "comparison", op: "highest", result: "F1", text: "x", evidence: ["F1", "F2"] },
     { index: 1, kind: "comparison", op: "highest", result: "F4", text: "x", evidence: ["F4", "F5"] },
-  ]), "> **Analyst inference** (NVDA highest on gross margin and net margin): The loss quarter was a one-off.");
+    { index: 2, kind: "comparison", op: "order", result: ["F6", "F7"], text: "x", evidence: ["F6", "F7"] },
+  ]), "> **Analyst inference** (from the gross margin and net margin rankings): The loss quarter was a one-off.");
+  assert.equal(label(margins, [2, 0, 1], [
+    { index: 0, kind: "comparison", op: "highest", result: "F1", text: "x", evidence: ["F1", "F2"] },
+    { index: 1, kind: "comparison", op: "highest", result: "F4", text: "x", evidence: ["F4", "F5"] },
+    { index: 2, kind: "comparison", op: "order", result: ["F6", "F7"], text: "x", evidence: ["F6", "F7"] },
+  ]), "> **Analyst inference** (from the revenue, gross margin, and net margin rankings): The loss quarter was a one-off.");
   // A subject is named in the label, beside what its comparisons checked (#308).
   const on = (supports: number[], accepted: ReadonlyArray<Assertion & { index: number }>) =>
     plainText(renderAssertion({ index: 9, kind: "analyst_inference", subject: "AMD", text: "Its net margin may understate underlying profitability.", evidence: [], supports }, margins, [], accepted).segments);
   assert.equal(on([1], [{ index: 1, kind: "comparison", op: "highest", result: "F4", text: "x", evidence: ["F4", "F5"] }]),
-    "> **Analyst inference on AMD** (NVDA highest on net margin): Its net margin may understate underlying profitability.");
+    "> **Analyst inference on AMD** (from the net margin ranking): Its net margin may understate underlying profitability.");
   assert.equal(on([3], [{ index: 3, kind: "observation", text: "x", evidence: ["F5"] }]),
     "> **Analyst inference on AMD:** Its net margin may understate underlying profitability.");
   // A one-company answer's subject goes without saying.

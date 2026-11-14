@@ -2837,7 +2837,7 @@
       "segments": [
         {
           "type": "text",
-          "text": "> **Analyst inference** (AMD's operating margin fell, then rebounded; AMD's gross margin fell, then rebounded): Its operating margin is now at the top of its range and has improved steadily since the weak quarter, though the trend rests on a recovery from a depressed base."
+          "text": "> **Analyst inference** (from AMD's operating margin and gross margin trends): Its operating margin is now at the top of its range and has improved steadily since the weak quarter, though the trend rests on a recovery from a depressed base."
         },
         {
           "type": "text",
@@ -3057,7 +3057,7 @@
         },
         {
           "type": "text",
-          "text": "> **Analyst inference** (AMD's operating margin fell, then rebounded): The counterpoint is that the improved margin comparison partly reflects an easy base, since the weak quarter carried a management-cited charge, and operating margin has gained only slightly in recent quarters."
+          "text": "> **Analyst inference** (from AMD's operating margin trend): The counterpoint is that the improved margin comparison partly reflects an easy base, since the weak quarter carried a management-cited charge, and operating margin has gained only slightly in recent quarters."
         }
       ]
     }

@@ -8,12 +8,15 @@
 // to the observations it rests on, writing no figure, so every figure shown is
 // a template's value from the packet. A comparison states the high or low,
 // ranking or trend its check derived, never the model's wording of it, and an
-// inference resting on comparisons carries their checked results in its label.
+// inference resting on comparisons names the metrics they rank or trace in its label.
 
 import type { Assertion } from "./assertions.ts";
-import { checkedComparisons, metricLabel, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
+import { checkedComparisons, metricLabel as definedMetric, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
 import type { EvidencePacket, PacketClaim, PacketFigure } from "./evidence-packet.ts";
 import { createSealer, type Sealer, type Segment } from "./prose-refs.ts";
+
+// Prose names an engine measure without its formula ("net margin", not "net margin (net income / revenue)"): the table's heading carries it.
+const metricLabel = (metric: string): string => definedMetric(metric).replace(/ \([^()]*[/×][^()]*\)$/, "");
 
 type Block = Record<string, unknown>;
 
@@ -32,15 +35,19 @@ export type RenderedAssertion = {
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // accepted: the answer's accepted assertions, which an inference's supports index.
+// once: each company whose one period the answer's notes name (answerPeriods),
+// keyed to that period; its figures there go undated.
 export function renderAssertion(
   assertion: Assertion & { index: number },
   packet: EvidencePacket,
   factBlocks: ReadonlyArray<Block>,
   accepted: ReadonlyArray<Assertion & { index: number }> = [],
+  once: ReadonlyMap<string, string> = new Map(),
 ): RenderedAssertion {
   const seal = createSealer(factBlocks);
   const figure_ids: string[] = [];
-  const segments = templateSegments(assertion, packet, accepted, {
+  const undated = (figure: PacketFigure) => figure.company !== undefined && once.get(figure.company) === periodKey(figure);
+  const segments = templateSegments(assertion, packet, accepted, undated, {
     value: (figure) => {
       figure_ids.push(figure.id);
       return seal.value(figure);
@@ -61,6 +68,7 @@ function templateSegments(
   assertion: Assertion & { index: number },
   packet: EvidencePacket,
   accepted: ReadonlyArray<Assertion & { index: number }>,
+  undated: (figure: PacketFigure) => boolean,
   { value, gap, quote }: Writes,
 ): Segment[] {
   const figures = assertion.evidence.flatMap((id) => packet.figures.filter((figure) => figure.id === id));
@@ -83,7 +91,7 @@ function templateSegments(
           text(i === 0 ? `${g === 0 ? "" : "; "}${capitalize(`${owner(figure)}${figureLabel(figure)}`)} was ` : `${joiner}${figureLabel(figure)} `);
           segments.push(value(figure));
         });
-        text(periodPhrase(group[0]!));
+        if (!undated(group[0]!)) text(periodPhrase(group[0]!));
       });
       if (groups.size > 0) text(".");
       figures.filter((entry) => entry.ranking).forEach((figure) => {
@@ -106,7 +114,7 @@ function templateSegments(
       // A claim over several metrics reads as the comparisons it stands for.
       checkedComparisons(assertion, packet).forEach((comparison, i) => {
         if (i > 0) text("\n\n");
-        comparisonSegments(comparison, { text, value, owner, push: (segment) => segments.push(segment) });
+        comparisonSegments(comparison, { text, value, owner, undated, push: (segment) => segments.push(segment) });
       });
       break;
     case "unknown_cause": {
@@ -116,8 +124,8 @@ function templateSegments(
     }
     case "analyst_inference": {
       // Words only: the check rejected any figure or reference in it.
-      const label = checkedResults(assertion, packet, accepted);
-      text(`> **Analyst inference${subjectClause(assertion, packet)}${label.length > 0 ? `** (${label.join("; ")}):` : ":**"} ${literal(assertion.text)}`);
+      const basis = inferenceBasis(assertion, packet, accepted);
+      text(`> **Analyst inference${subjectClause(assertion, packet)}${basis ? `** (from ${basis}):` : ":**"} ${literal(assertion.text)}`);
       break;
     }
   }
@@ -159,7 +167,7 @@ function subjectClause(assertion: Assertion, packet: EvidencePacket): string {
   return assertion.subject && packet.companies.length > 1 ? ` on ${assertion.subject}` : "";
 }
 
-// What an inference's comparisons checked, for its label, from their results.
+// What an inference's comparisons checked, for the judge, from their results.
 // One company highest on several metrics is one clause.
 export function checkedResults(
   assertion: Assertion,
@@ -177,6 +185,29 @@ export function checkedResults(
   return [...clauses].map(([clause, metrics]) => (metrics.length > 0 ? `${clause} ${new Intl.ListFormat("en").format(metrics)}` : clause));
 }
 
+// What an inference rests on, for its label: the metrics its comparisons rank
+// or trace ("the revenue and net margin rankings"), not their results, which
+// the comparisons above it state; empty when it rests on none.
+function inferenceBasis(assertion: Assertion, packet: EvidencePacket, accepted: ReadonlyArray<Assertion & { index: number }>): string {
+  const NOUNS = { ranking: ["ranking", "rankings"], segments: ["ranking by segment", "rankings by segment"], trend: ["trend", "trends"] } as const;
+  const bases = new Map<string, { owner: string; noun: keyof typeof NOUNS; metrics: string[] }>();
+  for (const n of assertion.supports ?? []) {
+    const entry = accepted.find((candidate) => candidate.index === n && candidate.kind === "comparison");
+    for (const comparison of entry ? checkedComparisons(entry, packet) : []) {
+      const first = comparison.figures[0]!;
+      const noun = comparison.op === "trend" ? "trend" : first.segment !== undefined ? "segments" : "ranking";
+      // Over time or across segments, the metric is one company's.
+      const owner = comparison.axis === "time" || noun === "segments" ? ownerOf(first, packet) : "";
+      const basis = bases.get(`${owner}|${noun}`) ?? { owner, noun, metrics: [] };
+      const metric = metricLabel(comparison.metric);
+      if (!basis.metrics.includes(metric)) basis.metrics.push(metric);
+      bases.set(`${owner}|${noun}`, basis);
+    }
+  }
+  return new Intl.ListFormat("en").format([...bases.values()].map(({ owner, noun, metrics }) =>
+    `${owner || "the "}${new Intl.ListFormat("en").format(metrics)} ${NOUNS[noun][metrics.length > 1 ? 1 : 0]}`));
+}
+
 // "NVDA's ": a figure's company as its possessive, the only company's when it names none.
 function ownerOf(figure: PacketFigure, packet: EvidencePacket): string {
   const company = figure.company ?? (packet.companies.length === 1 ? packet.companies[0] : undefined);
@@ -187,6 +218,7 @@ type Writer = {
   text: (value: string) => void;
   value: (figure: PacketFigure) => Segment;
   owner: (figure: PacketFigure) => string;
+  undated: (figure: PacketFigure) => boolean;
   push: (segment: Segment) => void;
 };
 
@@ -202,14 +234,19 @@ function comparisonSegments(comparison: CheckedComparison, out: Writer): void {
     out.push(out.value(figure));
     if (figure.period) out.text(` in ${periodText(figure.period)}`);
   };
-  // Across companies, each value's period; one period they all share is said once.
-  const datedAs = (figure: PacketFigure) => (figure.period ? ` (${periodText(figure.period)}${figure.period_end ? `, ended ${monthYear(figure.period_end)}` : ""})` : "");
-  const shared = new Set(figures.map(datedAs)).size === 1;
+  // Across companies, each value's period, unless the answer says its company's
+  // apart; one period they all share is said once. An engine period's own end
+  // ("FY2026 (ended Sep 2026)") joins it with a comma, never a second bracket.
+  const datedAs = (figure: PacketFigure) => (figure.period
+    ? ` (${periodText(figure.period).replace(/ \((ended|as of) ([^()]*)\)/g, ", $1 $2")}${figure.period_end ? `, ended ${monthYear(figure.period_end)}` : ""})`
+    : "");
+  const dated = figures.filter((figure) => !out.undated(figure));
+  const shared = dated.length === figures.length && new Set(figures.map(datedAs)).size === 1;
   const list = (label: (figure: PacketFigure) => string) => {
     figures.forEach((figure, i) => {
       out.text(`${i === 0 ? "" : ", "}${label(figure)} `);
       out.push(out.value(figure));
-      if (comparison.axis === "cohort" && !shared) out.text(datedAs(figure));
+      if (comparison.axis === "cohort" && !shared && !out.undated(figure)) out.text(datedAs(figure));
     });
     if (comparison.axis === "cohort" && shared) out.text(datedAs(first));
   };
@@ -275,17 +312,17 @@ function resultClause(comparison: CheckedComparison, owner: (figure: PacketFigur
   const { op, axis, figures, metric } = comparison;
   const first = figures[0]!;
   const member = (figure: PacketFigure) => figure.segment ?? figure.company ?? "";
-  const subject = `${owner(first)}${metricLabel(metric)}`;
+  const subject = `${owner(first)}${definedMetric(metric)}`;
   const segmented = first.segment !== undefined;
   if (op === "highest" || op === "lowest") {
     if (axis === "time") return [`${subject} ${op} in ${periodText(comparison.winner!.period!)}`];
     return segmented
-      ? [`${member(comparison.winner!)} ${op} of ${owner(first)}segments by ${metricLabel(metric)}`]
-      : [`${member(comparison.winner!)} ${op} on`, metricLabel(metric)];
+      ? [`${member(comparison.winner!)} ${op} of ${owner(first)}segments by ${definedMetric(metric)}`]
+      : [`${member(comparison.winner!)} ${op} on`, definedMetric(metric)];
   }
   if (op === "order") {
     const names = figures.map((figure) => (axis === "time" ? periodText(figure.period!) : member(figure)));
-    return [`${axis === "time" ? subject : metricLabel(metric)} highest first: ${names.join(", ")}`];
+    return [`${axis === "time" ? subject : definedMetric(metric)} highest first: ${names.join(", ")}`];
   }
   const moved: Record<TrendResult, string> = {
     rose: "rose",
@@ -322,6 +359,33 @@ export function calendarNote(assertions: ReadonlyArray<Assertion>, packet: Evide
   return named.length === 0
     ? undefined
     : `The periods compared end at different times, so they do not line up: ${new Intl.ListFormat("en").format(named)}.`;
+}
+
+// Across companies, each company that shows one period in the answer's
+// figures has it said once, here, rather than after each of its figures; a
+// company shown at several periods keeps them by its figures. Then the
+// calendar note is not needed: each period is named with its end.
+export function answerPeriods(assertions: ReadonlyArray<Assertion>, packet: EvidencePacket): { once: ReadonlyMap<string, string>; note?: string } {
+  const periods = new Map<string, Map<string, PacketFigure>>();
+  if (packet.companies.length > 1) {
+    for (const figure of assertions.flatMap((assertion) => assertion.kind === "analyst_inference" ? [] : packet.figures.filter((entry) => assertion.evidence.includes(entry.id)))) {
+      if (figure.company === undefined || figure.period === undefined || figure.gap !== undefined || figure.ranking) continue;
+      periods.set(figure.company, (periods.get(figure.company) ?? new Map()).set(periodKey(figure), figure));
+    }
+  }
+  const once = new Map([...periods].flatMap(([company, keys]) => (keys.size === 1 ? [[company, [...keys.keys()][0]!] as const] : [])));
+  if (once.size === 0) {
+    const note = calendarNote(assertions, packet);
+    return note === undefined ? { once } : { once, note };
+  }
+  const named = (figure: PacketFigure) => `${periodText(figure.period!)}${figure.period_end ? ` (ended ${monthYear(figure.period_end)})` : ""}`;
+  const firsts = [...once.keys()].map((company) => periods.get(company)!.values().next().value!);
+  if (once.size === periods.size && new Set(once.values()).size === 1) return { once, note: `Period: ${named(firsts[0]!)}.` };
+  return { once, note: `Periods: ${firsts.map((figure) => `${figure.company} ${named(figure)}`).join(", ")}.` };
+}
+
+function periodKey(figure: PacketFigure): string {
+  return `${figure.period ?? ""}|${figure.period_end ?? ""}`;
 }
 
 // The text a rendered assertion reads as, each value as displayed.

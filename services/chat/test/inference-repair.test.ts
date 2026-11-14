@@ -48,11 +48,11 @@ const FISCAL_FIGURES = [
 const FISCAL_PRICES = "By price return, highest first: NVDA 6.6%, AAPL 6.05% (Dec 2025 to Aug 2026).";
 const FISCAL_NOTE = "The periods compared end at different times, so they do not line up: NVDA's FY2025 ended Jan 2025 and AAPL's FY2025 ended Sep 2025.";
 const PROFITABILITY_TEXT = "It has the larger revenue base, while the other company converts far more of its sales into profit.";
-const PROFITABILITY = `> **Analyst inference on AAPL** (revenue highest first: AAPL, NVDA; gross margin highest first: NVDA, AAPL; net margin highest first: NVDA, AAPL): ${PROFITABILITY_TEXT}`;
+const PROFITABILITY = `> **Analyst inference on AAPL** (from the revenue, gross margin, and net margin rankings): ${PROFITABILITY_TEXT}`;
 const GAP_TEXT = "The revenue comparison is not like-for-like, since its fiscal year ended months before the other's, so the gap could shift on a matched period.";
 const GAP_REASON = "The figures show NVDA's fiscal year ended Jan 2025 and AAPL's Sep 2025, eight months apart, so the revenue comparison is not period-matched; the caveat that the gap could shift follows from that.";
 const ENDS_TEXT = "The different fiscal year ends limit direct comparability of the two revenue figures.";
-const ENDS = `> **Analyst inference on NVDA** (revenue highest first: AAPL, NVDA): ${ENDS_TEXT}`;
+const ENDS = `> **Analyst inference on NVDA** (from the revenue ranking): ${ENDS_TEXT}`;
 const UNVERIFIED_GAP = `> **Unverified analyst view on NVDA** (not backed by the figures shown): ${GAP_TEXT}`;
 const fiscal = (takeaway: string, ...rest: string[]) => [FISCAL_FIGURES, takeaway, FISCAL_PRICES, ...rest, FISCAL_NOTE].join("\n\n");
 
@@ -451,7 +451,7 @@ test("a trace recorded before repairs replays with none: its worded inference st
 
   assert.equal((await replayRecorded(FISCAL)).repair_input_changed, true, "its recorded answer prompt carried staleness the analyst no longer sends (#398)");
   const recorded = await replayRecorded(repairUnderTodaysPrompt(FISCAL));
-  assert.equal(text(recorded.blocks), fiscal(PROFITABILITY, "> **Analyst inference on NVDA** (revenue highest first: AAPL, NVDA): The revenue comparison is not like-for-like, since its fiscal year ended well before the other's, so the gap could look different on matched periods."));
+  assert.equal(text(recorded.blocks), fiscal(PROFITABILITY, "> **Analyst inference on NVDA** (from the revenue ranking): The revenue comparison is not like-for-like, since its fiscal year ended well before the other's, so the gap could look different on matched periods."));
   assert.deepEqual(recorded.assertions?.repaired, [6]);
   assert.equal(recorded.repair_input_changed, false);
 });

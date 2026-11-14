@@ -2910,7 +2910,7 @@
       "segments": [
         {
           "type": "text",
-          "text": "> **Analyst inference on NVDA** (revenue highest first: AAPL, NVDA; gross margin highest first: NVDA, AAPL; net margin highest first: NVDA, AAPL; revenue growth (YoY) highest first: NVDA, AAPL): It is the faster-growing and far more profitable business on the latest fiscal years shown, while the other is the larger-revenue but lower-margin, slower-growth business."
+          "text": "> **Analyst inference on NVDA** (from the revenue, gross margin, net margin, and revenue growth (YoY) rankings): It is the faster-growing and far more profitable business on the latest fiscal years shown, while the other is the larger-revenue but lower-margin, slower-growth business."
         },
         {
           "type": "text",
@@ -3114,7 +3114,7 @@
         },
         {
           "type": "text",
-          "text": "> **Analyst inference on NVDA** (revenue growth (YoY) highest first: NVDA, AAPL; price return highest first: NVDA, AAPL): Its market performance has been close to the other's despite the large gap in growth and margins."
+          "text": "> **Analyst inference on NVDA** (from the revenue growth (YoY) and price return rankings): Its market performance has been close to the other's despite the large gap in growth and margins."
         },
         {
           "type": "text",
@@ -3122,7 +3122,7 @@
         },
         {
           "type": "text",
-          "text": "> **Analyst inference on AAPL** (revenue highest first: AAPL, NVDA; revenue growth (YoY) highest first: NVDA, AAPL): The two fiscal years do not end on the same date, so the side-by-side is not a like-for-like period comparison."
+          "text": "> **Analyst inference on AAPL** (from the revenue and revenue growth (YoY) rankings): The two fiscal years do not end on the same date, so the side-by-side is not a like-for-like period comparison."
         },
         {
           "type": "text",

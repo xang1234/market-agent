@@ -209,7 +209,7 @@ test("the seal recomputes market cap and P/E from their restated inputs and pres
   assert.ok(outcome.ok, JSON.stringify(!outcome.ok && outcome.failures));
   assert.deepEqual(outcome.certificate.computations.map((computation) => computation.node_id), ["cap", "pe"]);
   assert.deepEqual(outcome.block.financial.results.map((result) => [result.disposition, result.presented.kind === "value" && result.presented.value, result.presented.text]), [
-    ["verified", "2956800000000", "USD 2,956,800,000,000.00"],
+    ["verified", "2956800000000", "$3.0T"],
     ["verified", "100.58675607711651299245599329421626152556580050293", "100.59x"],
   ]);
 });

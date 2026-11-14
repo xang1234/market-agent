@@ -87,8 +87,8 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual(rows[0]?.research_scope.companies, [{ issuer_id: NVDA.issuer_id, label: "NVDA" }], "the turn should resolve 'NVDA' to the seeded company");
     // The commentary is rendered from the recorded reply's assertions, so the LLM step really ran.
     assert.deepEqual(engineAnswer(assistant).notes, [
-      "NVDA's revenue rose in every period from Q1 FY2025 (ended Apr 2024) (USD 26,044,000,000.00) to Q4 FY2026 (ended Jan 2026) (USD 62,100,000,000.00).\n\n" +
-        "NVDA's gross margin (gross profit / revenue) was 74.40%, operating margin (operating income / revenue) 64.90% and net margin (net income / revenue) 57.00% in Q4 FY2026 (ended Jan 2026).",
+      "NVDA's revenue rose in every period from Q1 FY2025 (ended Apr 2024) ($26.0B) to Q4 FY2026 (ended Jan 2026) ($62.1B).\n\n" +
+        "NVDA's gross margin was 74.40%, operating margin 64.90% and net margin 57.00% in Q4 FY2026 (ended Jan 2026).",
     ]);
     // ...and the deployment that wrote it is on the completion and saved with the message (#183).
     assert.equal(completed.data.answered_by, "fixture/recorded");
@@ -137,17 +137,17 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
   await t.test("the answer shows NVDA's eight quarters of revenue and each one's growth, its latest margins and year-over-year growth, and the quarters' high and low, each verified from cited facts", async () => {
     assert.ok(assistant);
     assert.deepEqual(engineAnswer(assistant).results, [
-      ["Revenue", "Q1 FY2025 (ended 2024-04-28)", "verified", "USD 26,044,000,000.00"],
-      ["Revenue", "Q2 FY2025 (ended 2024-07-28)", "verified", "USD 30,040,000,000.00"],
-      ["Revenue", "Q3 FY2025 (ended 2024-10-27)", "verified", "USD 35,082,000,000.00"],
-      ["Revenue", "Q4 FY2025 (ended 2025-01-26)", "verified", "USD 39,331,000,000.00"],
-      ["Revenue", "Q1 FY2026 (ended 2025-04-27)", "verified", "USD 44,062,000,000.00"],
-      ["Revenue", "Q2 FY2026 (ended 2025-07-27)", "verified", "USD 46,743,000,000.00"],
-      ["Revenue", "Q3 FY2026 (ended 2025-10-26)", "verified", "USD 57,006,000,000.00"],
-      ["Revenue", "Q4 FY2026 (ended 2026-01-25)", "verified", "USD 62,100,000,000.00"],
-      ["Gross profit", "Q4 FY2026 (ended 2026-01-25)", "verified", "USD 46,200,000,000.00"],
-      ["Operating income", "Q4 FY2026 (ended 2026-01-25)", "verified", "USD 40,300,000,000.00"],
-      ["Net income", "Q4 FY2026 (ended 2026-01-25)", "verified", "USD 35,400,000,000.00"],
+      ["Revenue", "Q1 FY2025 (ended 2024-04-28)", "verified", "$26.0B"],
+      ["Revenue", "Q2 FY2025 (ended 2024-07-28)", "verified", "$30.0B"],
+      ["Revenue", "Q3 FY2025 (ended 2024-10-27)", "verified", "$35.1B"],
+      ["Revenue", "Q4 FY2025 (ended 2025-01-26)", "verified", "$39.3B"],
+      ["Revenue", "Q1 FY2026 (ended 2025-04-27)", "verified", "$44.1B"],
+      ["Revenue", "Q2 FY2026 (ended 2025-07-27)", "verified", "$46.7B"],
+      ["Revenue", "Q3 FY2026 (ended 2025-10-26)", "verified", "$57.0B"],
+      ["Revenue", "Q4 FY2026 (ended 2026-01-25)", "verified", "$62.1B"],
+      ["Gross profit", "Q4 FY2026 (ended 2026-01-25)", "verified", "$46.2B"],
+      ["Operating income", "Q4 FY2026 (ended 2026-01-25)", "verified", "$40.3B"],
+      ["Net income", "Q4 FY2026 (ended 2026-01-25)", "verified", "$35.4B"],
       ["Gross margin (gross profit / revenue)", "Q4 FY2026 (ended 2026-01-25)", "verified", "74.40%"],
       ["Operating margin (operating income / revenue)", "Q4 FY2026 (ended 2026-01-25)", "verified", "64.90%"],
       ["Net margin (net income / revenue)", "Q4 FY2026 (ended 2026-01-25)", "verified", "57.00%"],
@@ -183,7 +183,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const performance = answer.blocks.find((block) => block.kind === "perf_comparison")!;
     const seriesRefs = (performance.data_ref as { params: { series_refs: string[] } }).params.series_refs;
     const narrative = answer.blocks[0]!;
-    assert.equal(narrativeText(narrative), "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close).");
+    assert.equal(narrativeText(narrative), "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17%.\n\nPeriod: YTD 2026: Dec 2025 close to Aug 2026 close.");
     assert.deepEqual(refsOf(narrative), [["series", seriesRefs[0], "5.81%"], ["series", seriesRefs[1], "3.17%"]]);
     assert.deepEqual(answer.block_proofs?.[String(performance.id)], { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown" }, "the chart is source-linked, not a verified calculation (#236)");
     assert.equal((answer.block_proofs?.[String(narrative.id)] as { calculation?: string } | undefined)?.calculation, "not_verified");
@@ -239,8 +239,9 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     // The answer is rendered from the recorded reply's assertions: not the placeholder, nor the fallback.
     const narrative = answer.blocks[0]!;
     assert.equal(narrativeText(narrative), [
-      "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close).",
+      "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17%.",
       `According to a source dated Aug 2025 on AMD: ${AMD_Q2_2025_RELEASE.text}`,
+      "Period: YTD 2026: Dec 2025 close to Aug 2026 close.",
     ].join("\n\n"));
     const [claim] = refsOf(narrative).filter(([kind]) => kind === "claim");
     const { rows } = await client.query<{ claim_refs: string[] }>(`select claim_refs from snapshots where snapshot_id = $1::uuid`, [answer.snapshot_id]);
@@ -353,14 +354,15 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const companies = (answer.blocks[0]!.financial as { labels: Record<string, { kind: string; text: string }> }).labels;
     assert.deepEqual(Object.values(companies).filter((label) => label.kind === "subject").map((label) => label.text), ["NVIDIA Corporation", "Advanced Micro Devices, Inc."]);
     assert.deepEqual(engineAnswer(answer).results.filter(([measure]) => measure.startsWith("Gross margin") || measure === "Revenue"), [
-      ["Revenue", "Q4 FY2026 (ended 2026-01-25)", "verified", "USD 62,100,000,000.00"],
+      ["Revenue", "Q4 FY2026 (ended 2026-01-25)", "verified", "$62.1B"],
       ["Gross margin (gross profit / revenue)", "Q4 FY2026 (ended 2026-01-25)", "verified", "74.40%"],
-      ["Revenue", "Q2 FY2026 (ended 2026-06-27)", "verified", "USD 11,200,000,000.00"],
+      ["Revenue", "Q2 FY2026 (ended 2026-06-27)", "verified", "$11.2B"],
       ["Gross margin (gross profit / revenue)", "Q2 FY2026 (ended 2026-06-27)", "verified", "54.02%"],
     ]);
     assert.deepEqual(engineAnswer(answer).notes, [
-      "Of NVDA and Advanced Micro Devices, Inc., NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026 (ended Jan 2026)), Advanced Micro Devices, Inc. 54.02% (Q2 FY2026 (ended Jun 2026)).\n\n" +
-        "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026 (ended Jan 2026); Advanced Micro Devices, Inc.'s revenue was USD 11,200,000,000.00 in Q2 FY2026 (ended Jun 2026).",
+      "Of NVDA and Advanced Micro Devices, Inc., NVDA's gross margin was highest: NVDA 74.40%, Advanced Micro Devices, Inc. 54.02%.\n\n" +
+        "NVDA's revenue was $62.1B; Advanced Micro Devices, Inc.'s revenue was $11.2B.\n\n" +
+        "Periods: NVDA Q4 FY2026 (ended Jan 2026), Advanced Micro Devices, Inc. Q2 FY2026 (ended Jun 2026).",
     ]);
     // The saved scope covers the auto-selected peer, so a follow-up about AMD continues it (#206).
     const { rows } = await client.query<{ research_scope: { companies: Array<{ issuer_id: string }> } }>(
@@ -507,7 +509,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     completedTurn(await runTurn(base, amdThread.thread_id, "And its revenue in Q2 2025?"));
     const answer = await latestAssistantMessage(base, amdThread.thread_id);
     assert.deepEqual(engineAnswer(answer), {
-      results: [["Revenue", "Q2 FY2025 (ended 2025-06-28)", "verified", "USD 7,685,000,000.00"]],
+      results: [["Revenue", "Q2 FY2025 (ended 2025-06-28)", "verified", "$7.7B"]],
       notes: ["AMD is carried from the previous answer. Not covered by this answer: a margin over several periods; the cause of these figures."],
     });
     causeQuotedOrNamed(answer);
@@ -851,9 +853,9 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const answer = await latestAssistantMessage(base, defaultThread.thread_id);
     // Each company at its own latest quarter (#398 D4), with no price chart: price history is not an engine figure.
     assert.deepEqual(engineAnswer(answer).results.filter(([measure]) => measure === "Revenue" || measure.startsWith("Year-over-year")), [
-      ["Revenue", "Q4 FY2026 (ended 2026-01-25)", "verified", "USD 62,100,000,000.00"],
+      ["Revenue", "Q4 FY2026 (ended 2026-01-25)", "verified", "$62.1B"],
       ["Year-over-year percent change in Revenue", "Q4 FY2026 (ended 2026-01-25) vs Q4 FY2025 (ended 2025-01-26)", "verified", "57.89%"],
-      ["Revenue", "Q2 FY2026 (ended 2026-06-27)", "verified", "USD 11,200,000,000.00"],
+      ["Revenue", "Q2 FY2026 (ended 2026-06-27)", "verified", "$11.2B"],
       ["Year-over-year percent change in Revenue", "Q2 FY2026 (ended 2026-06-27) vs Q2 FY2025 (ended 2025-06-28)", "verified", "45.74%"],
     ]);
     assert.deepEqual(answer.blocks.map((block) => block.kind), ["financial_answer", "rich_text"]);
@@ -880,7 +882,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       };
     };
     assert.deepEqual(await shown("How is NVDA doing?"), {
-      first: ["Revenue", "Q1 FY2025 (ended 2024-04-28)", "verified", "USD 26,044,000,000.00"],
+      first: ["Revenue", "Q1 FY2025 (ended 2024-04-28)", "verified", "$26.0B"],
       margin: ["Gross margin (gross profit / revenue)", "Q4 FY2026 (ended 2026-01-25)", "verified", "74.40%"],
       yoy: ["Year-over-year percent change in Revenue", "Q4 FY2026 (ended 2026-01-25) vs Q4 FY2025 (ended 2025-01-26)", "verified", "57.89%"],
       period: [null, null, "quarter"],

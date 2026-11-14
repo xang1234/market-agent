@@ -10,7 +10,7 @@
     "44444444-4444-4444-9444-444444444444"
   ],
   "as_of": "2024-01-16T04:59:59.999Z",
-  "presentation_hash": "eb75e58954f16063d936bfe1c95a77ea2156cdb5032d9fd62f8b6184cc8ae2eb",
+  "presentation_hash": "96abe6732001c34b185c0ebaa9cabb7316b4d544357100139cf4a323d450e072",
   "financial": {
     "presentation_version": "financial-presentation.v2",
     "template_version": "financial-answer.v1",
@@ -64,7 +64,7 @@
         "period_label_id": "period:p0",
         "presented": {
           "kind": "value",
-          "text": "USD 391,035,000,000.00",
+          "text": "$391.0B",
           "full_text": "USD 391035000000",
           "value": "391035000000",
           "unit": {

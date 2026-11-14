@@ -4195,7 +4195,7 @@
         },
         {
           "type": "text",
-          "text": "> **Analyst inference on NVDA** (gross margin highest first: NVDA, AMD, AAPL; net margin highest first: NVDA, AAPL, AMD; revenue growth (YoY) highest first: NVDA, AMD, AAPL): It pairs the fastest growth with the richest margins of the three, making it the strongest on both counts."
+          "text": "> **Analyst inference on NVDA** (from the gross margin, net margin, and revenue growth (YoY) rankings): It pairs the fastest growth with the richest margins of the three, making it the strongest on both counts."
         },
         {
           "type": "text",
@@ -4203,7 +4203,7 @@
         },
         {
           "type": "text",
-          "text": "> **Analyst inference on AAPL** (revenue highest first: AAPL, NVDA, AMD; net margin highest first: NVDA, AAPL, AMD; revenue growth (YoY) highest first: NVDA, AMD, AAPL): It has the largest revenue base and a strong net margin, but the slowest growth of the three."
+          "text": "> **Analyst inference on AAPL** (from the revenue, net margin, and revenue growth (YoY) rankings): It has the largest revenue base and a strong net margin, but the slowest growth of the three."
         },
         {
           "type": "text",

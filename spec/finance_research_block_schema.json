@@ -1237,7 +1237,7 @@
             },
             "text": {
               "type": "string",
-              "pattern": "^(?:[A-Z]{3} )?-?[0-9][0-9,]*(?:\\.[0-9]+)?(?:%| pp| bp| shares| per share)?$"
+              "pattern": "^(?:-?(?:\\$|[A-Z]{3} ))?-?[0-9][0-9,]*(?:\\.[0-9]+)?[MBT]?(?:%| pp| bp| shares| per share)?$"
             },
             "full_text": {
               "type": "string",

@@ -1000,7 +1000,7 @@
         },
         {
           "type": "text",
-          "text": "> **Analyst inference** (revenue highest first: Data Center, Gaming, OEM & Other, Professional Visualization, Automotive): Its revenue is overwhelmingly concentrated in Data Center, with every other segment far smaller."
+          "text": "> **Analyst inference** (from NVDA's revenue ranking by segment): Its revenue is overwhelmingly concentrated in Data Center, with every other segment far smaller."
         },
         {
           "type": "text",
@@ -1008,7 +1008,7 @@
         },
         {
           "type": "text",
-          "text": "> **Analyst inference** (revenue highest first: Data Center, Gaming, OEM & Other, Professional Visualization, Automotive): Counterpoint: only one quarter of segment data is shown, so the data cannot show whether this concentration is rising or falling."
+          "text": "> **Analyst inference** (from NVDA's revenue ranking by segment): Counterpoint: only one quarter of segment data is shown, so the data cannot show whether this concentration is rising or falling."
         }
       ]
     }
