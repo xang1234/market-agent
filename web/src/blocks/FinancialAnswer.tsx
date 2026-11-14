@@ -1,4 +1,4 @@
-import { useContext, useState, type ReactElement, type ReactNode } from 'react'
+import { useContext, type ReactElement, type ReactNode } from 'react'
 import { ChartCard } from './ChartCard.tsx'
 import { CopyButton } from './CopyButton.tsx'
 import { provenanceRow, toTsv } from './tableCopy.ts'
@@ -6,25 +6,21 @@ import { InspectableResult } from '../evidence/InspectableResult.tsx'
 import { BlockProofContext } from './blockProof.ts'
 import { VerificationLabel } from './VerificationLabel.tsx'
 import {
-  cellPeriod,
   columnNames,
+  companyNames,
   coverageText,
-  gapReasons,
-  groupStarts,
   labelText,
   leadParts,
-  shortNames,
   resultLabel,
   resultShown,
   resultsById,
-  rowPeriod,
   seriesBars,
   shortPeriod,
   seriesCopyRows,
+  statementOf,
   tableCopyRows,
-  sortedRowIndexes,
   supportedFinancialContent,
-  type SortDirection,
+  type Statement,
 } from './financialAnswer.ts'
 import type {
   FinancialAnswerBlock,
@@ -60,9 +56,17 @@ export function FinancialAnswer({ block }: FinancialAnswerProps): ReactElement {
     )
   }
   const results = resultsById(content)
-  const subjects = Object.values(content.labels).flatMap((label) => (label.kind === 'subject' ? [label.text] : []))
-  const short = shortNames(subjects)
-  const names = new Map(subjects.map((name, index) => [name, short[index]!]))
+  const names = companyNames(content)
+  const parts = withLeadsTogether(content, results)
+  let leads = parts.filter((part) => Array.isArray(part)).flat()
+  const statements = new Map<FinancialPresentation, Statement>()
+  for (const presentation of content.presentations) {
+    if (presentation.kind !== 'table') continue
+    const statement = statementOf(content, presentation, results, leads)
+    statements.set(presentation, statement)
+    leads = leads.filter((lead) => !statement.foldedLeads.has(lead.result_id))
+  }
+  const separate = new Set(leads.map((lead) => lead.result_id))
   return (
     <ChartCard testId={`block-financial-answer-${block.id}`} blockKind="financial_answer" title={undefined} dataAttrs={{ 'data-certified': String(certified) }}>
       <div className="flex flex-wrap items-center gap-2">
@@ -73,13 +77,13 @@ export function FinancialAnswer({ block }: FinancialAnswerProps): ReactElement {
           {coverageText(content)}
         </p>
       </div>
-      {withLeadsTogether(content, results).map((part, index) =>
-        Array.isArray(part) ? (
-          <Leads key={`${block.id}-p${index}`} content={content} names={names} leads={part} />
-        ) : (
-          <PresentationView key={`${block.id}-p${index}`} blockId={block.id} provenance={provenanceRow(block)} content={content} results={results} names={names} presentation={part} />
-        ),
-      )}
+      {parts.map((part, index) => {
+        if (!Array.isArray(part)) {
+          return <PresentationView key={`${block.id}-p${index}`} blockId={block.id} provenance={provenanceRow(block)} content={content} results={results} statement={statements.get(part)} presentation={part} />
+        }
+        const unfolded = part.filter((lead) => separate.has(lead.result_id))
+        return unfolded.length === 0 ? null : <Leads key={`${block.id}-p${index}`} content={content} names={names} leads={unfolded} />
+      })}
     </ChartCard>
   )
 }
@@ -107,12 +111,12 @@ type PresentationViewProps = {
   provenance: ReadonlyArray<string>
   content: FinancialAnswerContent
   results: Results
-  names: Names
+  statement: Statement | undefined
   presentation: FinancialPresentation
 }
 
-function PresentationView({ blockId, provenance, content, results, names, presentation }: PresentationViewProps): ReactElement | null {
-  if (presentation.kind === 'table') return <CertifiedTable blockId={blockId} provenance={provenance} content={content} results={results} names={names} table={presentation} />
+function PresentationView({ blockId, provenance, content, results, statement, presentation }: PresentationViewProps): ReactElement | null {
+  if (presentation.kind === 'table') return <CertifiedTable blockId={blockId} provenance={provenance} content={content} results={results} statement={statement!} table={presentation} />
   if (presentation.kind === 'series') return <CertifiedSeries provenance={provenance} content={content} results={results} series={presentation} />
   if (presentation.kind === 'scenarios') return <CertifiedScenarios blockId={blockId} content={content} results={results} scenarios={presentation} />
   const result = results.get(presentation.result_id)
@@ -228,7 +232,7 @@ function Leads({ content, names, leads }: { content: FinancialAnswerContent; nam
   )
 }
 
-// period names the cell to the inspector; shown is what the cell prints of it (cellPeriod), the whole period its title. A gap's reason is its title and its screen-reader text.
+// period names the cell to the inspector; shown is what the cell prints of it, the whole period its title. A gap's reason is its title and its screen-reader text.
 function Cell({ content, result, period, shown }: { content: FinancialAnswerContent; result: FinancialPresentedResult | undefined; period?: string; shown?: string }): ReactElement {
   if (!result) return <span className="text-muted">Not requested</span>
   const { presented } = result
@@ -248,7 +252,7 @@ function Cell({ content, result, period, shown }: { content: FinancialAnswerCont
   return (
     <>
       <span className="text-muted" title={presented.text}>
-        <span aria-hidden="true">n/a</span>
+        <span aria-hidden="true">—</span>
         <span className="sr-only">{presented.text}</span>
       </span>
       {note}
@@ -256,42 +260,26 @@ function Cell({ content, result, period, shown }: { content: FinancialAnswerCont
   )
 }
 
-// The fiscal period, then its end date on a line of its own, so the company column stays narrow.
-function RowPeriod({ label }: { label: string }): ReactElement {
-  const short = shortPeriod(label)
-  const [period, ...rest] = short.split(' · ')
-  return (
-    <span className="block text-xs font-normal text-muted" title={short === label ? undefined : label}>
-      {period}
-      {rest.length === 0 ? null : <><span className="sr-only"> · </span><span className="block">{rest.join(' · ')}</span></>}
-    </span>
-  )
-}
-
 // A certified value opens the inspector; it reads as a plain figure until hovered or focused.
 const VALUE_BUTTON = '-mx-1 cursor-pointer rounded px-1 transition-colors hover:bg-accent-soft hover:text-accent-strong'
 
-const HEAD = 'border-b border-line-strong px-1.5 pb-2 align-bottom text-xs font-medium text-muted first:pl-0'
-const CELL = 'border-b border-line px-1.5 py-2.5 align-top first:pl-0 group-last/row:border-b-0 group-hover/row:bg-surface-hover'
-// A column that starts a new kind of figure (amounts, ratios, changes) is set off by a rule.
-const GROUP = 'border-l border-line'
+const HEAD = 'border-b border-line-strong px-3 pb-1.5 align-bottom text-xs font-medium text-muted first:pl-0'
+const CELL = 'border-b border-line px-3 py-1.5 align-top first:pl-0 group-hover/row:bg-surface-hover'
 
-type TableProps = { blockId: string; provenance: ReadonlyArray<string>; content: FinancialAnswerContent; results: Results; names: Names; table: FinancialTablePresentation }
+function differencesOf(statement: Statement): ReadonlyMap<string, FinancialPresentedResult> {
+  return new Map(statement.sections.flatMap((section) => section.rows.flatMap((row) => (row.difference ? [[row.key, row.difference] as const] : []))))
+}
 
-function CertifiedTable({ blockId, provenance, content, results, names: companies, table }: TableProps): ReactElement {
-  const [sort, setSort] = useState<{ columnId: string; direction: SortDirection } | null>(null)
-  const order = sort ? sortedRowIndexes(table, results, sort.columnId, sort.direction) : table.rows.map((_, index) => index)
-  const toggle = (columnId: string) =>
-    setSort((current) =>
-      current?.columnId === columnId && current.direction === 'ascending' ? { columnId, direction: 'descending' } : { columnId, direction: 'ascending' },
-    )
-  const measures = table.columns.map((column) => labelText(content, column.measure_label_id))
-  const names = columnNames(measures)
-  const starts = groupStarts(content, table, results)
+type TableProps = { blockId: string; provenance: ReadonlyArray<string>; content: FinancialAnswerContent; results: Results; statement: Statement; table: FinancialTablePresentation }
+
+function CertifiedTable({ blockId, provenance, content, results, statement, table }: TableProps): ReactElement {
+  const { companies, sharedPeriod, sections, differenceSides, footnotes } = statement
+  const width = 1 + companies.length + (differenceSides === null ? 0 : 1)
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex justify-end">
-        <CopyButton label="Copy table" what={table.caption || 'this table'} purpose="for a spreadsheet" text={() => toTsv([...tableCopyRows(content, table, results, order), provenance])} />
+      <div className="flex items-end justify-between gap-2">
+        {sharedPeriod === null ? <span /> : <p className="text-xs text-muted" data-testid={`block-financial-answer-${blockId}-period`}>{sharedPeriod}</p>}
+        <CopyButton label="Copy table" what={table.caption || 'this table'} purpose="for a spreadsheet" text={() => toTsv([...tableCopyRows(content, table, results, differencesOf(statement)), provenance])} />
       </div>
       <div className="scroll-edge overflow-x-auto" data-testid={`block-financial-answer-${blockId}-table`}>
         <table className="w-full border-separate border-spacing-0 text-left text-sm tabular-nums">
@@ -299,64 +287,57 @@ function CertifiedTable({ blockId, provenance, content, results, names: companie
           <thead>
             <tr>
               <th scope="col" className={`${HEAD} sticky left-0 z-10 bg-surface`}>
-                Company
+                <span className="sr-only">Measure</span>
               </th>
-              {table.columns.map((column, index) => {
-                const name = names[index]!
-                const heading = column.period_label_id === null ? name : `${name}, ${shortPeriod(labelText(content, column.period_label_id))}`
-                const active = sort?.columnId === column.column_id
-                return (
-                  <th
-                    key={column.column_id}
-                    scope="col"
-                    aria-sort={active ? sort.direction : 'none'}
-                    className={`${HEAD} text-right${starts[index] ? ` ${GROUP}` : ''}`}
-                  >
-                    <button type="button" className={active ? 'text-right text-fg' : 'text-right hover:text-fg'} title={name === measures[index] ? undefined : measures[index]} onClick={() => toggle(column.column_id)}>
-                      {heading}
-                    </button>
-                  </th>
-                )
-              })}
+              {companies.map((company) => (
+                <th key={company.subjectId} scope="col" className={`${HEAD} whitespace-nowrap text-right`} data-subject={company.subjectId}>
+                  <span className="block text-sm font-semibold text-fg" title={company.short === company.name ? undefined : company.name}>{company.short}</span>
+                  {sharedPeriod === null && company.period !== null ? <span className="block font-normal">{company.period}</span> : null}
+                </th>
+              ))}
+              {differenceSides === null ? null : (
+                <th scope="col" className={`${HEAD} whitespace-nowrap text-right`}>
+                  <span className="block text-sm font-semibold text-fg">Difference</span>
+                  <span className="block font-normal">{differenceSides.join(' − ')}</span>
+                </th>
+              )}
             </tr>
           </thead>
-          <tbody>
-            {order.map((rowIndex) => {
-              const row = table.rows[rowIndex]!
-              const shared = rowPeriod(content, table, row, results)
-              // A row of gaps reads n/a once, unless a gap names a period beyond the row's (another period, or a change's base) and so needs its own cell.
-              const reasons = gapReasons(row, results)
-              const gapped = reasons !== null && row.cells.every((cell, index) =>
-                table.columns[index]?.period_label_id !== null || cellPeriod(labelText(content, results.get(cell!)!.period_label_id), shared) === undefined)
-              const company = labelText(content, row.subject_label_id)
-              const shown = companies.get(company) ?? company
-              return (
-                <tr key={row.subject_label_id} className="group/row" data-row-label={row.subject_label_id}>
-                  <th scope="row" className={`${CELL} sticky left-0 z-10 whitespace-nowrap bg-surface font-medium text-fg`}>
-                    <span title={shown === company ? undefined : company}>{shown}</span>
-                    {shared === null ? null : <RowPeriod label={shared} />}
+          {sections.map((section) => (
+            <tbody key={section.rows[0]!.key}>
+              {section.title === null ? null : (
+                <tr>
+                  <th scope="colgroup" colSpan={width} className="border-b border-line px-0 pb-1 pt-3 text-left text-[11px] font-semibold uppercase tracking-wide text-muted">
+                    <span className="sticky left-0">{section.title}</span>
                   </th>
-                  {gapped ? (
-                    <td colSpan={row.cells.length} className={`${CELL} text-muted`}>
-                      <span aria-hidden="true">n/a</span>
-                      <span className="sr-only">Not available.</span>
-                      <span className="block text-xs">{reasons.join(' ')}</span>
-                    </td>
-                  ) : row.cells.map((cell, cellIndex) => {
-                    const result = cell === null ? undefined : results.get(cell)
-                    const label = table.columns[cellIndex]?.period_label_id === null && result ? labelText(content, result.period_label_id) : undefined
-                    return (
-                      <td key={`${row.subject_label_id}-${cellIndex}`} className={`${CELL} whitespace-nowrap text-right text-fg${starts[cellIndex] ? ` ${GROUP}` : ''}`}>
-                        <Cell content={content} result={result} period={label === undefined ? undefined : shortPeriod(label)} shown={label === undefined ? undefined : cellPeriod(label, shared)} />
-                      </td>
-                    )
-                  })}
                 </tr>
-              )
-            })}
-          </tbody>
+              )}
+              {section.rows.map((row) => (
+                <tr key={row.key} className="group/row" data-row={row.key}>
+                  <th scope="row" className={`${CELL} sticky left-0 z-10 whitespace-nowrap bg-surface font-normal text-fg`} title={row.label === row.measure ? undefined : row.measure}>
+                    {row.label}
+                  </th>
+                  {row.cells.map((cell, index) => (
+                    <td key={companies[index]!.subjectId} className={`${CELL} whitespace-nowrap text-right text-fg`} data-result-id={cell.result?.result_id}>
+                      <Cell content={content} result={cell.result} period={cell.result && shortPeriod(labelText(content, cell.result.period_label_id))} shown={cell.period ?? undefined} />
+                    </td>
+                  ))}
+                  {differenceSides === null ? null : (
+                    <td className={`${CELL} whitespace-nowrap text-right text-fg`} data-result-id={row.difference?.result_id}>
+                      {row.difference === undefined ? null : row.difference.presented.kind === 'value'
+                        ? <LeadValue content={content} result={row.difference} />
+                        : <Cell content={content} result={row.difference} />}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          ))}
         </table>
       </div>
+      {footnotes.map((note) => (
+        <p key={note} className="text-xs text-muted">{note}</p>
+      ))}
     </div>
   )
 }
