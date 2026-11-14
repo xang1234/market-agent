@@ -369,8 +369,8 @@ export function calendarNote(assertions: ReadonlyArray<Assertion>, packet: Evide
 // Across companies, each company that shows one period in the answer's
 // figures (a change's being the period it changed to) has it said once, here,
 // rather than after each of its figures; a company shown at several periods
-// keeps them by its figures. Then the
-// calendar note is not needed: each period is named with its end.
+// keeps them by its figures. Then the calendar note is not needed: each
+// period is named with its end.
 export function answerPeriods(assertions: ReadonlyArray<Assertion>, packet: EvidencePacket): { once: ReadonlyMap<string, string>; note?: string } {
   const periods = new Map<string, Map<string, PacketFigure>>();
   if (packet.companies.length > 1) {
