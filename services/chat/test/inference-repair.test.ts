@@ -520,6 +520,9 @@ test("in every repair outcome the last blocks a watcher hears are the blocks sav
 test("a repair that fails the checks shows its inference's first form at once, while another repaired verdict is still out", async (t) => {
   t.mock.method(console, "info", () => {});
   const UNVERIFIED_P = `> **Unverified analyst view on AAPL** (not backed by the figures shown): ${PROFITABILITY_TEXT}`;
+  // The margin rankings only the unverified view rests on are left out; the
+  // revenue ranking stays for the NVDA inference, pending and then verified.
+  const unverified = (...rest: string[]) => [FISCAL_RANKINGS.split("\n\n")[0], UNVERIFIED_P, ...rest, FISCAL_NOTE].join("\n\n");
   const second = deferred<LlmChatResult>();
   const asked = deferred<void>();
   const { createClient } = models(FISCAL, {
@@ -535,10 +538,10 @@ test("a repair that fails the checks shows its inference's first form at once, w
   const seen: string[] = [];
   answer.judging!.watch((blocks) => seen.push(text(blocks)));
   await asked.promise;
-  assert.equal(seen.at(-1), fiscal(UNVERIFIED_P, PENDING));
+  assert.equal(seen.at(-1), unverified(PENDING));
   second.resolve(verdict(6, "entailed"));
   const done = await answer.judging!.done;
-  assert.equal(text(done.blocks), fiscal(UNVERIFIED_P, ENDS));
+  assert.equal(text(done.blocks), unverified(ENDS));
   assert.equal(seen.at(-1), text(done.blocks));
   assert.equal(seen.some((blocks) => blocks.includes("2 times")), false);
 });
