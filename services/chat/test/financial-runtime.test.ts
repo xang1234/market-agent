@@ -396,6 +396,36 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     }
   });
 
+  await t.test("a company picked in answer to a clarification whose fetch fails or outlasts the budget is named still loading", async () => {
+    // AMBC is Alpha (filed) or Gamma (none on file).
+    const ambiguous = (mention: string): Promise<ChatSubjectPreResolution> => mention !== "AMBC" ? resolveMention(mention) : Promise.resolve({
+      status: "needs_clarification", input_text: mention, normalized_input: mention, message: "ambiguous",
+      candidates: [
+        { subject_ref: { kind: "issuer", id: IDS.issuerA }, display_name: "Alpha Industries Inc.", confidence: 0.5 },
+        { subject_ref: { kind: "issuer", id: MISSING_ISSUER }, display_name: "Gamma Unlisted", confidence: 0.5 },
+      ],
+    } as ChatSubjectPreResolution);
+    for (const [name, fetchFilings] of [
+      ["fails", async () => { throw new Error("sec_edgar: HTTP 503"); }],
+      ["never settles", () => new Promise<void>(() => {})],
+    ] as const) {
+      const hydrate = createTurnHydrator({
+        db: pool,
+        env: { SEC_EDGAR_USER_AGENT: "test-agent" },
+        fetchFilings,
+        fetchBars: async () => assert.fail("no market origin is configured"),
+        budgetMs: 50,
+        logger: { warn: () => {} },
+      });
+      const harness = chatHarness(pool, { model: revenueModel(["BBB"]), readQuestion: comparing("BBB", "AMBC"), resolveMention: ambiguous, hydrate });
+      const offered = completed((await harness.run({ ...base, userIntent: "Compare revenue for BBB and AMBC" })).events).financial_clarification as { clarification_id: string; choices: Array<{ choice_id: string; label: string }> };
+      const gamma = offered.choices.find((choice) => choice.label === "Gamma Unlisted")!;
+      const answered = completed((await harness.run({ ...base, userIntent: "Compare revenue for BBB and AMBC", clarificationAnswer: { clarification_id: offered.clarification_id, choice_id: gamma.choice_id } })).events);
+      const { rows: [saved] } = await db.query(`select blocks from chat_messages where message_id = $1`, [answered.message_id]);
+      assert.deepEqual(saved.blocks.at(-1).segments, [{ type: "text", text: "Filings for Gamma Unlisted are still loading; ask again in a minute." }], name);
+    }
+  });
+
   await t.test("a company whose filings are still loading at the budget is named so, and the turn completes", async () => {
     let finish!: () => void;
     const hydrate = createTurnHydrator({

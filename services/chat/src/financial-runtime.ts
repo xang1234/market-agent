@@ -373,24 +373,21 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const choice: PlanChoice = routed.kind !== "scenario" && routed.kind !== "analyst" && CASH_RESILIENCE.test(text) ? CASH_RESILIENCE_CHOICE : routed;
     if (reserved) return run(requested, reading, scope, choice);
     if (choice.kind === "analyst") return null;
-    const kept = withinScope(requested, scope);
-    if (kept.subjects.length === 0) return declined;
-    const refs = kept.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
+    const inScope = withinScope(requested, scope);
+    if (inScope.subjects.length === 0) return declined;
     return async () => {
+      // A clarification's pick is applied first, so the company picked is the
+      // one fetched and counted; planTurn applies it again, which changes no
+      // company already resolved, as a reserved run's retry needs.
+      const { clarificationAnswer } = context;
+      const kept: TurnCompanies = clarificationAnswer
+        ? { ...inScope, subjects: distinctBy(await applyAnswer(inScope.subjects, clarificationAnswer, planningContextAt(deps.planningModel, context, authority, deps.clock?.() ?? new Date()), text), requestedKey) }
+        : inScope;
+      const refs = kept.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
       // What a company lacks is fetched before its filings are counted, and
-      // before the run takes its cutoff, so what the fetch stored is read. A
-      // clarification's pick is fetched too; planTurn applies it again to plan.
-      const hydrate = async (fetch: NonNullable<typeof deps.hydrate>) => {
-        const { clarificationAnswer } = context;
-        const answered = clarificationAnswer
-          ? distinctBy(await applyAnswer(kept.subjects, clarificationAnswer, planningContextAt(deps.planningModel, context, authority, deps.clock?.() ?? new Date()), text), requestedKey)
-          : kept.subjects;
-        const companies = answered.flatMap(({ resolution }) => resolution.status === "resolved"
-          ? [{ issuer_id: resolution.subject_ref.id, label: kept.labels.get(resolution.subject_ref.id.toLowerCase()) ?? resolution.subject_ref.id }]
-          : []);
-        return fetch(companies, { emit: context.emit, turnId });
-      };
-      const loading = deps.hydrate ? await hydrate(deps.hydrate).catch((reason: unknown) => {
+      // before the run takes its cutoff, so what the fetch stored is read.
+      const companies = refs.map((ref) => ({ issuer_id: ref.id, label: kept.labels.get(ref.id.toLowerCase()) ?? ref.id }));
+      const loading = deps.hydrate ? await deps.hydrate(companies, { emit: context.emit, turnId }).catch((reason: unknown) => {
         console.warn("[chat] fetching the turn's companies failed; answering from what is on file", reason);
         return NOTHING_LOADING;
       }) : NOTHING_LOADING;
@@ -836,7 +833,8 @@ async function planCashResilience(context: PlanningContext, text: string): Promi
  * Applies the user's pick to the mention it was offered for. The clarification
  * is regenerated from the same request and must match the answered one
  * exactly; a stale or foreign answer changes nothing and the question is
- * asked again.
+ * asked again. With no mention left ambiguous there is nothing to pick, and
+ * the request is not replayed, which would reach the planning model.
  */
 async function applyAnswer(
   subjects: ReadonlyArray<RequestedSubject>,
@@ -844,6 +842,7 @@ async function applyAnswer(
   planningContext: (subjects: ReadonlyArray<RequestedSubject>) => PlanningContext,
   text: string,
 ): Promise<ReadonlyArray<RequestedSubject>> {
+  if (!subjects.some((subject) => subject.resolution.status === "ambiguous")) return subjects;
   const pending = await planFinancialRequest(planningContext(subjects), text, noModel);
   if (pending.outcome !== "needs_clarification" || pending.clarification.clarification_id !== answer.clarification_id) return subjects;
   let choice;
