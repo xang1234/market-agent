@@ -1,6 +1,7 @@
 import type { SubjectRef } from './search.ts'
 import type { FiscalPeriod, StatementBasis } from './statements.ts'
 import { defineResource } from '../fetch/resource.ts'
+import { notOnFileError } from './fundamentalsNotOnFile.ts'
 
 export type SegmentAxis = 'business' | 'geography'
 
@@ -95,7 +96,7 @@ export async function fetchSegments(
     signal: init.signal,
   })
   if (!res.ok) {
-    throw new SegmentsFetchError(res.status, `fundamentals segments fetch failed: HTTP ${res.status}`)
+    throw (await notOnFileError(res)) ?? new SegmentsFetchError(res.status, `fundamentals segments fetch failed: HTTP ${res.status}`)
   }
   const body = (await res.json()) as GetSegmentsResponse
   return body.segments

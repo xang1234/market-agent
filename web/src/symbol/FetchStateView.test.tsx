@@ -74,3 +74,10 @@ test('unavailable says it could not load, keeps the reason in details, and Retry
     restoreGlobals()
   }
 })
+
+test('not on file says so plainly, with no Retry', () => {
+  assert.equal(
+    render({ status: 'not_on_file', reason: 'business segments not found' }),
+    '<p class="text-sm text-muted">No quote on file.</p>',
+  )
+})
