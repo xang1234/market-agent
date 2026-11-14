@@ -12,7 +12,7 @@ import type { QueryExecutor } from "../../shared/src/http.ts";
 import { labelList, MAX_TURN_SUBJECTS, type ChatTurnEmit } from "./coordinator.ts";
 import { issuersWithoutFilings } from "./financial-runtime.ts";
 import { companyListings, listingsForComparison, listingTimeZones } from "./perf-block.ts";
-import { frozenDataMode, marketHydrationOrigin, type HydrationListing } from "./ytd-hydration.ts";
+import { frozenDataMode, marketHydrationOrigin, ytdRequestRange, type HydrationListing } from "./ytd-hydration.ts";
 
 // `listing_id` is the listing the turn named the company by, when it named
 // one. A company with no label (an auto-selected peer) is named by its listing.
@@ -48,10 +48,10 @@ export function createTurnHydrator(deps: {
   const now = deps.now ?? Date.now;
   const logger = deps.logger ?? console;
   // Each fetch runs once at a time and, in this process, starts at most once
-  // a minute per company or listing: a later turn waits on one still running,
+  // a minute per key: a later turn waits on one still running,
   // and one that finished or failed is not started again until the minute is
   // up. The check and the start are synchronous, so concurrent turns start one.
-  // ponytail: per process and never pruned; one entry per company ever named.
+  // ponytail: per process and never pruned; one entry per company or comparison ever named.
   const fetches = new Map<string, Fetch>();
   const start = (keys: ReadonlyArray<string>, fetch: () => Promise<void>): Fetch => {
     const entry: Fetch = { at: now(), settled: Promise.resolve() };
@@ -93,19 +93,32 @@ export function createTurnHydrator(deps: {
         ? [{ company, entry: start([key], () => deps.fetchFilings(company.issuer_id)) }]
         : [];
     });
-    const priced = unpriced.flatMap((listing) => {
-      const entry = current(`bars:${listing.id}`);
-      return entry?.outcome === undefined ? [{ listing, entry }] : [];
+    // A charted YTD window is one fetch of the whole comparison, keyed by the
+    // range each listing is requested over: the chart needs every listing's
+    // window on one basis, and hydrateYtdBars falls back to the next basis
+    // only for the listings it is given. Otherwise each bare listing is its own.
+    const units = turn.ytdCutoff === undefined
+      ? unpriced.map((listing) => ({ key: `bars:${listing.id}`, listings: [listing] }))
+      : unpriced.length === 0 ? [] : [{
+        key: `ytd:${unpriced.map((listing) => {
+          const range = ytdRequestRange(cutoff, listing.timeZone);
+          return `${listing.id}@${range.start}/${range.end}`;
+        }).sort().join(",")}`,
+        listings: unpriced,
+      }];
+    const priced = units.flatMap((unit) => {
+      const entry = current(unit.key);
+      return entry?.outcome === undefined ? [{ ...unit, entry }] : [];
     });
-    const due = priced.flatMap(({ listing, entry }) => (entry ? [] : [listing]));
-    const batch = due.length === 0 ? [] : [start(due.map((listing) => `bars:${listing.id}`), () => deps.fetchBars(origin!, due.map(({ id, timeZone }) => ({ id, timeZone })), cutoff))];
+    const due = priced.filter(({ entry }) => !entry);
+    const batch = due.length === 0 ? [] : [start(due.map(({ key }) => key), () => deps.fetchBars(origin!, due.flatMap(({ listings }) => listings.map(({ id, timeZone }) => ({ id, timeZone }))), cutoff))];
     const listingLabel = new Map(unpriced.map((listing) => [listing.issuer_id, listing.label]));
     const labelOf = new Map(capped.map((company) => [company.issuer_id, company.label ?? listingLabel.get(company.issuer_id) ?? company.issuer_id]));
     const running = filings.filter(({ entry }) => entry.outcome === undefined);
 
     const steps = [
       { tool_name: "fetch_filings", label: `Fetching filings for ${labelList(running.map(({ company }) => labelOf.get(company.issuer_id)!))}`, fetches: running.map(({ entry }) => entry) },
-      { tool_name: "load_prices", label: `Loading prices for ${labelList(priced.map(({ listing }) => labelOf.get(listing.issuer_id)!))}`, fetches: [...priced.flatMap(({ entry }) => entry ?? []), ...batch] },
+      { tool_name: "load_prices", label: `Loading prices for ${labelList(priced.flatMap(({ listings }) => listings.map((listing) => labelOf.get(listing.issuer_id)!)))}`, fetches: [...priced.flatMap(({ entry }) => entry ?? []), ...batch] },
     ].filter((step) => step.fetches.length > 0).map((step) => ({ ...step, tool_call_id: `${step.tool_name}-${turn.turnId}` }));
     for (const { tool_call_id, tool_name, label } of steps) turn.emit("tool.started", { tool_call_id, tool_name, label });
 

@@ -80,10 +80,17 @@ export async function hydrateYtdBars(input: {
   }
 }
 
-// One series request per range: from Dec 20 of the prior year (no exchange is
-// more than 14 hours behind UTC, so the year is never later than the cutoff's
-// local year) to the end of each exchange's last completed session, never into
-// a session still trading, whose bar would be cached as its close.
+// The range a listing's window is requested over: from Dec 20 of the prior
+// year (no exchange is more than 14 hours behind UTC, so the year is never
+// later than the cutoff's local year) to the end of its exchange's last
+// completed session, never into a session still trading, whose bar would be
+// cached as its close. Two cutoffs with the same range fetch the same bars.
+export function ytdRequestRange(now: string, timeZone: string): { start: string; end: string } {
+  const year = new Date(Date.parse(now) - 14 * 60 * 60 * 1000).getUTCFullYear();
+  return { start: `${year - 1}-12-20T00:00:00.000Z`, end: completedSessionsEnd(now, timeZone) };
+}
+
+// One series request per range.
 async function fetchWindows(
   fetchImpl: typeof fetch,
   origin: string,
@@ -92,21 +99,20 @@ async function fetchWindows(
   basis: (typeof BASES)[number],
   signal: AbortSignal,
 ): Promise<Map<string, DailyClose[]>> {
-  const year = new Date(Date.parse(now) - 14 * 60 * 60 * 1000).getUTCFullYear();
-  const start = `${year - 1}-12-20T00:00:00.000Z`;
-  const byEnd = new Map<string, HydrationListing[]>();
+  const byRange = new Map<string, { range: { start: string; end: string }; group: HydrationListing[] }>();
   for (const listing of listings) {
-    const end = completedSessionsEnd(now, listing.timeZone);
-    byEnd.set(end, [...(byEnd.get(end) ?? []), listing]);
+    const range = ytdRequestRange(now, listing.timeZone);
+    const key = `${range.start}/${range.end}`;
+    byRange.set(key, { range, group: [...(byRange.get(key)?.group ?? []), listing] });
   }
   const bars = new Map<string, DailyClose[]>();
-  for (const [end, group] of byEnd) {
+  for (const { range, group } of byRange.values()) {
     const response = await fetchImpl(new URL("/v1/market/series", origin), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         subject_refs: group.map((listing) => ({ kind: "listing", id: listing.id })),
-        range: { start, end },
+        range,
         interval: "1d",
         basis,
         normalization: "raw",

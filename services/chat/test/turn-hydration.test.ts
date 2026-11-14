@@ -4,7 +4,7 @@ import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { createTurnHydrator } from "../src/turn-hydration.ts";
-import type { HydrationListing } from "../src/ytd-hydration.ts";
+import { hydrateYtdBars, type HydrationListing } from "../src/ytd-hydration.ts";
 import { chatDatabase } from "./financial-fixtures.ts";
 
 const LIVE = { SEC_EDGAR_USER_AGENT: "test-agent", MARKET_ORIGIN: "http://market.test" };
@@ -176,6 +176,67 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     } finally {
       await db.query(`delete from market_bar_ranges where listing_id = $1`, [LISTING]);
     }
+  });
+
+  const listed = async (ticker: string) => {
+    const [issuer, listing] = [randomUUID(), randomUUID()];
+    await db.query(`insert into issuers (issuer_id, legal_name) values ($1, $2)`, [issuer, `${ticker} Corp.`]);
+    await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $1, 'common_stock')`, [issuer]);
+    await db.query(`insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone) values ($1, $2, 'XNAS', $3, 'USD', 'America/New_York')`, [listing, issuer, ticker]);
+    return { company: { issuer_id: issuer, label: ticker }, listing };
+  };
+  const [aaa, bbb] = [await listed("AAAA"), await listed("BBBB")];
+
+  await t.test("a comparison fetches every listing to its own window, though one was fetched to another window a moment ago", async () => {
+    const [june, november] = ["2026-06-30T21:00:00.000Z", "2026-11-13T22:00:00.000Z"];
+    for (const [first, second] of [[june, november], [november, june]]) {
+      const calls: Array<{ listings: string[]; cutoff: string }> = [];
+      const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => {}, fetchBars: async (_origin, listings, cutoff) => { calls.push({ listings: listings.map((listing) => listing.id), cutoff }); } });
+      await hydrate([aaa.company], { ...recorder().turn, ytdCutoff: first });
+      const { events, turn } = recorder();
+      await hydrate([aaa.company, bbb.company], { ...turn, ytdCutoff: second });
+      await hydrate([aaa.company, bbb.company], { ...recorder().turn, ytdCutoff: first });
+      assert.deepEqual(calls, [
+        { listings: [aaa.listing], cutoff: first },
+        { listings: [aaa.listing, bbb.listing], cutoff: second },
+        { listings: [aaa.listing, bbb.listing], cutoff: first },
+      ]);
+      assert.deepEqual(events.map((event) => event.label), ["Loading prices for AAAA and BBBB", "Loading prices for AAAA and BBBB"]);
+    }
+  });
+
+  await t.test("a comparison is fetched on one basis for every listing, though one was fetched alone on another a moment ago", async () => {
+    // Before Labor Day's open: the last completed New York session is Aug 31.
+    const cutoff = "2026-09-01T00:00:00.000Z";
+    const full = [{ ts: "2025-12-31T05:00:00.000Z", close: 100 }, { ts: "2026-08-31T04:00:00.000Z", close: 120 }];
+    // AAAA has a split-adjusted window and BBBB only a dividend-adjusted one.
+    const requests: Array<{ basis: string; listings: string[] }> = [];
+    const fetchImpl = (async (_url: URL | string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { basis: string; subject_refs: Array<{ id: string }> };
+      requests.push({ basis: body.basis, listings: body.subject_refs.map((ref) => ref.id) });
+      const results = body.subject_refs.map((ref) => ({
+        listing: { id: ref.id },
+        outcome: body.basis === "split_adjusted" && ref.id === bbb.listing ? { outcome: "unavailable" } : { outcome: "available", data: { bars: full } },
+      }));
+      return new Response(JSON.stringify({ results }), { status: 200 });
+    }) as typeof fetch;
+    const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => {}, fetchBars: (origin, listings, now) => hydrateYtdBars({ origin, listings, now, fetchImpl }) });
+    await hydrate([aaa.company], { ...recorder().turn, ytdCutoff: cutoff });
+    await hydrate([aaa.company, bbb.company], { ...recorder().turn, ytdCutoff: cutoff });
+    assert.deepEqual(requests, [
+      { basis: "split_adjusted", listings: [aaa.listing] },
+      { basis: "split_adjusted", listings: [aaa.listing, bbb.listing] },
+      { basis: "split_and_div_adjusted", listings: [aaa.listing, bbb.listing] },
+    ]);
+  });
+
+  await t.test("the same comparison asked again within a minute, to the same sessions, is not fetched again", async () => {
+    const calls: string[] = [];
+    const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => {}, fetchBars: async (_origin, _listings, cutoff) => { calls.push(cutoff); } });
+    await hydrate([aaa.company, bbb.company], { ...recorder().turn, ytdCutoff: "2026-11-13T22:00:00.000Z" });
+    const { events, turn } = recorder();
+    await hydrate([bbb.company, aaa.company], { ...turn, ytdCutoff: "2026-11-13T22:00:05.000Z" });
+    assert.deepEqual([calls, events], [["2026-11-13T22:00:00.000Z"], []]);
   });
 
   await t.test("a frozen data mode fetches nothing, and without an SEC user agent only prices are fetched", async () => {
