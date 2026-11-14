@@ -717,7 +717,15 @@ function periodText(plan: FinancialPlan, node: OperationNode, names: (slot: Loca
   if (node.operation === "spread") return spreadSides(plan, node, (side) => `${names(side.slot)} ${periodText(plan, side.node, names, readsOf)}`).join(" minus ");
   if (node.operation === "period_rank") return windowSpan(plan, node, names, readsOf);
   const instant = measuresInstant(plan, node);
-  return readsOf(node).map((read) => readText(read, instant)).join(" vs ");
+  return readsOf(node).map((read) => readText(read, instant)).join(VERSUS);
+}
+
+const VERSUS = " vs ";
+
+/** A period label read back: a change's own period and the one it is compared with ("Q4 FY2026 vs Q3 FY2026"); any other label is its own period. */
+export function periodParts(text: string): { current: string; compared?: string } {
+  const [current, compared, ...more] = text.split(VERSUS);
+  return compared === undefined || more.length > 0 ? { current: text } : { current: current!, compared };
 }
 
 function periodKey(plan: FinancialPlan, node: OperationNode, readsOf: ReadsOf): string {

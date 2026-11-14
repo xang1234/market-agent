@@ -10,6 +10,7 @@
 // ranking or trend its check derived, never the model's wording of it, and an
 // inference resting on comparisons names the metrics they rank or trace in its label.
 
+import { periodParts } from "../../financial-core/src/index.ts";
 import type { Assertion } from "./assertions.ts";
 import { checkedComparisons, metricLabel as definedMetric, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
 import type { EvidencePacket, PacketClaim, PacketFigure } from "./evidence-packet.ts";
@@ -36,7 +37,8 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 
 // accepted: the answer's accepted assertions, which an inference's supports index.
 // once: each company whose one period the answer's notes name (answerPeriods),
-// keyed to that period; its figures there go undated.
+// keyed to that period; its figures there go undated, a change naming only the
+// period it is compared with.
 export function renderAssertion(
   assertion: Assertion & { index: number },
   packet: EvidencePacket,
@@ -92,6 +94,7 @@ function templateSegments(
           segments.push(value(figure));
         });
         if (!undated(group[0]!)) text(periodPhrase(group[0]!));
+        else if (comparedWith(group[0]!)) text(` ${comparedWith(group[0]!)}`);
       });
       if (groups.size > 0) text(".");
       figures.filter((entry) => entry.ranking).forEach((figure) => {
@@ -246,7 +249,9 @@ function comparisonSegments(comparison: CheckedComparison, out: Writer): void {
     figures.forEach((figure, i) => {
       out.text(`${i === 0 ? "" : ", "}${label(figure)} `);
       out.push(out.value(figure));
-      if (comparison.axis === "cohort" && !shared && !out.undated(figure)) out.text(datedAs(figure));
+      if (comparison.axis !== "cohort" || shared) return;
+      if (!out.undated(figure)) out.text(datedAs(figure));
+      else if (comparedWith(figure)) out.text(` (${comparedWith(figure)})`);
     });
     if (comparison.axis === "cohort" && shared) out.text(datedAs(first));
   };
@@ -362,8 +367,9 @@ export function calendarNote(assertions: ReadonlyArray<Assertion>, packet: Evide
 }
 
 // Across companies, each company that shows one period in the answer's
-// figures has it said once, here, rather than after each of its figures; a
-// company shown at several periods keeps them by its figures. Then the
+// figures (a change's being the period it changed to) has it said once, here,
+// rather than after each of its figures; a company shown at several periods
+// keeps them by its figures. Then the
 // calendar note is not needed: each period is named with its end.
 export function answerPeriods(assertions: ReadonlyArray<Assertion>, packet: EvidencePacket): { once: ReadonlyMap<string, string>; note?: string } {
   const periods = new Map<string, Map<string, PacketFigure>>();
@@ -378,14 +384,21 @@ export function answerPeriods(assertions: ReadonlyArray<Assertion>, packet: Evid
     const note = calendarNote(assertions, packet);
     return note === undefined ? { once } : { once, note };
   }
-  const named = (figure: PacketFigure) => `${periodText(figure.period!)}${figure.period_end ? ` (ended ${monthYear(figure.period_end)})` : ""}`;
+  const named = (figure: PacketFigure) => `${periodText(periodParts(figure.period!).current)}${figure.period_end ? ` (ended ${monthYear(figure.period_end)})` : ""}`;
   const firsts = [...once.keys()].map((company) => periods.get(company)!.values().next().value!);
   if (once.size === periods.size && new Set(once.values()).size === 1) return { once, note: `Period: ${named(firsts[0]!)}.` };
   return { once, note: `Periods: ${firsts.map((figure) => `${figure.company} ${named(figure)}`).join(", ")}.` };
 }
 
+// A company's period, a change's being the period it changed to.
 function periodKey(figure: PacketFigure): string {
-  return `${figure.period ?? ""}|${figure.period_end ?? ""}`;
+  return `${periodParts(figure.period ?? "").current}|${figure.period_end ?? ""}`;
+}
+
+// All a change says of its period once its company's is said: the period it is compared with, by its fiscal name ("vs Q3 FY2026").
+function comparedWith(figure: PacketFigure): string | undefined {
+  const { compared } = periodParts(figure.period ?? "");
+  return compared === undefined ? undefined : `vs ${periodText(compared.replace(/ \((?:ended|as of) \d{4}-\d{2}-\d{2}\)$/, ""))}`;
 }
 
 // The text a rendered assertion reads as, each value as displayed.

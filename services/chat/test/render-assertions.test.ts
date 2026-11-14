@@ -207,6 +207,32 @@ test("across companies, each company's one period is said once for the answer, a
     "rendered alone, each figure keeps its period, in one pair of parentheses");
 });
 
+test("a change of a company's stated period names only the period it is compared with", () => {
+  const engine = (id: string, company: string, metric: string, period: string, value: string) => ({ id, company, metric, period, value, source_ids: [] });
+  const chips: EvidencePacket = { ...PACKET, companies: ["MU", "NVDA"], claims: [], figures: [
+    engine("F1", "MU", "Gross margin (gross profit / revenue)", "Q4 FY2026 (ended 2026-09-03)", "86.76%"),
+    engine("F2", "MU", "Year-over-year percent change in Revenue", "Q4 FY2026 (ended 2026-09-03) vs Q4 FY2025 (ended 2025-08-28)", "196.00%"),
+    engine("F3", "NVDA", "Gross margin (gross profit / revenue)", "Q2 FY2027 (ended 2026-07-26)", "74.98%"),
+    engine("F4", "NVDA", "Year-over-year percent change in Revenue", "Q2 FY2027 (ended 2026-07-26) vs Q2 FY2026 (ended 2025-07-27)", "68.00%"),
+    engine("F5", "MU", "Revenue", "Q3 FY2026 (ended 2026-05-28)", "$9.3B"),
+  ] };
+  const margins: Assertion & { index: number } = { index: 0, kind: "comparison", op: "order", result: ["F1", "F3"], text: "x", evidence: ["F1", "F3"] };
+  const growth: Assertion & { index: number } = { index: 1, kind: "comparison", op: "highest", result: "F2", text: "x", evidence: ["F2", "F4"] };
+  const mu: Assertion & { index: number } = { index: 2, kind: "observation", text: "x", evidence: ["F1", "F2"] };
+  const shown = [margins, growth, mu];
+  const say = (assertion: Assertion & { index: number }, assertions: ReadonlyArray<Assertion> = shown) =>
+    plainText(renderAssertion(assertion, chips, [], [], answerPeriods(assertions, chips).once).segments);
+
+  assert.equal(answerPeriods(shown, chips).note, "Periods: MU Q4 FY2026 (ended Sep 2026), NVDA Q2 FY2027 (ended Jul 2026).");
+  assert.equal(say(margins), "By gross margin, highest first: MU 86.76%, NVDA 74.98%.");
+  assert.equal(say(growth), "Of MU and NVDA, MU's year-over-year percent change in revenue was highest: MU 196.00% (vs Q4 FY2025), NVDA 68.00% (vs Q2 FY2026).");
+  assert.equal(say(mu), "MU's gross margin was 86.76%; MU's year-over-year percent change in revenue was 196.00% vs Q4 FY2025.");
+
+  const another = { ...mu, evidence: ["F2", "F5"] };
+  assert.equal(say(another, [another]), "MU's year-over-year percent change in revenue was 196.00% in Q4 FY2026 (ended Sep 2026) vs Q4 FY2025 (ended Aug 2025); MU's revenue was $9.3B in Q3 FY2026 (ended May 2026).",
+    "a company shown at two periods keeps each change's whole period");
+});
+
 test("a ranking over a price window writes its dates by month and year (#301), each return a chip on its chart line (#317)", () => {
   const window = "YTD 2026: 2025-12-31 close to 2026-08-31 close";
   const NVDA_LINE = "d1000000-0000-4000-8000-000000000001";
