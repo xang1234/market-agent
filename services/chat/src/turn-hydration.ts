@@ -9,10 +9,11 @@
 import type { QueryExecutor } from "../../shared/src/http.ts";
 import { labelList, MAX_TURN_SUBJECTS, type ChatTurnEmit } from "./coordinator.ts";
 import { issuersWithoutFilings } from "./financial-runtime.ts";
-import { companyListings, listingTimeZones } from "./perf-block.ts";
+import { companyListings, listingsForComparison, listingTimeZones } from "./perf-block.ts";
 import { frozenDataMode, marketHydrationOrigin, type HydrationListing } from "./ytd-hydration.ts";
 
-export type TurnCompany = Readonly<{ issuer_id: string; label: string }>;
+// `listing_id` is the listing the turn named the company by, when it named one.
+export type TurnCompany = Readonly<{ issuer_id: string; label: string; listing_id?: string }>;
 
 /**
  * Returns the issuers, lowercased, whose filings are still loading: a fetch
@@ -73,7 +74,7 @@ export function createTurnHydrator(deps: {
     const ids = capped.map((company) => company.issuer_id);
     const [unfiled, unpriced] = await Promise.all([
       sec ? issuersWithoutFilings(deps.db, ids) : NONE,
-      origin === null ? [] : listingsWithoutBars(deps.db, ids),
+      origin === null ? [] : listingsWithoutBars(deps.db, capped),
     ]);
 
     // A company is fetched when it has no filings on file, or its last fetch
@@ -119,11 +120,14 @@ export function createTurnHydrator(deps: {
   };
 }
 
-// Each company's listing (the one chat charts, perf-block.ts companyListings)
-// when no daily bars are stored for it.
-async function listingsWithoutBars(db: QueryExecutor, issuerIds: ReadonlyArray<string>): Promise<Array<HydrationListing & { issuer_id: string }>> {
-  const listed = [...(await companyListings(db, issuerIds, new Date().toISOString()))]
-    .flatMap(([issuer_id, listing]) => (listing.listing_id ? [{ issuer_id: issuer_id.toLowerCase(), id: listing.listing_id }] : []));
+// Each company's listing the chart reads (perf-block.ts priceListingsForTurn):
+// the one the turn named, else its first active by ticker, when no daily bars
+// are stored for it.
+async function listingsWithoutBars(db: QueryExecutor, companies: ReadonlyArray<TurnCompany>): Promise<Array<HydrationListing & { issuer_id: string }>> {
+  const ids = companies.map((company) => company.issuer_id);
+  const named = new Map(companies.flatMap((company) => (company.listing_id ? [[company.issuer_id, { listing_id: company.listing_id.toLowerCase(), label: company.label }] as const] : [])));
+  const listed = [...listingsForComparison(ids, named, await companyListings(db, ids, new Date().toISOString()))]
+    .flatMap(([issuer_id, listing]) => (listing.listing_id ? [{ issuer_id, id: listing.listing_id }] : []));
   if (listed.length === 0) return [];
   const { rows } = await db.query<{ listing_id: string }>(
     `select listing.id::text as listing_id

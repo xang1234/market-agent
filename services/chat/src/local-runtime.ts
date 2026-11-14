@@ -145,8 +145,10 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   // window asked for now is cut off at the turn's asOf, which a follow-up keeps.
   const scopeAt = await analystTurnScope(context.threadId, context.userIntent ?? "", carriedSubjects, context.reading?.() ?? Promise.resolve(null));
   // What the companies lack is fetched before the cutoff below, so the answer reads it.
+  // Prices are fetched for the listing a company was named by, as the chart reads it.
+  const named = requestedListingsOf(carriedSubjects);
   await hydrateTurn(
-    companiesOf(carriedSubjects).map((company) => ({ issuer_id: company.issuer_id, label: company.label ?? company.issuer_id })),
+    companiesOf(carriedSubjects).map((company) => ({ issuer_id: company.issuer_id, label: company.label ?? company.issuer_id, listing_id: named.get(company.issuer_id)?.listing_id })),
     { emit: context.emit, turnId: context.turnId ?? context.runId },
   ).catch((reason: unknown) => console.warn("[chat] fetching the turn's companies failed; answering from what is on file", reason));
   // A live YTD chart fetches its prices first, so the cutoff below covers them (#232).

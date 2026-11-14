@@ -144,6 +144,21 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(fetch.sec, [ZETA], "30s after a failure at 50s, the company is still cooling");
   });
 
+  await t.test("fetches prices for the listing the turn named, not the company's first by ticker, and the first for a company named without one", async () => {
+    const named = randomUUID();
+    await db.query(`insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone) values ($1, $2, 'XLON', 'ZZZZ', 'GBP', 'Europe/London')`, [named, ZETA]);
+    try {
+      const fetch = fakes();
+      await createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, ...fetch })([{ issuer_id: ZETA, label: "ZZZZ", listing_id: named }], recorder().turn);
+      assert.deepEqual(fetch.bars.map((call) => call.listings), [[{ id: named, timeZone: "Europe/London" }]]);
+      const unnamed = fakes();
+      await createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, ...unnamed })([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn);
+      assert.deepEqual(unnamed.bars.map((call) => call.listings), [[{ id: LISTING, timeZone: "America/New_York" }]]);
+    } finally {
+      await db.query(`delete from listings where listing_id = $1`, [named]);
+    }
+  });
+
   await t.test("a frozen data mode fetches nothing, and without an SEC user agent only prices are fetched", async () => {
     const company = [{ issuer_id: ZETA, label: "ZETA" }];
     for (const env of [{ ...LIVE, DEV_NO_KEYS: "true" }, { ...LIVE, DEV_NO_KEYS: "traces" }, { ...LIVE, DEV_MODE: "analyst" }]) {
