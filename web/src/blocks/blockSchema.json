@@ -186,6 +186,125 @@
       },
       "additionalProperties": false
     },
+    "CommentaryPart": {
+      "description": "One part of analyst commentary: a statement of figures, an inference the judge found entailed, one it found unsupported, one it is still checking, or a note.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "segments"
+          ],
+          "properties": {
+            "kind": {
+              "const": "figures"
+            },
+            "segments": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/TextSegment"
+                  },
+                  {
+                    "$ref": "#/$defs/RefSegment"
+                  }
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "subject",
+            "basis",
+            "text"
+          ],
+          "properties": {
+            "kind": {
+              "const": "inference"
+            },
+            "subject": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1
+            },
+            "basis": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "subject",
+            "text"
+          ],
+          "properties": {
+            "kind": {
+              "const": "unverified"
+            },
+            "subject": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "pending"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "text"
+          ],
+          "properties": {
+            "kind": {
+              "const": "note"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "RefSegment": {
       "type": "object",
       "required": [
@@ -247,6 +366,13 @@
             "analyst_commentary": {
               "description": "Analyst commentary written on a financial answer's results, shown apart from that answer.",
               "const": true
+            },
+            "commentary": {
+              "description": "Analyst commentary as its parts, beside its segments (the same answer as one Markdown text), so a reader can lead with its inferences.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CommentaryPart"
+              }
             },
             "comparison_gap": {
               "description": "A scenario price comparison's decline or refusal (#224), so a later turn looks past it by this mark, not its words.",

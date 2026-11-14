@@ -158,7 +158,7 @@ test("a company overview carries analyst commentary on its published results (#3
     assert.deepEqual((shown.block_proofs as Record<string, unknown>)[answer!.id], { evidence: "linked", calculation: "verified", public_by_cutoff: "proven" });
     assert.deepEqual((done.message as { blocks: Block[] }).blocks.map((block) => block.id), [answer!.id, `commentary-${done.message_id}`]);
 
-    assert.deepEqual({ ...commentary, segments: undefined }, {
+    assert.deepEqual({ ...commentary, segments: undefined, commentary: undefined }, {
       id: `commentary-${done.message_id}`,
       kind: "rich_text",
       snapshot_id: saved.snapshot_id,
@@ -167,8 +167,12 @@ test("a company overview carries analyst commentary on its published results (#3
       as_of: answer!.as_of,
       analyst_commentary: true,
       segments: undefined,
+      commentary: undefined,
     });
     assert.equal(plainText(segmentsOf(commentary)), ALFA_TEXT, "no judge is configured, so the inference stays hidden");
+    // Its parts are saved beside its text: the same statements, one each.
+    assert.deepEqual((commentary!.commentary as Array<{ kind: string; segments: Parameters<typeof plainText>[0] }>).map((part) => [part.kind, plainText(part.segments)]),
+      ALFA_TEXT.split("\n\n").map((statement) => ["figures", statement]));
     const { results, labels } = answer!.financial as FinancialAnswerContent;
     const refs = segmentsOf(commentary).filter((segment) => segment.type === "ref");
     assert.deepEqual(refs, ["out_gross_margin", "out_operating_margin", "out_net_margin", "out_revenue_fy2022_q1", "out_revenue_fy2023_q4"].map((output) => {

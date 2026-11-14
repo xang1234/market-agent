@@ -380,6 +380,81 @@ test("an answer written on an engine packet is sent only that packet, and its in
   ]);
 });
 
+// The commentary blocks an engine answer gets, as first shown and once judged:
+// growth ranked on both spans, with an inference on NVDA the judge finds
+// entailed and one on AMD it finds unsupported.
+async function partsOn(financial: FinancialAnswerContent, mark: Record<string, unknown>) {
+  const reply = [
+    "```assertions",
+    JSON.stringify([
+      { kind: "comparison", text: "NVDA grew fastest.", evidence: ["F2", "F3", "F5", "F6"], op: "highest", result: "F3" },
+      { kind: "analyst_inference", subject: "NVDA", text: "Its   growth leads\non both spans.", supports: [0] },
+      { kind: "analyst_inference", subject: "AMD", text: "Its *data center* demand is cooling.", supports: [0] },
+    ]),
+    "```",
+  ].join("\n");
+  const createClient = () => async (_deployment: unknown, request: LlmChatRequest) => {
+    if (!request.messages[0]!.content.startsWith("You check the analyst inferences")) return { text: reply };
+    const [inference] = (JSON.parse(request.messages[1]!.content) as { inferences: Array<{ id: number; text: string }> }).inferences;
+    const verdict = inference!.text.includes("cooling") ? "unsupported" : "entailed";
+    return { text: JSON.stringify({ verdicts: [{ id: inference!.id, verdict, worded_amount: false }] }) };
+  };
+  const skeleton = { id: "commentary-x", kind: "rich_text", snapshot_id: "s", data_ref: { kind: "rich_text", id: "commentary-x" }, source_refs: [], as_of: "2026-09-01T00:00:00.000Z", segments: [], ...mark };
+  const answer = await answerTurn(
+    { context: { userIntent: "Compare NVDA and AMD growth", bundleId: "financial_answer" }, blocks: [skeleton], toolCalls: [], packet: enginePacket(financial, TICKERS, null) },
+    { thread_id: "t", run_id: "r", question: "Compare NVDA and AMD growth" },
+    { env: { LLM_CHANNELS: "anthropic", LLM_ANTHROPIC_PROTOCOL: "anthropic", LLM_ANTHROPIC_API_KEY: "sk-test", LLM_ANTHROPIC_MODELS: "claude-sonnet-5-5,claude-haiku-5-5", LITELLM_MODEL: "anthropic/claude-sonnet-5-5", JUDGE_LITELLM_MODEL: "anthropic/claude-haiku-5-5" }, createClient },
+  );
+  return { pending: answer.blocks[0]!, judged: (await answer.judging!.done).blocks[0]! };
+}
+
+const GROWTH_FIRST = "Of NVDA and AMD, NVDA's quarter-over-quarter percent change in revenue was highest: NVDA 8.94% (vs Q3 FY2026), AMD 4.67% (vs Q1 FY2026).";
+const GROWTH_SECOND = "Of NVDA and AMD, NVDA's year-over-year percent change in revenue was highest: NVDA 57.89% (vs Q4 FY2025), AMD 45.74% (vs Q2 FY2025).";
+const BASIS = "the quarter-over-quarter percent change in revenue and year-over-year percent change in revenue rankings";
+const commentaryText = (block: Record<string, unknown>) => (block.commentary as Array<Record<string, unknown>>).map((part) =>
+  part.kind === "figures" ? { kind: "figures", text: plainText(part.segments as Parameters<typeof plainText>[0]) } : part);
+
+test("analyst commentary carries its parts beside its text: each comparison, each inference by its verdict, and a periods note only a table does not already say", async () => {
+  const tabled = { ...COMPARISON, presentations: [{ kind: "table" }] } as unknown as FinancialAnswerContent;
+  const { pending, judged } = await partsOn(tabled, { analyst_commentary: true });
+
+  // The text is the answer as one Markdown document, as before.
+  assert.equal(plainText(judged.segments as Parameters<typeof plainText>[0]), [
+    GROWTH_FIRST,
+    GROWTH_SECOND,
+    `> **Analyst inference on NVDA** (from ${BASIS}): Its growth leads on both spans.`,
+    "> **Unverified analyst view on AMD** (not backed by the figures shown): Its \\*data center\\* demand is cooling.",
+    "Periods: NVDA Q4 FY2026, AMD Q2 FY2026.",
+  ].join("\n\n"));
+  // The parts: the analyst's words plain, and no periods note beside the table.
+  assert.deepEqual(commentaryText(judged), [
+    { kind: "figures", text: GROWTH_FIRST },
+    { kind: "figures", text: GROWTH_SECOND },
+    { kind: "inference", subject: "NVDA", basis: BASIS, text: "Its growth leads on both spans." },
+    { kind: "unverified", subject: "AMD", text: "Its *data center* demand is cooling." },
+  ]);
+  // A figure keeps its ref, as the text has it.
+  assert.deepEqual((judged.commentary as Array<{ segments?: Array<{ type: string }> }>)[0]!.segments!.filter((segment) => segment.type === "ref"), [
+    { type: "ref", ref_kind: "result", ref_id: RESULT(2), format: "8.94%", period: "Q4 FY2026 vs Q3 FY2026" },
+    { type: "ref", ref_kind: "result", ref_id: RESULT(5), format: "4.67%", period: "Q2 FY2026 vs Q1 FY2026" },
+  ]);
+  // While the judge reads, each inference is a pending part, as the text holds a line in its place.
+  assert.deepEqual(commentaryText(pending), [
+    { kind: "figures", text: GROWTH_FIRST },
+    { kind: "figures", text: GROWTH_SECOND },
+    { kind: "pending" },
+    { kind: "pending" },
+  ]);
+
+  // Without a table, the periods note is the commentary's to say.
+  const { judged: untabled } = await partsOn(COMPARISON, { analyst_commentary: true });
+  assert.deepEqual(commentaryText(untabled).at(-1), { kind: "note", text: "Periods: NVDA Q4 FY2026, AMD Q2 FY2026." });
+  // An answer that is no analyst commentary keeps its text alone.
+  const { judged: plain } = await partsOn(tabled, {});
+  assert.equal("commentary" in plain, false);
+  assert.equal(plainText(plain.segments as Parameters<typeof plainText>[0]), plainText(judged.segments as Parameters<typeof plainText>[0]));
+});
+
 const LEAD = content([
   value(1, "a", "measure:m1", "period:p0", "74.40%"),
   value(2, "b", "measure:m1", "period:p1", "54.02%"),
