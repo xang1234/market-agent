@@ -11,11 +11,11 @@ import { analystAgentRouter, analystAgentRunner, certifiedAsk, statusNote, stopN
 import type { AnalystToolResult } from "../src/analyst-tools.ts";
 import { answerPath, answerTurn } from "../src/answer-trace.ts";
 import type { AssertionReport } from "../src/assertions.ts";
-import { createChatCoordinator, type ChatAssistantMessagePersistence, type ChatTurnInput } from "../src/coordinator.ts";
+import { createChatCoordinator, resolveTurnSubjects, type ChatAssistantMessagePersistence, type ChatTurnInput } from "../src/coordinator.ts";
 import { figureCompanies, mergePackets, type EvidencePacket, type PacketClaim } from "../src/evidence-packet.ts";
 import { chatGapText } from "../src/financial-runtime.ts";
 import { ANSWER_DEADLINES, composeAnalystBlocksWithLlm } from "../src/llm-runtime.ts";
-import { proposedMetric, resolveResearchScope, type ResearchScope } from "../src/research-scope.ts";
+import { proposedMetric, resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS } from "../src/scope-figures.ts";
 import { loadPriorSubjects } from "../src/thread-context.ts";
 import { loadToolRegistry } from "../../tools/src/registry.ts";
@@ -269,6 +269,22 @@ test("an ask for the statement alone, when the question names its lines, is the 
   assert.deepEqual([one.choice.kind, whole.choice.kind], ["planner", "kept_figures"]);
   assert.equal(one.fingerprint, two.fingerprint, "a retry's rewording resumes the same ask");
   assert.notEqual(one.fingerprint, other.fingerprint);
+  const twice = certifiedAsk({ subject_refs: [{ kind: "issuer", id: A }], metrics: ["income_statement", "income_statement"], question: "AAA revenue" } as never, KNOWN, ["revenue"]);
+  assert.ok("fingerprint" in twice);
+  assert.equal(twice.fingerprint, one.fingerprint, "a metric named twice is named once");
+});
+
+test("a turn's companies by its reading keep each company a fresh question writes, and only the reading's on a follow-up", async () => {
+  const aaa = await resolveMention("AAA") as Extract<Awaited<ReturnType<typeof resolveMention>>, { status: "resolved" }>;
+  const companies = async (userIntent: string, change: ScopeProposal["companies"], prior: typeof aaa[]) => (await resolveTurnSubjects(
+    { threadId: randomUUID(), runId: randomUUID(), userIntent, emit: () => {}, reading: async () => ({ ...NO_ASKS, companies: change }) } as never,
+    (request) => resolveMention(request.text),
+    async () => prior,
+    true,
+  )).subjects.map((subject) => subject.subject_ref.id);
+  assert.deepEqual(await companies("Compare AAA and BBB revenue", { kind: "as_named", names: ["AAA"] }, []), [A, B], "a written ticker the reading left out");
+  assert.deepEqual(await companies("Switch from AAA to BBB", { kind: "only", names: ["BBB"] }, [aaa]), [B], "a company switched away from");
+  assert.deepEqual(await companies("Compare BBB with AAA", { kind: "compare", add: ["BBB"] }, [aaa]), [A, B], "the earlier company stays first");
 });
 
 test("a planner ask says its period, and two that differ only by their year are two asks", () => {

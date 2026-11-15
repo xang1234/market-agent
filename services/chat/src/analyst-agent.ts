@@ -470,8 +470,9 @@ export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, Reques
   const period = readPeriod(args.period);
   if (period === null) return { invalid: "period is latest, a fiscal_year with its year, or a fiscal_quarter with its quarter" };
   const companies = [...new Set(subjects as string[])];
-  const lines = Array.isArray(metrics) && metrics.length === 1 && metrics[0] === "income_statement" && incomeLines.length > 0 ? [...new Set(incomeLines)].sort() : null;
-  const keptMetrics = metrics === undefined || lines ? null : [...new Set(metrics as string[])].sort();
+  const named = metrics === undefined ? null : [...new Set(metrics as string[])].sort();
+  const lines = named?.length === 1 && named[0] === "income_statement" && incomeLines.length > 0 ? [...new Set(incomeLines)].sort() : null;
+  const keptMetrics = lines ? null : named;
   const choice: PlanChoice = keptMetrics ? { kind: "kept_figures", metrics: keptMetrics, period } : { kind: "planner" };
   const asked = keptMetrics ? { metrics: keptMetrics } : lines ? { metrics: ["income_statement"], lines } : { question: question.toLowerCase().replace(/\s+/g, " ") };
   const fingerprint = createHash("sha256").update(JSON.stringify({ companies: [...companies].sort(), period, ...asked })).digest("hex").slice(0, 16);

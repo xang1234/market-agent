@@ -1221,10 +1221,8 @@ async function dropped(
 // The reading's names, and each company the message writes that the reading left out.
 function withWritten(names: Names, written: Names): Names {
   const keys = new Set(names.resolved.map(companyKey));
-  const inputs = new Set(names.ambiguous.map((resolution) => resolution.input_text.toLowerCase()));
-  const resolved = written.resolved.filter((subject) => !keys.has(companyKey(subject)));
-  const ambiguous = written.ambiguous.filter((resolution) => !inputs.has(resolution.input_text.toLowerCase()));
-  return { ...names, resolved: [...names.resolved, ...resolved], ambiguous: [...names.ambiguous, ...ambiguous], named: [...names.named, ...resolved, ...ambiguous] };
+  const more = written.resolved.filter((subject) => !keys.has(companyKey(subject)));
+  return { ...names, resolved: [...names.resolved, ...more], named: [...names.named, ...more] };
 }
 
 async function resolveNames(names: ReadonlyArray<string>, preResolve: ChatSubjectPreResolver): Promise<Names> {
