@@ -188,8 +188,8 @@ export function blockText(body: string): Omit<ReleaseExhibit, "type"> {
   return { text: blocks.join(BLOCK_JOIN), edges };
 }
 
-// A closing block tag, or a line break (with any attributes).
 const BLOCK_JOIN = " ";
+// A closing block tag, or a line break (with any attributes).
 const BLOCK_BREAK = /<(?:\/(?:div|p|li|tr|td|th|h[1-6]|table|ul|ol)\s*|br\b[^>]*)>/i;
 const MARKUP = /<\/?(?:html|body|div|p|br|table|font|span)\b/i;
 

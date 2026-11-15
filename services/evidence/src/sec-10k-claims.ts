@@ -118,12 +118,14 @@ function buildMessages(item: TenKItem, text: string): LlmChatMessage[] {
 
 // Kept beside verifyStatement, not in it, so earnings-release claims keep
 // their sentence rule: a 10-K list item ends in a semicolon, or opens with a
-// bullet ("*") no sentence starts after.
+// bullet ("*") no sentence starts after. It must end as an item does, so the
+// first paragraph of a longer item ("...compete with AMD,") is no item.
+const ITEM_END = /[.;!?]["')]?$/;
 const BULLETS = "•▪◦●■*·\uf0b7";
 const LEADING_BULLET = new RegExp(`^[${BULLETS}]\\s*`);
 function wholeListItem(claim: TenKClaim, section: TenKSection): (TenKClaim & { exhibit: string; start: number; end: number }) | null {
   const quote = canonicalText(claim.quote).replace(LEADING_BULLET, "");
-  if (quote.length < MIN_QUOTE_CHARS || quote.length > MAX_QUOTE_CHARS) return null;
+  if (quote.length < MIN_QUOTE_CHARS || quote.length > MAX_QUOTE_CHARS || !ITEM_END.test(quote)) return null;
   for (let start = section.text.indexOf(quote); start >= 0; start = section.text.indexOf(quote, start + 1)) {
     const end = start + quote.length;
     if (start >= 2 && BULLETS.includes(section.text[start - 2]!) && section.text[start - 1] === " " && section.edges.has(start - 2) && section.edges.has(end)) {
@@ -172,10 +174,7 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
 
   let droppedUnquoted = 0;
   const verified = new Map<string, VerifiedClaim>();
-  // A reply cut short or of the wrong shape, one whose every quote is
-  // invented, or a found item none of whose prompts names a claim is the
-  // model failing, so the document is read again.
-  let unparseable = found.some((section) => replies.every((reply) => reply.section !== section || reply.claims?.length === 0));
+  let unparseable = false;
   for (const { section, claims } of replies) {
     const checked = (claims ?? []).map((claim) => ({ claim, found: verifyStatement(claim, [section]) ?? wholeListItem(claim, section) }));
     if (claims === null || (checked.length > 0 && checked.every((pick) => pick.found === null))) unparseable = true;
@@ -219,8 +218,8 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
     const claimIds: string[] = [];
     let resolved = 0;
     for (const claim of verified.values()) {
-      // Keyed on the document, predicate and quote, so a re-read of the
-      // document (once its items parse) adds only what is new.
+      // Keyed on the document, predicate and quote, so a re-read (after
+      // parse_status is reset by hand) adds only what is new.
       const { rowCount: stored } = await tx.db.query(
         `select 1 from claims where document_id = $1 and predicate = $2 and text_canonical = $3`,
         [doc.documentId, claim.predicate, claim.quote],
@@ -291,14 +290,10 @@ export async function storeTenK(
   deps: { db: QueryExecutor; objectStore: ObjectStore },
   input: { issuerId: string; bytes: Uint8Array; url: string | null; accession: string | null; filedDate: string | null; retrievedAt: string },
 ): Promise<{ documentId: string; sourceId: string }> {
-  // The same bytes stored by --file carry no accession until the backfill
-  // names it, so the next backfill finds them without a fetch.
   const { rows: [existing] } = await deps.db.query<{ document_id: string; source_id: string }>(
-    `update documents set provider_doc_id = coalesce(provider_doc_id, $2)
-      where document_id = (select document_id from documents
-                            where content_hash = $1 and deleted_at is null order by created_at limit 1)
-      returning document_id::text as document_id, source_id::text as source_id`,
-    [contentHashFromBytes(input.bytes), input.accession],
+    `select document_id::text as document_id, source_id::text as source_id from documents
+      where content_hash = $1 and deleted_at is null order by created_at limit 1`,
+    [contentHashFromBytes(input.bytes)],
   );
   let stored = existing ? { documentId: existing.document_id, sourceId: existing.source_id } : null;
   if (stored === null) {
@@ -321,6 +316,18 @@ export async function storeTenK(
       },
     }).catch((error: unknown) => cleanupSourceAfterFailedIngest(deps.db, source.source_id, error));
     stored = { documentId: document.document_id, sourceId: document.source_id };
+  }
+  // Bytes stored first by --file (before, or by a concurrent run) carry no
+  // filing until the backfill names it: its accession, so the next backfill
+  // finds them without a fetch, and its date, for the document and its claims.
+  if (input.accession !== null) {
+    const filedAt = input.filedDate === null ? null : `${input.filedDate}T00:00:00Z`;
+    await deps.db.query(
+      `update documents set provider_doc_id = coalesce(provider_doc_id, $2), published_at = coalesce(published_at, $3::timestamptz)
+        where document_id = $1`,
+      [stored.documentId, input.accession, filedAt],
+    );
+    await deps.db.query(`update claims set effective_time = $2::timestamptz where document_id = $1 and effective_time is null`, [stored.documentId, filedAt]);
   }
   await createMention(deps.db, {
     document_id: stored.documentId,

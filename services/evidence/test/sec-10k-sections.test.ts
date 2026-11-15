@@ -45,8 +45,18 @@ test("a heading reads through a word markup split, and Item 1 may be the Descrip
   assert.ok(!(sections["1A"] as TenKSection).text.includes("Properties"));
 });
 
+test("a combined Items 1 and 2 heading opens Item 1", () => {
+  const body = "<div>We make things that people use every day in many places.</div>".repeat(30);
+  for (const heading of ["Items 1 and 2. Business and Properties", "ITEMS 1 AND 2. BUSINESS AND PROPERTIES", "Items 1 & 2. Business"]) {
+    const sections = tenKSections(`<div>${heading}</div>${body}<div>Item 1A. Risk Factors</div>${body}`);
+    assert.equal((sections["1"] as TenKSection).text.slice(0, heading.length), heading, heading);
+  }
+});
+
 test("an HTML list item, whose bullet the browser draws, reads as a bulleted block", () => {
   const body = "<div>We make things that people use every day in many places.</div>".repeat(30);
-  const sections = tenKSections(`<div>Item 1. Business</div><ul><li>suppliers of GPUs, such as AMD;</li></ul>${body}<div>Item 1A. Risk Factors</div>${body}`);
-  assert.ok((sections["1"] as TenKSection).text.includes("Item 1. Business • suppliers of GPUs, such as AMD; We make"));
+  const sections = tenKSections(`<div>Item 1. Business</div><p>Our competitors include:<ul><li>suppliers of GPUs, such as AMD;</li></ul></p>${body}<div>Item 1A. Risk Factors</div>${body}`);
+  const item1 = sections["1"] as TenKSection;
+  const at = item1.text.indexOf("• suppliers of GPUs, such as AMD;");
+  assert.ok(at > 0 && item1.edges.has(at), "the item starts its own block, after a paragraph it sits inside");
 });
