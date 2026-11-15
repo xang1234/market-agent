@@ -13,7 +13,8 @@ import { CLAIM_PREDICATES, isAnalystToolName, type AnalystToolName, type Analyst
 import type { AnsweredTurn, AnswerTraceInput, TurnTrace } from "./answer-trace.ts";
 import { isUuid, noteBlock } from "./chat-ids.ts";
 import { COMMENTARY_UNAVAILABLE } from "./engine-commentary.ts";
-import { ANALYST_AGENT_BUNDLE_ID, labelList, type ChatAnalystAgent, type ChatAnalystToolRuntimeResult, type ChatAnalystToolRuntimeToolCall, type ChatTurnRunContext } from "./coordinator.ts";
+import { ANALYST_AGENT_BUNDLE_ID } from "./bundle-routing.ts";
+import { labelList, type ChatAnalystAgent, type ChatAnalystToolRuntimeResult, type ChatAnalystToolRuntimeToolCall, type ChatTurnRunContext } from "./coordinator.ts";
 import { mergePackets, type EvidencePacket } from "./evidence-packet.ts";
 import {
   certifiedFinancials,
@@ -33,7 +34,6 @@ const MAX_STEPS = 3;
 const TURN_CALLS = 8;
 const ANSWER_CALLS = 3;
 const DEADLINES = { readMs: 75_000, turnMs: 120_000 };
-const MAX_REQUEST_KEYS = 64;
 
 export type AnalystAgentDeps = Readonly<{
   financial: Pick<ChatFinancialRuntimeDeps, "pool" | "evidence" | "resolveMention" | "priorSubjects" | "researchScope" | "hydrate">;
@@ -107,12 +107,14 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const askedFor = new Set<string>();
     const analyst: AnalystToolResult[] = [];
     const unmatched = companies.subjects.flatMap((subject) => (subject.resolution.status === "not_found" ? [subject.mention] : []));
-    const notes: string[] = leftOutNotes({ notFound: [...companies.notFound, ...unmatched] });
+    const notes: string[] = [
+      ...leftOutNotes({ notFound: unmatched }),
+      ...companies.notFound.map((name) => `"${name}" did not match a company name or ticker on file; try the ticker.`),
+    ];
     const heldCompetitorNotes: string[] = [];
     let readCompetition = false;
     const toolCalls: ChatAnalystToolRuntimeToolCall[] = [];
     const asked = new Map<string, Promise<ToolLoopOutput>>();
-    const keys = requestKeys(deps.financial.pool, authority, context.threadId, turnId);
     const fetched = new Map<string, Promise<boolean>>();
     const stillLoading = (issuers: ReadonlyArray<string>) => Promise.all(issuers.map((issuer) => {
       const pending = fetched.get(issuer) ?? (deps.financial.hydrate
@@ -136,13 +138,8 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       const answer = (async (): Promise<ToolLoopOutput> => {
         const loading = await stillLoading(ask.subjects);
         if (loading.length > 0) notes.push(`Filings for ${labelList(loading.map(labelOf))} are still loading; ask again in a minute.`);
-        const key = await keys(ask.fingerprint);
         const subjects = ask.subjects.map((issuer) => known.get(issuer)!);
         const who = labelList(ask.subjects.map(labelOf));
-        if (key === null) {
-          notes.push(`${who}: ${chatGapText("request_conflict")}`);
-          return { content: JSON.stringify({ tool: "certified_financials", status: "gap", reason: "request_conflict" }) };
-        }
         const { clarificationAnswer: _picked, ...turn } = context;
         let plannerRefused = false;
         // A planner call leaves one for the loop's next step, beside the answer's.
@@ -155,9 +152,8 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
           choice: ask.choice,
           labels: new Map(subjects.map((subject) => [issuerOf(subject), labelOf(issuerOf(subject))])),
           authority,
-          requestKey: requestKeyFor(turnId, key.n),
+          requestKey: requestKeyFor(turnId, context.runId, ask.fingerprint),
           persistParent: async () => {},
-          originRef: key.origin,
         });
         if (outcome.status === "declined" && outcome.reason === "planning_unavailable" && plannerRefused) {
           notes.push(`${who}: the figures were not computed, as the turn reached its limit of model calls.`);
@@ -173,12 +169,10 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       return answer;
     };
 
-    const withoutTenK = new Set<string>();
     const readStored = async (name: AnalystToolName, args: JsonObject): Promise<ToolLoopOutput> => {
       if (argIssuers(args).some((issuer) => !known.has(issuer))) return invalid(name, UNKNOWN_COMPANY);
       const result = await deps.read(name, lowercasedRefs(args), { as_of: asOf, user_id: context.userId ?? null });
       analyst.push(result);
-      if ("no_filing" in result) for (const issuer of result.no_filing) withoutTenK.add(issuer.issuer_id.toLowerCase());
       if (result.tool === "get_peer_set" && result.status === "ok") {
         for (const peer of result.peers) {
           const issuer = peer.issuer_id.toLowerCase();
@@ -193,20 +187,6 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       return { content: JSON.stringify(readSummary(result)), ...(isFailure(result) ? { isError: true } : {}) };
     };
 
-    let stepCalls = 0;
-    let stepFoundNoTenK: boolean[] = [];
-    const settled = () => read !== null && read.metrics.length === 0 && read.income_items.length === 0 && read.asks.size === 0 && read.period.kind === "none" &&
-      stepCalls > 0 && stepFoundNoTenK.length === stepCalls && stepFoundNoTenK.every(Boolean) && named.every((subject) => withoutTenK.has(issuerOf(subject)));
-    const reader: ControlledRouter = {
-      complete: async (request, controls) => {
-        if (settled()) throw new ReadingSettled();
-        stepFoundNoTenK = [];
-        const reply = await router.complete(request, controls);
-        stepCalls = reply.toolCalls?.length ?? 0;
-        return reply;
-      },
-    };
-
     const inFlight = new Set<Promise<ToolLoopOutput>>();
     const execute = async (call: LlmToolCall): Promise<ToolLoopOutput> => {
       const work = call.name === "certified_financials"
@@ -214,7 +194,6 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         : isAnalystToolName(call.name) ? readStored(call.name, call.arguments) : Promise.resolve(invalid(call.name, "no such tool"));
       inFlight.add(work);
       const output = await work.finally(() => inFlight.delete(work));
-      stepFoundNoTenK.push(readsOnlyTenK(call) && statusOf(output.content) === "no_filing");
       toolCalls.push({
         tool_call_id: randomUUID(),
         tool_name: call.name,
@@ -231,7 +210,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const readingDeadline = new AbortController();
     const readTimer = setTimeout(() => readingDeadline.abort(new TurnDeadline()), (deps.deadlines ?? DEADLINES).readMs);
     const loop = await withLlmAbortSignal(AbortSignal.any([signal, readingDeadline.signal]), () => runToolLoop({
-      router: reader,
+      router,
       policy,
       maxSteps: MAX_STEPS,
       execute,
@@ -247,7 +226,6 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       },
     })).catch(async (reason: unknown) => {
       await Promise.allSettled([...inFlight]);
-      if (reason instanceof ReadingSettled) return null;
       if (!isModelFailure(reason)) throw reason;
       console.warn("[chat] the analyst agent's reading stopped early; it answers from what it read", reason);
       notes.push(loopRefused ? UNFINISHED.calls : reason instanceof TurnDeadline ? UNFINISHED.time : UNFINISHED.model_failed);
@@ -371,12 +349,6 @@ const QUIET = (() => undefined) as unknown as ChatTurnRunContext["emit"];
 
 const UNKNOWN_COMPANY = "name each company by a subject_ref the prompt or a peer read gave";
 
-class ReadingSettled extends Error {}
-
-// A competition read can still fall back on industry peers, which no 10-K holds.
-const readsOnlyTenK = (call: LlmToolCall) => call.name === "get_company_profile" || (call.name === "get_claims" && call.arguments.role !== "competitor" &&
-  Array.isArray(call.arguments.predicates) && !call.arguments.predicates.includes("business.competition"));
-
 const isModelFailure = (reason: unknown) => reason instanceof LlmRouterError || reason instanceof LlmProviderError || reason instanceof TurnDeadline;
 
 // A turn's model calls: each guard takes one while more than `reserved` are left, and else throws as a client failure.
@@ -471,12 +443,13 @@ export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, Reques
   if (period === null) return { invalid: "period is latest, a fiscal_year with its year, or a fiscal_quarter with its quarter" };
   const companies = [...new Set(subjects as string[])];
   const named = metrics === undefined ? null : [...new Set(metrics as string[])].sort();
-  const lines = named?.length === 1 && named[0] === "income_statement" && incomeLines.length > 0 ? [...new Set(incomeLines)].sort() : null;
-  const keptMetrics = lines ? null : named;
-  const choice: PlanChoice = keptMetrics ? { kind: "kept_figures", metrics: keptMetrics, period } : { kind: "planner" };
-  const asked = keptMetrics ? { metrics: keptMetrics } : lines ? { metrics: ["income_statement"], lines } : { question: question.toLowerCase().replace(/\s+/g, " ") };
+  const statement = named?.length === 1 && named[0] === "income_statement";
+  const kept = named !== null && !(statement && incomeLines.length > 0) ? named : null;
+  const choice: PlanChoice = kept ? { kind: "kept_figures", metrics: kept, period } : { kind: "planner" };
+  const plannerMayRead = named === null || statement;
+  const asked = plannerMayRead ? { metrics: named, question: question.toLowerCase().replace(/\s+/g, " ") } : { metrics: named };
   const fingerprint = createHash("sha256").update(JSON.stringify({ companies: [...companies].sort(), period, ...asked })).digest("hex").slice(0, 16);
-  return { subjects: companies, choice, question: keptMetrics ? question : plannerQuestion(question, period), fingerprint };
+  return { subjects: companies, choice, question: kept ? question : plannerQuestion(question, period), fingerprint };
 }
 
 function plannerQuestion(question: string, period: ReadPeriod): string {
@@ -504,39 +477,6 @@ function readPeriod(value: JsonValue | undefined): ReadPeriod | null {
   return typeof value.fiscal_period === "string" && QUARTERS.has(value.fiscal_period)
     ? { kind: "fiscal_quarter", fiscal_period: value.fiscal_period as "Q1" | "Q2" | "Q3" | "Q4", fiscal_year: year }
     : null;
-}
-
-export function requestKeys(
-  pool: ChatFinancialRuntimeDeps["pool"],
-  authority: ReturnType<typeof chatAuthority>,
-  threadId: string,
-  turnId: string,
-): (fingerprint: string) => Promise<{ n: number; origin: string } | null> {
-  const taken = new Set<number>();
-  const prefix = requestKeyFor(turnId, 0).slice(0, -1);
-  let queue: Promise<unknown> = Promise.resolve();
-  return (fingerprint) => {
-    const origin = `chat:${threadId}:${turnId}:${fingerprint}`;
-    const next = queue.then(async () => {
-      const { rows } = await pool.query<{ request_key: string; origin: string | null; unfinished: boolean }>(
-        `select r.request_key, p.plan->'origin'->>'ref' as origin, r.execution_state in ('pending', 'running', 'ready_to_seal') as unfinished
-           from financial_runs r join financial_plans p on p.plan_id = r.plan_id and p.user_id = r.user_id
-          where r.user_id = $1 and r.parent_kind = $2 and r.parent_id = $3 and left(r.request_key, length($4)) = $4`,
-        [authority.owner_user_id, authority.parent.kind, authority.parent.id, prefix],
-      );
-      const stored = new Map(rows.flatMap((row) => {
-        const n = Number(row.request_key.slice(prefix.length));
-        return Number.isInteger(n) && n >= 1 && n <= MAX_REQUEST_KEYS ? [[n, row] as const] : [];
-      }));
-      const resumable = [...stored].filter(([n, run]) => !taken.has(n) && run.origin === origin && run.unfinished).map(([n]) => n);
-      const n = resumable.length > 0 ? Math.min(...resumable) : Array.from({ length: MAX_REQUEST_KEYS }, (_, i) => i + 1).find((key) => !taken.has(key) && !stored.has(key));
-      if (n === undefined) return null;
-      taken.add(n);
-      return { n, origin };
-    });
-    queue = next.catch(() => undefined);
-    return next;
-  };
 }
 
 async function certifiedOutput(

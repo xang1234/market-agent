@@ -409,8 +409,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
   return Object.freeze({ take, everyOfferedChoice, assertReady });
 }
 
-/** The request key of a turn's nth certified-financials call, from 1: each call in a turn is its own run. */
-export const requestKeyFor = (turnId: string, n: number): string => `turn:${turnId}:${n}`;
+export const requestKeyFor = (turnId: string, runId: string, ask: string): string => `turn:${turnId}:${runId}:${ask}`;
 
 /** One engine request for certified figures, published to the parent artifact `persistParent` saves. */
 export type CertifiedFinancialsRequest = Readonly<{
@@ -420,11 +419,9 @@ export type CertifiedFinancialsRequest = Readonly<{
   // By issuer, the name the packet gives each company.
   labels: ReadonlyMap<string, string>;
   authority: FinancialRuntimeAuthority;
-  // One run per thread: a later call under it resumes that run's plan, whatever it asks now.
+  // One run per key, and a later call under it resumes that run's plan, whatever it asks now.
   requestKey: string;
   persistParent: PersistParentArtifact;
-  // What the plan records as having asked for it; the turn when absent.
-  originRef?: string;
 }>;
 
 // ponytail: a call that resumes a reserved run does not plan, so its planned
@@ -455,7 +452,7 @@ export async function certifiedFinancials(
     request_key,
     plan: async (db) => {
       const received = deps.clock?.() ?? new Date();
-      planned = await planTurn(deps.planningModel, request.originRef === undefined ? context : { ...context, originRef: request.originRef }, context.userIntent ?? "", request.subjects, authority, received, (subjects) => {
+      planned = await planTurn(deps.planningModel, context, context.userIntent ?? "", request.subjects, authority, received, (subjects) => {
         planned_subjects = subjects;
       }, {
         choice: request.choice,
@@ -524,7 +521,7 @@ async function requestedMentions(context: ChatFinancialTurnContext, text: string
   return [explicit, ...comparedAdditions(await context.reading?.() ?? null)];
 }
 
-export type TurnCompanies = Readonly<{
+type TurnCompanies = Readonly<{
   // One per company, primary first, as the planner takes them.
   subjects: ReadonlyArray<RequestedSubject>;
   resolved: ReadonlyArray<ChatResolvedSubjectPreResolution>;
@@ -762,13 +759,13 @@ const PLANNER: PlanChoice = { kind: "planner" };
 
 function planningContextAt(
   model: PlanningModel | null,
-  context: ChatFinancialTurnContext & { originRef?: string },
+  context: ChatFinancialTurnContext,
   authority: FinancialRuntimeAuthority,
   cutoff: Date,
 ): (subjects: ReadonlyArray<RequestedSubject>) => PlanningContext {
   return (subjects) => ({
     plan_id: randomUUID(),
-    origin: { kind: "chat_request", ref: context.originRef ?? `chat:${context.threadId}:${context.turnId ?? context.runId}` },
+    origin: { kind: "chat_request", ref: `chat:${context.threadId}:${context.turnId ?? context.runId}` },
     knowledge_cutoff: cutoff.toISOString(),
     cutoff_timezone: "UTC",
     reporting_basis: "as_restated",
@@ -783,7 +780,7 @@ function planningContextAt(
 
 async function planTurn(
   model: PlanningModel | null,
-  context: ChatFinancialTurnContext & { originRef?: string },
+  context: ChatFinancialTurnContext,
   text: string,
   requested: ReadonlyArray<RequestedSubject>,
   authority: FinancialRuntimeAuthority,

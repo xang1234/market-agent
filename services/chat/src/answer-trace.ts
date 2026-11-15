@@ -11,6 +11,7 @@ import { isDeepStrictEqual } from "node:util";
 import { loadLlmSettingsFromEnv, type LlmChatClient, type LlmChatMessage, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { isRecord } from "../../shared/src/http.ts";
 import { assertionList, checkAssertions, type AssertionReport } from "./assertions.ts";
+import { ANALYST_AGENT_BUNDLE_ID } from "./bundle-routing.ts";
 import { judgeCases, judgeInferences, judgeMessages, verdictsOf, type JudgeCase, type JudgeRecord, type ModelRecord } from "./inference-judge.ts";
 import { repairRequests, repairRound, requestRepair, type RepairRequest, type RepairTrace } from "./inference-repair.ts";
 import { sentToRepair, shownAs, verdictText, type AnswerPath, type InferenceVerdict, type ShownAs } from "./verdicts.ts";
@@ -61,8 +62,9 @@ export type TracedAnswer = Pick<TurnTrace, "exchange" | "assertions" | "blocks">
 // The answer as composed, its inferences not yet judged.
 export type ComposedAnswer = Pick<TurnTrace, "exchange" | "assertions"> & { blocks: AnswerBlocks; path: AnswerPath };
 
-export function answerPath(input: Pick<AnswerTraceInput, "packet">): AnswerPath {
-  return input.packet?.route === "financial_engine" && input.packet.claims.length === 0 ? "engine" : "analyst";
+export function answerPath(input: Pick<AnswerTraceInput, "packet" | "context">): AnswerPath {
+  if (input.context.bundleId === ANALYST_AGENT_BUNDLE_ID) return "agent";
+  return input.packet?.route === "financial_engine" ? "engine" : "analyst";
 }
 
 export async function composeTraced(

@@ -1132,7 +1132,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       choice,
       labels: new Map([[IDS.issuerA, "NVDA"]]),
       authority: authorityFor(),
-      requestKey: requestKeyFor(turnId, n),
+      requestKey: requestKeyFor(turnId, turnId, String(n)),
       persistParent: async () => {},
     },
   );
@@ -1185,7 +1185,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
         choice: { kind: "kept_figures", metrics: ["income_statement"], period: { kind: "fiscal_year", fiscal_year: 2023 } },
         labels: new Map([[IDS.issuerA.toUpperCase(), "NVDA"], [IDS.issuerB, "BBB"]]),
         authority: authorityFor(),
-        requestKey: requestKeyFor(turnId, 1),
+        requestKey: requestKeyFor(turnId, turnId, "1"),
         persistParent: async () => {},
       },
     );

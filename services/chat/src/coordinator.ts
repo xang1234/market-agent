@@ -1,5 +1,5 @@
 import { answerMessageId, contentHashForText, financialMessageId, stableUuid } from "./chat-ids.ts";
-import { DEFAULT_BUNDLE_ID, chooseBundleIdForSubjectKind } from "./bundle-routing.ts";
+import { ANALYST_AGENT_BUNDLE_ID, DEFAULT_BUNDLE_ID, chooseBundleIdForSubjectKind } from "./bundle-routing.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import {
   createChatSseSequencer,
@@ -38,7 +38,7 @@ import {
 } from "./messages.ts";
 import { financialAwareRunner, offeredChoicesRunner } from "./financial-turn.ts";
 import { workSummaryRunner, type ChatWorkSummarySave } from "./work-summary.ts";
-import { companyNameIn, type CompanyChange, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
+import { companyNameIn, companyWordsIn, type CompanyChange, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import type { AssertionReport } from "./assertions.ts";
 import type { BlockProof } from "../../snapshot/src/block-proof.ts";
 import { ChatTurnStoppedError, claimAnswerSave, TurnStop } from "./turn-stop.ts";
@@ -1114,7 +1114,7 @@ export async function resolveTurnSubjects(
   if (!change) return unreadChange(mentioned, prior);
   if (change.kind === "drop") return dropped(prior, change, preResolve);
   const read = await resolveNames(change.kind === "compare" ? change.add : change.names, preResolve);
-  const names = byReading && prior.length === 0 ? withWritten(read, mentioned) : read;
+  const names = byReading && prior.length === 0 ? typedTickersFirst(read, mentioned, text ?? "") : read;
   if (change.kind === "compare" || names.named.length === 0) return listed(prior, names);
   if (change.kind === "unclear" && prior.length >= 2) {
     const added = newNames(names, prior);
@@ -1218,11 +1218,12 @@ async function dropped(
   return listed(kept, adding);
 }
 
-// The reading's names, and each company the message writes that the reading left out.
-function withWritten(names: Names, written: Names): Names {
-  const keys = new Set(names.resolved.map(companyKey));
-  const more = written.resolved.filter((subject) => !keys.has(companyKey(subject)));
-  return { ...names, resolved: [...names.resolved, ...more], named: [...names.named, ...more] };
+function typedTickersFirst(names: Names, written: Names, text: string): Names {
+  const words = new Set(companyWordsIn(text));
+  const typed = written.resolved.filter((subject) => words.has(tickerLabel(subject)));
+  const keys = new Set(typed.map(companyKey));
+  const others = <T extends ChatSubjectPreResolution>(list: ReadonlyArray<T>) => list.filter((subject) => subject.status !== "resolved" || !keys.has(companyKey(subject)));
+  return { ...names, resolved: [...typed, ...others(names.resolved)], named: [...typed, ...others(names.named)] };
 }
 
 async function resolveNames(names: ReadonlyArray<string>, preResolve: ChatSubjectPreResolver): Promise<Names> {
@@ -1423,8 +1424,6 @@ function emitSubjectResolutionToolEvents(
   });
   emit("tool.completed", subjectToolCompletedPayload(preResolution, toolCallId));
 }
-
-export const ANALYST_AGENT_BUNDLE_ID = "analyst_agent";
 
 function analystAgentSeat(
   { next, picking }: { next: ChatTurnRunner; picking: ChatTurnRunner },
