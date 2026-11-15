@@ -85,3 +85,53 @@ test("an HTML list item, whose bullet the browser draws, reads as a bulleted blo
   const at = item1.text.indexOf("• suppliers of GPUs, such as AMD;");
   assert.ok(at > 0 && item1.edges.has(at), "the item starts its own block, after a paragraph it sits inside");
 });
+
+const paragraphs = (tag: string, n: number) =>
+  Array.from({ length: n }, (_, i) => `<p>${tag} paragraph ${i}: we make things that people use every day in many places.</p>`).join("");
+
+test("a smaller reporting company's omitted Item 1A is not found, though Item 7 opens by citing it", () => {
+  const html = [
+    `<div>Item 1. Business</div>${paragraphs("business", 30)}`,
+    "<div>Item 1A. Risk Factors</div><p>Not required for smaller reporting companies.</p>",
+    "<div>Item 1B. Unresolved Staff Comments</div><p>None.</p>",
+    `<div>Item 7. Management's Discussion and Analysis</div><p>Item 1A. Risk Factors and forward-looking statements are described above.</p>${paragraphs("liquidity", 30)}`,
+    "<div>Item 8. Financial Statements</div>",
+  ].join("");
+  assert.deepEqual(tenKSections(html)["1A"], { type: "1A", error: "section_not_found" });
+});
+
+test("a page header that repeats the item's heading stays inside the item", () => {
+  for (const header of ["Item 1A. Risk Factors (continued)", "Item 1A. Risk Factors"]) {
+    const pages = [1, 2, 3].map((page) => `<div>${header}</div>${paragraphs(`page ${page}`, 25)}`).join("");
+    const html = `<div>Item 1. Business</div>${paragraphs("business", 30)}<div>Item 1A. Risk Factors</div>${paragraphs("page 0", 25)}${pages}<div>Item 1B. Unresolved Staff Comments</div>`;
+    const item1a = tenKSections(html)["1A"] as TenKSection;
+    assert.ok(item1a.text.startsWith("Item 1A. Risk Factors page 0 paragraph 0"), header);
+    assert.ok(item1a.text.endsWith("page 3 paragraph 24: we make things that people use every day in many places."), header);
+  }
+});
+
+test("a paragraph that opens with an item's title and runs on cites the item, so the section continues", () => {
+  const html = [
+    `<div>Item 1. Business</div>${paragraphs("early", 15)}<p>Item 1A. Risk Factors describes the risks we face in more detail.</p>${paragraphs("competition", 15)}`,
+    `<div>Item 1A. Risk Factors</div>${paragraphs("supply", 15)}<p>Item 7. Management's Discussion and Analysis describes our liquidity in more detail.</p>${paragraphs("demand", 15)}`,
+    "<div>Item 1B. Unresolved Staff Comments</div>",
+  ].join("");
+  const sections = tenKSections(html);
+  assert.ok((sections["1"] as TenKSection).text.endsWith("competition paragraph 14: we make things that people use every day in many places."));
+  assert.ok((sections["1A"] as TenKSection).text.endsWith("demand paragraph 14: we make things that people use every day in many places."));
+});
+
+test("a heading that shares its block with PART I opens the item at its label", () => {
+  const html = `<div>Item 1. Business 3</div><div>Item 1A. Risk Factors 9</div><p><b>PART I</b> <b>ITEM 1. BUSINESS</b></p>${paragraphs("business", 30)}<p><b>ITEM 1A. RISK FACTORS</b></p>${paragraphs("risk", 30)}`;
+  assert.equal((tenKSections(html)["1"] as TenKSection).text.slice(0, 36), "ITEM 1. BUSINESS business paragraph ");
+});
+
+test("a table of contents in one block is no Item 1 when the real heading follows it", () => {
+  const html = `<p>Item 1. Business 3 Item 1A. Risk Factors 9 Item 2. Properties 21</p><div>PART I</div><div>Item 1. Business</div>${paragraphs("business", 30)}<div>Item 1A. Risk Factors</div>${paragraphs("risk", 30)}`;
+  assert.equal((tenKSections(html)["1"] as TenKSection).text.slice(0, 26), "Item 1. Business business ");
+});
+
+test("a title split by markup still heads the next item, so the one before it ends", () => {
+  const html = `<div>Item 1A. Risk Factors</div>${paragraphs("risk", 30)}<div>Item 7A. Quantitative and Qualitat<span>ive</span> Disclosures About Market Risk.</div>${paragraphs("rates", 30)}`;
+  assert.ok(!(tenKSections(html)["1A"] as TenKSection).text.includes("rates paragraph"));
+});
