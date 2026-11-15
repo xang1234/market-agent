@@ -201,9 +201,12 @@ test("the analyst agent writes an investment memo's sections from stored sources
   await t.test("the memo's sections read at its frozen cutoff, about the issuer its financial sections compute for", async () => {
     const cutoff = "2026-11-01T00:00:00.000Z";
     const workflow = analyzeAgentWorkflow(analyzeAgentDeps(LLM_ENV, scriptedModel([])));
-    const { blocks } = await workflow(workflowInput([{ kind: "listing", id: LISTING }, { kind: "issuer", id: IDS.issuerB }], cutoff));
+    const input = workflowInput([{ kind: "listing", id: LISTING }, { kind: "issuer", id: IDS.issuerB }], cutoff);
+    const { blocks } = await workflow(input);
     const sections = sectionsOf(blocks);
     assert.deepEqual(sections.map((section) => (section as unknown as { as_of: string }).as_of), AGENT_SECTIONS.map(() => cutoff));
+    const runs = (await db.query(`select knowledge_cutoff from financial_runs where parent_id = $1`, [input.runId])).rows;
+    assert.ok(runs.length > 0 && runs.every((row) => new Date(row.knowledge_cutoff).toISOString() === cutoff), "the agent's figures are planned at the memo's cutoff");
     assert.ok(sections.every((section) => JSON.stringify(section.children).includes("Beta Holdings Corp.")), "issuer B, as the engine's sections, not listing A");
   });
 

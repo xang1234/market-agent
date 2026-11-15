@@ -81,6 +81,37 @@ test("analyze memo financial publication", { timeout: 300_000 }, async (t) => {
     assert.equal((await loadAnalyzeFinancialSections(db, { userId: IDS.owner, analyzeRunId: memo.runId }))!.coverage, "complete");
   });
 
+  await t.test("an analyst agent's unfinished figure under a memo is cancelled, never resumed or filed as a section", async () => {
+    const memo = await createMemoRun(db, pool, { templateId, playbookId: "investment_memo" });
+    await memo.publish();
+    const { rows: [agent] } = await db.query<{ run_id: string }>(
+      `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode, knowledge_cutoff, policies)
+       select user_id, parent_kind, parent_id, parent_version, 'agent:investment_thesis:0123456789abcdef', request_hash, plan_id, feature_mode, knowledge_cutoff, policies
+         from financial_runs where parent_id = $1 and request_key = $1::text
+       returning run_id::text`,
+      [memo.runId],
+    );
+    const recoverable = async () => (await listRecoverableRuns(db, { parent_kinds: ["analyze_memo_run"], limit: 100 })).map((run) => run.run_id);
+    const [run] = (await listRecoverableRuns(db, { parent_kinds: ["analyze_memo_run"], limit: 100 })).filter((candidate) => candidate.run_id === agent!.run_id);
+    assert.ok(run, "the unfinished agent figure is listed");
+    const client = snapshotTransactionClient(await pool.connect());
+    try {
+      const outcome = await recoverRun(client, run, {
+        worker_id: "recovery-test",
+        ttl_ms: 60_000,
+        evidence: createEvidenceFinancialPort,
+        parents: { analyze_memo_run: analyzeFinancialRecovery(pool) },
+      });
+      assert.equal(outcome.status, "skipped", JSON.stringify(outcome));
+    } finally {
+      client.release();
+    }
+    const { rows: [state] } = await db.query<{ execution_state: string }>(`select execution_state from financial_runs where run_id = $1`, [agent!.run_id]);
+    assert.equal(state!.execution_state, "cancelled");
+    assert.equal((await recoverable()).includes(agent!.run_id), false, "it leaves the recovery queue");
+    assert.deepEqual(await committed(db, memo.runId), { sections: 3, certificates: 3, plans: 1 }, "nothing is filed as a memo section");
+  });
+
   await t.test("a memo that no longer belongs to the owner receives nothing", async () => {
     const memo = await createMemoRun(db, pool, { templateId, playbookId: "earnings_quality" });
     await db.query(`update analyze_templates set user_id = $2 where template_id = $1`, [templateId, IDS.other]);

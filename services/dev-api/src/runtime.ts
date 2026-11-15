@@ -12,7 +12,7 @@ import { startFinancialWorkerFromEnv, type FinancialWorkerEnv } from "./financia
 import { activeFinancialSurfaces, loadFinancialConfig, type FinancialEnv } from "./financial-env.ts";
 import { analyzeFinancialRecovery } from "../../analyze/src/financial-section.ts";
 import { gridFinancialRecovery } from "../../analyst-grids/src/financial-column.ts";
-import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
+import type { FinancialPool } from "../../financial-engine/src/ports.ts";
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
 import type { FinancialWorker } from "../../financial-engine/src/worker.ts";
@@ -93,7 +93,7 @@ export async function createDevApiRuntimeFromEnv(
 }
 
 /** Parents whose verified units are resumable after a restart. Discovery-owned runs are never resumed here, only under the Discovery worker's fence. */
-export function recoveryParents(db: SqlExecutor): Readonly<Record<string, ParentRecovery>> {
+export function recoveryParents(db: FinancialPool): Readonly<Record<string, ParentRecovery>> {
   return {
     analyze_memo_run: analyzeFinancialRecovery(db),
     analyst_grid_run: gridFinancialRecovery(db),

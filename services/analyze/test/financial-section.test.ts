@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { IDS, ORIGINAL_REVENUE, seedCashResilience } from "../../financial-engine/test/db-fixtures.ts";
-import type { RunRecord } from "../../financial-engine/src/run-record.ts";
 import {
-  analyzeFinancialRecovery,
   financialSectionIds,
   latestReadsByIssuer,
   loadAnalyzeFinancialSections,
@@ -33,18 +31,6 @@ test("numerical sections are chosen per playbook; narrative sections stay with t
   assert.deepEqual(financialSectionIds(playbook("peer_comparison")), ["peer_table"]);
   assert.deepEqual(financialSectionIds(playbook("investment_memo")), ["financial_health", "cash_resilience", "revenue_trend"]);
   assert.deepEqual(financialSectionIds(playbook("variant_view")), []);
-});
-
-test("an analyst agent's figure under a memo resumes under the authority it was made with, and is never filed as a memo section", async () => {
-  const memo = "22222222-2222-4222-8222-222222222222";
-  const db = { query: async () => assert.fail("an agent's run is not looked up as the memo's sections") };
-  const run = {
-    user_id: IDS.owner, parent_kind: "analyze_memo_run", parent_id: memo, parent_version: "template:t:v1", request_key: "agent:investment_thesis:0123456789abcdef",
-  } as RunRecord;
-  const recovery = analyzeFinancialRecovery(db as never);
-  const authority = await recovery.authority(run);
-  assert.deepEqual([authority?.parent, authority?.egress_channel], [{ kind: "analyze_memo_run", id: memo, version: "template:t:v1" }, "analyze"]);
-  await recovery.persistParent({ run, client: db } as never, { unit_id: "u1" } as never);
 });
 
 test("the financial context freezes cutoff, basis, catalog, and the exact peers requested", () => {

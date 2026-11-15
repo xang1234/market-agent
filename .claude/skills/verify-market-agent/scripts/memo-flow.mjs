@@ -13,7 +13,7 @@ mkdirSync(OUT, { recursive: true })
 
 const SECTIONS = ['investment_thesis', 'growth_drivers', 'competitive_position', 'downside_risks']
 const EMPTY = /^No stored source covers this section/
-const UNWRITTEN = /^This section was not written|^The answer could not be written/
+const UNWRITTEN = /^This section was not written|^The answer could not be written|^Commentary is unavailable/
 // Case matters for Buy, Hold and Sell: a 10-K's "we sell" is not a Sell.
 const stanceIn = (text) => [...text.matchAll(/\b(?:Buy|Hold|Sell)\b/g), ...text.matchAll(/\b(?:rating|conviction)\b/gi)].map((match) => match[0])
 const LLM_LOG = join(ROOT, '.dev/logs/dev-api.log')
@@ -116,7 +116,8 @@ const sectionPasses = (section) => section.shown && !section.unwritten && (secti
 const passed =
   failure === null && report.subject_matches && report.generated &&
   report.sections.every(sectionPasses) &&
-  (competitive.claims.length === 0 || report.competitive_cites_competition) &&
+  // A company with a 10-K on file has its competition read; one with none shows its peers at most.
+  (claimIds.length === 0 || report.competitive_cites_competition) &&
   report.risks_cite_only_risk_factors &&
   report.stance_words.length === 0
 process.exit(passed ? 0 : 1)

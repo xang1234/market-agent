@@ -65,9 +65,9 @@ export function analyzeAgentWorkflow(deps: AnalyzeAgentDeps): (input: DevApiAnal
       snapshotId: input.snapshotId,
       asOf,
     })));
-    // Every section settles before one's failure fails the memo, so none runs on unawaited.
-    const failure = settled.find((result) => result.status === "rejected");
-    if (failure) throw failure.reason;
+    // Every section settles before a failure fails the memo, so none runs on unawaited.
+    const failures = settled.flatMap((result) => (result.status === "rejected" ? [result.reason as unknown] : []));
+    if (failures.length > 0) throw failures.length === 1 ? failures[0] : new AggregateError(failures, "memo sections failed");
     const written = settled.map((result) => (result as PromiseFulfilledResult<AnalystSection>).value);
     return { blocks: sections.flatMap((entry, i) => sectionBlocks(entry, written[i]!, input.snapshotId, asOf)) };
   };
