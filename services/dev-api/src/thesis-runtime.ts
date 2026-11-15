@@ -32,7 +32,6 @@ type PreparedAssessment = {
   model_version: string | null;
   packet_hash: string;
   input_hash: string;
-  /** The snapshot that already seals every result, when each condition kept its last checked result from one earlier run. */
   reused_snapshot_id: string | null;
   /** Facts the verified conditions cited beyond the packet's own; sealed and cited with it. */
   cited_facts: ThesisPacket['facts'];
@@ -148,11 +147,9 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
     async alertFindings() { return findings; },
   };
 }
-// An input hash is the packet hash, then the run that recorded it.
 function packetHashOf(inputHash: string): string {
   return inputHash.split('/')[0];
 }
-// A condition keeps its last checked result while the evidence it was assessed on is unchanged.
 function keptOn(lastChecked: ReadonlyMap<string, LastCheckedResult>, packetHash: string): LastCheckedResult[] {
   return [...lastChecked.values()].filter(last => packetHashOf(last.input_hash) === packetHash);
 }

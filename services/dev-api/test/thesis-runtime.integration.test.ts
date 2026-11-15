@@ -213,12 +213,11 @@ test('narrative monitoring includes IR and non-IR claims, never stores a fabrica
   assert.equal((await db.query('select count(*)::int as n from findings where agent_id=$1',[agent.agent_id])).rows[0].n,1);
 });
 
-// Supports each condition it is asked about with the packet's one claim, or cites an id the packet never supplied for a condition in unchecked. Logs the condition ids of every call in asked.
-function scripted(unchecked: string[] = [], asked: string[][] = []): ThesisLlm {
+function scripted({citeUnknownRefFor=[],askedLog=[]}:{citeUnknownRefFor?:string[];askedLog?:string[][]}={}): ThesisLlm {
   return {async complete(input) {
     const {conditions,evidence}=JSON.parse(input.messages[1].content) as {conditions:Array<{condition_id:string}>;evidence:{claims:Array<{id:string}>}};
-    asked.push(conditions.map(c=>c.condition_id));
-    return {text:JSON.stringify({results:conditions.map(c=>({condition_id:c.condition_id,status:'supported',refs:[unchecked.includes(c.condition_id)?'C99':evidence.claims[0].id]}))}),deployment:{channel:'test',model:'scripted'}};
+    askedLog.push(conditions.map(c=>c.condition_id));
+    return {text:JSON.stringify({results:conditions.map(c=>({condition_id:c.condition_id,status:'supported',refs:[citeUnknownRefFor.includes(c.condition_id)?'C99':evidence.claims[0].id]}))}),deployment:{channel:'test',model:'scripted'}};
   }};
 }
 
@@ -257,7 +256,7 @@ async function narrativeMonitor(t:TestContext,name:string,conditionIds:string[])
 test('a condition supported, then left unchecked, then supported again raises one finding', {skip:!dockerAvailable(),timeout:120000}, async t => {
   const monitor=await narrativeMonitor(t,'thesis-last-checked-findings',[CONDITION]);
   await monitor.run(scripted(),'first');
-  await monitor.run(scripted([CONDITION]),'second');
+  await monitor.run(scripted({citeUnknownRefFor:[CONDITION]}),'second');
   await monitor.run(scripted(),'third');
   assert.deepEqual(await monitor.statuses(),[['supported'],['unchecked'],['supported']]);
   assert.equal(await monitor.findings(),1,'an unchecked reply is no baseline, so supported again is no transition');
@@ -266,9 +265,9 @@ test('a condition supported, then left unchecked, then supported again raises on
 test('a rerun on the same evidence asks the model again only for the condition whose reply was unchecked', {skip:!dockerAvailable(),timeout:120000}, async t => {
   const monitor=await narrativeMonitor(t,'thesis-last-checked-reuse',[CONDITION,OTHER_CONDITION]);
   const asked:string[][]=[];
-  await monitor.run(scripted([OTHER_CONDITION],asked),'same');
-  await monitor.run(scripted([],asked),'same');
-  await monitor.run(scripted([],asked),'same');
+  await monitor.run(scripted({citeUnknownRefFor:[OTHER_CONDITION],askedLog:asked}),'same');
+  await monitor.run(scripted({askedLog:asked}),'same');
+  await monitor.run(scripted({askedLog:asked}),'same');
   assert.deepEqual(asked,[[CONDITION,OTHER_CONDITION],[OTHER_CONDITION]]);
   assert.deepEqual(await monitor.statuses(),[['supported','supported'],['supported','supported'],['supported','unchecked']]);
   const [third,second,first]=await monitor.assessments();
@@ -280,7 +279,7 @@ test('a rerun on the same evidence asks the model again only for the condition w
 
 test('a run overlapped by one that left the condition unchecked records its own checked reply', {skip:!dockerAvailable(),timeout:120000}, async t => {
   const monitor=await narrativeMonitor(t,'thesis-overlap-unchecked',[CONDITION]);
-  const overlapped=await monitor.run(scripted(),'same',()=>monitor.run(scripted([CONDITION]),'same'));
+  const overlapped=await monitor.run(scripted(),'same',()=>monitor.run(scripted({citeUnknownRefFor:[CONDITION]}),'same'));
   assert.deepEqual(overlapped.outputs_summary,{findings:1,assessments:1,reused:false});
   assert.deepEqual(await monitor.statuses(),[['supported'],['unchecked']]);
   assert.equal(await monitor.findings(),1);

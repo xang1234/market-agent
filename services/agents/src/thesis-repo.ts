@@ -188,7 +188,7 @@ export async function getLastCheckedResults(
   versionId: string,
 ): Promise<Map<string, LastCheckedResult>> {
   assertUuid(versionId, "thesis_version_id");
-  // ponytail: reads every assessment of the version, about 9k rows a year for an hourly agent; bound it by assessed_at if run time shows it.
+  // ponytail: scans one row per condition per run of the version, about 44k a year for an hourly five-condition agent. Keep a per-condition baseline table if run time shows it; a cutoff on assessed_at would drop baselines.
   const { rows } = await db.query<Omit<LastCheckedResult, "result"> & { result: unknown }>(
     `select distinct on (entry.result->>'condition_id')
             entry.result, a.input_hash, a.snapshot_id::text as snapshot_id, a.model_version
