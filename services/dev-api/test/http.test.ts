@@ -772,10 +772,7 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
   assert.ok(workflowInput);
   assert.deepEqual(workflowInput.sourceCategories, ["filings", "news"]);
   assert.deepEqual(workflowInput.subjectRefs, [primarySubject, addedSubject]);
-  assert.equal(workflowInput.playbookSectionId, "summary");
-  assert.match(workflowInput.playbookPrompt, /Earnings quality/);
-  assert.match(workflowInput.playbookPrompt, /Required sections: Summary/);
-  assert.equal(workflowInput.playbookName, "Earnings quality");
+  assert.equal(workflowInput.playbook?.playbook_id, "earnings_quality");
   assert.ok(workflowInput.bundleIds.includes("analyze_template_run"));
   assert.ok(workflowInput.bundleIds.includes("filing_research"));
   assert.ok(workflowInput.bundleIds.includes("document_research"));
@@ -1192,7 +1189,7 @@ test("service Analyze adapter honors explicit empty source categories as base bu
   assert.ok(workflowInput);
   assert.deepEqual(workflowInput.sourceCategories, []);
   assert.deepEqual(workflowInput.bundleIds, [ANALYZE_BASE_BUNDLE_ID]);
-  assert.equal(workflowInput.playbookSectionId, "summary");
+  assert.equal(workflowInput.playbook?.sections[0]?.section_id, "summary");
 });
 
 test("POST /v1/analyze/runs rejects verifier failures before persistence", async (t) => {

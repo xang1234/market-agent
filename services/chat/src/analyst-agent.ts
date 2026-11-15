@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { FinancialRuntimeAuthority, FinancialSubjectRef } from "../../financial-core/src/index.ts";
-import type { Clarification, PlanningModel, RequestedSubject } from "../../financial-engine/src/planner.ts";
-import { createLlmRouterFromEnv, LlmClientError, LlmProviderError, LlmRouterError, withLlmAbortSignal, type LlmChatClient, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
+import { planningModelFromRouter, type Clarification, type PlanningModel, type RequestedSubject } from "../../financial-engine/src/planner.ts";
+import { createDefaultPiLlmChatClient, createLlmRouterFromEnv, LlmClientError, LlmProviderError, LlmRouterError, withLlmAbortSignal, type LlmChatClient, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
+import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import type { ControlledRouter, LlmToolCall } from "../../llm/src/router.ts";
 import { runToolLoop, type ToolLoopOutput, type ToolLoopResult } from "../../llm/src/tool-loop.ts";
 import type { JsonObject, JsonValue } from "../../shared/src/json.ts";
@@ -10,7 +11,7 @@ import { isRecord } from "../../shared/src/http.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import { createTurnToolPolicy, loadToolRegistry, type ToolRegistry } from "../../tools/src/index.ts";
 import { CLAIM_PREDICATES, isAnalystToolName, type AnalystToolName, type AnalystToolResult } from "./analyst-tools.ts";
-import type { AnsweredTurn, AnswerTraceInput, TurnTrace } from "./answer-trace.ts";
+import { answerTurn, type AnsweredTurn, type AnswerTraceInput, type TurnTrace } from "./answer-trace.ts";
 import { isUuid, noteBlock } from "./chat-ids.ts";
 import { COMMENTARY_UNAVAILABLE } from "./engine-commentary.ts";
 import { ANALYST_AGENT_BUNDLE_ID } from "./bundle-routing.ts";
@@ -79,6 +80,30 @@ export async function analystAgentRouter(
 
 function perStepDeadlines(router: ControlledRouter): ControlledRouter {
   return { complete: (request) => router.complete(request, withDeadlines(ANSWER_DEADLINES)) };
+}
+
+/** The agent's router, planner and answer on one client that meters each attempt, the way production builds them. */
+export function meteredModels(
+  env: NodeJS.ProcessEnv,
+  base: () => Promise<LlmChatClient> | LlmChatClient = () => (env.LLM_REPLAY_FILE?.trim() ? createReplayLlmChatClient(env.LLM_REPLAY_FILE.trim()) : createDefaultPiLlmChatClient()),
+): Pick<AgentModels, "router" | "planner" | "compose"> {
+  const guarded = (beforeModelCall: () => void) => async (): Promise<LlmChatClient> => {
+    const client = await base();
+    return (deployment, request, options) => {
+      beforeModelCall();
+      return client(deployment, request, options);
+    };
+  };
+  return {
+    router: (beforeModelCall) => analystAgentRouter(env, { createClient: guarded(beforeModelCall) }),
+    planner: (beforeModelCall) => async (request) => {
+      const router = await createLlmRouterFromEnv(env, { createClient: guarded(beforeModelCall) });
+      if (!router) throw new Error("LLM router is not configured");
+      return planningModelFromRouter(router)(request);
+    },
+    compose: (input, turn, onAnswered, beforeModelCall) =>
+      answerTurn(input, turn, { env, traceDir: env.CHAT_TRACE_DIR?.trim(), onAnswered, createClient: guarded(beforeModelCall) }),
+  };
 }
 
 type Certified = Readonly<{ block: FinancialAnswerBlock; packet: EvidencePacket; subjects: ReadonlyArray<string> }>;

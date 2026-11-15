@@ -125,14 +125,14 @@ export type DevApiAnalyzeWorkflowInput = {
   userId: string;
   template: AnalyzeTemplateRow;
   body: Record<string, unknown>;
+  // The run the memo is saved as, made before the workflow so its figures can belong to it.
+  runId: string;
   snapshotId: string;
   instructions: string;
-  playbookPrompt: string;
-  playbookName?: string | null;
+  playbook?: AnalyzePlaybook;
   sourceCategories: ReadonlyArray<string>;
   bundleIds: ReadonlyArray<string>;
   subjectRefs: ReadonlyArray<SubjectRef>;
-  playbookSectionId?: string | null;
 };
 
 export type DevApiAnalyzeWorkflowResult = {
@@ -228,6 +228,7 @@ async function persistAnalyzeRun(
   deps: AnalyzeServiceDeps,
   input: {
     template: { template_id: string; version: number; name: string };
+    runId: string;
     snapshotId: string;
     userId: string;
     body: Record<string, unknown>;
@@ -239,7 +240,6 @@ async function persistAnalyzeRun(
   },
 ): Promise<DevAnalyzeRun> {
   const runAsOf = (input.memoBlocks[0]?.as_of as string | undefined) ?? new Date().toISOString();
-  const runId = randomUUID();
   const lane = deps.analyzeFinancial;
   const financial = lane ? input.runMetadata.financial ?? null : null;
   let blocks: ReadonlyArray<Record<string, unknown>>;
@@ -267,7 +267,7 @@ async function persistAnalyzeRun(
       });
   }
   const persisted = await persistAnalyzeTemplateRunAfterSnapshotSealWithPool(deps.db, {
-    run_id: runId,
+    run_id: input.runId,
     template_id: input.template.template_id,
     template_version: input.template.version,
     blocks: blocks as ReadonlyArray<JsonValue>,
@@ -387,21 +387,22 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         subject_refs: subjectRefs,
         ...(financial ? { financial } : {}),
       });
+      const runId = randomUUID();
       const rendered = await deps.runAnalyzeWorkflow({
         userId,
         template,
         body,
+        runId,
         snapshotId,
         instructions,
-        playbookPrompt: resolvedPlaybook.prompt,
-        playbookName: resolvedPlaybook.playbook.name,
+        playbook: resolvedPlaybook.playbook,
         sourceCategories,
         bundleIds,
         subjectRefs,
-        playbookSectionId: resolvedPlaybook.playbook.sections[0]?.section_id ?? null,
       });
       return persistAnalyzeRun(deps, {
         template,
+        runId,
         snapshotId,
         userId,
         body,
@@ -432,13 +433,6 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
       const playbook = metadata.playbook_id === null
         ? undefined
         : ANALYZE_PLAYBOOKS.find((candidate) => candidate.playbook_id === metadata.playbook_id);
-      const playbookPrompt = playbook
-        ? resolveAnalyzePlaybookRequest({
-          playbook_id: playbook.playbook_id,
-          instructions: metadata.instructions,
-          source_categories: metadata.source_categories,
-        }).prompt
-        : metadata.instructions;
       const financial = metadata.financial ?? (playbook ? await newFinancialContext(deps, playbook, subjectRefs) : null);
       const rerunMetadata = serializeAnalyzeRunMetadataV1({
         template_id: template.template_id,
@@ -451,6 +445,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         rerun_of_run_id: original.run_id,
         ...(financial ? { financial } : {}),
       });
+      const rerunId = randomUUID();
       const snapshotId = randomUUID();
       const body = {
         template_id: template.template_id,
@@ -463,17 +458,17 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         userId,
         template,
         body,
+        runId: rerunId,
         snapshotId,
         instructions: metadata.instructions,
-        playbookPrompt,
-        playbookName: playbook?.name ?? null,
+        ...(playbook ? { playbook } : {}),
         sourceCategories,
         bundleIds,
         subjectRefs,
-        playbookSectionId: playbook?.sections[0]?.section_id ?? null,
       });
       return persistAnalyzeRun(deps, {
         template,
+        runId: rerunId,
         snapshotId,
         userId,
         body,
@@ -487,7 +482,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
     async shareRunToChat({ userId, runId, body }) {
       const run = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
       if (run === null) throw new DevApiHttpError(404, "analyze run not found");
-      const blocks = enrichAnalyzeRunBlocks(run.blocks, run);
+      const blocks = enrichAnalyzeRunBlocks(run.blocks.filter((block) => !isCertifiedBlock(block)), run);
       const shared = acceptedShare(await shareArtifactToChat({
         sources: [
           {
@@ -502,13 +497,16 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
       if (snapshotId === undefined) throw new DevApiHttpError(422, "artifact share rejected");
       // Each engine section is sealed under its own certificate and shared
       // under it, so erasing the financial run also erases the chat copy.
+      // The agent's certified figures in the memo are each shared under their own snapshot too.
       const sections = (await loadAnalyzeFinancialSections(deps.db, { userId, analyzeRunId: run.run_id }))?.sections ?? [];
-      const sectionShares = await Promise.all(sections.flatMap((section) => section.status === "published"
-        ? [shareArtifactToChat({
-            sources: [{ source_kind: "block", origin_snapshot_id: section.snapshot_id, blocks: [section.block] }],
-            egress: { db: deps.db },
-          }).then(acceptedShare)]
-        : []));
+      const certified = [
+        ...run.blocks.flatMap((block) => (isCertifiedBlock(block) ? [block] : [])),
+        ...sections.flatMap((section) => (section.status === "published" ? [section.block] : [])),
+      ];
+      const sectionShares = await Promise.all(certified.map((block) => shareArtifactToChat({
+        sources: [{ source_kind: "block", origin_snapshot_id: block.snapshot_id as string, blocks: [block] }],
+        egress: { db: deps.db },
+      }).then(acceptedShare)));
 
       return withPoolClient(deps.db, async (client) => {
         try {
@@ -556,6 +554,8 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
     },
   };
 }
+
+const isCertifiedBlock = (block: unknown): block is Record<string, unknown> => isRecord(block) && block.kind === "financial_answer";
 
 function acceptedShare(result: ShareToChatResult): Extract<ShareToChatResult, { ok: true }> {
   if (!result.ok) throw new DevApiHttpError(422, "artifact share rejected", result.rejections);

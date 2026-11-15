@@ -29,7 +29,7 @@ function fakeDb() {
         metadata = JSON.parse(String(values?.[3]));
         return {
           rows: [{
-            run_id: RUN, template_id: values?.[0], template_version: values?.[1], playbook_id: values?.[2], run_metadata: metadata,
+            run_id: values?.[6] ?? RUN, template_id: values?.[0], template_version: values?.[1], playbook_id: values?.[2], run_metadata: metadata,
             snapshot_id: values?.[4], blocks: JSON.parse(String(values?.[5])), created_at: "2026-05-06T00:00:00.000Z",
           }],
         };
@@ -62,12 +62,13 @@ function okSeal(snapshotId: string): SnapshotSealResult {
 
 type Hydration = { reads: Array<[string, Record<string, number>]>; at: string };
 
-function adaptersWith(published: AnalyzeFinancialRun[], hydrated: Hydration[], workflow = true) {
+function adaptersWith(published: AnalyzeFinancialRun[], hydrated: Hydration[], workflow = true, written: string[] = []) {
   return createServiceDevApiAdapters({
     db: fakeDb(),
-    runAnalyzeWorkflow: workflow ? (input) => ({
-      blocks: [{ id: "memo-1", kind: "rich_text", snapshot_id: input.snapshotId, as_of: "2026-05-06T00:00:00.000Z", segments: [{ type: "text", text: "Narrative." }] }],
-    }) : undefined,
+    runAnalyzeWorkflow: workflow ? (input) => {
+      written.push(input.runId);
+      return { blocks: [{ id: "memo-1", kind: "rich_text", snapshot_id: input.snapshotId, as_of: "2026-05-06T00:00:00.000Z", segments: [{ type: "text", text: "Narrative." }] }] };
+    } : undefined,
     sealAnalyzeSnapshot: async () => {
       throw new Error("a playbook run seals through buildAnalyzeRunSeals");
     },
@@ -91,7 +92,8 @@ function adaptersWith(published: AnalyzeFinancialRun[], hydrated: Hydration[], w
 test("a memo run hydrates its issuer, declares its frozen financial context, and publishes it against the committed run", async () => {
   const published: AnalyzeFinancialRun[] = [];
   const hydrated: Hydration[] = [];
-  const run = await adaptersWith(published, hydrated).analyze.createRun({
+  const written: string[] = [];
+  const run = await adaptersWith(published, hydrated, true, written).analyze.createRun({
     userId: USER,
     body: { template_id: TEMPLATE, playbook_id: "earnings_quality", subject_ref: { kind: "issuer", id: ISSUER } },
   });
@@ -109,7 +111,8 @@ test("a memo run hydrates its issuer, declares its frozen financial context, and
   assert.deepEqual(hydrated.map((call) => call.reads), [[[ISSUER, { revenue: 2 }]]], "revenue_trend reads revenue for the latest two years");
   assert.ok(String(financial.knowledge_cutoff) >= hydrated[0]!.at, "the cutoff is taken after the facts are fetched");
   assert.equal(published.length, 1);
-  assert.deepEqual(published[0], { user_id: USER, analyze_run_id: RUN, template_id: TEMPLATE, template_version: 3, context: financial });
+  assert.deepEqual(written, [run.run_id], "the workflow writes for the run the memo is saved as");
+  assert.deepEqual(published[0], { user_id: USER, analyze_run_id: run.run_id, template_id: TEMPLATE, template_version: 3, context: financial });
   assert.deepEqual(run.financial_sections, {
     coverage: "none",
     sections: [{ section_id: "revenue_trend", status: "gap", reason_code: "not_started" }],
@@ -119,7 +122,10 @@ test("a memo run hydrates its issuer, declares its frozen financial context, and
 test("a rerun of a memo saved without a financial context hydrates and publishes a fresh one", async () => {
   const published: AnalyzeFinancialRun[] = [];
   const hydrated: Hydration[] = [];
-  const run = await adaptersWith(published, hydrated).analyze.rerun({ userId: USER, runId: ORIGINAL });
+  const written: string[] = [];
+  const run = await adaptersWith(published, hydrated, true, written).analyze.rerun({ userId: USER, runId: ORIGINAL });
+  assert.deepEqual(written, [run.run_id], "the rerun writes for its own new run");
+  assert.notEqual(run.run_id, ORIGINAL);
 
   const metadata = run.run_metadata as { rerun_of_run_id: string; financial: Record<string, unknown> };
   assert.equal(metadata.rerun_of_run_id, ORIGINAL);

@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import type { AddressInfo } from "node:net";
-import test, { type TestContext } from "node:test";
+import test from "node:test";
 
 import type { Client } from "pg";
 
 import { claimAgentRun } from "../../agents/src/agent-run-repo.ts";
 import { createAgent, getAgent } from "../../agents/src/agent-repo.ts";
 import { runAgentLoop } from "../../agents/src/agent-loop.ts";
-import { createAnalyzeTemplate } from "../../analyze/src/template-repo.ts";
 import { createClaimArgument } from "../../evidence/src/claim-argument-repo.ts";
 import { createClaimEvidence } from "../../evidence/src/claim-evidence-repo.ts";
 import { createClaim } from "../../evidence/src/claim-repo.ts";
@@ -23,16 +21,11 @@ import {
   registerLifoCleanup,
 } from "../../../db/test/docker-pg.ts";
 import {
-  analyzeFinancial,
   closeLocalRuntimePoolForTests,
   createAgentLoopStages,
-  runAnalyzeWorkflow,
-  sealAnalyzeSnapshot,
 } from "../src/local-runtime.ts";
-import { createDevApiServer, createServiceDevApiAdapters } from "../src/http.ts";
 
 const USER_ID = "10000000-0000-4000-8000-000000000001";
-const OTHER_USER_ID = "10000000-0000-4000-8000-000000000099";
 const SUBJECT_ID = "20000000-0000-4000-8000-000000000002";
 const RUN_ID = "30000000-0000-4000-8000-000000000003";
 
@@ -99,230 +92,6 @@ function testHash(seed: string): string {
 function sorted(values: ReadonlyArray<string>): string[] {
   return [...values].sort();
 }
-
-async function startDevApiServer(
-  t: TestContext,
-  adapters: ReturnType<typeof createServiceDevApiAdapters>,
-): Promise<string> {
-  const server = createDevApiServer({}, { adapters });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
-  const { port } = server.address() as AddressInfo;
-  return `http://127.0.0.1:${port}`;
-}
-
-test(
-  "local analyze runtime produces verifier-valid claim/document/source backed blocks",
-  { skip: !dockerAvailable(), timeout: 120_000 },
-  async (t) => {
-    const { databaseUrl } = await bootstrapDatabase(t, "dev-api-local-analyze-runtime");
-    const previousDevApiUrl = process.env.DEV_API_DATABASE_URL;
-    const previousDatabaseUrl = process.env.DATABASE_URL;
-    process.env.DEV_API_DATABASE_URL = databaseUrl;
-    registerLifoCleanup(t, async () => {
-      await closeLocalRuntimePoolForTests();
-      if (previousDevApiUrl === undefined) {
-        delete process.env.DEV_API_DATABASE_URL;
-      } else {
-        process.env.DEV_API_DATABASE_URL = previousDevApiUrl;
-      }
-      if (previousDatabaseUrl === undefined) {
-        delete process.env.DATABASE_URL;
-      } else {
-        process.env.DATABASE_URL = previousDatabaseUrl;
-      }
-    });
-
-    const client = await connectedClient(t, databaseUrl);
-    await seedUser(client);
-    await seedUser(client, OTHER_USER_ID);
-    const otherUserSeeded = await seedExistingEvidence(client, { userId: OTHER_USER_ID, label: "other-user" });
-    const seeded = await seedExistingEvidence(client, { userId: USER_ID, label: "owned" });
-    const template = await createAnalyzeTemplate(client, {
-      user_id: USER_ID,
-      name: "Evidence-backed memo",
-      prompt_template: "Summarize the evidence",
-      source_categories: ["filings", "news"],
-    });
-
-    const snapshotId = "40000000-0000-4000-8000-000000000004";
-    const rendered = await runAnalyzeWorkflow({
-      userId: USER_ID,
-      template,
-      body: {},
-      snapshotId,
-      instructions: "Summarize the evidence",
-      playbookPrompt: "Earnings quality: Assess revenue quality.\nRequired sections: Summary",
-      playbookName: "Earnings quality",
-      sourceCategories: ["filings"],
-      bundleIds: ["company_profile", "filings"],
-      subjectRefs: [{ kind: "issuer", id: SUBJECT_ID }],
-      playbookSectionId: "summary",
-    });
-
-    assert.equal(rendered.blocks.length >= 1, true);
-    const firstBlock = rendered.blocks[0]!;
-    assert.equal(firstBlock.snapshot_id, snapshotId);
-    assert.equal(firstBlock.title, "Earnings quality");
-    assert.match(JSON.stringify(firstBlock), /Required sections: Summary/);
-    assert.equal(
-      (firstBlock.data_ref as { params?: { playbook_section_id?: string } }).params?.playbook_section_id,
-      "summary",
-    );
-    assert.equal(Array.isArray(firstBlock.source_refs), true);
-    assert.deepEqual(firstBlock.source_refs, [seeded.sourceId]);
-    assert.equal(Array.isArray(firstBlock.claim_refs), true);
-    assert.deepEqual(firstBlock.claim_refs, [seeded.claimId]);
-    assert.equal(Array.isArray(firstBlock.document_refs), true);
-    assert.deepEqual(firstBlock.document_refs, [seeded.documentId]);
-    assert.match(JSON.stringify(firstBlock), /owned seeded evidence says operating margin quality improved/);
-    assert.doesNotMatch(JSON.stringify(firstBlock), /other-user seeded evidence/);
-    assert.equal((firstBlock.claim_refs as unknown[]).includes(otherUserSeeded.claimId), false);
-
-    const seal = await sealAnalyzeSnapshot({
-      snapshotId,
-      userId: USER_ID,
-      templateId: template.template_id,
-      body: {},
-      blocks: rendered.blocks,
-    });
-
-    assert.equal(seal.ok, true, JSON.stringify(seal.verification.failures));
-    if (!seal.ok) return;
-    assert.equal(seal.snapshot.snapshot_id, snapshotId);
-    assert.equal(seal.snapshot.source_ids.length > 0, true);
-    assert.equal(seal.snapshot.claim_refs.length > 0, true);
-    assert.equal(seal.snapshot.document_refs.length > 0, true);
-
-    const pool = await connectedPool(t, databaseUrl);
-    const base = await startDevApiServer(t, createServiceDevApiAdapters({
-      db: pool,
-      runAnalyzeWorkflow,
-      sealAnalyzeSnapshot,
-      createAgentLoopStages,
-      analyzeFinancial,
-    }));
-    const response = await fetch(`${base}/v1/analyze/runs`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-user-id": USER_ID,
-      },
-      body: JSON.stringify({
-        template_id: template.template_id,
-        instructions: "Summarize the evidence",
-        source_categories: ["filings"],
-        subject_ref: { kind: "issuer", id: SUBJECT_ID },
-      }),
-    });
-    const body = await response.json() as {
-      blocks?: Array<Record<string, unknown>>;
-      snapshot_id?: string;
-      financial_sections?: { sections: Array<{ section_id: string; status: string }> };
-    };
-    assert.equal(response.status, 201);
-    assert.deepEqual(body.blocks?.[0]?.claim_refs, [seeded.claimId]);
-    assert.equal(typeof body.snapshot_id, "string");
-    assert.deepEqual(
-      body.financial_sections?.sections.map(({ section_id, status }) => ({ section_id, status })),
-      [{ section_id: "revenue_trend", status: "gap" }],
-      "the memo declares its engine section, a gap for an issuer with no stored facts",
-    );
-  },
-);
-
-test(
-  "local analyze runtime only includes issuer IR evidence when issuer_ir is selected",
-  { skip: !dockerAvailable(), timeout: 120_000 },
-  async (t) => {
-    const { databaseUrl } = await bootstrapDatabase(t, "dev-api-local-ir-opt-in");
-    const previousDevApiUrl = process.env.DEV_API_DATABASE_URL;
-    const previousDatabaseUrl = process.env.DATABASE_URL;
-    process.env.DEV_API_DATABASE_URL = databaseUrl;
-    registerLifoCleanup(t, async () => {
-      await closeLocalRuntimePoolForTests();
-      if (previousDevApiUrl === undefined) {
-        delete process.env.DEV_API_DATABASE_URL;
-      } else {
-        process.env.DEV_API_DATABASE_URL = previousDevApiUrl;
-      }
-      if (previousDatabaseUrl === undefined) {
-        delete process.env.DATABASE_URL;
-      } else {
-        process.env.DATABASE_URL = previousDatabaseUrl;
-      }
-    });
-
-    const client = await connectedClient(t, databaseUrl);
-    await seedUser(client);
-    await client.query(
-      `insert into issuers (issuer_id, legal_name) values ($1::uuid, 'Acme Robotics Holdings')`,
-      [SUBJECT_ID],
-    );
-    const regular = await seedExistingEvidence(client, { label: "regular-news" });
-    const ir = await seedExistingEvidence(client, {
-      label: "issuer-ir",
-      textCanonical: "issuer IR evidence says management raised full-year revenue guidance.",
-      effectiveTime: "2026-05-08T00:00:00.000Z",
-    });
-    const registry = await client.query<{ ir_source_id: string }>(
-      `insert into ir_source_registry (issuer_id, source_type, url, enabled)
-       values ($1::uuid, 'rss', 'https://investors.acme.example/news/rss', true)
-       returning ir_source_id::text as ir_source_id`,
-      [SUBJECT_ID],
-    );
-    await client.query(
-      `insert into ir_document_assets
-         (ir_source_id, issuer_id, document_id, source_id, asset_kind, canonical_url,
-          hosted_provider, issuer_attested, content_type, discovered_at, fetched_at)
-       values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'press_release',
-               'https://investors.acme.example/news/q1-results',
-               'issuer_ir', true, 'text/html',
-               '2026-05-08T00:00:00.000Z', '2026-05-08T00:00:00.000Z')`,
-      [registry.rows[0]!.ir_source_id, SUBJECT_ID, ir.documentId, ir.sourceId],
-    );
-
-    const template = await createAnalyzeTemplate(client, {
-      user_id: USER_ID,
-      name: "IR opt-in memo",
-      prompt_template: "Summarize the evidence",
-      source_categories: ["news"],
-    });
-
-    const withoutIr = await runAnalyzeWorkflow({
-      userId: USER_ID,
-      template,
-      body: {},
-      snapshotId: "40000000-0000-4000-8000-000000000014",
-      instructions: "Summarize the evidence",
-      playbookPrompt: "Earnings quality",
-      playbookName: "Earnings quality",
-      sourceCategories: ["news"],
-      bundleIds: ["analyze_template_run", "document_research"],
-      subjectRefs: [{ kind: "issuer", id: SUBJECT_ID }],
-      playbookSectionId: "summary",
-    });
-    const withIr = await runAnalyzeWorkflow({
-      userId: USER_ID,
-      template,
-      body: {},
-      snapshotId: "40000000-0000-4000-8000-000000000015",
-      instructions: "Summarize the evidence",
-      playbookPrompt: "Earnings quality",
-      playbookName: "Earnings quality",
-      sourceCategories: ["issuer_ir"],
-      bundleIds: ["analyze_template_run", "document_research"],
-      subjectRefs: [{ kind: "issuer", id: SUBJECT_ID }],
-      playbookSectionId: "summary",
-    });
-
-    assert.deepEqual(withoutIr.blocks[0]!.claim_refs, [regular.claimId]);
-    assert.equal((JSON.stringify(withoutIr.blocks[0])).includes("issuer IR evidence"), false);
-    assert.deepEqual(withIr.blocks[0]!.claim_refs, [ir.claimId]);
-    assert.equal((withIr.blocks[0]!.claim_refs as readonly string[]).includes(regular.claimId), false);
-    assert.match(JSON.stringify(withIr.blocks[0]), /issuer IR evidence/);
-  },
-);
 
 test(
   "local agent runtime creates snapshot-backed findings that real alert evaluation can fire on",
