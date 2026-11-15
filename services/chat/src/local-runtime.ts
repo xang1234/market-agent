@@ -47,6 +47,7 @@ import { createLlmThreadTitleModel, type DroppedClaims } from "./llm-runtime.ts"
 import { structuredRefsFromHandoff } from "./local-runtime-structured.ts";
 import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
 import { saveCommentary } from "./engine-commentary.ts";
+import { analystAgentRouter, analystAgentRunner } from "./analyst-agent.ts";
 import { ChatSnapshotSealError, createChatMessagePersistence, saveChatMessageWorkSummary, type ChatSealResult } from "./messages.ts";
 import type { ChatWorkSummarySave } from "./work-summary.ts";
 import {
@@ -514,20 +515,38 @@ export async function financialResearchScope(
   return (await turnScope(context.threadId, context.userIntent ?? "", covered, true, reading))(turnNow(process.env));
 }
 
-export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime({
-  pool: { query: (text, values) => pool().query(text, values), connect: () => pool().connect() },
-  planningModel: async (request) => {
+const financialDeps = {
+  pool: { query: (text: string, values?: unknown[]) => pool().query(text, values), connect: () => pool().connect() },
+  planningModel: async (request: Parameters<ReturnType<typeof planningModelFromRouter>>[0]) => {
     const router = await createLlmRouterFromEnv(process.env);
     if (!router) throw new Error("LLM router is not configured");
     return planningModelFromRouter(router)(request);
   },
-  resolveMention: (mention) => preResolveSubject({ text: mention }),
-  priorSubjects: (threadId) => loadPriorSubjects({ threadId }),
+  resolveMention: (mention: string) => preResolveSubject({ text: mention }),
+  priorSubjects: (threadId: string) => loadPriorSubjects({ threadId }),
   evidence: createEvidenceFinancialPort,
   researchScope: financialResearchScope,
+};
+
+export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime({
+  ...financialDeps,
   hydrate: hydrateTurn,
   commentary: (db, input) => saveCommentary(db, (answer, turn, onAnswered) =>
     answerTurn(answer, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered }), input),
+});
+
+// The analyst agent (CHAT_ANALYST_AGENT=1, runtime.ts): its reads cut off as the analyst path's do.
+export const analystAgent = analystAgentRunner({
+  financial: financialDeps,
+  router: () => analystAgentRouter(process.env),
+  read: (name, args, turn) => runRegisteredAnalystTool(pool(), name, args, turn).catch((reason: unknown) => {
+    if (!isUnavailableRead(reason)) throw reason;
+    console.warn(`[chat] ${name} failed; the analyst agent answers without it`, reason);
+    return { tool: name, status: "unavailable" as const, reason: "the read failed" };
+  }),
+  compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered }),
+  asOf: () => turnNow(process.env),
+  conversation: (threadId) => loadRecentConversation(pool(), { threadId, limit: CONVERSATION_MESSAGES }),
 });
 
 export const persistAssistantMessage: ChatAssistantMessagePersistence = async (message) =>
@@ -544,16 +563,23 @@ export const generateThreadTitle: ChatThreadTitleGenerator = async (job) =>
     model: createLlmThreadTitleModel(),
   })(job);
 
+// An engine answer the analyst agent saves beside its card was sealed with
+// its own snapshot and certificate when it was published: it is saved as it
+// is, and only the rest is sealed here.
+const sealedHere = (blocks: ReadonlyArray<Record<string, unknown>>) => blocks.filter((block) => block.kind !== "financial_answer");
+
 async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersistenceInput): Promise<ChatSealResult> {
-  const snapshotId = snapshotIdFromBlocks(input.blocks);
-  const asOf = maxBlockAsOf(input.blocks) ?? turnNow(process.env);
+  const own = sealedHere(input.blocks);
+  const snapshotId = snapshotIdFromBlocks(own);
+  const asOf = maxBlockAsOf(own) ?? turnNow(process.env);
   const userId = await threadUserId(input.threadId);
   return withPoolClient(pool(), async (client: PoolClient) => {
     try {
       await client.query("begin");
-      const dropped = await droppedClaims(client, input.blocks, { user_id: userId, as_of: asOf });
+      const dropped = await droppedClaims(client, own, { user_id: userId, as_of: asOf });
       if (dropped && !input.without) throw new ChatSnapshotSealError([{ reason_code: "missing_claim_ref", details: dropped }]);
-      const blocks = dropped ? input.without!(dropped) : input.blocks;
+      const saved = dropped ? input.without!(dropped) : input.blocks;
+      const blocks = sealedHere(saved);
       // On this client alone: one waiting for another while it holds its locks
       // would stall the pool once every client did.
       const manifest = await manifestFromBlockRefs(client, {
@@ -582,7 +608,7 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
       });
       // A refused seal keeps its audit row.
       await client.query("commit");
-      return dropped ? { ...seal, blocks } : seal;
+      return dropped ? { ...seal, blocks: saved } : seal;
     } catch (error) {
       await client.query("rollback").catch((rollbackError: unknown) => {
         (error as { rollback_error?: unknown }).rollback_error = rollbackError;

@@ -537,6 +537,79 @@ test("default turn runner calls analyst tool runtime and persists after verifica
   assert.equal(turn.events[1].tool_call_id, "tool-backed-1");
 });
 
+// The chain's seats, as each records its turn: offered choices, then the financial lane or the agent, then the base runner.
+function seats(analystAgent?: (context: ChatTurnRunContext) => Promise<null>) {
+  const calls: string[] = [];
+  const coordinator = createChatCoordinator({
+    financialRuntime: {
+      everyOfferedChoice: async () => {
+        calls.push("offered");
+        return null;
+      },
+      take: async () => {
+        calls.push("financial");
+        return null;
+      },
+      assertReady: async () => {},
+    },
+    ...(analystAgent ? { analystAgent: async (context: ChatTurnRunContext) => {
+      calls.push(`agent:${context.bundleId}`);
+      return analystAgent(context);
+    } } : {}),
+    runner: async (context) => {
+      calls.push(`base:${context.bundleId}`);
+      context.emit("turn.completed", {});
+    },
+  });
+  return { calls, coordinator };
+}
+
+test("without the analyst agent the chain is trunk's: the financial lane holds its seat", async () => {
+  const { calls, coordinator } = seats();
+  await coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "AAPL revenue" }).completed;
+  assert.deepEqual(calls, ["offered", "financial", `base:${DEFAULT_BUNDLE_ID}`]);
+});
+
+test("with the analyst agent it takes the financial lane's seat, and a turn it reads nothing for goes on to the base runner", async () => {
+  const { calls, coordinator } = seats(async () => null);
+  await coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "AAPL revenue" }).completed;
+  assert.deepEqual(calls, ["offered", "agent:analyst_agent", `base:${DEFAULT_BUNDLE_ID}`]);
+});
+
+test("the analyst agent's answer is sealed, saved and streamed as an analyst turn, under its own bundle", async () => {
+  const saved: string[] = [];
+  const coordinator = createChatCoordinator({
+    analystAgent: async (context) => ({
+      snapshot_id: "11111111-1111-4111-a111-111111111111",
+      verification: { ok: true },
+      tool_calls: [{ tool_call_id: "agent-call-1", tool_name: "get_company_profile", status: "ok", bundle_id: context.bundleId }],
+      blocks: [{
+        id: "agent-card", kind: "rich_text", snapshot_id: "11111111-1111-4111-a111-111111111111", data_ref: { kind: "rich_text", id: "agent-card" },
+        source_refs: [], as_of: "2026-11-01T00:00:00.000Z", segments: [{ type: "text", text: "According to a source on AAPL: it sells phones." }],
+      }],
+    }),
+    persistAssistantMessage: async ({ blocks }) => {
+      saved.push(blocks.map((block) => block.id).join());
+      return readMessage({ snapshot_id: "22222222-2222-4222-a222-222222222222", message_id: "33333333-3333-4333-a333-333333333333" });
+    },
+    runner: () => assert.fail("the agent answered the turn"),
+  });
+  const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "What does AAPL sell?" });
+  await turn.completed;
+  assert.deepEqual(saved, ["agent-card"]);
+  assert.deepEqual(turn.events.map((event) => [event.type, event.bundle_id ?? null]), [
+    ["turn.started", "analyst_agent"],
+    ["tool.started", "analyst_agent"],
+    ["tool.completed", "analyst_agent"],
+    ["snapshot.staged", null],
+    ["snapshot.sealed", null],
+    ["block.began", null],
+    ["block.delta", null],
+    ["block.completed", null],
+    ["turn.completed", "analyst_agent"],
+  ]);
+});
+
 test("default turn runner fails closed when no analyst tool runtime is configured", async () => {
   const coordinator = createChatCoordinator();
 

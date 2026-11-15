@@ -139,6 +139,9 @@ export type ChatAnalystToolRuntime = (
   input: ChatAnalystToolRuntimeInput,
 ) => Promise<ChatAnalystToolRuntimeResult> | ChatAnalystToolRuntimeResult;
 
+// The analyst agent's answer to a turn (analyst-agent.ts), or null for a turn it reads nothing for.
+export type ChatAnalystAgent = (context: ChatTurnRunContext) => Promise<ChatAnalystToolRuntimeResult | null>;
+
 export type ChatAnalystToolExecutor = (input: {
   tool: ToolDefinition;
   bundleId: string;
@@ -323,6 +326,8 @@ export type ChatCoordinatorOptions = {
   readQuestion?: (question: string) => Promise<ScopeProposal | null>;
   verificationMode?: ChatVerificationMode;
   financialRuntime?: ChatFinancialRuntime;
+  // Present only with CHAT_ANALYST_AGENT=1 (runtime.ts): the agent takes the financial lane's seat.
+  analystAgent?: ChatAnalystAgent;
   analystToolRuntime?: ChatAnalystToolRuntime;
   persistAssistantMessage?: ChatAssistantMessagePersistence;
   // Records how a saved answer's turn worked; absent, no answer keeps a "Worked for" line.
@@ -396,12 +401,16 @@ export function createChatCoordinator(
       verificationMode: options.verificationMode ?? "strict",
     }))
     : missingAnalystToolRuntimeRunner);
-  const runner = workSummaryRunner(threadTitleGenerationRunner(runActivityReportingRunner(offeredChoicesRunner(readingRunner(financialAwareRunner(subjectAwareRunner(baseRunner, {
+  const subjectAware = subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
     preResolveSubject,
     loadPriorSubjects: options.loadPriorSubjects,
     renderSubjectClarification: options.renderSubjectClarification,
-  }), { financialRuntime: options.financialRuntime, persistAssistantMessage }), options.readQuestion), options.financialRuntime), options.runActivity), {
+  });
+  const seat = options.analystAgent
+    ? analystAgentSeat(subjectAware, options.analystAgent, { persistAssistantMessage, verificationMode: options.verificationMode ?? "strict" })
+    : financialAwareRunner(subjectAware, { financialRuntime: options.financialRuntime, persistAssistantMessage });
+  const runner = workSummaryRunner(threadTitleGenerationRunner(runActivityReportingRunner(offeredChoicesRunner(readingRunner(seat, options.readQuestion), options.financialRuntime), options.runActivity), {
     generateThreadTitle: options.generateThreadTitle,
     onThreadTitleGenerationError: options.onThreadTitleGenerationError,
   }), { save: options.saveWorkSummary, now: options.now ?? Date.now });
@@ -1401,6 +1410,23 @@ function emitSubjectResolutionToolEvents(
     tool_name: "resolve_subjects",
   });
   emit("tool.completed", subjectToolCompletedPayload(preResolution, toolCallId));
+}
+
+export const ANALYST_AGENT_BUNDLE_ID = "analyst_agent";
+
+// The agent answers the turn as an analyst turn is answered, sealed, saved and
+// streamed; a turn it reads nothing for goes on to `next`.
+function analystAgentSeat(
+  next: ChatTurnRunner,
+  agent: ChatAnalystAgent,
+  options: { persistAssistantMessage?: ChatAssistantMessageCommit; verificationMode: ChatVerificationMode },
+): ChatTurnRunner {
+  return async (context) => {
+    const turn = { ...context, bundleId: ANALYST_AGENT_BUNDLE_ID };
+    const answer = await agent(turn);
+    if (answer === null) return next(context);
+    await toolBackedAnalystTurnRunner(turn, { ...options, runtime: () => answer });
+  };
 }
 
 async function toolBackedAnalystTurnRunner(

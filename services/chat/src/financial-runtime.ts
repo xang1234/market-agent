@@ -51,6 +51,7 @@ import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { ELIGIBLE_FACT_SQL, PUBLIC_SOURCE_SQL } from "../../evidence/src/financial-input-repo.ts";
 import { selectPrice } from "../../financial-engine/src/select-price.ts";
 import type { SelectionPolicy } from "../../financial-engine/src/select-inputs.ts";
+import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId, noteBlock } from "./chat-ids.ts";
 import { enginePacket, type EvidencePacket } from "./evidence-packet.ts";
@@ -179,6 +180,9 @@ const GAP_TEXT: Readonly<Record<ChatGap, string>> = {
   request_conflict: "This turn was already answered with a different calculation.",
   parent_authority_required: "This calculation could not be run for this conversation.",
 };
+
+/** How a turn words a gap, the same for every lane that asks the engine. */
+export const chatGapText = (reason: ChatGap): string => GAP_TEXT[reason];
 
 // Whether a request's gap declines the turn, or is a notice about its run:
 // running, answered otherwise, cancelled, or not this thread's. A newer
@@ -420,6 +424,8 @@ export type CertifiedFinancialsRequest = Readonly<{
   // One run per thread: a later call under it resumes that run's plan, whatever it asks now.
   requestKey: string;
   persistParent: PersistParentArtifact;
+  // What the plan records as having asked for it; the turn when absent.
+  originRef?: string;
 }>;
 
 // ponytail: a call that resumes a reserved run does not plan, so its planned
@@ -428,7 +434,8 @@ type PlannedSubjects = Readonly<{ planned_subjects: ReadonlyArray<RequestedSubje
 
 export type CertifiedFinancials =
   // The packet is built when called, so a caller that never reads it does no work after the commit.
-  | Readonly<{ status: "published"; run_id: string; content: FinancialAnswerContent; packet: () => Promise<EvidencePacket> }>
+  // block: the sealed answer whole, for a caller whose parent saves it later.
+  | Readonly<{ status: "published"; run_id: string; content: FinancialAnswerContent; block: FinancialAnswerBlock; packet: () => Promise<EvidencePacket> }>
   // An earlier attempt published the run, so only its parent holds the block:
   // a caller that needs the figures on a retry keeps them in its parent.
   | Readonly<{ status: "existing"; run_id: string }>
@@ -450,7 +457,7 @@ export async function certifiedFinancials(
     request_key,
     plan: async (db) => {
       const received = deps.clock?.() ?? new Date();
-      planned = await planTurn(deps.planningModel, context, context.userIntent ?? "", request.subjects, authority, received, (subjects) => {
+      planned = await planTurn(deps.planningModel, request.originRef === undefined ? context : { ...context, originRef: request.originRef }, context.userIntent ?? "", request.subjects, authority, received, (subjects) => {
         planned_subjects = subjects;
       }, {
         choice: request.choice,
@@ -473,7 +480,8 @@ export async function certifiedFinancials(
     case "driven": {
       const [unit] = outcome.report?.finalized ?? [];
       if (unit?.result.status === "published") {
-        const content = unit.result.publication.block.financial;
+        const { block } = unit.result.publication;
+        const content = block.financial;
         const packet = async () => {
           const plan = await findPlanForRequest(deps.pool, { authority, request_key });
           const labels = new Map([...request.labels].map(([issuer, label]) => [issuer.toLowerCase(), label]));
@@ -483,7 +491,7 @@ export async function certifiedFinancials(
           }));
           return enginePacket(content, tickers, plan);
         };
-        return { status: "published", run_id: outcome.run_id, content, packet };
+        return { status: "published", run_id: outcome.run_id, content, block, packet };
       }
       if (outcome.report === null || unit?.result.status === "existing" || (!unit && outcome.report.existing > 0)) return { status: "existing", run_id: outcome.run_id };
       // A drive cancelled midway is a notice, as a cancelled run is.
@@ -518,7 +526,7 @@ async function requestedMentions(context: ChatFinancialTurnContext, text: string
   return [explicit, ...comparedAdditions(await context.reading?.() ?? null)];
 }
 
-type TurnCompanies = Readonly<{
+export type TurnCompanies = Readonly<{
   // One per company, primary first, as the planner takes them.
   subjects: ReadonlyArray<RequestedSubject>;
   resolved: ReadonlyArray<ChatResolvedSubjectPreResolution>;
@@ -538,7 +546,8 @@ type TurnCompanies = Readonly<{
 
 const label = (resolution: ChatResolvedSubjectPreResolution) => resolution.handoff?.display_labels?.ticker ?? resolution.display_label;
 
-async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFinancialTurnContext, text: string): Promise<TurnCompanies> {
+/** The companies a turn is about, as the financial lane picks them: named, compared, or carried from the previous answer. */
+export async function requestedSubjects(deps: Pick<ChatFinancialRuntimeDeps, "pool" | "resolveMention" | "priorSubjects">, context: ChatFinancialTurnContext, text: string): Promise<TurnCompanies> {
   // Each name is resolved once, though the analyst path's rules read the message again.
   const resolutions = new Map<string, Promise<ChatSubjectPreResolution>>();
   const resolve = (mention: string) => resolutions.get(mention) ?? resolutions.set(mention, deps.resolveMention(mention)).get(mention)!;
@@ -750,13 +759,13 @@ const PLANNER: PlanChoice = { kind: "planner" };
 
 function planningContextAt(
   model: PlanningModel | null,
-  context: ChatFinancialTurnContext,
+  context: ChatFinancialTurnContext & { originRef?: string },
   authority: FinancialRuntimeAuthority,
   cutoff: Date,
 ): (subjects: ReadonlyArray<RequestedSubject>) => PlanningContext {
   return (subjects) => ({
     plan_id: randomUUID(),
-    origin: { kind: "chat_request", ref: `chat:${context.threadId}:${context.turnId ?? context.runId}` },
+    origin: { kind: "chat_request", ref: context.originRef ?? `chat:${context.threadId}:${context.turnId ?? context.runId}` },
     knowledge_cutoff: cutoff.toISOString(),
     cutoff_timezone: "UTC",
     reporting_basis: "as_restated",
@@ -771,7 +780,7 @@ function planningContextAt(
 
 async function planTurn(
   model: PlanningModel | null,
-  context: ChatFinancialTurnContext,
+  context: ChatFinancialTurnContext & { originRef?: string },
   text: string,
   requested: ReadonlyArray<RequestedSubject>,
   authority: FinancialRuntimeAuthority,
@@ -990,7 +999,7 @@ function sameRef(left: FinancialSubjectRef, right: FinancialSubjectRef): boolean
   return left.kind === right.kind && left.id === right.id;
 }
 
-function chatAuthority(userId: string, threadId: string, turnId: string): FinancialRuntimeAuthority {
+export function chatAuthority(userId: string, threadId: string, turnId: string): FinancialRuntimeAuthority {
   return createRuntimeAuthority({
     owner_user_id: userId,
     egress_channel: "chat",

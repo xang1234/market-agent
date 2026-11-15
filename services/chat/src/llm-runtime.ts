@@ -157,6 +157,8 @@ export async function composeAnalystBlocksWithLlm(input: {
   // The evidence the answer is written from, when the caller built it (an
   // engine answer's, enginePacket); otherwise the turn's (turnPacket).
   packet?: EvidencePacket;
+  // Said after the system prompt's own rules (the analyst agent's packet holds claims of its own kinds).
+  instructions?: ReadonlyArray<string>;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
   // Receives the deployment (channel/model) that wrote the answer (#183).
   onAnswered?: (deployment: string) => void;
@@ -244,6 +246,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           "subject as \"it\" or \"its\" ({\"kind\":\"analyst_inference\",\"subject\":\"AMD\",\"text\":\"Its net margin may understate",
           "underlying profitability, given the one-time charge management disclosed.\",\"supports\":[2,3]}).",
           "When evidence_packet has neither figures nor claims, reply with an empty list.",
+          ...(input.instructions ?? []),
         ].join(" "),
       },
       {

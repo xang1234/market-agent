@@ -5,6 +5,8 @@ export type ChatRuntimeEnv = {
   CHAT_DATABASE_URL?: string;
   DATABASE_URL?: string;
   CHAT_VERIFICATION_MODE?: string;
+  // "1" answers chat with the analyst agent (analyst-agent.ts) in the financial lane's seat.
+  CHAT_ANALYST_AGENT?: string;
   NODE_ENV?: string;
 };
 
@@ -32,6 +34,7 @@ export async function loadChatServerOptionsFromEnv(
     generateThreadTitle: runtime.generateThreadTitle,
     analystToolRuntime: runtime.analystToolRuntime,
     financialRuntime: runtime.financialRuntime,
+    ...(env.CHAT_ANALYST_AGENT?.trim() === "1" ? { analystAgent: runtime.analystAgent } : {}),
   };
 }
 
