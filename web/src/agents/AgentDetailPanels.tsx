@@ -48,7 +48,7 @@ export function AgentDetailPanels({ findings, assessments, detailsError, runs, r
               <li key={run.agent_run_log_id} className="rounded-lg border border-line p-3 text-sm">
                 <span className="font-medium">{run.status}</span>
                 <span className="ml-2 text-muted">{run.started_at}</span>
-                {run.error ? <p className="mt-1 text-negative">{run.error}</p> : null}
+                {run.error ? <p className="mt-1 break-words text-negative">{run.error}</p> : null}
               </li>
             ))}
           </ul>
