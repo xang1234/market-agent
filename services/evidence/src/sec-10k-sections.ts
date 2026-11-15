@@ -5,13 +5,12 @@ export type TenKItem = (typeof TEN_K_ITEMS)[number];
 
 // canonicalText turns every tag into a space, so a tag inside a word splits it.
 const tagSplitTolerant = (title: string) => title.split(" ").map((word) => [...word].join(" ?")).join("\\s+");
-// "ltem" is a typo some filers make for "Item" (1-800-Flowers' Item 1A).
+// Some filers type "ltem" for "Item" (1-800-Flowers' Item 1A), so every heading
+// pattern accepts a leading l.
 const HEADINGS: Readonly<Record<TenKItem, RegExp>> = {
   "1": new RegExp(`^[il]tems?\\s*1(?:\\s*(?:and|&)\\s*2)?\\s*[.:-]?\\s*(?:description\\s+of\\s+)?${tagSplitTolerant("business")}\\b`, "i"),
   "1A": new RegExp(`^[il]tem\\s*1a\\s*[.:-]?\\s*${tagSplitTolerant("risk factors")}\\b`, "i"),
 };
-// A title in lower case counts only after a separator, as in "Item 1B.
-// unresolved", so a paragraph that opens "Item 7 of this report" heads nothing.
 const ANY_HEADING = /^(?:[Il]tems?|ITEMS?|items?)\s*\d{1,2}[A-Ca-c]?(?:\s*(?:and|And|AND|&)\s*\d{1,2}[A-Ca-c]?)?\s*(?:[.:-]\s*[A-Za-z[]|[A-Z[])/;
 const MIN_ITEM_BODY_CHARS = 1_000;
 

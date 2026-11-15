@@ -49,15 +49,14 @@ export type TenKDocument = {
   effectiveTime: string | null;
 };
 
-// A 10-K document's parse_status says how far it was read. "parsed" means
-// every item was read. "failed" means a read found too few items, as for a
-// 10-K laid out by a cross-reference index (Intel's) or a smaller reporting
-// company with no Item 1A. An item is read once it has claims. A rerun
-// sections a failed document again, with no fetch and no model call, and reads
-// only the items it newly finds, so a parser that learns a layout needs no reset.
-// ponytail: an item whose reply held no claim reads as unread, so a failed
-// document's rerun asks the model about it again. Record the items read on the
-// document if that ever costs.
+// parse_status "parsed" means every item was read, and "failed" that the
+// parser missed an item, as for a 10-K laid out by a cross-reference index
+// (Intel's) or a smaller reporting company with no Item 1A. An item counts as
+// read once it has claims, so a rerun sections a failed document again from its
+// stored bytes and asks the model only about the items it newly finds.
+// ponytail: an item whose reply held no claim reads as unread, so each rerun of
+// a failed document asks the model about it again. Record the items read on the
+// document if that costs.
 // "unparseable": a reply of the wrong shape, or none of whose quotes is in the
 // filing, so nothing is stored and its items stay unread for the next run.
 // "no_sections": no item is found or read.
@@ -144,8 +143,7 @@ function wholeListItem(claim: TenKClaim, section: TenKSection): (TenKClaim & { e
 }
 
 // A risk factor names partners and customers too, so only a competition
-// claim has competitors. A name counts as a whole word, so "metaverse" names
-// no Meta.
+// claim has competitors.
 function competitorsNamedIn(claim: TenKClaim): string[] {
   if (claim.predicate !== "business.competition") return [];
   const namedAsWord = (name: string) =>
@@ -238,9 +236,8 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
   }
 
   return withTransaction(deps.db, async (tx) => {
-    // The row lock orders this with a concurrent read of the same document,
-    // and with storeTenK adopting the filing's date, so a claim gets the date
-    // whichever runs first.
+    // The row lock orders this with a concurrent read of the same document and
+    // with storeTenK adopting the filing's date.
     const { rows: [locked] } = await tx.db.query<{ parse_status: string; published_at: Date | null }>(
       `select parse_status, published_at from documents where document_id = $1 for update`,
       [doc.documentId],
@@ -377,7 +374,8 @@ export type TenKBackfillDeps = Extract10kDeps & {
 
 // An issuer's latest 10-K, from its submissions feed: fetched and stored
 // unless already stored, then extracted unless already read. A rerun makes one
-// SEC request per issuer (the feed) and no model call.
+// SEC request per issuer (the feed), and a model call only for an item the
+// parser newly finds.
 export async function backfillIssuer10k(
   deps: TenKBackfillDeps,
   issuer: { issuerId: string; cik: number },

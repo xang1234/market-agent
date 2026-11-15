@@ -195,9 +195,8 @@ test("a 10-K with neither item is recorded failed, rechecked with no fetch or mo
   const { rows: [doc] } = await client.query<{ document_id: string; source_id: string }>(`select document_id::text as document_id, source_id::text as source_id from documents`);
   assert.equal(await parseStatus(client, doc!.document_id), "failed");
 
-  // The same document as a parser that learns its layout would see it.
-  const sectioned = { documentId: doc!.document_id, sourceId: doc!.source_id, issuerId: nvda, effectiveTime: null, html: `<div>Item 1. Business</div><div>${DESCRIPTION}</div>${BODY}` };
-  const read = await extract10kClaims(deps, sectioned);
+  const asALearnedParserSeesIt = { documentId: doc!.document_id, sourceId: doc!.source_id, issuerId: nvda, effectiveTime: null, html: `<div>Item 1. Business</div><div>${DESCRIPTION}</div>${BODY}` };
+  const read = await extract10kClaims(deps, asALearnedParserSeesIt);
   assert.deepEqual([read.outcome, read.extracted, read.missing, calls()], ["extracted", 1, ["1A"], 1]);
 });
 

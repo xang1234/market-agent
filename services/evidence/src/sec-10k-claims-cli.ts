@@ -23,7 +23,6 @@ export function resultLine(result: Extract10kResult, ms: number): string {
     `ms=${ms} llm_calls=${result.llmCalls}`;
 }
 
-// A 10-K read in part counts once by its outcome and once as partial.
 export function summaryLine(results: ReadonlyArray<{ outcome: string; missing?: ReadonlyArray<TenKItem> }>): string {
   const totals = new Map<string, number>();
   const count = (key: string) => totals.set(key, (totals.get(key) ?? 0) + 1);
