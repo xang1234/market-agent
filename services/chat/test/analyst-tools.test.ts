@@ -44,12 +44,11 @@ const CONSENSUS = [
 
 const LABELS: Record<string, string> = { [NVDA]: "NVDA", [AMD]: "AMD", [MU]: "MU", [WDC]: "WDC", [AAPL]: "AAPL" };
 
-// A stack database holding NVDA's 10-K claims, MU's industry and AAPL's consensus.
 function stackDb(seen: Array<{ text: string; values?: unknown[] }> = []) {
   return {
     query: fakeQuery((text, values) => {
       seen.push({ text, values });
-      if (text.includes("from claims c")) {
+      if (text.includes("with filers as")) {
         const [issuers, role, predicates] = values as [string[], string, string[]];
         if (role === "competitor") return { rows: issuers.includes(AMD) && predicates.includes("business.competition") ? [COMPETITION] : [] };
         return { rows: issuers.includes(NVDA) ? PROFILE.filter((claim) => predicates.includes(claim.predicate)) : [] };
@@ -59,7 +58,7 @@ function stackDb(seen: Array<{ text: string; values?: unknown[] }> = []) {
       if (text.includes("from consensus_captures cc")) return { rows: values?.[0] === AAPL ? CONSENSUS : [] };
       if (text.includes("jsonb_array_elements")) {
         const refs = JSON.parse(String(values?.[0])) as Array<{ kind: string; id: string }>;
-        return { rows: refs.flatMap((ref, i) => ref.id === AAPL_LISTING ? [{ ord: i + 1, issuer_id: AAPL }] : ref.kind === "issuer" && LABELS[ref.id] ? [{ ord: i + 1, issuer_id: ref.id }] : []) };
+        return { rows: refs.map((ref, i) => ({ ord: i + 1, issuer_id: ref.id === AAPL_LISTING ? AAPL : ref.kind === "issuer" && LABELS[ref.id] ? ref.id : null })) };
       }
       if (text.includes("as label")) return { rows: (values?.[0] as string[]).map((id) => ({ issuer_id: id, label: LABELS[id] })) };
       throw new Error(`unexpected query: ${text.slice(0, 60)}`);
@@ -114,6 +113,15 @@ test("a registry call reads its subject's issuer at the turn's cutoff, and refus
   assert.deepEqual(
     await runRegisteredAnalystTool(db, "get_claims", { subject_refs: [{ kind: "issuer", id: NVDA }], role: "customer" }, { as_of: AS_OF }),
     { tool: "get_claims", status: "invalid_arguments", reason: "role is subject or competitor" },
+  );
+  assert.deepEqual(
+    await runRegisteredAnalystTool(db, "get_peer_set", { subject_ref: { kind: "issuer", id: MU }, criteria: "size", n: 5 }, { as_of: AS_OF }),
+    { tool: "get_peer_set", status: "invalid_arguments", reason: "peers are chosen by industry only" },
+  );
+  assert.equal((await runRegisteredAnalystTool(db, "get_peer_set", { subject_ref: { kind: "issuer", id: MU }, criteria: "industry", n: 5 }, { as_of: AS_OF })).status, "ok");
+  assert.deepEqual(
+    await runRegisteredAnalystTool(db, "get_claims", { subject_refs: [{ kind: "issuer", id: NVDA }, { kind: "issuer", id: KO }] }, { as_of: AS_OF }),
+    { tool: "get_claims", status: "no_subject", reason: "a subject_ref names no stored issuer" },
   );
   assert.deepEqual(
     await runRegisteredAnalystTool(db, "get_company_profile", { subject_ref: { kind: "issuer", id: KO } }, { as_of: AS_OF }),

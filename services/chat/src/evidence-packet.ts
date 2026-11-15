@@ -113,17 +113,12 @@ export type PacketClaim = {
   company?: string;
   effective_time?: string;
   published_at?: string;
-  // The filing the claim is quoted from, when an analyst tool read it.
-  filing?: string;
   claim_id: string;
   source_id: string;
 };
 
-// What the analyst tools return, each with its C id. A consensus capture is an
-// attributed analyst expectation and a peer is the peer set's choice: neither
-// is a stored claim, so neither carries a claim_id.
 export type AnalystPacketEntry =
-  | (PacketClaim & { kind: "claim" })
+  | (PacketClaim & { kind: "claim"; filing: string })
   | { kind: "consensus"; id: string; text: string; predicate: string; company: string; captured_on: string; capture_id: string; source_id: string }
   | { kind: "peer"; id: string; text: string; predicate: "peer_set.industry"; company: string; peer_issuer_id: string };
 

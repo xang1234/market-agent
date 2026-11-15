@@ -43,7 +43,6 @@ export function parseCliArgs(args: string[], now: Date = new Date()): CliRequest
     ticker: ticker.toUpperCase(),
     runs,
     input: {
-      // A date is read as of its end.
       as_of: asOf === undefined ? now.toISOString() : `${asOf}T23:59:59.999Z`,
       ...(predicates === undefined ? {} : { predicates }),
       ...(role === undefined ? {} : { role: role as AnalystToolInput["role"] }),
@@ -54,7 +53,7 @@ export function parseCliArgs(args: string[], now: Date = new Date()): CliRequest
 
 export function entryLine(entry: AnalystPacketEntry): string {
   const ref = entry.kind === "claim"
-    ? [entry.filing ?? "", `claim=${entry.claim_id}`]
+    ? [entry.filing, `claim=${entry.claim_id}`]
     : entry.kind === "consensus" ? [`capture=${entry.capture_id}`] : [`issuer=${entry.peer_issuer_id}`];
   return [entry.id, entry.predicate, entry.company ?? "", ...ref, entry.text].join("\t");
 }

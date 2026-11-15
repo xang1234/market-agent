@@ -1,7 +1,4 @@
-// The analyst agent's knowledge tools (spec/finance_research_tool_registry.json).
-// Each reads only stored sources and says so with a typed status when there is
-// none: an empty answer is never model text.
-import { loadFilingClaims, type FilingClaim } from "../../evidence/src/local-runtime-evidence.ts";
+import { issuerLabelSql, loadLatestFilingClaims, type FilingClaim } from "../../evidence/src/local-runtime-evidence.ts";
 import type { RowQueryExecutor } from "../../evidence/src/types.ts";
 import { createSqlPeerSetResolver, DEFAULT_PEER_LIMIT } from "../../fundamentals/src/peer-set-resolver.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
@@ -47,14 +44,14 @@ type Executor = (db: RowQueryExecutor, input: AnalystToolInput) => Promise<Analy
 
 const EXECUTORS: Readonly<Record<AnalystToolName, Executor>> = {
   get_company_profile: async (db, input) => {
-    const read = await loadFilingClaims(db, { ...input, role: "subject", predicates: BUSINESS_PREDICATES });
+    const read = await loadLatestFilingClaims(db, { ...input, role: "subject", predicates: BUSINESS_PREDICATES });
     return read.claims.length === 0
       ? { tool: "get_company_profile", status: "no_business_claims" }
       : { tool: "get_company_profile", status: "ok", ...read };
   },
   get_claims: async (db, input) => {
     const predicates = input.predicates ?? CLAIM_PREDICATES;
-    const read = await loadFilingClaims(db, { ...input, role: input.role ?? "subject", predicates });
+    const read = await loadLatestFilingClaims(db, { ...input, role: input.role ?? "subject", predicates });
     return read.claims.length === 0 ? { tool: "get_claims", status: "no_claims" } : { tool: "get_claims", status: "ok", ...read };
   },
   get_peer_set: async (db, input) => {
@@ -72,14 +69,13 @@ const EXECUTORS: Readonly<Record<AnalystToolName, Executor>> = {
       peers: peers.map((peer) => ({ issuer_id: peer.id, label: labels.get(peer.id)! })),
     };
   },
-  // ADR 0006: the newest capture on or before the cutoff, at most 7 days old.
   get_analyst_consensus: async (db, input) => {
     const issuerId = input.issuer_ids[0]!;
     const { rows } = await db.query<Omit<ConsensusValue, "label" | "provider"> & { provider: string; captured_on: string }>(
       `with cutoff as (select ($2::timestamptz at time zone 'UTC')::date as day),
             newest as (
               select max(captured_on) as day from consensus_captures, cutoff
-               where issuer_id = $1::uuid and value is not null and captured_on <= cutoff.day
+               where issuer_id = $1::uuid and captured_on <= cutoff.day
             )
        select cc.capture_id::text as capture_id, cc.source_id::text as source_id, s.provider,
               cc.captured_on::text as captured_on, cc.field_key, cc.raw_value, cc.fiscal_period
@@ -87,9 +83,9 @@ const EXECUTORS: Readonly<Record<AnalystToolName, Executor>> = {
          join sources s on s.source_id = cc.source_id
          join newest on cc.captured_on = newest.day
          cross join cutoff
-        where cc.issuer_id = $1::uuid and cc.value is not null and newest.day >= cutoff.day - 7
+        where cc.issuer_id = $1::uuid and cc.value is not null and newest.day >= cutoff.day - $4::int
         order by array_position($3::text[], cc.field_key), cc.source_id`,
-      [issuerId, input.as_of, Object.keys(CONSENSUS_FIELDS)],
+      [issuerId, input.as_of, Object.keys(CONSENSUS_FIELDS), CONSENSUS_MAX_AGE_DAYS],
     );
     if (rows.length === 0) return { tool: "get_analyst_consensus", status: "no_consensus" };
     const labels = await issuerLabels(db, [issuerId]);
@@ -111,9 +107,11 @@ export function isAnalystToolName(name: string): name is AnalystToolName {
   return (ANALYST_TOOL_NAMES as ReadonlyArray<string>).includes(name);
 }
 
+// ADR 0006: a capture older than this is no consensus.
+const CONSENSUS_MAX_AGE_DAYS = 7;
+
 const PROVIDERS: Readonly<Record<string, string>> = { finviz_dev_consensus: "Finviz" };
 
-// The consensus_captures field keys (0080), as an answer names them.
 const CONSENSUS_FIELDS = {
   eps_next_q: "EPS next quarter",
   eps_next_y: "EPS next year",
@@ -129,9 +127,6 @@ export async function runAnalystTool(db: RowQueryExecutor, name: AnalystToolName
   return EXECUTORS[name](db, input);
 }
 
-// A registry call's arguments (subject_ref, or get_claims' subject_refs,
-// predicates and role) as executor input, each subject resolved to its issuer.
-// The turn sets the cutoff; a model never moves it.
 export async function runRegisteredAnalystTool(
   db: RowQueryExecutor,
   name: AnalystToolName,
@@ -148,10 +143,13 @@ export async function runRegisteredAnalystTool(
   if (role !== undefined && !(CLAIM_ROLES as ReadonlyArray<JsonValue>).includes(role)) {
     return { tool: name, status: "invalid_arguments", reason: `role is ${CLAIM_ROLES.join(" or ")}` };
   }
+  if (args.criteria !== undefined && args.criteria !== "industry") {
+    return { tool: name, status: "invalid_arguments", reason: "peers are chosen by industry only" };
+  }
   const issuerIds = await issuersOfSubjects(db, refs);
-  if (issuerIds.length < refs.length) return { tool: name, status: "no_subject", reason: "a subject_ref names no stored issuer" };
+  if (issuerIds.includes(null)) return { tool: name, status: "no_subject", reason: "a subject_ref names no stored issuer" };
   return runAnalystTool(db, name, {
-    issuer_ids: [...new Set(issuerIds)],
+    issuer_ids: [...new Set(issuerIds as string[])],
     as_of: turn.as_of,
     user_id: turn.user_id ?? null,
     ...(predicates === undefined ? {} : { predicates: predicates as string[] }),
@@ -166,30 +164,25 @@ function isSubjectRef(value: JsonValue | undefined): value is SubjectRef {
   return isRecord(value) && typeof value.kind === "string" && typeof value.id === "string";
 }
 
-// Each ref's issuer, in order, one per ref that names one: an issuer is itself, a listing or instrument
-// the issuer behind it (ADR 0001). A theme, portfolio or screen has none.
-async function issuersOfSubjects(db: RowQueryExecutor, refs: ReadonlyArray<SubjectRef>): Promise<string[]> {
-  const { rows } = await db.query<{ ord: number; issuer_id: string }>(
+// One per ref, null where it names no stored issuer.
+async function issuersOfSubjects(db: RowQueryExecutor, refs: ReadonlyArray<SubjectRef>): Promise<Array<string | null>> {
+  const { rows } = await db.query<{ ord: number; issuer_id: string | null }>(
     `select r.ord::int as ord, coalesce(i.issuer_id, n.issuer_id, ln.issuer_id)::text as issuer_id
        from jsonb_array_elements($1::jsonb) with ordinality as r(ref, ord)
        left join issuers i on r.ref->>'kind' = 'issuer' and i.issuer_id::text = r.ref->>'id'
        left join instruments n on r.ref->>'kind' = 'instrument' and n.instrument_id::text = r.ref->>'id'
        left join listings l on r.ref->>'kind' = 'listing' and l.listing_id::text = r.ref->>'id'
        left join instruments ln on ln.instrument_id = l.instrument_id
-      where coalesce(i.issuer_id, n.issuer_id, ln.issuer_id) is not null
       order by r.ord`,
     [JSON.stringify(refs)],
   );
   return rows.map((row) => row.issuer_id);
 }
 
-// Each issuer as an answer names it: its ticker, else its legal name.
 async function issuerLabels(db: RowQueryExecutor, issuerIds: ReadonlyArray<string>): Promise<Map<string, string>> {
   const { rows } = await db.query<{ issuer_id: string; label: string }>(
     `select i.issuer_id::text as issuer_id,
-            coalesce((select l.ticker from instruments n join listings l on l.instrument_id = n.instrument_id
-                       where n.issuer_id = i.issuer_id and (l.active_to is null or l.active_to > now())
-                       order by l.ticker limit 1), i.legal_name) as label
+            ${issuerLabelSql("i")} as label
        from issuers i where i.issuer_id = any($1::uuid[])`,
     [issuerIds],
   );

@@ -442,9 +442,7 @@ export async function loadPeriodClaimEvidence(
 
 export type FilingClaimLookup = {
   issuer_ids: ReadonlyArray<string>;
-  // The issuers' own filings ("subject"), or other filers' claims naming them.
   role: "subject" | "competitor";
-  // Exact predicates, such as "business.products" or "risk.factor".
   predicates: ReadonlyArray<string>;
   as_of: string;
   user_id?: string | null;
@@ -461,33 +459,48 @@ export type FilingClaim = {
   effective_time: string | null;
   published_at: string | null;
   filer_issuer_id: string;
-  // The filer's ticker, else its legal name.
   filer_label: string;
   accession: string | null;
   document_title: string | null;
 };
 
-// Claims arguing the issuer in the role, from each filer's latest filing that
-// has any of the predicates: a newer 10-K never supersedes an older one's
-// claims, so the older ones stay citable and only this read leaves them out.
-// In document order within each predicate.
-export async function loadFilingClaims(
+// The issuers' own 10-K claims, or other filers' naming them, read only from
+// each filer's latest filing with any 10-K claim: AA3 never supersedes an
+// older 10-K's claims, and a competitor or risk the latest one drops is gone.
+export async function loadLatestFilingClaims(
   db: RowQueryExecutor,
   input: FilingClaimLookup,
 ): Promise<{ claims: ReadonlyArray<FilingClaim>; truncated: boolean }> {
   const issuerIds = unique(input.issuer_ids);
   if (issuerIds.length === 0 || input.predicates.length === 0) return { claims: [], truncated: false };
   const { rows } = await db.query<Omit<FilingClaim, "published_at" | "effective_time"> & { published_at: Date | string | null; effective_time: Date | string | null; matched: string }>(
-    `with matched as (
-       select c.claim_id, c.document_id, c.reported_by_source_id, c.text_canonical, c.predicate, c.polarity,
-              c.effective_time, d.published_at, d.provider_doc_id, d.title,
-              coalesce(d.published_at, d.created_at) as filed,
-              filer.subject_id as filer_issuer_id
-         from claims c
+    `with filers as (
+       select distinct filer.subject_id as filer_issuer_id
+         from claim_arguments ca
+         join claim_arguments filer
+           on filer.claim_id = ca.claim_id and filer.role = 'subject' and filer.subject_kind = 'issuer'
+        where ca.subject_kind = 'issuer' and ca.subject_id = any($1::uuid[]) and ca.role = $2::text
+     ),
+     latest as (
+       select distinct on (f.filer_issuer_id) f.filer_issuer_id, d.document_id, d.published_at, d.provider_doc_id, d.title
+         from filers f
+         join claim_arguments filer
+           on filer.subject_id = f.filer_issuer_id and filer.role = 'subject' and filer.subject_kind = 'issuer'
+         join claims c on c.claim_id = filer.claim_id
+         join documents d on d.document_id = c.document_id
+         join sources s on s.source_id = c.reported_by_source_id
+        where c.predicate like any($7::text[])
+          and ${citableClaimSql("$5::uuid", "$4::timestamptz")}
+        order by f.filer_issuer_id, coalesce(d.published_at, d.created_at) desc, d.document_id desc
+     ),
+     matched as (
+       select c.claim_id, c.reported_by_source_id, c.text_canonical, c.predicate, c.polarity, c.effective_time, l.*
+         from latest l
+         join claims c on c.document_id = l.document_id
          join documents d on d.document_id = c.document_id
          join sources s on s.source_id = c.reported_by_source_id
          join claim_arguments filer
-           on filer.claim_id = c.claim_id and filer.role = 'subject' and filer.subject_kind = 'issuer'
+           on filer.claim_id = c.claim_id and filer.role = 'subject' and filer.subject_kind = 'issuer' and filer.subject_id = l.filer_issuer_id
         where exists (
                 select 1 from claim_arguments ca
                  where ca.claim_id = c.claim_id and ca.subject_kind = 'issuer'
@@ -495,37 +508,23 @@ export async function loadFilingClaims(
               )
           and c.predicate = any($3::text[])
           and ${citableClaimSql("$5::uuid", "$4::timestamptz")}
-     ),
-     latest as (
-       select distinct on (filer_issuer_id) filer_issuer_id, document_id
-         from matched
-        order by filer_issuer_id, filed desc, document_id desc
      )
      select m.claim_id::text as claim_id,
             m.document_id::text as document_id,
             m.reported_by_source_id::text as source_id,
             m.text_canonical, m.predicate, m.polarity, m.effective_time, m.published_at,
             m.filer_issuer_id::text as filer_issuer_id,
-            coalesce(t.ticker, i.legal_name) as filer_label,
+            ${issuerLabelSql("i")} as filer_label,
             m.provider_doc_id as accession,
             m.title as document_title,
             count(*) over () as matched
        from matched m
-       join latest using (filer_issuer_id, document_id)
        join issuers i on i.issuer_id = m.filer_issuer_id
-       left join lateral (
-         select l.ticker
-           from instruments n
-           join listings l on l.instrument_id = n.instrument_id
-          where n.issuer_id = m.filer_issuer_id and (l.active_to is null or l.active_to > now())
-          order by l.ticker
-          limit 1
-       ) t on true
       order by filer_label, m.filer_issuer_id, array_position($3::text[], m.predicate),
                (select min((ce.locator->>'start')::int) from claim_evidence ce where ce.claim_id = m.claim_id and ce.locator->>'start' ~ '^[0-9]{1,9}$') nulls last,
                m.claim_id
       limit $6::int`,
-    [issuerIds, input.role, input.predicates, input.as_of, userIdOrNull(input.user_id), input.limit ?? 50],
+    [issuerIds, input.role, input.predicates, input.as_of, userIdOrNull(input.user_id), input.limit ?? 50, TEN_K_PREDICATE_PATTERNS],
   );
   const claims = rows.map(({ matched: _matched, published_at, effective_time, ...claim }) => Object.freeze({
     ...claim,
@@ -533,6 +532,15 @@ export async function loadFilingClaims(
     effective_time: effective_time === null ? null : isoString(effective_time),
   }));
   return { claims, truncated: Number(rows[0]?.matched ?? 0) > rows.length };
+}
+
+const TEN_K_PREDICATE_PATTERNS = ["business.%", "risk.%"];
+
+// An issuer as an answer names it, from its row aliased `issuer`.
+export function issuerLabelSql(issuer: string): string {
+  return `coalesce((select l.ticker from instruments n join listings l on l.instrument_id = n.instrument_id
+                     where n.issuer_id = ${issuer}.issuer_id and (l.active_to is null or l.active_to > now())
+                     order by l.ticker limit 1), ${issuer}.legal_name)`;
 }
 
 // Several reads as one: their claims in order, each once, as the first read
