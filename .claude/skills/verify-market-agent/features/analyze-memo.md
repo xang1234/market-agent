@@ -17,12 +17,14 @@ Open `/symbol/listing:<id>/overview`, choose Analyze (`data-testid=analyze-this-
 
 Preconditions: a stack with a model configured, listings imported (`$V import`), and the company's 10-K fixture loaded with AA3's CLI (the boot recipe in `docs/plans/analyst-agent.md`). A company with no 10-K on file still generates, with each business section saying no stored source covers it.
 
-- **Generate.** Run `$V memo NVDA`. It exits 0 and prints a report with `generated: true`, the four `sections` each `shown` with their claim predicates or `empty: true`, `competitive_cites_competition: true`, and an empty `stance_words`.
+- **Generate.** Run `$V memo NVDA`. It exits 0 and prints a report with `generated: true`, the four `sections` each `shown` with their claim predicates, figures and sources or `empty: true`, `competitive_cites_competition: true`, `risks_cite_only_risk_factors: true`, and an empty `stance_words`.
+- **No 10-K.** Run `$V memo KO` with no KO 10-K loaded. It exits 0 with the business sections `empty`. The competitive section may list KO's industry peers, which cite the industry source on file.
 - **Proof.** Open `2-result.png`, `page.txt` and `run.json` in the printed `evidence` folder. `memo_ms` is the time from the Generate click to the rendered sections. `llm_calls` counts the `[llm]` lines dev-api logged meanwhile, so it needs `LLM_USAGE_LOG=true` in `.env.dev`.
 
 ## Gotchas
 
 - The memo's figures come from facts on file. Analyze fetches nothing for the agent, so a company with no stored SEC facts shows the engine's gap note in the thesis. A chat question about the company fetches them through chat's auto-fetch.
+- A section the agent could not write (`unwritten: true`, such as with no model configured) fails the run, since it is not a statement about the sources.
 - `stance_words` reads the memo canvas with quoted 10-K claims taken out, since a filing's own words are quoted as stored. `page_stance_words` reads the whole page, quotes included.
 - Other playbooks get one note saying the agent writes only the Investment memo's sections. `$V memo` always picks the Investment memo.
 - On a `Generate failed` message, read `page.txt` and `.dev/logs/dev-api.log`.

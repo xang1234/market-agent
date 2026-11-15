@@ -80,7 +80,6 @@ type LocalRuntimeClusterEvidence = {
   clusters: ReadonlyArray<LocalRuntimeClusterGroup>;
 };
 
-// The memo's analyst agent as production wires it; a test swaps only its model client.
 export const analyzeAgentDeps = (env: NodeJS.ProcessEnv, client?: AnalyzeAgentDeps["client"]): AnalyzeAgentDeps => ({
   db: { query: (text, values) => pool().query(text, values), connect: () => pool().connect() },
   env,

@@ -130,6 +130,8 @@ export type DevApiAnalyzeWorkflowInput = {
   snapshotId: string;
   instructions: string;
   playbook?: AnalyzePlaybook;
+  // The memo's frozen financial cutoff, when it has one.
+  knowledgeCutoff?: string;
   sourceCategories: ReadonlyArray<string>;
   bundleIds: ReadonlyArray<string>;
   subjectRefs: ReadonlyArray<SubjectRef>;
@@ -396,6 +398,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         snapshotId,
         instructions,
         playbook: resolvedPlaybook.playbook,
+        ...(financial ? { knowledgeCutoff: financial.knowledge_cutoff } : {}),
         sourceCategories,
         bundleIds,
         subjectRefs,
@@ -462,6 +465,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         snapshotId,
         instructions: metadata.instructions,
         ...(playbook ? { playbook } : {}),
+        ...(financial ? { knowledgeCutoff: financial.knowledge_cutoff } : {}),
         sourceCategories,
         bundleIds,
         subjectRefs,
@@ -497,7 +501,6 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
       if (snapshotId === undefined) throw new DevApiHttpError(422, "artifact share rejected");
       // Each engine section is sealed under its own certificate and shared
       // under it, so erasing the financial run also erases the chat copy.
-      // The agent's certified figures in the memo are each shared under their own snapshot too.
       const sections = (await loadAnalyzeFinancialSections(deps.db, { userId, analyzeRunId: run.run_id }))?.sections ?? [];
       const certified = [
         ...run.blocks.flatMap((block) => (isCertifiedBlock(block) ? [block] : [])),

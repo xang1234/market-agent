@@ -1,8 +1,3 @@
-// The memo's narrative sections, each written by the analyst agent from
-// stored sources (services/chat/src/analyst-agent.ts), as a chat turn's
-// answer is. A section's certified figures keep their own engine snapshots
-// beside it; everything else seals in the memo's snapshot.
-
 import { randomUUID } from "node:crypto";
 
 import { analyzeAuthority } from "../../analyze/src/financial-section.ts";
@@ -17,7 +12,6 @@ import type { LlmChatClient } from "../../llm/src/index.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import type { DevApiAnalyzeWorkflowInput, DevApiAnalyzeWorkflowResult } from "./analyze-adapter.ts";
 
-// By section id, what the agent reads and answers for that section.
 const GOALS: Readonly<Record<string, (company: string) => string>> = {
   investment_thesis: (company) =>
     `What is the investment case for ${company} as its stored sources state it: what the business does and sells, and its latest fiscal year's revenue, gross margin and operating margin?`,
@@ -38,7 +32,6 @@ export type AnalyzeAgentDeps = Readonly<{
   db: FinancialPool;
   env: NodeJS.ProcessEnv;
   logToolCalls: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
-  // The client every model attempt goes through; production's when absent.
   client?: () => Promise<LlmChatClient> | LlmChatClient;
 }>;
 
@@ -54,7 +47,7 @@ export function analyzeAgentWorkflow(deps: AnalyzeAgentDeps): (input: DevApiAnal
     logToolCalls: deps.logToolCalls,
   });
   return async (input) => {
-    const asOf = new Date().toISOString();
+    const asOf = input.knowledgeCutoff ?? new Date().toISOString();
     const sections = (input.playbook?.sections ?? []).filter((entry) => Object.hasOwn(GOALS, entry.section_id));
     const company = sections.length === 0 ? null : await companyOf(deps.db, input.subjectRefs);
     if (company === null) {
@@ -62,7 +55,7 @@ export function analyzeAgentWorkflow(deps: AnalyzeAgentDeps): (input: DevApiAnal
       return { blocks: [{ ...note, subject_refs: input.subjectRefs }] };
     }
     const authority = analyzeAuthority(input.userId, input.runId, input.template.template_id, input.template.version);
-    const written = await Promise.all(sections.map((entry) => section({
+    const settled = await Promise.allSettled(sections.map((entry) => section({
       subject: company,
       goal: GOALS[entry.section_id]!(company.label),
       sectionId: entry.section_id,
@@ -72,11 +65,15 @@ export function analyzeAgentWorkflow(deps: AnalyzeAgentDeps): (input: DevApiAnal
       snapshotId: input.snapshotId,
       asOf,
     })));
+    // Every section settles before one's failure fails the memo, so none runs on unawaited.
+    const failure = settled.find((result) => result.status === "rejected");
+    if (failure) throw failure.reason;
+    const written = settled.map((result) => (result as PromiseFulfilledResult<AnalystSection>).value);
     return { blocks: sections.flatMap((entry, i) => sectionBlocks(entry, written[i]!, input.snapshotId, asOf)) };
   };
 }
 
-// The section as one titled block over what the agent showed, then its certified figures, which keep their own snapshots.
+// A certified figure follows its section, not inside it, since it keeps its own engine snapshot.
 function sectionBlocks(entry: AnalyzePlaybookSection, written: AnalystSection, snapshotId: string, asOf: string): Array<Record<string, unknown>> {
   const shown = written.blocks.filter((block) => block.kind !== "financial_answer");
   const refs = (key: string) => [...new Set(shown.flatMap((block) => (Array.isArray(block[key]) ? block[key] as string[] : [])))];
@@ -100,9 +97,9 @@ function sectionBlocks(entry: AnalyzePlaybookSection, written: AnalystSection, s
   ];
 }
 
-// The company a memo is about: its first issuer, or the issuer of its first listing, named by ticker where one is listed.
+// The issuer the memo's financial sections compute for, else its first listing's.
 async function companyOf(db: FinancialPool, refs: ReadonlyArray<SubjectRef>): Promise<Company | null> {
-  const ref = refs.find((entry) => entry.kind === "issuer" || entry.kind === "listing");
+  const ref = refs.find((entry) => entry.kind === "issuer") ?? refs.find((entry) => entry.kind === "listing");
   if (!ref) return null;
   const { rows } = await db.query<{ issuer_id: string; label: string }>(
     ref.kind === "listing"

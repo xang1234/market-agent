@@ -1,7 +1,7 @@
 // Symbol page -> Analyze -> Investment memo -> Generate memo, the way a user does it.
 // Exits 1 unless the memo generates with the analyst agent's four sections, each citing
-// an F or C id or saying no stored source covers it, with no stance word in the agent's
-// own words. Saves what it saw to OUT.
+// stored sources or saying none covers it, with no stance word in the agent's own words.
+// Saves what it saw to OUT.
 import { createRequire } from 'node:module'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -12,7 +12,8 @@ const { Client } = createRequire(join(ROOT, 'services/dev-api/package.json'))('p
 mkdirSync(OUT, { recursive: true })
 
 const SECTIONS = ['investment_thesis', 'growth_drivers', 'competitive_position', 'downside_risks']
-const EMPTY = /^(No stored source covers this section|This section was not written)/
+const EMPTY = /^No stored source covers this section/
+const UNWRITTEN = /^This section was not written|^The answer could not be written/
 // Case matters for Buy, Hold and Sell: a 10-K's "we sell" is not a Sell.
 const stanceIn = (text) => [...text.matchAll(/\b(?:Buy|Hold|Sell)\b/g), ...text.matchAll(/\b(?:rating|conviction)\b/gi)].map((match) => match[0])
 const LLM_LOG = join(ROOT, '.dev/logs/dev-api.log')
@@ -91,7 +92,10 @@ const report = {
       shown: canvas.includes(section.title),
       claims: (section.claim_refs ?? []).map((claim) => predicates.get(claim) ?? 'unknown'),
       figures: segments.filter((segment) => segment.type === 'ref' && segment.ref_kind === 'result').length,
+      // Industry peers and analyst consensus cite their stored source, not a claim row.
+      sources: (section.source_refs ?? []).length,
       empty: notes.some((note) => EMPTY.test(note)),
+      unwritten: notes.some((note) => UNWRITTEN.test(note)),
     }
   }),
   certified_blocks: blocks.filter((block) => block.kind === 'financial_answer').length,
@@ -101,15 +105,18 @@ const report = {
   evidence: OUT,
 }
 const competitive = report.sections.find((section) => section.id === 'competitive_position')
+const risks = report.sections.find((section) => section.id === 'downside_risks')
 report.competitive_cites_competition = competitive?.claims?.includes('business.competition') ?? false
+report.risks_cite_only_risk_factors = (risks?.claims ?? []).every((predicate) => predicate === 'risk.factor')
 writeFileSync(join(OUT, 'page.txt'), text)
 writeFileSync(join(OUT, 'run.json'), JSON.stringify(run, null, 2))
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
 console.log(JSON.stringify(report, null, 2))
-const sectionPasses = (section) => section.shown && (section.empty || section.claims.length > 0 || section.figures > 0)
+const sectionPasses = (section) => section.shown && !section.unwritten && (section.empty || section.claims.length > 0 || section.figures > 0 || section.sources > 0)
 const passed =
   failure === null && report.subject_matches && report.generated &&
   report.sections.every(sectionPasses) &&
-  (competitive.empty || report.competitive_cites_competition) &&
+  (competitive.claims.length === 0 || report.competitive_cites_competition) &&
+  report.risks_cite_only_risk_factors &&
   report.stance_words.length === 0
 process.exit(passed ? 0 : 1)

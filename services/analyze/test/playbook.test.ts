@@ -41,7 +41,7 @@ test("resolveAnalyzePlaybookRequest overlays user instructions without dropping 
 test("investment_memo asks for a competitive position and no stance", () => {
   const resolved = resolveAnalyzePlaybookRequest({ playbook_id: "investment_memo" });
   assert.equal(resolved.playbook.name, "Investment memo");
-  assert.equal(resolved.playbook.version, 2);
+  assert.equal(resolved.playbook.version, 1, "a stored memo's optional sections are looked up by its version");
   assert.deepEqual(resolved.playbook.default_source_categories, ["filings", "transcripts", "news"]);
   assert.deepEqual(resolved.playbook.sections.map((section) => section.section_id), [
     "investment_thesis",

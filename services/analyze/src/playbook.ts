@@ -87,7 +87,7 @@ export const ANALYZE_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = Object.freeze([
   }),
   Object.freeze({
     playbook_id: "investment_memo",
-    version: 2,
+    version: 1,
     name: "Investment memo",
     description: "Full investment memo from stored sources: thesis, financial health, growth, competitive position, risks, and ownership.",
     default_instructions:

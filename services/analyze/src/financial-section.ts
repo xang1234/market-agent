@@ -195,8 +195,8 @@ export async function loadAnalyzeFinancialSections(db: SqlExecutor, input: { use
 export function analyzeFinancialRecovery(db: SqlExecutor): ParentRecovery {
   return {
     async authority(run: RunRecord) {
-      // Only the memo's own sections are keyed by its run id; a resumed analyst agent figure would be saved as one of them.
-      if (run.request_key !== run.parent_id) return null;
+      // The analyst agent's figures for a memo run before the memo is saved, so they resume under the authority they were made with.
+      if (!isMemoSectionRun(run)) return memoAuthority(run.user_id, run.parent_id, run.parent_version);
       const memo = await loadMemoRun(db, run.parent_id);
       if (!memo || memo.user_id !== run.user_id || !memo.context) return null;
       return analyzeAuthority(memo.user_id, run.parent_id, memo.template_id, memo.template_version);
@@ -208,11 +208,18 @@ export function analyzeFinancialRecovery(db: SqlExecutor): ParentRecovery {
 // ---------------------------------------------------------------------------
 
 export function analyzeAuthority(userId: string, analyzeRunId: string, templateId: string, templateVersion: number): FinancialRuntimeAuthority {
+  return memoAuthority(userId, analyzeRunId, `template:${templateId}:v${templateVersion}`);
+}
+
+// The memo's own sections are the one run keyed by the memo run's id.
+const isMemoSectionRun = (run: Pick<RunRecord, "request_key" | "parent_id">) => run.request_key === run.parent_id;
+
+function memoAuthority(userId: string, analyzeRunId: string, version: string): FinancialRuntimeAuthority {
   return createRuntimeAuthority({
     owner_user_id: userId,
     egress_channel: "analyze",
     // The memo run is the parent; its template version is pinned for the run's life.
-    parent: { kind: "analyze_memo_run", id: analyzeRunId, version: `template:${templateId}:v${templateVersion}` },
+    parent: { kind: "analyze_memo_run", id: analyzeRunId, version },
     allowed_source_classes: ["sec_filing"],
     feature: { surface: "analyze", capability: "financial-section", mode: "enforce" },
     approval_state: "not_required",
@@ -275,6 +282,7 @@ async function planningContext(db: SqlExecutor, run: AnalyzeFinancialRun, author
 
 /** Records the section against the memo run inside the finalization transaction, under the memo's owner. */
 const persistMemoSection: PersistParentArtifact = async (tx, publication) => {
+  if (!isMemoSectionRun(tx.run)) return;
   const inserted = await tx.client.query(
     `insert into analyze_run_financial_sections (analyze_run_id, section_id, financial_run_id, unit_id, snapshot_id, certificate_digest, block)
      select r.run_id, $2, $3::uuid, $2, $4::uuid, $5, $6::jsonb

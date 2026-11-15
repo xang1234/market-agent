@@ -34,9 +34,8 @@ import { turnStopSignal } from "./turn-stop.ts";
 
 const MAX_STEPS = 4;
 const TURN_CALLS = 8;
-// A memo writes its sections at once, and four of them stay within 30 model calls.
-const SECTION_CALLS = 7;
 const ANSWER_CALLS = 3;
+const SECTION_CALLS = MAX_STEPS + ANSWER_CALLS;
 const DEADLINES = { readMs: 75_000, turnMs: 120_000 };
 
 type AgentModels = Readonly<{
@@ -82,7 +81,6 @@ function perStepDeadlines(router: ControlledRouter): ControlledRouter {
   return { complete: (request) => router.complete(request, withDeadlines(ANSWER_DEADLINES)) };
 }
 
-/** The agent's router, planner and answer on one client that meters each attempt, the way production builds them. */
 export function meteredModels(
   env: NodeJS.ProcessEnv,
   base: () => Promise<LlmChatClient> | LlmChatClient = () => (env.LLM_REPLAY_FILE?.trim() ? createReplayLlmChatClient(env.LLM_REPLAY_FILE.trim()) : createDefaultPiLlmChatClient()),
@@ -110,29 +108,29 @@ type Certified = Readonly<{ block: FinancialAnswerBlock; packet: EvidencePacket;
 
 type Meter = ReturnType<typeof callMeter>;
 
-// One ask of the agent: a chat turn's question, or a memo section's goal.
 type AgentAsk = Readonly<{
   question: string;
   named: ReadonlyArray<RequestedSubject>;
   labels: ReadonlyMap<string, string>;
   carried: ReadonlyArray<string>;
   notes: ReadonlyArray<string>;
-  // What each certified call plans under, its own ask as the intent.
-  context: ChatFinancialTurnContext;
+  planningContext: ChatFinancialTurnContext;
   authority: FinancialRuntimeAuthority;
   requestKey: (ask: string) => string;
   incomeLines: ReadonlyArray<string>;
-  conversation: ReadonlyArray<{ role: string; text: string }>;
+  conversation: () => Promise<ReadonlyArray<{ role: string; text: string }>>;
   asOf: string;
+  // A certified call's cutoff, read when it is made, so a company's filings fetched earlier in the turn are in it.
+  clock: () => string;
   meter: Meter;
   snapshotId: string;
-  // Keeps the ask's notes and certified blocks apart from another ask's in the same snapshot.
-  key: (name: string) => string;
+  scopedKey: (name: string) => string;
   trace: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id">;
   logToolCalls?: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
 }>;
 
 type Gathered = Readonly<{
+  conversation: ReadonlyArray<{ role: string; text: string }>;
   toolCalls: ChatAnalystToolRuntimeToolCall[];
   certified: ReadonlyArray<Certified>;
   analyst: ReadonlyArray<AnalystToolResult>;
@@ -145,6 +143,7 @@ type Answered = Pick<ChatAnalystToolRuntimeResult, "blocks"> & Readonly<{
   without: (dropped: DroppedClaims) => Pick<ChatAnalystToolRuntimeResult, "blocks">;
   answeredBy?: string;
   assertions: AnsweredTurn["assertions"];
+  failed: boolean;
 }>;
 
 export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
@@ -170,15 +169,16 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         ...leftOutNotes({ notFound: unmatched }),
         ...companies.notFound.map((name) => `"${name}" did not match a company name or ticker on file; try the ticker.`),
       ],
-      context,
+      planningContext: context,
       authority: chatAuthority(context.userId, context.threadId, turnId),
       requestKey: (ask) => requestKeyFor(turnId, context.runId, ask),
       incomeLines: read?.income_items ?? [],
-      conversation: await deps.conversation?.(context.threadId) ?? [],
+      conversation: async () => await deps.conversation?.(context.threadId) ?? [],
       asOf: deps.asOf(),
+      clock: deps.asOf,
       meter,
       snapshotId: randomUUID(),
-      key: (name) => name,
+      scopedKey: (name) => name,
       trace: { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}) },
       ...(logToolCalls ? { logToolCalls: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => logToolCalls(context.threadId, calls) } : {}),
     };
@@ -218,15 +218,13 @@ export type AnalystSectionInput = Readonly<{
 }>;
 
 export type AnalystSection = Readonly<{
-  // empty: nothing the stored sources hold answers the section, and its one block says why.
-  status: "written" | "empty";
+  // empty: no stored source covers the section. unwritten: nothing could be read, or no answer written. The blocks say which.
+  status: "written" | "empty" | "unwritten";
   blocks: ReadonlyArray<Record<string, unknown>>;
   packet: EvidencePacket | null;
   assertions: AnsweredTurn["assertions"];
-  tool_calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>;
 }>;
 
-/** The agent's answer to one memo section's goal about one company, read and judged as a chat turn's is. */
 export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystSectionInput) => Promise<AnalystSection> {
   const section = async (input: AnalystSectionInput, signal: AbortSignal): Promise<AnalystSection> => {
     const issuer = input.subject.issuer_id.toLowerCase();
@@ -236,31 +234,31 @@ export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystS
       labels: new Map([[issuer, input.subject.label]]),
       carried: [],
       notes: [],
-      context: { threadId: input.runId, runId: input.runId, turnId: input.sectionId, userId: input.userId, userIntent: input.goal, bundleId: ANALYST_AGENT_BUNDLE_ID, emit: QUIET },
+      planningContext: { threadId: input.runId, runId: input.runId, turnId: input.sectionId, userId: input.userId, userIntent: input.goal, bundleId: ANALYST_AGENT_BUNDLE_ID, emit: QUIET },
       authority: input.authority,
       requestKey: (ask) => `agent:${input.sectionId}:${ask}`,
       incomeLines: [],
-      conversation: [],
+      conversation: async () => [],
       asOf: input.asOf,
+      clock: () => input.asOf,
       meter: callMeter(SECTION_CALLS),
       snapshotId: input.snapshotId,
-      key: (name) => `${input.sectionId}:${name}`,
+      scopedKey: (name) => `${input.sectionId}:${name}`,
       trace: { thread_id: input.runId, run_id: input.runId, turn_id: input.sectionId },
       ...(deps.logToolCalls ? { logToolCalls: deps.logToolCalls } : {}),
     };
     const gathered = await gather(deps, job, signal);
-    const empty = (text: string): AnalystSection => ({
-      status: "empty",
-      blocks: [{ ...noteBlock({ snapshotId: input.snapshotId, asOf: input.asOf }, job.key("agent:empty"), [text, ...(gathered?.packet.gaps ?? [])].join(" ")), subject_refs: [{ kind: "issuer", id: issuer }] }],
+    const noted = (status: "empty" | "unwritten", text: string): AnalystSection => ({
+      status,
+      blocks: [{ ...noteBlock({ snapshotId: input.snapshotId, asOf: input.asOf }, job.scopedKey("agent:empty"), [text, ...(gathered?.packet.gaps ?? [])].join(" ")), subject_refs: [{ kind: "issuer", id: issuer }] }],
       packet: gathered?.packet ?? null,
       assertions: null,
-      tool_calls: gathered?.toolCalls ?? [],
     });
-    if (!gathered?.toolCalls.some((entry) => entry.status === "ok")) return empty(SECTION_UNREAD);
+    if (!gathered?.toolCalls.some((entry) => entry.status === "ok")) return noted("unwritten", SECTION_UNREAD);
     const { figures, claims } = gathered.packet;
-    if (claims.length === 0 && figures.every((figure) => figure.gap !== undefined)) return empty(NO_SOURCES);
+    if (claims.length === 0 && figures.every((figure) => figure.gap !== undefined)) return noted("empty", NO_SOURCES);
     const answered = await write(deps, job, gathered);
-    return { status: "written", blocks: answered.blocks, packet: gathered.packet, assertions: answered.assertions, tool_calls: gathered.toolCalls };
+    return { status: answered.failed ? "unwritten" : "written", blocks: answered.blocks, packet: gathered.packet, assertions: answered.assertions };
   };
   return (input) => withTurnDeadline(deps, (signal) => section(input, signal));
 }
@@ -279,7 +277,6 @@ async function withTurnDeadline<T>(deps: Pick<AgentModels, "deadlines">, run: (s
 
 let defaultRegistry: ToolRegistry | undefined;
 
-// Reads stored sources with the tool loop until the ask is covered; null when no model is configured.
 async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Promise<Gathered | null> {
   let loopRefused = false;
   const router = await deps.router(job.meter(ANSWER_CALLS, () => {
@@ -294,7 +291,8 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
   });
   if (!policy.ok) throw new Error(policy.message);
 
-  const { context, meter, asOf } = job;
+  const conversation = await job.conversation();
+  const { planningContext: context, meter, asOf } = job;
   const turnId = context.turnId ?? context.runId;
   const known = new Map(job.named.map((subject) => [issuerOf(subject), subject] as const));
   const labelOf = (issuer: string) => job.labels.get(issuer) ?? known.get(issuer)?.mention ?? issuer;
@@ -338,7 +336,7 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
       const planningModel = deps.planner?.(meter(ANSWER_CALLS + 1, () => {
         plannerRefused = true;
       })) ?? null;
-      const outcome = await certifiedFinancials({ ...deps.financial, planningModel, clock: () => new Date(asOf) }, {
+      const outcome = await certifiedFinancials({ ...deps.financial, planningModel, clock: () => new Date(job.clock()) }, {
         context: { ...turn, userIntent: ask.question },
         subjects,
         choice: ask.choice,
@@ -408,7 +406,7 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
     request: {
       messages: [
         { role: "system", content: [template.system_prompt, template.policy_prompt, ...GATHER_RULES].join(" ") },
-        { role: "user", content: JSON.stringify({ question: job.question, companies: job.named.map((subject) => companyEntry(subject, job.carried, labelOf)), conversation: job.conversation }) },
+        { role: "user", content: JSON.stringify({ question: job.question, companies: job.named.map((subject) => companyEntry(subject, job.carried, labelOf)), conversation }) },
       ],
       tools: policy.selection.tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.input_json_schema as JsonObject })),
       temperature: 0,
@@ -434,12 +432,11 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
     cutoff: asOf,
   });
   if (toolCalls.some((entry) => entry.status === "ok")) await job.logToolCalls?.(toolCalls);
-  return { toolCalls, certified, analyst, packet, covered, labelOf };
+  return { conversation, toolCalls, certified, analyst, packet, covered, labelOf };
 }
 
-// Writes, renders and judges the answer over what the agent gathered, with the certified blocks first.
 async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promise<Answered> {
-  const { toolCalls, certified, analyst, packet, covered } = gathered;
+  const { conversation, toolCalls, certified, analyst, packet, covered } = gathered;
   const { snapshotId, asOf, question } = job;
   const readCalls = toolCalls.filter((entry) => entry.status === "ok").map((entry) => entry.tool_call_id);
   const subjectRefs = covered.map((id) => ({ kind: "issuer" as const, id }));
@@ -448,7 +445,7 @@ async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promis
     id: cardId, kind: "rich_text", snapshot_id: snapshotId, data_ref: { kind: "rich_text", id: cardId },
     source_refs: [], as_of: asOf, analyst_commentary: true, segments: [], subject_refs: subjectRefs,
   };
-  const noted = packet.gaps.length === 0 ? [] : [{ ...noteBlock({ snapshotId, asOf }, job.key("agent:not-covered"), packet.gaps.join(" ")), subject_refs: subjectRefs, tool_call_ids: readCalls }];
+  const noted = packet.gaps.length === 0 ? [] : [{ ...noteBlock({ snapshotId, asOf }, job.scopedKey("agent:not-covered"), packet.gaps.join(" ")), subject_refs: subjectRefs, tool_call_ids: readCalls }];
   let answerRefused = false;
   let answeredBy: string | undefined;
   let written: Pick<AnsweredTurn, "assertions" | "blocks" | "judging" | "without">;
@@ -460,7 +457,7 @@ async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promis
       blocks: [card],
       toolCalls,
       factBlocks: noted,
-      conversation: job.conversation,
+      conversation,
       packet,
       instructions: askedFigures ? [...ANSWER_RULES, ANALYSIS_RULE] : ANSWER_RULES,
       ...(askedFigures ? {} : { answerShape: DESCRIPTION_SHAPE, inferences: false as const }),
@@ -479,15 +476,15 @@ async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promis
 
   const claims = analyst.flatMap((result) => (result.status === "ok" && "claims" in result ? result.claims : []));
   const cited = citedSources(written.assertions, packet);
-  const certifiedBlocks = certified.map((entry, i) => ({ ...entry.block, id: `${entry.block.id}-${job.key(String(i + 1))}` }) as Record<string, unknown>);
+  const certifiedBlocks = certified.map((entry, i) => ({ ...entry.block, id: `${entry.block.id}-${job.scopedKey(String(i + 1))}` }) as Record<string, unknown>);
   const unwritten = [{
-    ...noteBlock({ snapshotId, asOf }, job.key("agent:unwritten"), certified.length > 0 ? COMMENTARY_UNAVAILABLE : failed ? ANSWER_FAILED : NO_ANSWER),
+    ...noteBlock({ snapshotId, asOf }, job.scopedKey("agent:unwritten"), certified.length > 0 ? COMMENTARY_UNAVAILABLE : failed ? ANSWER_FAILED : NO_ANSWER),
     subject_refs: subjectRefs,
     tool_call_ids: readCalls,
   }];
   const turnBlocks = (blocks: ReadonlyArray<Record<string, unknown>>) => {
     const shown = blocks.filter(rendered).map((block) => ({ ...withRefs(block, claims, cited), tool_call_ids: readCalls }));
-    const spent = answerRefused && shown.length > 0 ? [{ ...noteBlock({ snapshotId, asOf }, job.key("agent:calls-spent"), ANALYSIS_LEFT_OUT), subject_refs: subjectRefs, tool_call_ids: readCalls }] : [];
+    const spent = answerRefused && shown.length > 0 ? [{ ...noteBlock({ snapshotId, asOf }, job.scopedKey("agent:calls-spent"), ANALYSIS_LEFT_OUT), subject_refs: subjectRefs, tool_call_ids: readCalls }] : [];
     const own = [...shown, ...(failed ? unwritten : []), ...noted, ...spent];
     return [...certifiedBlocks, ...(own.length > 0 ? own : unwritten)];
   };
@@ -503,6 +500,7 @@ async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promis
     without: (dropped) => turnAnswer(written.without(dropped)),
     ...(answeredBy ? { answeredBy } : {}),
     assertions: written.assertions,
+    failed,
   };
 }
 

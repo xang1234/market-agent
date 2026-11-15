@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 
 import { dockerAvailable, registerLifoCleanup } from "../../../db/test/docker-pg.ts";
-import { memoDatabase } from "../../analyze/test/financial-fixtures.ts";
+import { memoDatabase, playbook } from "../../analyze/test/financial-fixtures.ts";
 import { meteredModels } from "../../chat/src/analyst-agent.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { LlmClientError, type LlmChatClient, type LlmChatRequest, type LlmToolCall } from "../../llm/src/router.ts";
@@ -191,6 +191,34 @@ test("the analyst agent writes an investment memo's sections from stored sources
 
     const shared = await adapters.analyze.shareRunToChat({ userId: IDS.owner, runId: run.run_id, body: { title: "AAA memo" } });
     assert.deepEqual(shared.origin_snapshot_ids, [run.snapshot_id, certified[0]!.snapshot_id], "the figure is shared under its own snapshot");
+  });
+
+  const workflowInput = (subjectRefs: ReadonlyArray<{ kind: "issuer" | "listing"; id: string }>, knowledgeCutoff?: string) => ({
+    userId: IDS.owner, template: { template_id: templateId, version: 1 } as never, body: {}, runId: randomUUID(), snapshotId: randomUUID(), instructions: "",
+    playbook: playbook("investment_memo"), sourceCategories: [], bundleIds: [], subjectRefs, ...(knowledgeCutoff ? { knowledgeCutoff } : {}),
+  });
+
+  await t.test("the memo's sections read at its frozen cutoff, about the issuer its financial sections compute for", async () => {
+    const cutoff = "2026-11-01T00:00:00.000Z";
+    const workflow = analyzeAgentWorkflow(analyzeAgentDeps(LLM_ENV, scriptedModel([])));
+    const { blocks } = await workflow(workflowInput([{ kind: "listing", id: LISTING }, { kind: "issuer", id: IDS.issuerB }], cutoff));
+    const sections = sectionsOf(blocks);
+    assert.deepEqual(sections.map((section) => (section as unknown as { as_of: string }).as_of), AGENT_SECTIONS.map(() => cutoff));
+    assert.ok(sections.every((section) => JSON.stringify(section.children).includes("Beta Holdings Corp.")), "issuer B, as the engine's sections, not listing A");
+  });
+
+  await t.test("a section that fails fails the memo only once every other section has settled", async () => {
+    let settledSections = 0;
+    const workflow = analyzeAgentWorkflow({
+      ...analyzeAgentDeps(LLM_ENV, scriptedModel([])),
+      logToolCalls: async (logged) => {
+        if (logged.some((call) => JSON.stringify(call.arguments).includes("risk.factor"))) throw new TypeError("the tool call log is broken");
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        settledSections += 1;
+      },
+    });
+    await assert.rejects(workflow(workflowInput([{ kind: "listing", id: LISTING }])), TypeError);
+    assert.equal(settledSections, 3, "no section runs on after the memo fails");
   });
 
   await t.test("a company with no stored sources gets a typed empty section for each", async () => {
