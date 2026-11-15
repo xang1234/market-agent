@@ -136,7 +136,7 @@
     "note": "AA5 lanes 5 and 8, flag on: the follow-up keeps MU and reads its risk factors",
     "budget_ms": { "saved": 60000 },
     "turns": [
-      { "ask": "What does MU sell?", "expect": { "subjects": ["MU"], "tools": ["get_company_profile"], "text": ["DRAM", "NAND"] } },
+      { "ask": "What does MU sell?", "expect": { "subjects": ["MU"], "tools": ["get_company_profile"], "text": ["DRAM", "NAND"], "not_text": ["No figures are shown", "names it as a competitor"] } },
       { "ask": "What are its main risks?", "expect": { "subjects": ["MU"], "tools": ["get_claims"], "text": ["average selling prices"] } }
     ]
   },
