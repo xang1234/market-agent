@@ -49,11 +49,18 @@ export type TenKDocument = {
   effectiveTime: string | null;
 };
 
+// A 10-K document's parse_status says how far it was read. "parsed" means
+// every item was read. "failed" means a read found too few items, as for a
+// 10-K laid out by a cross-reference index (Intel's) or a smaller reporting
+// company with no Item 1A. An item is read once it has claims. A rerun
+// sections a failed document again, with no fetch and no model call, and reads
+// only the items it newly finds, so a parser that learns a layout needs no reset.
+// ponytail: an item whose reply held no claim reads as unread, so a failed
+// document's rerun asks the model about it again. Record the items read on the
+// document if that ever costs.
 // "unparseable": a reply of the wrong shape, or none of whose quotes is in the
-// filing, so nothing is stored and the document stays unread for the next run.
-// "no_sections": neither item was found (a 10-K laid out by a cross-reference
-// index, as Intel's is). No model call runs, and the document stays unread, so
-// a parser that learns the layout reads it on the next run.
+// filing, so nothing is stored and its items stay unread for the next run.
+// "no_sections": no item is found or read.
 export type Extract10kOutcome = "extracted" | "already_extracted" | "unparseable" | "no_sections";
 export type Extract10kResult = {
   outcome: Extract10kOutcome;
@@ -148,6 +155,16 @@ function competitorsNamedIn(claim: TenKClaim): string[] {
 
 type VerifiedClaim = TenKClaim & { item: TenKItem; start: number; end: number; issuerIds: string[] };
 
+const TEXT_BASIS = "sec_10k_item_canonical_text.v1";
+const readThrough = (parseStatus: string | undefined) => parseStatus === "parsed" || parseStatus === "superseded";
+async function itemsRead(db: QueryExecutor, documentId: string): Promise<Set<TenKItem>> {
+  const { rows } = await db.query<{ item: TenKItem }>(
+    `select distinct locator->>'item' as item from claim_evidence where document_id = $1 and locator->>'text_basis' = $2`,
+    [documentId, TEXT_BASIS],
+  );
+  return new Set(rows.map((row) => row.item));
+}
+
 // Extract one 10-K document's claims and store the verified ones. Transport
 // errors propagate and store nothing, so the document stays unread.
 export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument): Promise<Extract10kResult> {
@@ -157,11 +174,19 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
     [doc.documentId],
   );
   if (status === undefined) throw new Error(`no document ${doc.documentId}`);
-  if (status.parse_status !== "pending") return { ...started, outcome: "already_extracted", missing: [] };
+  if (readThrough(status.parse_status)) return { ...started, outcome: "already_extracted", missing: [] };
   const sections = tenKSections(doc.html);
-  const found = TEN_K_ITEMS.flatMap((item) => "error" in sections[item] ? [] : [sections[item] as TenKSection]);
-  const missing = TEN_K_ITEMS.filter((item) => "error" in sections[item]);
-  if (found.length === 0) return { ...started, outcome: "no_sections", missing };
+  const read = await itemsRead(deps.db, doc.documentId);
+  const missingAfter = (readNow: Set<TenKItem>) => TEN_K_ITEMS.filter((item) => "error" in sections[item] && !readNow.has(item));
+  const found = TEN_K_ITEMS.flatMap((item) => "error" in sections[item] || read.has(item) ? [] : [sections[item] as TenKSection]);
+  const missing = missingAfter(read);
+  if (found.length === 0) {
+    await deps.db.query(
+      `update documents set parse_status = $2 where document_id = $1 and parse_status in ('pending', 'failed')`,
+      [doc.documentId, missing.length === 0 ? "parsed" : "failed"],
+    );
+    return { ...started, outcome: read.size === 0 ? "no_sections" : "already_extracted", missing };
+  }
 
   const prompts = found.flatMap((section) => releasePrompts([section]).map((text) => ({ section, text })));
   const replies = await Promise.all(prompts.map(async ({ section, text }, index) => {
@@ -213,24 +238,22 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
   }
 
   return withTransaction(deps.db, async (tx) => {
-    // The row lock orders this with storeTenK adopting the filing's date, so
-    // a claim gets the date whichever runs first.
-    const stamped = await tx.db.query<{ published_at: Date | null }>(
-      `update documents set parse_status = 'parsed' where document_id = $1 and parse_status = 'pending' returning published_at`,
+    // The row lock orders this with a concurrent read of the same document,
+    // and with storeTenK adopting the filing's date, so a claim gets the date
+    // whichever runs first.
+    const { rows: [locked] } = await tx.db.query<{ parse_status: string; published_at: Date | null }>(
+      `select parse_status, published_at from documents where document_id = $1 for update`,
       [doc.documentId],
     );
-    const effectiveTime = doc.effectiveTime ?? stamped.rows[0]?.published_at?.toISOString() ?? null;
-    if ((stamped.rowCount ?? 0) === 0) return { ...started, outcome: "already_extracted" as const, missing };
+    const readNow = await itemsRead(tx.db, doc.documentId);
+    const missingNow = missingAfter(readNow);
+    if (readThrough(locked!.parse_status) || found.some((section) => readNow.has(section.type))) {
+      return { ...started, outcome: "already_extracted" as const, missing: missingNow };
+    }
+    const effectiveTime = doc.effectiveTime ?? locked!.published_at?.toISOString() ?? null;
     const claimIds: string[] = [];
     let resolved = 0;
     for (const claim of verified.values()) {
-      // Keyed on the document, predicate and quote, so a re-read (after
-      // parse_status is reset by hand) adds only what is new.
-      const { rowCount: stored } = await tx.db.query(
-        `select 1 from claims where document_id = $1 and predicate = $2 and text_canonical = $3`,
-        [doc.documentId, claim.predicate, claim.quote],
-      );
-      if ((stored ?? 0) > 0) continue;
       const row = await createClaim(tx.db, {
         document_id: doc.documentId,
         predicate: claim.predicate,
@@ -252,20 +275,21 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
       await createClaimEvidence(tx.db, {
         claim_id: row.claim_id,
         document_id: doc.documentId,
-        locator: { item: claim.item, start: claim.start, end: claim.end, text_basis: "sec_10k_item_canonical_text.v1" },
+        locator: { item: claim.item, start: claim.start, end: claim.end, text_basis: TEXT_BASIS },
         excerpt_hash: createHash("sha256").update(claim.quote).digest("hex"),
         confidence: 1,
       });
       claimIds.push(row.claim_id);
     }
     const competitors = { resolved, named };
+    await tx.db.query(`update documents set parse_status = $2 where document_id = $1`, [doc.documentId, missingNow.length === 0 ? "parsed" : "failed"]);
     await writeToolCallLog(tx.db, {
       tool_name: "extract_10k_claims",
       args,
-      result: { outcome: "extracted", missing, claim_ids: claimIds, dropped_unquoted: droppedUnquoted, competitors },
+      result: { outcome: "extracted", missing: missingNow, claim_ids: claimIds, dropped_unquoted: droppedUnquoted, competitors },
       status: claimIds.length > 0 ? "ok" : "skipped",
     });
-    return { outcome: "extracted" as const, extracted: claimIds.length, droppedUnquoted, competitors, missing, llmCalls: prompts.length };
+    return { outcome: "extracted" as const, extracted: claimIds.length, droppedUnquoted, competitors, missing: missingNow, llmCalls: prompts.length };
   });
 }
 
@@ -366,7 +390,7 @@ export async function backfillIssuer10k(
       where provider_doc_id = $1 and deleted_at is null order by created_at limit 1`,
     [latest.accession],
   );
-  if (existing !== undefined && existing.parse_status !== "pending") {
+  if (readThrough(existing?.parse_status)) {
     return { outcome: "already_extracted", extracted: 0, droppedUnquoted: 0, competitors: { resolved: 0, named: 0 }, missing: [], llmCalls: 0, accession: latest.accession };
   }
   // The filings backfill stores 10-Ks too: claims cite the stored bytes.

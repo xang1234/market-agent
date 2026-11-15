@@ -14,12 +14,24 @@ import {
   type Extract10kResult,
   type TenKBackfillDeps,
 } from "./sec-10k-claims.ts";
+import type { TenKItem } from "./sec-10k-sections.ts";
 import type { QueryExecutor } from "./types.ts";
 
 export function resultLine(result: Extract10kResult, ms: number): string {
   return `outcome=${result.outcome} extracted=${result.extracted} dropped_unquoted=${result.droppedUnquoted} ` +
     `competitors=${result.competitors.resolved}/${result.competitors.named} missing=${result.missing.join(",") || "none"} ` +
     `ms=${ms} llm_calls=${result.llmCalls}`;
+}
+
+// A 10-K read in part counts once by its outcome and once as partial.
+export function summaryLine(results: ReadonlyArray<{ outcome: string; missing?: ReadonlyArray<TenKItem> }>): string {
+  const totals = new Map<string, number>();
+  const count = (key: string) => totals.set(key, (totals.get(key) ?? 0) + 1);
+  for (const result of results) {
+    count(result.outcome);
+    if (result.outcome !== "no_sections" && (result.missing?.length ?? 0) > 0) count("partial");
+  }
+  return `done: ${[...totals].map(([key, n]) => `${key}=${n}`).join(" ") || "no issuers"}`;
 }
 
 // The dev stack's .env.dev, which the verify boot recipe passes with
@@ -89,7 +101,7 @@ async function main(): Promise<void> {
     } else {
       const stored = await issuers(db, tickers);
       const queue = stored.slice(0, limit);
-      const totals: Record<string, number> = {};
+      const results: Array<{ outcome: string; missing?: TenKItem[] }> = [];
       for (const ticker of tickers.filter((ticker) => !stored.some((issuer) => issuer.tickers.includes(ticker.toUpperCase())))) {
         failed = true;
         console.error(`${ticker}: no stored issuer`);
@@ -99,24 +111,24 @@ async function main(): Promise<void> {
           const label = `${issuer.tickers.join("/") || "-"} ${issuer.legal_name}`;
           const started = Date.now();
           if (issuer.cik === null) {
-            totals.no_cik = (totals.no_cik ?? 0) + 1;
+            results.push({ outcome: "no_cik" });
             console.log(`${label}: outcome=no_cik`);
             continue;
           }
           try {
             const result = await backfillIssuer10k(deps, { issuerId: issuer.issuer_id, cik: Number(issuer.cik) });
-            totals[result.outcome] = (totals[result.outcome] ?? 0) + 1;
+            results.push(result);
             if (result.outcome === "unparseable") failed = true;
             console.log(`${label}: ${"accession" in result ? `${result.accession} ${resultLine(result, Date.now() - started)}` : "outcome=no_10k"}`);
           } catch (error) {
             failed = true;
-            totals.failed = (totals.failed ?? 0) + 1;
+            results.push({ outcome: "failed" });
             console.error(`${label}: failed: ${error instanceof Error ? error.message : String(error)}`);
           }
         }
       };
       await Promise.all(Array.from({ length: concurrency }, work));
-      console.log(`done: ${Object.entries(totals).map(([outcome, n]) => `${outcome}=${n}`).join(" ") || "no issuers"}`);
+      console.log(summaryLine(results));
     }
   } finally {
     await db.end();

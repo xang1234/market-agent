@@ -12,7 +12,7 @@ import {
   type TenKBackfillDeps,
   type TenKDocument,
 } from "../src/sec-10k-claims.ts";
-import { parseCliArgs } from "../src/sec-10k-claims-cli.ts";
+import { parseCliArgs, summaryLine } from "../src/sec-10k-claims-cli.ts";
 import { MemoryObjectStore } from "../src/object-store.ts";
 import type { SecSubmissions } from "../src/sec-edgar.ts";
 import type { QueryExecutor } from "../src/types.ts";
@@ -119,7 +119,8 @@ test("a 10-K's quoted claims are stored with their filer and resolved competitor
   assert.deepEqual(await counts(client), { claims: 3, competitors: 1 }, "a second run adds no rows");
 
   await client.query(`update documents set parse_status = 'pending' where document_id = $1`, [tenK.documentId]);
-  assert.equal((await extract10kClaims(deps, tenK)).extracted, 0, "a re-read stores only claims not yet stored");
+  assert.equal((await extract10kClaims(deps, tenK)).outcome, "already_extracted");
+  assert.equal(calls(), 3, "a reset by hand reads no item that has claims");
   assert.deepEqual(await counts(client), { claims: 3, competitors: 1 });
 });
 
@@ -164,14 +165,60 @@ test("a 10-K the model answers badly stays unread, with nothing stored", dockerT
   assert.equal((await extract10kClaims({ db: client, llm, resolveCompetitor }, tenK)).extracted, 2, "read again by the next run");
 });
 
-test("a 10-K with neither item calls no model and stays unread", dockerTest, async (t) => {
+const parseStatus = async (client: QueryExecutor, documentId: string) =>
+  (await client.query<{ parse_status: string }>(`select parse_status from documents where document_id = $1`, [documentId])).rows[0]!.parse_status;
+const BODY = "<div>During 2025, the Company derived revenue abroad.</div>".repeat(25);
+const OWN_RISK = "Our results depend on a small number of customers for most of our revenue.";
+const DESCRIPTION = "We design memory chips for data centers and phones.";
+
+test("a 10-K with neither item is recorded failed, rechecked with no fetch or model call, and read once the parser finds an item", dockerTest, async (t) => {
   const { client, nvda } = await nvdaDatabase(t, "tenk-no-sections");
-  const tenK = await storedTenK(client, nvda, new TextEncoder().encode("<html><body><div>Our Business</div><div>We design chips.</div></body></html>"));
-  const { llm, calls } = llmAnswering({});
-  const result = await extract10kClaims({ db: client, llm, resolveCompetitor: async () => null }, tenK);
-  assert.deepEqual([result.outcome, result.missing, calls()], ["no_sections", ["1", "1A"], 0]);
-  const { rows: [status] } = await client.query<{ parse_status: string }>(`select parse_status from documents where document_id = $1`, [tenK.documentId]);
-  assert.equal(status!.parse_status, "pending");
+  const unsectioned = new TextEncoder().encode(`<html><body><div>Our Business</div><div>${DESCRIPTION}</div>${BODY}</body></html>`);
+  const objectStore = new MemoryObjectStore();
+  const { llm, calls } = llmAnswering({ "1": JSON.stringify({ claims: [{ predicate: "business.description", quote: DESCRIPTION }] }) });
+  const fetched: string[] = [];
+  const deps: TenKBackfillDeps = {
+    db: client, llm, objectStore, resolveCompetitor: async () => null,
+    secClient: {
+      fetchSubmissions: async () => ({ filings: { recent: { accessionNumber: ["0001045810-26-000021"], form: ["10-K"], primaryDocument: ["nvda-20260125.htm"], filingDate: ["2026-02-25"] } } }),
+      fetchFiling: async (input) => {
+        fetched.push(input.document);
+        return { bytes: unsectioned, contentType: "text/html", retrievedAt: "2026-11-15T00:00:00.000Z", url: `https://www.sec.gov/${input.document}` };
+      },
+    },
+  };
+  for (const run of ["first", "rerun"]) {
+    const result = await backfillIssuer10k(deps, { issuerId: nvda, cik: 1045810 });
+    assert.deepEqual([result.outcome, "missing" in result && result.missing, calls()], ["no_sections", ["1", "1A"], 0], run);
+  }
+  assert.deepEqual(fetched, ["nvda-20260125.htm"], "the rerun reads the stored bytes");
+  const { rows: [doc] } = await client.query<{ document_id: string; source_id: string }>(`select document_id::text as document_id, source_id::text as source_id from documents`);
+  assert.equal(await parseStatus(client, doc!.document_id), "failed");
+
+  // The same document as a parser that learns its layout would see it.
+  const sectioned = { documentId: doc!.document_id, sourceId: doc!.source_id, issuerId: nvda, effectiveTime: null, html: `<div>Item 1. Business</div><div>${DESCRIPTION}</div>${BODY}` };
+  const read = await extract10kClaims(deps, sectioned);
+  assert.deepEqual([read.outcome, read.extracted, read.missing, calls()], ["extracted", 1, ["1A"], 1]);
+});
+
+test("a 10-K read in part is recorded failed, and a rerun reads only the item it newly finds", dockerTest, async (t) => {
+  const { client, nvda } = await nvdaDatabase(t, "tenk-partial");
+  const { llm, calls } = llmAnswering({
+    "1": JSON.stringify({ claims: [{ predicate: "business.description", quote: DESCRIPTION }] }),
+    "1A": JSON.stringify({ claims: [{ predicate: "risk.factor", quote: OWN_RISK }] }),
+  });
+  const deps: Extract10kDeps = { db: client, llm, resolveCompetitor: async () => null };
+  const tenK = await storedTenK(client, nvda, new TextEncoder().encode(`<div>Item 1. Business</div><div>${DESCRIPTION}</div>${BODY}<div>Item 2. Properties</div>`));
+  const summary = async () => {
+    const result = await extract10kClaims(deps, tenK);
+    return [result.outcome, result.extracted, result.missing, calls(), await parseStatus(client, tenK.documentId)];
+  };
+  assert.deepEqual(await summary(), ["extracted", 1, ["1A"], 1, "failed"]);
+  assert.deepEqual(await summary(), ["already_extracted", 0, ["1A"], 1, "failed"], "Item 1 is not read again");
+
+  tenK.html = `<div>Item 1. Business</div><div>${DESCRIPTION}</div>${BODY}<div>Item 1A. Risk Factors</div><div>${OWN_RISK}</div>${BODY}<div>Item 2. Properties</div>`;
+  assert.deepEqual(await summary(), ["extracted", 1, [], 2, "parsed"], "a parser that finds Item 1A reads only Item 1A");
+  assert.deepEqual(await counts(client), { claims: 2, competitors: 0 });
 });
 
 test("a risk factor headed by an asterisk or middle-dot bullet, as 3M writes them, verifies whole", dockerTest, async (t) => {
@@ -296,6 +343,20 @@ test("a competitor counts only when the quote names it as a whole word", dockerT
   assert.deepEqual(result.competitors, { resolved: 1, named: 2 }, "metaverse names no Meta");
   const { rows } = await client.query<{ subject_id: string }>(`select subject_id::text as subject_id from claim_arguments where role = 'competitor'`);
   assert.deepEqual(rows, [{ subject_id: ids.Intel }]);
+});
+
+test("the backfill's summary counts each outcome, and 10-Ks read in part", () => {
+  assert.equal(
+    summaryLine([
+      { outcome: "extracted", missing: [] },
+      { outcome: "extracted", missing: ["1A"] },
+      { outcome: "no_sections", missing: ["1", "1A"] },
+      { outcome: "already_extracted", missing: ["1A"] },
+      { outcome: "failed" },
+    ]),
+    "done: extracted=2 partial=2 no_sections=1 already_extracted=1 failed=1",
+  );
+  assert.equal(summaryLine([]), "done: no issuers");
 });
 
 test("the CLI runs a backfill only when asked for one", () => {
