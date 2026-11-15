@@ -15,6 +15,7 @@ import { dependencyClosure, type FinancialAnswerContent, type FinancialPlan } fr
 import { returnLabel } from "../../market/src/perf-points.ts";
 import { QUARTERS_SHOWN, type ResearchScope, type ScopeQuarter } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
+import type { AnalystToolResult } from "./analyst-tools.ts";
 
 type Block = Record<string, unknown>;
 
@@ -112,9 +113,73 @@ export type PacketClaim = {
   company?: string;
   effective_time?: string;
   published_at?: string;
+  // The filing the claim is quoted from, when an analyst tool read it.
+  filing?: string;
   claim_id: string;
   source_id: string;
 };
+
+// What the analyst tools return, each with its C id. A consensus capture is an
+// attributed analyst expectation and a peer is the peer set's choice: neither
+// is a stored claim, so neither carries a claim_id.
+export type AnalystPacketEntry =
+  | (PacketClaim & { kind: "claim" })
+  | { kind: "consensus"; id: string; text: string; predicate: string; company: string; captured_on: string; capture_id: string; source_id: string }
+  | { kind: "peer"; id: string; text: string; predicate: "peer_set.industry"; company: string; peer_issuer_id: string };
+
+type UnnumberedEntry<E = AnalystPacketEntry> = E extends unknown ? Omit<E, "id"> : never;
+
+/**
+ * The analyst tools' results as packet entries, numbered C1 on in the order
+ * read: the same results give the same ids. A row two results both return is
+ * one entry, as the first gave it.
+ */
+export function analystPacketEntries(results: ReadonlyArray<AnalystToolResult>): AnalystPacketEntry[] {
+  const entries = new Map<string, UnnumberedEntry>();
+  for (const result of results) {
+    for (const [key, entry] of resultEntries(result)) if (!entries.has(key)) entries.set(key, entry);
+  }
+  return [...entries.values()].map((entry, index) => ({ ...entry, id: `C${index + 1}` }) as AnalystPacketEntry);
+}
+
+function resultEntries(result: AnalystToolResult): Array<readonly [string, UnnumberedEntry]> {
+  if (result.status !== "ok") return [];
+  switch (result.tool) {
+    case "get_company_profile":
+    case "get_claims":
+      return result.claims.map((claim) => [`claim:${claim.claim_id}`, {
+        kind: "claim",
+        text: claim.text_canonical,
+        predicate: claim.predicate,
+        stance: STANCE[claim.polarity] ?? "unclassified",
+        company: claim.filer_label,
+        ...(claim.effective_time ? { effective_time: claim.effective_time } : {}),
+        ...(claim.published_at ? { published_at: claim.published_at } : {}),
+        filing: [claim.document_title ?? "filing", claim.accession && `accession ${claim.accession}`, claim.published_at && `filed ${claim.published_at.slice(0, 10)}`]
+          .filter(Boolean).join(", "),
+        claim_id: claim.claim_id,
+        source_id: claim.source_id,
+      }] as const);
+    case "get_analyst_consensus":
+      return result.values.map((value) => [`consensus:${value.capture_id}`, {
+        kind: "consensus",
+        text: `attributed consensus: ${value.provider} ${value.label}${value.fiscal_period ? ` (${value.fiscal_period})` : ""}, captured ${result.captured_on}: ${value.raw_value}`,
+        predicate: `consensus.${value.field_key}`,
+        company: result.company,
+        captured_on: result.captured_on,
+        capture_id: value.capture_id,
+        source_id: value.source_id,
+      }] as const);
+    case "get_peer_set":
+      return result.peers.map((peer, index) => [`peer:${result.company}:${peer.issuer_id}`, {
+        kind: "peer",
+        text: `${peer.label} is ${result.company}'s peer ${index + 1} of ${result.peers.length} in its industry (${result.industry}), by market cap`,
+        predicate: "peer_set.industry",
+        company: result.company,
+        peer_issuer_id: peer.issuer_id,
+      }] as const);
+  }
+}
 
 export type EvidencePacket = {
   route: string;

@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { buildEvidencePacket, claimSelection, packetForModel, type ClaimRecord } from "../src/evidence-packet.ts";
+import { analystPacketEntries, buildEvidencePacket, claimSelection, packetForModel, type ClaimRecord } from "../src/evidence-packet.ts";
+import type { AnalystToolResult } from "../src/analyst-tools.ts";
 import { resolveResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import { proposal } from "./scope-fixtures.ts";
 
@@ -355,3 +356,20 @@ test("a recorded trace carries the packet its model was sent", () => {
   assert.equal(sent.figures.length, 17);
 });
 
+
+test("analyst tool results get the same C ids on every run, and a claim two results return is one entry", () => {
+  const claim = (claim_id: string, predicate: string, text: string) => ({
+    claim_id, document_id: "d-10k", source_id: "s-10k", text_canonical: text, predicate, polarity: "neutral",
+    effective_time: null, published_at: null, filer_issuer_id: NVDA.issuer_id, filer_label: "NVDA", accession: null, document_title: "10-K",
+  });
+  const profile: AnalystToolResult = { tool: "get_company_profile", status: "ok", truncated: false, claims: [claim("c-1", "business.description", "We make GPUs."), claim("c-2", "business.competition", "AMD competes with us.")] };
+  const competitors: AnalystToolResult = { tool: "get_claims", status: "ok", truncated: false, claims: [claim("c-2", "business.competition", "AMD competes with us.")] };
+  const peers: AnalystToolResult = { tool: "get_peer_set", status: "ok", company: "NVDA", industry: "Semiconductors", peers: [{ issuer_id: AMD.issuer_id, label: "AMD" }] };
+  const ids = () => analystPacketEntries([profile, competitors, peers, { tool: "get_analyst_consensus", status: "no_consensus" }]).map((entry) => [entry.id, entry.kind, entry.text]);
+  assert.deepEqual(ids(), [
+    ["C1", "claim", "We make GPUs."],
+    ["C2", "claim", "AMD competes with us."],
+    ["C3", "peer", "AMD is NVDA's peer 1 of 1 in its industry (Semiconductors), by market cap"],
+  ]);
+  assert.deepEqual(ids(), ids());
+});
