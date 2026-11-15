@@ -5,11 +5,14 @@ export type TenKItem = (typeof TEN_K_ITEMS)[number];
 
 // canonicalText turns every tag into a space, so a tag inside a word splits it.
 const tagSplitTolerant = (title: string) => title.split(" ").map((word) => [...word].join(" ?")).join("\\s+");
+// "ltem" is a typo some filers make for "Item" (1-800-Flowers' Item 1A).
 const HEADINGS: Readonly<Record<TenKItem, RegExp>> = {
-  "1": new RegExp(`^items?\\s*1(?:\\s*(?:and|&)\\s*2)?\\s*[.:-]?\\s*(?:description\\s+of\\s+)?${tagSplitTolerant("business")}\\b`, "i"),
-  "1A": new RegExp(`^item\\s*1a\\s*[.:-]?\\s*${tagSplitTolerant("risk factors")}\\b`, "i"),
+  "1": new RegExp(`^[il]tems?\\s*1(?:\\s*(?:and|&)\\s*2)?\\s*[.:-]?\\s*(?:description\\s+of\\s+)?${tagSplitTolerant("business")}\\b`, "i"),
+  "1A": new RegExp(`^[il]tem\\s*1a\\s*[.:-]?\\s*${tagSplitTolerant("risk factors")}\\b`, "i"),
 };
-const ANY_HEADING = /^(?:ITEMS?|Items?)\s*\d{1,2}[A-Ca-c]?(?:\s*(?:[Aa]nd|AND|&)\s*\d{1,2}[A-Ca-c]?)?\s*[.:-]?\s*[A-Z[]/;
+// A title in lower case counts only after a separator, as in "Item 1B.
+// unresolved", so a paragraph that opens "Item 7 of this report" heads nothing.
+const ANY_HEADING = /^(?:[Il]tems?|ITEMS?|items?)\s*\d{1,2}[A-Ca-c]?(?:\s*(?:and|And|AND|&)\s*\d{1,2}[A-Ca-c]?)?\s*(?:[.:-]\s*[A-Za-z[]|[A-Z[])/;
 const MIN_ITEM_BODY_CHARS = 1_000;
 
 // An HTML list item is one block, its bullet the browser's: a paragraph

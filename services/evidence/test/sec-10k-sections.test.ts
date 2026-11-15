@@ -45,6 +45,31 @@ test("a heading reads through a word markup split, and Item 1 may be the Descrip
   assert.ok(!(sections["1A"] as TenKSection).text.includes("Properties"));
 });
 
+test("an item ends at the next heading however its title is cased, and at Item 2 when Item 1B is absent", () => {
+  const body = "<div>We make things that people use every day in many places.</div>".repeat(30);
+  for (const next of ["Item 1B. unresolved staff comments", "ITEM 1B: UNRESOLVED STAFF COMMENTS", "Item 1B.unresolved", "Item 2. properties", "ITEM 2 - PROPERTIES"]) {
+    const sections = tenKSections(`<div>Item 1. Business</div>${body}<div>Item 1a. risk factors</div>${body}<div>${next}</div>${body}`);
+    const item1 = sections["1"] as TenKSection;
+    const item1a = sections["1A"] as TenKSection;
+    assert.ok(!item1.text.includes("risk factors"), `Item 1 ends at a lower-case 1A heading, before ${next}`);
+    assert.equal(item1a.text.slice(0, 22), "Item 1a. risk factors ", next);
+    assert.ok(!item1a.text.includes(next), `Item 1A ends at ${next}`);
+  }
+});
+
+test("an ltem typo, as 1-800-Flowers' 10-K writes Item 1A, still heads an item", () => {
+  const body = "<div>We make things that people use every day in many places.</div>".repeat(30);
+  const sections = tenKSections(`<div>Item 1. Business</div>${body}<div>ltem 1A. Risk Factors</div>${body}<div>Item 1B. Unresolved Staff Comments</div>`);
+  assert.equal((sections["1A"] as TenKSection).text.slice(0, 21), "ltem 1A. Risk Factors");
+  assert.ok(!(sections["1"] as TenKSection).text.includes("Risk Factors"));
+});
+
+test("a paragraph that opens by citing an item is no heading", () => {
+  const body = "<div>We make things that people use every day in many places.</div>".repeat(30);
+  const sections = tenKSections(`<div>Item 1A. Risk Factors</div>${body}<div>Item 7 of this report discusses these risks further.</div>${body}<div>Item 1B. Unresolved Staff Comments</div>`);
+  assert.ok((sections["1A"] as TenKSection).text.includes("Item 7 of this report"));
+});
+
 test("a combined Items 1 and 2 heading opens Item 1", () => {
   const body = "<div>We make things that people use every day in many places.</div>".repeat(30);
   for (const heading of ["Items 1 and 2. Business and Properties", "ITEMS 1 AND 2. BUSINESS AND PROPERTIES", "Items 1 & 2. Business", "Items 1 And 2. Business And Properties"]) {
