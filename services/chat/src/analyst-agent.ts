@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import type { FinancialSubjectRef } from "../../financial-core/src/index.ts";
+import type { FinancialRuntimeAuthority, FinancialSubjectRef } from "../../financial-core/src/index.ts";
 import type { Clarification, PlanningModel, RequestedSubject } from "../../financial-engine/src/planner.ts";
 import { createLlmRouterFromEnv, LlmClientError, LlmProviderError, LlmRouterError, withLlmAbortSignal, type LlmChatClient, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import type { ControlledRouter, LlmToolCall } from "../../llm/src/router.ts";
@@ -25,6 +25,7 @@ import {
   requestKeyFor,
   type CertifiedFinancials,
   type ChatFinancialRuntimeDeps,
+  type ChatFinancialTurnContext,
 } from "./financial-runtime.ts";
 import { ANSWER_DEADLINES, withDeadlines, type DroppedClaims } from "./llm-runtime.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS, LATEST, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
@@ -32,21 +33,33 @@ import { turnStopSignal } from "./turn-stop.ts";
 
 const MAX_STEPS = 4;
 const TURN_CALLS = 8;
+// A memo writes its sections at once, and four of them stay within 30 model calls.
+const SECTION_CALLS = 7;
 const ANSWER_CALLS = 3;
 const DEADLINES = { readMs: 75_000, turnMs: 120_000 };
 
-export type AnalystAgentDeps = Readonly<{
-  financial: Pick<ChatFinancialRuntimeDeps, "pool" | "evidence" | "resolveMention" | "priorSubjects" | "researchScope" | "hydrate">;
+type AgentModels = Readonly<{
   // Each model-facing dep calls beforeModelCall before every model attempt it makes; it throws once the turn has made its calls.
   router: (beforeModelCall: () => void) => Promise<ControlledRouter | null>;
   planner?: (beforeModelCall: () => void) => PlanningModel;
   read: (name: AnalystToolName, args: Readonly<Record<string, JsonValue>>, turn: { as_of: string; user_id: string | null }) => Promise<AnalystToolResult>;
   compose: (input: AnswerTraceInput, turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">, onAnswered: (deployment: string) => void, beforeModelCall: () => void) => Promise<AnsweredTurn>;
+  registry?: ToolRegistry;
+  deadlines?: Readonly<{ readMs: number; turnMs: number }>;
+}>;
+
+type AgentCore = AgentModels & Readonly<{ financial: Pick<ChatFinancialRuntimeDeps, "pool" | "evidence" | "hydrate"> }>;
+
+export type AnalystAgentDeps = AgentModels & Readonly<{
+  financial: Pick<ChatFinancialRuntimeDeps, "pool" | "evidence" | "resolveMention" | "priorSubjects" | "researchScope" | "hydrate">;
   asOf: () => string;
   conversation?: (threadId: string) => Promise<ReadonlyArray<{ role: string; text: string }>>;
   logToolCalls?: (threadId: string, calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
-  registry?: ToolRegistry;
-  deadlines?: Readonly<{ readMs: number; turnMs: number }>;
+}>;
+
+export type AnalystSectionDeps = AgentModels & Readonly<{
+  financial: Pick<ChatFinancialRuntimeDeps, "pool" | "evidence">;
+  logToolCalls?: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
 }>;
 
 export class TurnDeadline extends Error {
@@ -70,8 +83,46 @@ function perStepDeadlines(router: ControlledRouter): ControlledRouter {
 
 type Certified = Readonly<{ block: FinancialAnswerBlock; packet: EvidencePacket; subjects: ReadonlyArray<string> }>;
 
+type Meter = ReturnType<typeof callMeter>;
+
+// One ask of the agent: a chat turn's question, or a memo section's goal.
+type AgentAsk = Readonly<{
+  question: string;
+  named: ReadonlyArray<RequestedSubject>;
+  labels: ReadonlyMap<string, string>;
+  carried: ReadonlyArray<string>;
+  notes: ReadonlyArray<string>;
+  // What each certified call plans under, its own ask as the intent.
+  context: ChatFinancialTurnContext;
+  authority: FinancialRuntimeAuthority;
+  requestKey: (ask: string) => string;
+  incomeLines: ReadonlyArray<string>;
+  conversation: ReadonlyArray<{ role: string; text: string }>;
+  asOf: string;
+  meter: Meter;
+  snapshotId: string;
+  // Keeps the ask's notes and certified blocks apart from another ask's in the same snapshot.
+  key: (name: string) => string;
+  trace: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id">;
+  logToolCalls?: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
+}>;
+
+type Gathered = Readonly<{
+  toolCalls: ChatAnalystToolRuntimeToolCall[];
+  certified: ReadonlyArray<Certified>;
+  analyst: ReadonlyArray<AnalystToolResult>;
+  packet: EvidencePacket;
+  covered: ReadonlyArray<string>;
+  labelOf: (issuer: string) => string;
+}>;
+
+type Answered = Pick<ChatAnalystToolRuntimeResult, "blocks"> & Readonly<{
+  without: (dropped: DroppedClaims) => Pick<ChatAnalystToolRuntimeResult, "blocks">;
+  answeredBy?: string;
+  assertions: AnsweredTurn["assertions"];
+}>;
+
 export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
-  let registry = deps.registry;
   const agentTurn = async (context: ChatTurnRunContext, signal: AbortSignal): ReturnType<ChatAnalystAgent> => {
     if (!context.userId || !isUuid(context.threadId)) return null;
     const question = context.userIntent ?? "";
@@ -82,252 +133,351 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     if (companies.clarify || companies.subjects.some((subject) => subject.resolution.status === "ambiguous")) return "pick_company";
     if (named.length === 0) return null;
     const read = await reading;
-    let loopRefused = false;
-    let answerRefused = false;
-    const router = await deps.router(meter(ANSWER_CALLS, () => {
-      loopRefused = true;
-    }));
-    if (!router) return null;
-    registry ??= loadToolRegistry();
-    const policy = createTurnToolPolicy({
-      registry,
-      audience: "analyst",
-      classification: { bundle_id: ANALYST_AGENT_BUNDLE_ID, reason: "analyst_agent" },
-      user_turn: question,
-    });
-    if (!policy.ok) throw new Error(policy.message);
-
     const turnId = context.turnId ?? context.runId;
-    const authority = chatAuthority(context.userId, context.threadId, turnId);
-    const asOf = deps.asOf();
-    const known = new Map(named.map((subject) => [issuerOf(subject), subject] as const));
-    const labelOf = (issuer: string) => companies.labels.get(issuer) ?? known.get(issuer)?.mention ?? issuer;
-    const whoOf = (args: JsonObject) => labelList(argIssuers(args).filter((issuer) => known.has(issuer)).map(labelOf));
-    const certified: Certified[] = [];
-    const askedFor = new Set<string>();
-    const analyst: AnalystToolResult[] = [];
     const unmatched = companies.subjects.flatMap((subject) => (subject.resolution.status === "not_found" ? [subject.mention] : []));
-    const notes: string[] = [
-      ...leftOutNotes({ notFound: unmatched }),
-      ...companies.notFound.map((name) => `"${name}" did not match a company name or ticker on file; try the ticker.`),
-    ];
-    const heldCompetitorNotes: string[] = [];
-    let readCompetition = false;
-    const toolCalls: ChatAnalystToolRuntimeToolCall[] = [];
-    const asked = new Map<string, Promise<ToolLoopOutput>>();
-    const fetched = new Map<string, Promise<boolean>>();
-    const stillLoading = (issuers: ReadonlyArray<string>) => Promise.all(issuers.map((issuer) => {
-      const pending = fetched.get(issuer) ?? (deps.financial.hydrate
-        ? deps.financial.hydrate([{ issuer_id: issuer, label: labelOf(issuer) }], { emit: QUIET, turnId })
-          .then((loading) => loading.has(issuer))
-          .catch((reason: unknown) => {
-            console.warn("[chat] fetching a company's filings failed; the analyst agent answers from what is on file", reason);
-            return false;
-          })
-        : Promise.resolve(false));
-      fetched.set(issuer, pending);
-      return pending.then((loading) => (loading ? [issuer] : []));
-    })).then((lists) => lists.flat());
-
-    const certify = async (args: JsonObject): Promise<ToolLoopOutput> => {
-      const ask = certifiedAsk(args, known, read?.income_items ?? []);
-      if ("invalid" in ask) return invalid("certified_financials", ask.invalid);
-      const prior = asked.get(ask.fingerprint);
-      if (prior) return prior;
-      for (const issuer of ask.subjects) askedFor.add(issuer);
-      const answer = (async (): Promise<ToolLoopOutput> => {
-        const loading = await stillLoading(ask.subjects);
-        if (loading.length > 0) notes.push(`Filings for ${labelList(loading.map(labelOf))} are still loading; ask again in a minute.`);
-        const subjects = ask.subjects.map((issuer) => known.get(issuer)!);
-        const who = labelList(ask.subjects.map(labelOf));
-        const { clarificationAnswer: _picked, ...turn } = context;
-        let plannerRefused = false;
-        // A planner call leaves one for the loop's next step, beside the answer's.
-        const planningModel = deps.planner?.(meter(ANSWER_CALLS + 1, () => {
-          plannerRefused = true;
-        })) ?? null;
-        const outcome = await certifiedFinancials({ ...deps.financial, planningModel, clock: () => new Date(deps.asOf()) }, {
-          context: { ...turn, userIntent: ask.question },
-          subjects,
-          choice: ask.choice,
-          labels: new Map(subjects.map((subject) => [issuerOf(subject), labelOf(issuerOf(subject))])),
-          authority,
-          requestKey: requestKeyFor(turnId, context.runId, ask.fingerprint),
-          persistParent: async () => {},
-        });
-        if (outcome.status === "declined" && outcome.reason === "planning_unavailable" && plannerRefused) {
-          notes.push(`${who}: the figures were not computed, as the turn reached its limit of model calls.`);
-          return { content: JSON.stringify({ tool: "certified_financials", status: "declined", reason: "turn_call_limit" }) };
-        }
-        return certifiedOutput(outcome, who, async (published) => {
-          const packet = await published.packet();
-          certified.push({ block: published.block, packet, subjects: ask.subjects });
-          return packet;
-        }, notes);
-      })();
-      asked.set(ask.fingerprint, answer);
-      return answer;
+    const logToolCalls = deps.logToolCalls;
+    const job: AgentAsk = {
+      question,
+      named,
+      labels: companies.labels,
+      carried: companies.carried,
+      notes: [
+        ...leftOutNotes({ notFound: unmatched }),
+        ...companies.notFound.map((name) => `"${name}" did not match a company name or ticker on file; try the ticker.`),
+      ],
+      context,
+      authority: chatAuthority(context.userId, context.threadId, turnId),
+      requestKey: (ask) => requestKeyFor(turnId, context.runId, ask),
+      incomeLines: read?.income_items ?? [],
+      conversation: await deps.conversation?.(context.threadId) ?? [],
+      asOf: deps.asOf(),
+      meter,
+      snapshotId: randomUUID(),
+      key: (name) => name,
+      trace: { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}) },
+      ...(logToolCalls ? { logToolCalls: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => logToolCalls(context.threadId, calls) } : {}),
     };
-
-    const readStored = async (name: AnalystToolName, args: JsonObject): Promise<ToolLoopOutput> => {
-      if (argIssuers(args).some((issuer) => !known.has(issuer))) return invalid(name, UNKNOWN_COMPANY);
-      const result = await deps.read(name, lowercasedRefs(args), { as_of: asOf, user_id: context.userId ?? null });
-      analyst.push(result);
-      if (result.tool === "get_peer_set" && result.status === "ok") {
-        for (const peer of result.peers) {
-          const issuer = peer.issuer_id.toLowerCase();
-          if (!known.has(issuer)) known.set(issuer, { mention: peer.label, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: issuer }, label: peer.label } });
-        }
-      }
-      const competitor = args.role === "competitor";
-      const predicates: ReadonlyArray<JsonValue> = Array.isArray(args.predicates) ? args.predicates : CLAIM_PREDICATES;
-      if (!isFailure(result) && (name === "get_peer_set" || (name === "get_claims" && !competitor && predicates.includes("business.competition")))) readCompetition = true;
-      const note = statusNote(result, whoOf(args), competitor);
-      if (note) (competitor && result.status === "no_claims" ? heldCompetitorNotes : notes).push(note);
-      return { content: JSON.stringify(readSummary(result)), ...(isFailure(result) ? { isError: true } : {}) };
-    };
-
-    const inFlight = new Set<Promise<ToolLoopOutput>>();
-    const execute = async (call: LlmToolCall): Promise<ToolLoopOutput> => {
-      const work = call.name === "certified_financials"
-        ? certify(call.arguments)
-        : isAnalystToolName(call.name) ? readStored(call.name, call.arguments) : Promise.resolve(invalid(call.name, "no such tool"));
-      inFlight.add(work);
-      const output = await work.finally(() => inFlight.delete(work));
-      toolCalls.push({
-        tool_call_id: randomUUID(),
-        tool_name: call.name,
-        status: output.isError ? "error" : "ok",
-        bundle_id: ANALYST_AGENT_BUNDLE_ID,
-        arguments: call.arguments,
-        result: { status: statusOf(output.content) },
-      });
-      return output;
-    };
-
-    const template = policy.selection.prompt_template;
-    const conversation = await deps.conversation?.(context.threadId) ?? [];
-    const readingDeadline = new AbortController();
-    const readTimer = setTimeout(() => readingDeadline.abort(new TurnDeadline()), (deps.deadlines ?? DEADLINES).readMs);
-    const loop = await withLlmAbortSignal(AbortSignal.any([signal, readingDeadline.signal]), () => runToolLoop({
-      router,
-      policy,
-      maxSteps: MAX_STEPS,
-      execute,
-      request: {
-        messages: [
-          { role: "system", content: [template.system_prompt, template.policy_prompt, ...GATHER_RULES].join(" ") },
-          { role: "user", content: JSON.stringify({ question, companies: named.map((subject) => companyEntry(subject, companies.carried, labelOf)), conversation }) },
-        ],
-        tools: policy.selection.tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.input_json_schema as JsonObject })),
-        temperature: 0,
-        reasoning: "low",
-        maxTokens: 4096,
-      },
-    })).catch(async (reason: unknown) => {
-      await Promise.allSettled([...inFlight]);
-      if (!isModelFailure(reason)) throw reason;
-      console.warn("[chat] the analyst agent's reading stopped early; it answers from what it read", reason);
-      notes.push(loopRefused ? UNFINISHED.calls : reason instanceof TurnDeadline ? UNFINISHED.time : UNFINISHED.model_failed);
-      return null;
-    }).finally(() => clearTimeout(readTimer));
-    if (loop) notes.push(...stopNotes(loop, whoOf));
-    if (!toolCalls.some((entry) => entry.status === "ok")) return null;
-
+    const gathered = await gather(deps, job, signal);
+    if (!gathered?.toolCalls.some((entry) => entry.status === "ok")) return null;
+    const answered = await write(deps, job, gathered);
     const namedIds = new Set(named.map(issuerOf));
-    const covered = [...new Set([...namedIds, ...certified.flatMap((answer) => answer.subjects)])];
-    const packet = mergePackets({
-      engine: certified.map((answer) => answer.packet),
-      analyst,
-      figuresAskedFor: [...askedFor].map(labelOf),
-      notes: [...new Set([...notes, ...(readCompetition ? heldCompetitorNotes : [])])],
-      labels: new Map([...known.keys()].map((issuer) => [issuer, labelOf(issuer)])),
-      cutoff: asOf,
-    });
-    await deps.logToolCalls?.(context.threadId, toolCalls);
-    const readCalls = toolCalls.filter((entry) => entry.status === "ok").map((entry) => entry.tool_call_id);
-    const snapshotId = randomUUID();
-    const subjectRefs = covered.map((id) => ({ kind: "issuer" as const, id }));
-    const cardId = randomUUID();
-    const card = {
-      id: cardId, kind: "rich_text", snapshot_id: snapshotId, data_ref: { kind: "rich_text", id: cardId },
-      source_refs: [], as_of: asOf, analyst_commentary: true, segments: [], subject_refs: subjectRefs,
-    };
-    const noted = packet.gaps.length === 0 ? [] : [{ ...noteBlock({ snapshotId, asOf }, "agent:not-covered", packet.gaps.join(" ")), subject_refs: subjectRefs, tool_call_ids: readCalls }];
-    let answeredBy: string | undefined;
-    let answer: Pick<AnsweredTurn, "assertions" | "blocks" | "judging" | "without">;
-    let failed = false;
-    const askedFigures = certified.length > 0;
-    try {
-      answer = await deps.compose({
-        context: { userIntent: question, bundleId: ANALYST_AGENT_BUNDLE_ID },
-        blocks: [card],
-        toolCalls,
-        factBlocks: noted,
-        conversation,
-        packet,
-        instructions: askedFigures ? [...ANSWER_RULES, ANALYSIS_RULE] : ANSWER_RULES,
-        ...(askedFigures ? {} : { answerShape: DESCRIPTION_SHAPE, inferences: false as const }),
-      }, { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}), question }, (deployment) => {
-        answeredBy = deployment;
-      }, meter(0, () => {
-        answerRefused = true;
-      }));
-      if (answer.judging) answer = { ...answer, assertions: (await answer.judging.done).assertions };
-    } catch (reason) {
-      if (!isModelFailure(reason)) throw reason;
-      console.warn("[chat] the analyst agent's answer could not be written; the turn answers with what it read alone", reason);
-      failed = true;
-      answer = { assertions: null, blocks: [], without: () => ({ blocks: [] }) };
-    }
-
-    const claims = analyst.flatMap((result) => (result.status === "ok" && "claims" in result ? result.claims : []));
-    const cited = citedSources(answer.assertions, packet);
-    const certifiedBlocks = certified.map((answer, i) => ({ ...answer.block, id: `${answer.block.id}-${i + 1}` }) as Record<string, unknown>);
-    const unwritten = [{
-      ...noteBlock({ snapshotId, asOf }, "agent:unwritten", certified.length > 0 ? COMMENTARY_UNAVAILABLE : failed ? ANSWER_FAILED : NO_ANSWER),
-      subject_refs: subjectRefs,
-      tool_call_ids: readCalls,
-    }];
-    const turnBlocks = (written: ReadonlyArray<Record<string, unknown>>) => {
-      const shown = written.filter(rendered).map((block) => ({ ...withRefs(block, claims, cited), tool_call_ids: readCalls }));
-      const spent = answerRefused && shown.length > 0 ? [{ ...noteBlock({ snapshotId, asOf }, "agent:calls-spent", ANALYSIS_LEFT_OUT), subject_refs: subjectRefs, tool_call_ids: readCalls }] : [];
-      const own = [...shown, ...(failed ? unwritten : []), ...noted, ...spent];
-      return [...certifiedBlocks, ...(own.length > 0 ? own : unwritten)];
-    };
-    const turnAnswer = (shown: Pick<AnsweredTurn, "blocks" | "judging">): Pick<ChatAnalystToolRuntimeResult, "blocks"> => {
-      let settled = shown.blocks;
-      shown.judging?.watch((blocks) => {
-        settled = blocks;
-      });
-      return { blocks: turnBlocks(settled) };
-    };
     const scope = await deps.financial.researchScope?.({ ...context, subjectPreResolutions: companies.resolved, subjectPreResolution: companies.resolved[0] }, reading)
       .catch((reason: unknown) => {
         console.warn("[chat] research scope unavailable; saving the analyst agent's answer without it", reason);
         return undefined;
       });
     return {
-      snapshot_id: snapshotId,
+      snapshot_id: job.snapshotId,
       verification: { ok: true },
-      tool_calls: toolCalls,
-      ...turnAnswer(answer),
-      without: (dropped: DroppedClaims) => turnAnswer(answer.without(dropped)),
-      ...(answeredBy ? { answered_by: answeredBy } : {}),
-      ...(answer.assertions ? { assertion_report: answer.assertions } : {}),
-      ...(scope ? { research_scope: { ...scope, companies: covered.map((id) => (namedIds.has(id) ? { issuer_id: id, label: labelOf(id) } : { issuer_id: id })) } } : {}),
+      tool_calls: gathered.toolCalls,
+      blocks: answered.blocks,
+      without: answered.without,
+      ...(answered.answeredBy ? { answered_by: answered.answeredBy } : {}),
+      ...(answered.assertions ? { assertion_report: answered.assertions } : {}),
+      ...(scope ? { research_scope: { ...scope, companies: gathered.covered.map((id) => (namedIds.has(id) ? { issuer_id: id, label: gathered.labelOf(id) } : { issuer_id: id })) } } : {}),
     };
   };
-  return async (context) => {
-    const deadline = new AbortController();
-    const timer = setTimeout(() => deadline.abort(new TurnDeadline()), (deps.deadlines ?? DEADLINES).turnMs);
-    const stop = turnStopSignal();
-    const signal = stop ? AbortSignal.any([stop, deadline.signal]) : deadline.signal;
-    try {
-      return await withLlmAbortSignal(signal, () => agentTurn(context, signal));
-    } finally {
-      clearTimeout(timer);
+  return (context) => withTurnDeadline(deps, (signal) => agentTurn(context, signal));
+}
+
+export type AnalystSectionInput = Readonly<{
+  subject: Readonly<{ issuer_id: string; label: string }>;
+  goal: string;
+  sectionId: string;
+  userId: string;
+  // The memo run the section's certified figures belong to, under its authority.
+  runId: string;
+  authority: FinancialRuntimeAuthority;
+  snapshotId: string;
+  asOf: string;
+}>;
+
+export type AnalystSection = Readonly<{
+  // empty: nothing the stored sources hold answers the section, and its one block says why.
+  status: "written" | "empty";
+  blocks: ReadonlyArray<Record<string, unknown>>;
+  packet: EvidencePacket | null;
+  assertions: AnsweredTurn["assertions"];
+  tool_calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>;
+}>;
+
+/** The agent's answer to one memo section's goal about one company, read and judged as a chat turn's is. */
+export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystSectionInput) => Promise<AnalystSection> {
+  const section = async (input: AnalystSectionInput, signal: AbortSignal): Promise<AnalystSection> => {
+    const issuer = input.subject.issuer_id.toLowerCase();
+    const job: AgentAsk = {
+      question: input.goal,
+      named: [{ mention: input.subject.label, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: issuer }, label: input.subject.label } }],
+      labels: new Map([[issuer, input.subject.label]]),
+      carried: [],
+      notes: [],
+      context: { threadId: input.runId, runId: input.runId, turnId: input.sectionId, userId: input.userId, userIntent: input.goal, bundleId: ANALYST_AGENT_BUNDLE_ID, emit: QUIET },
+      authority: input.authority,
+      requestKey: (ask) => `agent:${input.sectionId}:${ask}`,
+      incomeLines: [],
+      conversation: [],
+      asOf: input.asOf,
+      meter: callMeter(SECTION_CALLS),
+      snapshotId: input.snapshotId,
+      key: (name) => `${input.sectionId}:${name}`,
+      trace: { thread_id: input.runId, run_id: input.runId, turn_id: input.sectionId },
+      ...(deps.logToolCalls ? { logToolCalls: deps.logToolCalls } : {}),
+    };
+    const gathered = await gather(deps, job, signal);
+    const empty = (text: string): AnalystSection => ({
+      status: "empty",
+      blocks: [{ ...noteBlock({ snapshotId: input.snapshotId, asOf: input.asOf }, job.key("agent:empty"), [text, ...(gathered?.packet.gaps ?? [])].join(" ")), subject_refs: [{ kind: "issuer", id: issuer }] }],
+      packet: gathered?.packet ?? null,
+      assertions: null,
+      tool_calls: gathered?.toolCalls ?? [],
+    });
+    if (!gathered?.toolCalls.some((entry) => entry.status === "ok")) return empty(SECTION_UNREAD);
+    const { figures, claims } = gathered.packet;
+    if (claims.length === 0 && figures.every((figure) => figure.gap !== undefined)) return empty(NO_SOURCES);
+    const answered = await write(deps, job, gathered);
+    return { status: "written", blocks: answered.blocks, packet: gathered.packet, assertions: answered.assertions, tool_calls: gathered.toolCalls };
+  };
+  return (input) => withTurnDeadline(deps, (signal) => section(input, signal));
+}
+
+async function withTurnDeadline<T>(deps: Pick<AgentModels, "deadlines">, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(new TurnDeadline()), (deps.deadlines ?? DEADLINES).turnMs);
+  const stop = turnStopSignal();
+  const signal = stop ? AbortSignal.any([stop, deadline.signal]) : deadline.signal;
+  try {
+    return await withLlmAbortSignal(signal, () => run(signal));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+let defaultRegistry: ToolRegistry | undefined;
+
+// Reads stored sources with the tool loop until the ask is covered; null when no model is configured.
+async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Promise<Gathered | null> {
+  let loopRefused = false;
+  const router = await deps.router(job.meter(ANSWER_CALLS, () => {
+    loopRefused = true;
+  }));
+  if (!router) return null;
+  const policy = createTurnToolPolicy({
+    registry: deps.registry ?? (defaultRegistry ??= loadToolRegistry()),
+    audience: "analyst",
+    classification: { bundle_id: ANALYST_AGENT_BUNDLE_ID, reason: "analyst_agent" },
+    user_turn: job.question,
+  });
+  if (!policy.ok) throw new Error(policy.message);
+
+  const { context, meter, asOf } = job;
+  const turnId = context.turnId ?? context.runId;
+  const known = new Map(job.named.map((subject) => [issuerOf(subject), subject] as const));
+  const labelOf = (issuer: string) => job.labels.get(issuer) ?? known.get(issuer)?.mention ?? issuer;
+  const whoOf = (args: JsonObject) => labelList(argIssuers(args).filter((issuer) => known.has(issuer)).map(labelOf));
+  const certified: Certified[] = [];
+  const askedFor = new Set<string>();
+  const analyst: AnalystToolResult[] = [];
+  const notes: string[] = [...job.notes];
+  const heldCompetitorNotes: string[] = [];
+  let readCompetition = false;
+  const toolCalls: ChatAnalystToolRuntimeToolCall[] = [];
+  const asked = new Map<string, Promise<ToolLoopOutput>>();
+  const fetched = new Map<string, Promise<boolean>>();
+  const stillLoading = (issuers: ReadonlyArray<string>) => Promise.all(issuers.map((issuer) => {
+    const pending = fetched.get(issuer) ?? (deps.financial.hydrate
+      ? deps.financial.hydrate([{ issuer_id: issuer, label: labelOf(issuer) }], { emit: QUIET, turnId })
+        .then((loading) => loading.has(issuer))
+        .catch((reason: unknown) => {
+          console.warn("[chat] fetching a company's filings failed; the analyst agent answers from what is on file", reason);
+          return false;
+        })
+      : Promise.resolve(false));
+    fetched.set(issuer, pending);
+    return pending.then((loading) => (loading ? [issuer] : []));
+  })).then((lists) => lists.flat());
+
+  const certify = async (args: JsonObject): Promise<ToolLoopOutput> => {
+    const ask = certifiedAsk(args, known, job.incomeLines);
+    if ("invalid" in ask) return invalid("certified_financials", ask.invalid);
+    const prior = asked.get(ask.fingerprint);
+    if (prior) return prior;
+    for (const issuer of ask.subjects) askedFor.add(issuer);
+    const answer = (async (): Promise<ToolLoopOutput> => {
+      const loading = await stillLoading(ask.subjects);
+      if (loading.length > 0) notes.push(`Filings for ${labelList(loading.map(labelOf))} are still loading; ask again in a minute.`);
+      const subjects = ask.subjects.map((issuer) => known.get(issuer)!);
+      const who = labelList(ask.subjects.map(labelOf));
+      const { clarificationAnswer: _picked, ...turn } = context;
+      let plannerRefused = false;
+      // A planner call leaves one for the loop's next step, beside the answer's.
+      const planningModel = deps.planner?.(meter(ANSWER_CALLS + 1, () => {
+        plannerRefused = true;
+      })) ?? null;
+      const outcome = await certifiedFinancials({ ...deps.financial, planningModel, clock: () => new Date(asOf) }, {
+        context: { ...turn, userIntent: ask.question },
+        subjects,
+        choice: ask.choice,
+        labels: new Map(subjects.map((subject) => [issuerOf(subject), labelOf(issuerOf(subject))])),
+        authority: job.authority,
+        requestKey: job.requestKey(ask.fingerprint),
+        persistParent: async () => {},
+      });
+      if (outcome.status === "declined" && outcome.reason === "planning_unavailable" && plannerRefused) {
+        notes.push(`${who}: the figures were not computed, as the turn reached its limit of model calls.`);
+        return { content: JSON.stringify({ tool: "certified_financials", status: "declined", reason: "turn_call_limit" }) };
+      }
+      return certifiedOutput(outcome, who, async (published) => {
+        const packet = await published.packet();
+        certified.push({ block: published.block, packet, subjects: ask.subjects });
+        return packet;
+      }, notes);
+    })();
+    asked.set(ask.fingerprint, answer);
+    return answer;
+  };
+
+  const readStored = async (name: AnalystToolName, args: JsonObject): Promise<ToolLoopOutput> => {
+    if (argIssuers(args).some((issuer) => !known.has(issuer))) return invalid(name, UNKNOWN_COMPANY);
+    const result = await deps.read(name, lowercasedRefs(args), { as_of: asOf, user_id: context.userId ?? null });
+    analyst.push(result);
+    if (result.tool === "get_peer_set" && result.status === "ok") {
+      for (const peer of result.peers) {
+        const issuer = peer.issuer_id.toLowerCase();
+        if (!known.has(issuer)) known.set(issuer, { mention: peer.label, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: issuer }, label: peer.label } });
+      }
     }
+    const competitor = args.role === "competitor";
+    const predicates: ReadonlyArray<JsonValue> = Array.isArray(args.predicates) ? args.predicates : CLAIM_PREDICATES;
+    if (!isFailure(result) && (name === "get_peer_set" || (name === "get_claims" && !competitor && predicates.includes("business.competition")))) readCompetition = true;
+    const note = statusNote(result, whoOf(args), competitor);
+    if (note) (competitor && result.status === "no_claims" ? heldCompetitorNotes : notes).push(note);
+    return { content: JSON.stringify(readSummary(result)), ...(isFailure(result) ? { isError: true } : {}) };
+  };
+
+  const inFlight = new Set<Promise<ToolLoopOutput>>();
+  const execute = async (call: LlmToolCall): Promise<ToolLoopOutput> => {
+    const work = call.name === "certified_financials"
+      ? certify(call.arguments)
+      : isAnalystToolName(call.name) ? readStored(call.name, call.arguments) : Promise.resolve(invalid(call.name, "no such tool"));
+    inFlight.add(work);
+    const output = await work.finally(() => inFlight.delete(work));
+    toolCalls.push({
+      tool_call_id: randomUUID(),
+      tool_name: call.name,
+      status: output.isError ? "error" : "ok",
+      bundle_id: ANALYST_AGENT_BUNDLE_ID,
+      arguments: call.arguments,
+      result: { status: statusOf(output.content) },
+    });
+    return output;
+  };
+
+  const template = policy.selection.prompt_template;
+  const readingDeadline = new AbortController();
+  const readTimer = setTimeout(() => readingDeadline.abort(new TurnDeadline()), (deps.deadlines ?? DEADLINES).readMs);
+  const loop = await withLlmAbortSignal(AbortSignal.any([signal, readingDeadline.signal]), () => runToolLoop({
+    router,
+    policy,
+    maxSteps: MAX_STEPS,
+    execute,
+    request: {
+      messages: [
+        { role: "system", content: [template.system_prompt, template.policy_prompt, ...GATHER_RULES].join(" ") },
+        { role: "user", content: JSON.stringify({ question: job.question, companies: job.named.map((subject) => companyEntry(subject, job.carried, labelOf)), conversation: job.conversation }) },
+      ],
+      tools: policy.selection.tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.input_json_schema as JsonObject })),
+      temperature: 0,
+      reasoning: "low",
+      maxTokens: 4096,
+    },
+  })).catch(async (reason: unknown) => {
+    await Promise.allSettled([...inFlight]);
+    if (!isModelFailure(reason)) throw reason;
+    console.warn("[chat] the analyst agent's reading stopped early; it answers from what it read", reason);
+    notes.push(loopRefused ? UNFINISHED.calls : reason instanceof TurnDeadline ? UNFINISHED.time : UNFINISHED.model_failed);
+    return null;
+  }).finally(() => clearTimeout(readTimer));
+  if (loop) notes.push(...stopNotes(loop, whoOf));
+
+  const covered = [...new Set([...job.named.map(issuerOf), ...certified.flatMap((entry) => entry.subjects)])];
+  const packet = mergePackets({
+    engine: certified.map((entry) => entry.packet),
+    analyst,
+    figuresAskedFor: [...askedFor].map(labelOf),
+    notes: [...new Set([...notes, ...(readCompetition ? heldCompetitorNotes : [])])],
+    labels: new Map([...known.keys()].map((issuer) => [issuer, labelOf(issuer)])),
+    cutoff: asOf,
+  });
+  if (toolCalls.some((entry) => entry.status === "ok")) await job.logToolCalls?.(toolCalls);
+  return { toolCalls, certified, analyst, packet, covered, labelOf };
+}
+
+// Writes, renders and judges the answer over what the agent gathered, with the certified blocks first.
+async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promise<Answered> {
+  const { toolCalls, certified, analyst, packet, covered } = gathered;
+  const { snapshotId, asOf, question } = job;
+  const readCalls = toolCalls.filter((entry) => entry.status === "ok").map((entry) => entry.tool_call_id);
+  const subjectRefs = covered.map((id) => ({ kind: "issuer" as const, id }));
+  const cardId = randomUUID();
+  const card = {
+    id: cardId, kind: "rich_text", snapshot_id: snapshotId, data_ref: { kind: "rich_text", id: cardId },
+    source_refs: [], as_of: asOf, analyst_commentary: true, segments: [], subject_refs: subjectRefs,
+  };
+  const noted = packet.gaps.length === 0 ? [] : [{ ...noteBlock({ snapshotId, asOf }, job.key("agent:not-covered"), packet.gaps.join(" ")), subject_refs: subjectRefs, tool_call_ids: readCalls }];
+  let answerRefused = false;
+  let answeredBy: string | undefined;
+  let written: Pick<AnsweredTurn, "assertions" | "blocks" | "judging" | "without">;
+  let failed = false;
+  const askedFigures = certified.length > 0;
+  try {
+    written = await deps.compose({
+      context: { userIntent: question, bundleId: ANALYST_AGENT_BUNDLE_ID },
+      blocks: [card],
+      toolCalls,
+      factBlocks: noted,
+      conversation: job.conversation,
+      packet,
+      instructions: askedFigures ? [...ANSWER_RULES, ANALYSIS_RULE] : ANSWER_RULES,
+      ...(askedFigures ? {} : { answerShape: DESCRIPTION_SHAPE, inferences: false as const }),
+    }, { ...job.trace, question }, (deployment) => {
+      answeredBy = deployment;
+    }, job.meter(0, () => {
+      answerRefused = true;
+    }));
+    if (written.judging) written = { ...written, assertions: (await written.judging.done).assertions };
+  } catch (reason) {
+    if (!isModelFailure(reason)) throw reason;
+    console.warn("[chat] the analyst agent's answer could not be written; the turn answers with what it read alone", reason);
+    failed = true;
+    written = { assertions: null, blocks: [], without: () => ({ blocks: [] }) };
+  }
+
+  const claims = analyst.flatMap((result) => (result.status === "ok" && "claims" in result ? result.claims : []));
+  const cited = citedSources(written.assertions, packet);
+  const certifiedBlocks = certified.map((entry, i) => ({ ...entry.block, id: `${entry.block.id}-${job.key(String(i + 1))}` }) as Record<string, unknown>);
+  const unwritten = [{
+    ...noteBlock({ snapshotId, asOf }, job.key("agent:unwritten"), certified.length > 0 ? COMMENTARY_UNAVAILABLE : failed ? ANSWER_FAILED : NO_ANSWER),
+    subject_refs: subjectRefs,
+    tool_call_ids: readCalls,
+  }];
+  const turnBlocks = (blocks: ReadonlyArray<Record<string, unknown>>) => {
+    const shown = blocks.filter(rendered).map((block) => ({ ...withRefs(block, claims, cited), tool_call_ids: readCalls }));
+    const spent = answerRefused && shown.length > 0 ? [{ ...noteBlock({ snapshotId, asOf }, job.key("agent:calls-spent"), ANALYSIS_LEFT_OUT), subject_refs: subjectRefs, tool_call_ids: readCalls }] : [];
+    const own = [...shown, ...(failed ? unwritten : []), ...noted, ...spent];
+    return [...certifiedBlocks, ...(own.length > 0 ? own : unwritten)];
+  };
+  const turnAnswer = (shown: Pick<AnsweredTurn, "blocks" | "judging">): Pick<ChatAnalystToolRuntimeResult, "blocks"> => {
+    let settled = shown.blocks;
+    shown.judging?.watch((blocks) => {
+      settled = blocks;
+    });
+    return { blocks: turnBlocks(settled) };
+  };
+  return {
+    ...turnAnswer(written),
+    without: (dropped) => turnAnswer(written.without(dropped)),
+    ...(answeredBy ? { answeredBy } : {}),
+    assertions: written.assertions,
   };
 }
 
@@ -365,6 +515,8 @@ function callMeter(total: number) {
 }
 
 const NO_ANSWER = "No answer could be written from the stored sources read for this question.";
+const NO_SOURCES = "No stored source covers this section.";
+const SECTION_UNREAD = "This section was not written, as nothing could be read for it just now.";
 const ANSWER_FAILED = "The answer could not be written, as the model failed or ran out of time; ask again in a minute.";
 
 const ANSWER_RULES = [
