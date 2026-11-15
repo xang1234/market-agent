@@ -455,6 +455,25 @@ test('a cited figure shows as its certified result with its value and formula, a
   }
 })
 
+test('a condition whose reply could not be checked reads as not enough evidence and says why', async () => {
+  const history = currentHistory()
+  const narrative = { condition_id: CONDITION_B, statement: 'Data center platforms stay the core product.', falsifier: 'The 10-K stops naming data center platforms.', horizon: 'Next 10-K' }
+  history.thesis = { ...history.thesis!, conditions: [...history.thesis!.conditions, narrative] }
+  history.versions = [history.thesis]
+  const reason = "Not enough evidence: the model's reply for this condition could not be checked against the stored sources."
+  history.assessments = [{ ...history.assessments[0]!, results: [history.assessments[0]!.results[0]!, {
+    condition_id: CONDITION_B, status: 'unresolved', reason, claim_refs: [], fact_refs: [], method: 'unchecked_reply',
+  }] }]
+  const harness = await mountPanel({ fetchImpl: async () => json(history) })
+  try {
+    const condition = harness.document.querySelector(`[data-condition-id="${CONDITION_B}"]`)!
+    assert.equal(condition.querySelector('summary')?.textContent, 'Data center platforms stay the core product.Not enough evidence1 assessment')
+    assert.equal(condition.querySelector('p.text-sm')?.textContent, reason)
+  } finally {
+    await harness.unmount()
+  }
+})
+
 function currentHistory(): ThesisHistoryResponse {
   const thesis = {
     thesis_version_id: VERSION_A,

@@ -80,7 +80,7 @@ export type ConditionAssessment = {
   reason: string;
   claim_refs: string[];
   fact_refs: string[];
-  method: "metric" | "model" | "no_evidence";
+  method: "metric" | "model" | "no_evidence" | "unchecked_reply";
   financial?: ConditionFinancialRef;
   /** Absent on rows assessed before figures were stored. */
   figure_refs?: ConditionFigureRef[];
@@ -267,7 +267,7 @@ export function parseConditionAssessments(value: unknown): ConditionAssessment[]
     const reason = requireTrimmedString(row.reason, `${label}.reason`, 1, THESIS_REASON_MAX);
     const claimRefs = parseUuidArray(row.claim_refs, `${label}.claim_refs`);
     const factRefs = parseUuidArray(row.fact_refs, `${label}.fact_refs`);
-    if (row.method !== "metric" && row.method !== "model" && row.method !== "no_evidence") {
+    if (row.method !== "metric" && row.method !== "model" && row.method !== "no_evidence" && row.method !== "unchecked_reply") {
       throw new ThesisValidationError(`${label}.method is invalid`);
     }
     return {

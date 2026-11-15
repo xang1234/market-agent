@@ -200,10 +200,10 @@ test('narrative monitoring includes IR and non-IR claims, never stores a fabrica
   await execute(fabricating,'invalid');
   await execute(fabricating,'invalid');
   history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
-  assert.deepEqual(history.assessments[0].results,[{condition_id:CONDITION,status:'unresolved',reason:"Not enough evidence: the model's reply for this condition could not be checked against the stored sources.",claim_refs:[],fact_refs:[],method:'no_evidence'}],'a fabricated citation is never stored; its condition reads as not enough evidence and says why');
+  assert.deepEqual(history.assessments[0].results,[{condition_id:CONDITION,status:'unresolved',reason:"Not enough evidence: the model's reply for this condition could not be checked against the stored sources.",claim_refs:[],fact_refs:[],method:'unchecked_reply'}],'a fabricated citation is never stored; its condition reads as not enough evidence and says why');
   assert.equal(fabricated,2,'an assessment the reply could not back is asked again, not reused for the day');
-  const told=await db.query<{summary:string}>(`select summary from run_activities where agent_id=$1 and summary like 'The model''s reply for%'`,[agent.agent_id]);
-  assert.deepEqual(told.rows.map(row=>row.summary),Array(2).fill("The model's reply for 1 of 1 conditions could not be checked against the stored sources, so they read as not enough evidence. The next run asks again."));
+  const told=await db.query<{summary:string}>(`select summary from run_activities where agent_id=$1 and summary like 'Could not check%'`,[agent.agent_id]);
+  assert.deepEqual(told.rows.map(row=>row.summary),Array(2).fill("Could not check the model's reply against the stored sources for 1 of 1 narrative condition. Each reads as not enough evidence, and the next run asks again."));
   await db.query('update claims set superseded_at=now() where claim_id=any($1::uuid[])',[[valid.claim.claim_id,ir.claim.claim_id]]);
   assert.equal((await inspectCurrent()).ref.id,valid.claim.claim_id,'accessible superseded claims remain inspectable in their historical snapshot');
   await execute(null);

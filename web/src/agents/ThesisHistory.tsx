@@ -17,6 +17,7 @@ const METHOD_LABELS: Readonly<Record<ConditionAssessment['method'], string | nul
   metric: 'Checked an authoritative numeric fact against this threshold.',
   model: 'Assessed against the cited certified figures (F) and stored claims (C) only.',
   no_evidence: null,
+  unchecked_reply: null,
 }
 
 type Entry = { assessment: ThesisAssessment; result: ConditionAssessment; version: ThesisVersion | undefined; condition: ThesisCondition | undefined }
@@ -182,7 +183,7 @@ function StatusBadge({ entry: { result, condition } }: { entry: Pick<Entry, 'res
     : result.status === 'challenged'
       ? 'border-negative/40 bg-negative-soft text-negative'
       : 'border-line-strong bg-surface text-muted'
-  const label = result.method === 'no_evidence' && condition !== undefined && condition.metric === undefined ? 'Not enough evidence' : result.status
+  const label = (result.method === 'no_evidence' || result.method === 'unchecked_reply') && condition !== undefined && condition.metric === undefined ? 'Not enough evidence' : result.status
   return <span className={`whitespace-nowrap rounded border px-2 py-0.5 text-xs font-medium first-letter:uppercase ${classes}`}>{label}</span>
 }
 

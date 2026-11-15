@@ -1,7 +1,7 @@
 import type { AgentRow, QueryExecutor } from '../../agents/src/agent-repo.ts';
 import type { AgentLoopStages } from '../../agents/src/agent-loop.ts';
 import { getCurrentThesis, getLatestThesisAssessment, recordThesisAssessment } from '../../agents/src/thesis-repo.ts';
-import { evaluateThesis, THESIS_PROMPT_VERSION, UNCHECKED_REPLY, type ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
+import { evaluateThesis, THESIS_PROMPT_VERSION, type ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
 import { ThesisConflictError, type ThesisAssessment, type ThesisVersion, type ConditionAssessment } from '../../agents/src/thesis-types.ts';
 import { generateThesisFinding } from './thesis-finding.ts';
 import type { FindingRow } from '../../agents/src/finding-generator.ts';
@@ -96,11 +96,12 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       const previous = await getLatestThesisAssessment(tx, input.thesis.thesis_version_id);
       // Compared in the database, at its microsecond precision: through JS Dates
       // an assessment finished later in the cutoff's millisecond looked equal.
-      const finishedDuringThisRun = await tx.query<{ input_hash: string }>(
-        'select input_hash from agent_thesis_assessments where thesis_version_id = $1::uuid and assessed_at > $2::timestamptz order by assessed_at desc limit 1',
+      const finishedDuringThisRun = await tx.query<Pick<ThesisAssessment, 'input_hash' | 'results'>>(
+        'select input_hash, results from agent_thesis_assessments where thesis_version_id = $1::uuid and assessed_at > $2::timestamptz order by assessed_at desc limit 1',
         [input.thesis.thesis_version_id, deltas.as_of],
       );
-      if (finishedDuringThisRun.rows[0]?.input_hash.split('/')[0] === analysis.packet_hash) {
+      const finished = finishedDuringThisRun.rows[0];
+      if (finished !== undefined && reusable(finished, analysis.packet_hash)) {
         await activity(tx, input, 'dismissed', 'No new thesis changes: a run that finished during this one assessed the same evidence.');
         return { findings: 0, assessments: 0, reused: true };
       }
@@ -134,9 +135,10 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       }
       await activity(tx, input, 'reading', `Considered ${evidence.claims.length} current claims and sealed ${evidence.facts.length} stored facts for the configured metrics.`);
       await activity(tx, input, 'investigating', `Assessed ${analysis.results.length} saved conditions using ${analysis.model_version ?? 'the financial engine and missing-evidence handling'}.`);
-      const unchecked = analysis.results.filter(result => result.reason === UNCHECKED_REPLY).length;
+      const unchecked = analysis.results.filter(result => result.method === 'unchecked_reply').length;
+      const narrative = input.thesis.conditions.filter(condition => !condition.metric).length;
       if (unchecked > 0)
-        await activity(tx, input, 'investigating', `The model's reply for ${unchecked} of ${analysis.results.length} conditions could not be checked against the stored sources, so they read as not enough evidence. The next run asks again.`);
+        await activity(tx, input, 'investigating', `Could not check the model's reply against the stored sources for ${unchecked} of ${narrative} narrative ${narrative === 1 ? 'condition' : 'conditions'}. Each reads as not enough evidence, and the next run asks again.`);
       await activity(tx, input, findings.length ? 'found' : 'dismissed', findings.length ? `Recorded ${findings.length} thesis condition changes.` : 'Recorded the assessment; no new supported or challenged states.');
       return { findings: findings.length, assessments: 1, reused: false };
     },
@@ -144,8 +146,8 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
   };
 }
 // A reply the evidence could not back is asked again on the next run, not reused for the day.
-function reusable(previous: ThesisAssessment, packetHash: string): boolean {
-  return previous.input_hash.split('/')[0] === packetHash && !previous.results.some(result => result.reason === UNCHECKED_REPLY);
+function reusable(previous: Pick<ThesisAssessment, 'input_hash' | 'results'>, packetHash: string): boolean {
+  return previous.input_hash.split('/')[0] === packetHash && !previous.results.some(result => result.method === 'unchecked_reply');
 }
 // The engine numbers each run's results anew, so a cited figure's result id stays out of the reuse key. Its measure, period and value are in the packet.
 function withoutResultIds(packet: ThesisPacket) {

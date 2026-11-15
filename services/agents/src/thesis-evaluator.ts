@@ -196,11 +196,11 @@ function parseNarrativeResults(
 }
 
 function assessmentOrNotEnoughEvidence(conditionId: string, status: unknown, refIds: unknown, refs: ThesisEvidence["refs"]): ConditionAssessment {
-  if (status !== "supported" && status !== "challenged" && status !== "unresolved") return notEnoughEvidence(conditionId, UNCHECKED_REPLY);
-  if (!Array.isArray(refIds)) return notEnoughEvidence(conditionId, UNCHECKED_REPLY);
-  if (refIds.length === 0) return notEnoughEvidence(conditionId, status === "unresolved" ? NOT_ENOUGH_EVIDENCE : UNCHECKED_REPLY);
+  if (status !== "supported" && status !== "challenged" && status !== "unresolved") return uncheckedReply(conditionId);
+  if (!Array.isArray(refIds)) return uncheckedReply(conditionId);
+  if (refIds.length === 0) return status === "unresolved" ? notEnoughEvidence(conditionId) : uncheckedReply(conditionId);
   const cited = refIds.map((ref) => (typeof ref === "string" && Object.hasOwn(refs, ref) ? refs[ref] : undefined));
-  if (!cited.every((ref) => ref !== undefined)) return notEnoughEvidence(conditionId, UNCHECKED_REPLY);
+  if (!cited.every((ref) => ref !== undefined)) return uncheckedReply(conditionId);
   const figures = [...new Map(cited.flatMap((ref) => ref.figure_refs).map((figure) => [figure.result_id, figure])).values()];
   return {
     condition_id: conditionId,
@@ -213,15 +213,12 @@ function assessmentOrNotEnoughEvidence(conditionId: string, status: unknown, ref
   };
 }
 
-function notEnoughEvidence(conditionId: string, reason = NOT_ENOUGH_EVIDENCE): ConditionAssessment {
-  return {
-    condition_id: conditionId,
-    status: "unresolved",
-    reason,
-    claim_refs: [],
-    fact_refs: [],
-    method: "no_evidence",
-  };
+function notEnoughEvidence(conditionId: string): ConditionAssessment {
+  return { condition_id: conditionId, status: "unresolved", reason: NOT_ENOUGH_EVIDENCE, claim_refs: [], fact_refs: [], method: "no_evidence" };
+}
+
+function uncheckedReply(conditionId: string): ConditionAssessment {
+  return { condition_id: conditionId, status: "unresolved", reason: UNCHECKED_REPLY, claim_refs: [], fact_refs: [], method: "unchecked_reply" };
 }
 
 function parseReply(response: ThesisLlmReply, kind: string, maxTokens: number) {
