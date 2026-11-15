@@ -536,12 +536,11 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
     answerTurn(answer, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered }), input),
 });
 
-// The client createLlmRouterFromEnv picks, each call first passing the turn's guard.
-const guardedClient = (guard: () => void) => async (): Promise<LlmChatClient> => {
+const guardedClient = (beforeModelCall: () => void) => async (): Promise<LlmChatClient> => {
   const replay = process.env.LLM_REPLAY_FILE?.trim();
   const client = await (replay ? createReplayLlmChatClient(replay) : createDefaultPiLlmChatClient());
   return (deployment, request, options) => {
-    guard();
+    beforeModelCall();
     return client(deployment, request, options);
   };
 };
@@ -554,7 +553,7 @@ export const analystAgent = analystAgentRunner({
     console.warn(`[chat] ${name} failed; the analyst agent answers without it`, reason);
     return { tool: name, status: "unavailable" as const, reason: "the read failed" };
   }),
-  compose: (input, turn, onAnswered, guard) => answerTurn(input, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered, createClient: guardedClient(guard) }),
+  compose: (input, turn, onAnswered, beforeModelCall) => answerTurn(input, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered, createClient: guardedClient(beforeModelCall) }),
   asOf: () => turnNow(process.env),
   conversation: (threadId) => loadRecentConversation(pool(), { threadId, limit: CONVERSATION_MESSAGES }),
   logToolCalls: writeLocalToolCallLogs,

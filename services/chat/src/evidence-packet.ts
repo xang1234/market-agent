@@ -189,8 +189,7 @@ export function mergePackets(input: {
   engine: ReadonlyArray<EvidencePacket>;
   route?: EvidencePacket;
   analyst: ReadonlyArray<AnalystToolResult>;
-  // The companies certified calls asked figures of: only they can lack figures.
-  asked: ReadonlyArray<string>;
+  figuresAskedFor: ReadonlyArray<string>;
   notes: ReadonlyArray<string>;
   labels: ReadonlyMap<string, string>;
   cutoff: string;
@@ -219,7 +218,7 @@ export function mergePackets(input: {
   }
   const routeIds = new Map(routeClaims.map((claim) => [claim.id, idOf.get(claim.claim_id)!]));
   const companies = [...new Set([
-    ...input.asked,
+    ...input.figuresAskedFor,
     ...input.engine.flatMap((packet) => packet.companies),
     ...(input.route?.companies ?? []),
     ...claims.flatMap((claim) => (claim.company === undefined ? [] : [claim.company])),
@@ -230,7 +229,7 @@ export function mergePackets(input: {
     cutoff: input.cutoff,
     companies,
     figures,
-    coverage: [...new Set(input.asked)].map((company) => ({ company, status: shown.has(company) ? "shown" : "not_shown" })),
+    coverage: [...new Set(input.figuresAskedFor)].map((company) => ({ company, status: shown.has(company) ? "shown" : "not_shown" })),
     gaps: [...input.notes, ...entries.flatMap((entry) => (entry.kind === "filing_read" || entry.kind === "no_filing" ? [`${entry.text}.`] : []))],
     query_bounds: {},
     claims,

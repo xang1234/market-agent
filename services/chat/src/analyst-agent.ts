@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { FinancialSubjectRef } from "../../financial-core/src/index.ts";
-import type { PlanningModel, RequestedSubject } from "../../financial-engine/src/planner.ts";
+import type { Clarification, PlanningModel, RequestedSubject } from "../../financial-engine/src/planner.ts";
 import { createLlmRouterFromEnv, LlmClientError, LlmProviderError, LlmRouterError, withLlmAbortSignal, type LlmChatClient, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import type { ControlledRouter, LlmToolCall } from "../../llm/src/router.ts";
 import { runToolLoop, type ToolLoopOutput, type ToolLoopResult } from "../../llm/src/tool-loop.ts";
@@ -31,18 +31,16 @@ import { turnStopSignal } from "./turn-stop.ts";
 
 const MAX_STEPS = 3;
 const PLANNER_CALLS = 2;
-// A turn's model calls: its reading's steps and planner calls leave ANSWER_CALLS for the answer and its judge.
-const TURN_CALLS = 8;
 const ANSWER_CALLS = 3;
+const TURN_CALLS = MAX_STEPS + PLANNER_CALLS + ANSWER_CALLS;
 const TURN_MS = 120_000;
 const MAX_REQUEST_KEYS = 64;
 
 export type AnalystAgentDeps = Readonly<{
-  financial: Pick<ChatFinancialRuntimeDeps, "pool" | "planningModel" | "evidence" | "clock" | "resolveMention" | "priorSubjects" | "researchScope" | "hydrate">;
+  financial: Pick<ChatFinancialRuntimeDeps, "pool" | "planningModel" | "evidence" | "resolveMention" | "priorSubjects" | "researchScope" | "hydrate">;
   router: () => Promise<ControlledRouter | null>;
   read: (name: AnalystToolName, args: Readonly<Record<string, JsonValue>>, turn: { as_of: string; user_id: string | null }) => Promise<AnalystToolResult>;
-  // guard: called before each model call the answer makes; it throws once the turn has made its calls.
-  compose: (input: AnswerTraceInput, turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">, onAnswered: (deployment: string) => void, guard: () => void) => Promise<AnsweredTurn>;
+  compose: (input: AnswerTraceInput, turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">, onAnswered: (deployment: string) => void, beforeModelCall: () => void) => Promise<AnsweredTurn>;
   asOf: () => string;
   conversation?: (threadId: string) => Promise<ReadonlyArray<{ role: string; text: string }>>;
   logToolCalls?: (threadId: string, calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
@@ -50,7 +48,6 @@ export type AnalystAgentDeps = Readonly<{
   turnMs?: number;
 }>;
 
-/** Why a turn's reading stopped before its model said it was done. */
 export class TurnLimit extends Error {
   readonly limit: "calls" | "time";
 
@@ -69,7 +66,7 @@ export async function analystAgentRouter(
   return router && perStepDeadlines(router);
 }
 
-export function perStepDeadlines(router: ControlledRouter): ControlledRouter {
+function perStepDeadlines(router: ControlledRouter): ControlledRouter {
   return { complete: (request) => router.complete(request, withDeadlines(ANSWER_DEADLINES)) };
 }
 
@@ -82,8 +79,8 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const question = context.userIntent ?? "";
     const companies = await requestedSubjects(deps.financial, context, question);
     const named = companies.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject] : []);
-    // A company still to be picked is asked about by the next runner.
-    if (companies.clarify || named.length === 0 || named.length < companies.subjects.length) return null;
+    const unpicked = named.length < companies.subjects.length;
+    if (companies.clarify || named.length === 0 || unpicked) return null;
     const answering = await deps.router();
     if (!answering) return null;
     registry ??= loadToolRegistry();
@@ -123,8 +120,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const askedFor = new Set<string>();
     const analyst: AnalystToolResult[] = [];
     const notes: string[] = leftOutNotes({ notFound: companies.notFound });
-    // That no other filer names a company a competitor is said only when the turn read competition.
-    const competitorNotes: string[] = [];
+    const heldCompetitorNotes: string[] = [];
     let readCompetition = false;
     const toolCalls: ChatAnalystToolRuntimeToolCall[] = [];
     const asked = new Map<string, Promise<ToolLoopOutput>>();
@@ -160,7 +156,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
           return { content: JSON.stringify({ tool: "certified_financials", status: "gap", reason: "request_conflict" }) };
         }
         const { clarificationAnswer: _picked, ...turn } = context;
-        const outcome = await certifiedFinancials({ ...deps.financial, planningModel }, {
+        const outcome = await certifiedFinancials({ ...deps.financial, planningModel, clock: () => new Date(deps.asOf()) }, {
           context: { ...turn, userIntent: ask.question },
           subjects,
           choice: ask.choice,
@@ -193,18 +189,17 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       const competitor = args.role === "competitor";
       if (name === "get_peer_set" || (name === "get_claims" && !competitor && Array.isArray(args.predicates) && args.predicates.includes("business.competition"))) readCompetition = true;
       const note = statusNote(result, whoOf(args), competitor);
-      if (note) (competitor ? competitorNotes : notes).push(note);
+      if (note) (competitor ? heldCompetitorNotes : notes).push(note);
       return { content: JSON.stringify(readSummary(result)), ...(isFailure(result) ? { isError: true } : {}) };
     };
 
-    // A call still running when another throws finishes before the turn fails, so no run is left half made.
-    const running = new Set<Promise<ToolLoopOutput>>();
+    const inFlight = new Set<Promise<ToolLoopOutput>>();
     const execute = async (call: LlmToolCall): Promise<ToolLoopOutput> => {
       const work = call.name === "certified_financials"
         ? certify(call.arguments)
         : isAnalystToolName(call.name) ? readStored(call.name, call.arguments) : Promise.resolve(invalid(call.name, "no such tool"));
-      running.add(work);
-      const output = await work.finally(() => running.delete(work));
+      inFlight.add(work);
+      const output = await work.finally(() => inFlight.delete(work));
       toolCalls.push({
         tool_call_id: randomUUID(),
         tool_name: call.name,
@@ -234,7 +229,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         maxTokens: 4096,
       },
     }).catch(async (reason: unknown) => {
-      await Promise.allSettled([...running]);
+      await Promise.allSettled([...inFlight]);
       if (!isModelFailure(reason)) throw reason;
       console.warn("[chat] the analyst agent's reading stopped early; it answers from what it read", reason);
       notes.push(reason instanceof TurnLimit ? UNFINISHED[reason.limit] : UNFINISHED.model_failed);
@@ -244,13 +239,12 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     if (!toolCalls.some((entry) => entry.status === "ok")) return null;
 
     const namedIds = new Set(named.map(issuerOf));
-    // The companies the answer covers: the ones named, then any peer a certified call compared.
     const covered = [...new Set([...namedIds, ...certified.flatMap((answer) => answer.subjects)])];
     const packet = mergePackets({
       engine: certified.map((answer) => answer.packet),
       analyst,
-      asked: [...askedFor].map(labelOf),
-      notes: [...new Set([...notes, ...(readCompetition ? competitorNotes : [])])],
+      figuresAskedFor: [...askedFor].map(labelOf),
+      notes: [...new Set([...notes, ...(readCompetition ? heldCompetitorNotes : [])])],
       labels: new Map([...known.keys()].map((issuer) => [issuer, labelOf(issuer)])),
       cutoff: asOf,
     });
@@ -266,6 +260,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const noted = packet.gaps.length === 0 ? [] : [{ ...noteBlock({ snapshotId, asOf }, "agent:not-covered", packet.gaps.join(" ")), subject_refs: subjectRefs, tool_call_ids: readCalls }];
     let answeredBy: string | undefined;
     let answer: Pick<AnsweredTurn, "assertions" | "blocks" | "judging" | "without">;
+    const askedFigures = toolCalls.some((entry) => entry.tool_name === "certified_financials");
     try {
       answer = await deps.compose({
         context: { userIntent: question, bundleId: ANALYST_AGENT_BUNDLE_ID },
@@ -274,8 +269,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         factBlocks: noted,
         conversation,
         packet,
-        // An ask for no figures is answered as its sources describe it, with no takeaway or counterpoint of the agent's.
-        instructions: [...ANSWER_RULES, toolCalls.some((entry) => entry.tool_name === "certified_financials") ? ANALYSIS_RULE : DESCRIPTION_RULE],
+        instructions: [...ANSWER_RULES, askedFigures ? ANALYSIS_RULE : DESCRIPTION_RULE],
       }, { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}), question }, (deployment) => {
         answeredBy = deployment;
       }, () => {
@@ -320,7 +314,6 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       without: (dropped: DroppedClaims) => turnAnswer(answer.without(dropped)),
       ...(answeredBy ? { answered_by: answeredBy } : {}),
       ...(answer.assertions ? { assertion_report: answer.assertions } : {}),
-      // A peer a certified call compared keeps no label: it is an auto-selected peer to a follow-up.
       ...(scope ? { research_scope: { ...scope, companies: covered.map((id) => (namedIds.has(id) ? { issuer_id: id, label: labelOf(id) } : { issuer_id: id })) } } : {}),
     };
   };
@@ -382,7 +375,6 @@ const TOPIC: Readonly<Record<string, string>> = {
   get_analyst_consensus: "Analyst consensus",
 };
 
-/** What a reading that stopped before its model was done leaves unanswered: each call it did not run, else that part may be. */
 export function stopNotes(loop: Pick<ToolLoopResult, "stop" | "steps">, who: (args: JsonObject) => string): string[] {
   const unread = (calls: ReadonlyArray<LlmToolCall>, why: string) => calls.map((call) => {
     const whom = who(call.arguments);
@@ -433,9 +425,12 @@ export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, Reques
   const fingerprint = createHash("sha256")
     .update(JSON.stringify({ companies: [...companies].sort(), period, ...(keptMetrics ? { metrics: keptMetrics } : { question: question.toLowerCase().replace(/\s+/g, " ") }) }))
     .digest("hex").slice(0, 16);
-  // The planner reads only the question, so a period given apart from it is said in it.
-  const said = keptMetrics ? null : periodWords(period);
-  return { subjects: companies, choice, question: said ? `${question} (for ${said})` : question, fingerprint };
+  return { subjects: companies, choice, question: keptMetrics ? question : plannerQuestion(question, period), fingerprint };
+}
+
+function plannerQuestion(question: string, period: ReadPeriod): string {
+  const words = periodWords(period);
+  return words === null ? question : `${question} (for ${words})`;
 }
 
 function periodWords(period: ReadPeriod): string | null {
@@ -482,10 +477,8 @@ export function requestKeys(
         const n = Number(row.request_key.slice(prefix.length));
         return Number.isInteger(n) && n >= 1 && n <= MAX_REQUEST_KEYS ? [[n, row] as const] : [];
       }));
-      // An ask resumes the run an earlier attempt left it. One that completed is
-      // computed again under a new key, since its figures left with that attempt.
-      const resumed = [...stored].filter(([n, run]) => !taken.has(n) && run.origin === origin && !run.completed).map(([n]) => n);
-      const n = resumed.length > 0 ? Math.min(...resumed) : Array.from({ length: MAX_REQUEST_KEYS }, (_, i) => i + 1).find((key) => !taken.has(key) && !stored.has(key));
+      const resumable = [...stored].filter(([n, run]) => !taken.has(n) && run.origin === origin && !run.completed).map(([n]) => n);
+      const n = resumable.length > 0 ? Math.min(...resumable) : Array.from({ length: MAX_REQUEST_KEYS }, (_, i) => i + 1).find((key) => !taken.has(key) && !stored.has(key));
       if (n === undefined) return null;
       taken.add(n);
       return { n, origin };
@@ -519,20 +512,21 @@ async function certifiedOutput(
       notes.push(`${who}: these figures were computed in an earlier attempt of this turn and cannot be shown again.`);
       return output("existing", { run_id: outcome.run_id });
     case "clarification": {
-      // A planner's question is its model's own words, so neither the reader nor the agent's model sees it:
-      // only a figure question's options, which the planner words from its catalog.
-      const { kind, choices } = outcome.clarification;
-      const figures = kind === "metric" ? choices.map((choice) => choice.label) : [];
+      const figures = catalogChoices(outcome.clarification);
       notes.push(figures.length > 0
         ? `${who}: the figures were not computed, as the request names no one figure; ask again for ${figures.length < 2 ? figures[0] : `${figures.slice(0, -1).join(", ")} or ${figures.at(-1)}`}.`
         : `${who}: the figures were not computed, as the request could not be planned as asked.`);
-      return output("clarification", { kind, ...(figures.length > 0 ? { choices: figures } : {}) });
+      return output("clarification", { kind: outcome.clarification.kind, ...(figures.length > 0 ? { choices: figures } : {}) });
     }
     case "declined":
     case "gap":
       notes.push(`${who}: ${chatGapText(outcome.reason)}`);
       return output(outcome.status, { reason: outcome.reason });
   }
+}
+
+function catalogChoices(clarification: Clarification): string[] {
+  return clarification.kind === "metric" ? clarification.choices.map((choice) => choice.label) : [];
 }
 
 function invalid(tool: string, reason: string): ToolLoopOutput {

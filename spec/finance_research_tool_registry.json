@@ -842,9 +842,7 @@
                 "kind": {
                   "type": "string",
                   "enum": [
-                    "issuer",
-                    "instrument",
-                    "listing"
+                    "issuer"
                   ]
                 },
                 "id": {
@@ -1034,9 +1032,7 @@
               "kind": {
                 "type": "string",
                 "enum": [
-                  "issuer",
-                  "instrument",
-                  "listing"
+                  "issuer"
                 ]
               },
               "id": {
@@ -1801,9 +1797,7 @@
               "kind": {
                 "type": "string",
                 "enum": [
-                  "issuer",
-                  "instrument",
-                  "listing"
+                  "issuer"
                 ]
               },
               "id": {
@@ -2229,9 +2223,7 @@
               "kind": {
                 "type": "string",
                 "enum": [
-                  "issuer",
-                  "instrument",
-                  "listing"
+                  "issuer"
                 ]
               },
               "id": {
@@ -2255,9 +2247,7 @@
                 "kind": {
                   "type": "string",
                   "enum": [
-                    "issuer",
-                    "instrument",
-                    "listing"
+                    "issuer"
                   ]
                 },
                 "id": {
@@ -3679,9 +3669,7 @@
               "kind": {
                 "type": "string",
                 "enum": [
-                  "issuer",
-                  "instrument",
-                  "listing"
+                  "issuer"
                 ]
               },
               "id": {

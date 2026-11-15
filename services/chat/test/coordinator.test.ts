@@ -569,6 +569,60 @@ test("without the analyst agent the chain is trunk's: the financial lane holds i
   assert.deepEqual(calls, ["offered", "financial", `base:${DEFAULT_BUNDLE_ID}`]);
 });
 
+test("without the analyst agent every wrapper of trunk's chain runs in its place, the financial lane saving its own answer", async () => {
+  const calls: string[] = [];
+  const titled = deferred();
+  const coordinator = createChatCoordinator({
+    readQuestion: async (question) => {
+      calls.push(`read ${question}`);
+      return null;
+    },
+    financialRuntime: {
+      everyOfferedChoice: async (context) => {
+        calls.push(`offered ${context.reading ? "after" : "before"} the reading`);
+        return null;
+      },
+      take: async (context) => {
+        calls.push(`financial ${context.reading ? "with" : "without"} the reading`);
+        await context.reading?.();
+        return async () => ({ kind: "gap", reason_code: "unsupported", text: "That figure is not supported." });
+      },
+      assertReady: async () => {},
+    },
+    persistAssistantMessage: async ({ blocks }) => {
+      calls.push(`saved ${blocks.length}`);
+      return readMessage({ snapshot_id: "22222222-2222-4222-a222-222222222222", message_id: "33333333-3333-4333-a333-333333333333", blocks: JSON.parse(JSON.stringify(blocks)) });
+    },
+    saveWorkSummary: async ({ message_id }) => {
+      calls.push(`work summary ${message_id}`);
+    },
+    generateThreadTitle: async () => {
+      calls.push("title");
+      titled.resolve();
+    },
+    runActivity: {
+      agentId: "agent-1",
+      report: ({ stage }) => {
+        calls.push(`activity ${stage}`);
+      },
+    },
+    runner: () => assert.fail("the financial lane takes the turn"),
+  });
+  const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", userId: "11111111-1111-4111-a111-111111111111", runId: "run-1", userIntent: "AAPL revenue" });
+  await turn.completed;
+  await titled.promise;
+  assert.deepEqual(calls, [
+    "offered before the reading",
+    "financial with the reading",
+    "read AAPL revenue",
+    "activity reading",
+    "saved 1",
+    "work summary 33333333-3333-4333-a333-333333333333",
+    "activity found",
+    "title",
+  ]);
+});
+
 test("with the analyst agent it takes the financial lane's seat, and a turn it reads nothing for goes on to the base runner", async () => {
   const { calls, coordinator } = seats(async () => null);
   await coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "AAPL revenue" }).completed;
