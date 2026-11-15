@@ -23,6 +23,7 @@ import { AgentDetailPanels } from '../agents/AgentDetailPanels.tsx'
 import { ThesisPanel } from '../agents/ThesisPanel.tsx'
 import { alertRuleLabel, dynamicUniverseIdFor, universeLabel } from '../agents/agentLabels.ts'
 import { readThesisHandoff } from '../analyze/thesisHandoff.ts'
+import { EMPTY_UNIVERSE_OPTIONS, fetchUniverseOptions, type UniverseOptions } from '../analyst-grids/universeOptions.ts'
 import type { SubjectKind } from '../subject/subjectRef.ts'
 import type { ThesisAssessment } from '../../../services/agents/src/thesis-types.ts'
 import { authenticatedFetch } from '../http/authFetch.ts'
@@ -58,6 +59,7 @@ export function AgentsPage() {
   const [name, setName] = useState(thesisHandoff?.name ?? '')
   const [thesis, setThesis] = useState(thesisHandoff?.thesis ?? '')
   const [cadence, setCadence] = useState('daily')
+  const [universeOptions, setUniverseOptions] = useState<UniverseOptions>(EMPTY_UNIVERSE_OPTIONS)
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [editingAgent, setEditingAgent] = useState<AgentRow | null>(null)
   const [universeMode, setUniverseMode] = useState<AgentUniverse['mode']>('static')
@@ -95,6 +97,22 @@ export function AgentsPage() {
   const visibleFindings = detailsMatchSelection ? findings : []
   const visibleRunActivities = detailsMatchSelection ? runActivities : []
   const visibleDetailsError = detailsMatchSelection ? detailsError : null
+
+  useEffect(() => {
+    if (!session) return
+    let ignore = false
+    void fetchUniverseOptions({ userId: session.userId }).then((options) => {
+      if (!ignore) setUniverseOptions(options)
+    })
+    return () => { ignore = true }
+  }, [session])
+  const universeNames = useMemo(
+    () => new Map(Object.values(universeOptions).flat().map((option) => [option.id, option.label])),
+    [universeOptions],
+  )
+  const universeIdOptions = universeMode === 'watchlist' || universeMode === 'portfolio' || universeMode === 'screen'
+    ? universeOptions[universeMode]
+    : []
 
   useEffect(() => {
     if (!session) return
@@ -413,7 +431,6 @@ export function AgentsPage() {
         >
           <option value="hourly">hourly</option>
           <option value="daily">daily</option>
-          <option value="weekly">weekly</option>
         </select>
       </label>
       <fieldset className={FIELDSET_CLASS}>
@@ -435,6 +452,7 @@ export function AgentsPage() {
             <option value="static">static subjects</option>
             <option value="screen">saved screen</option>
             <option value="theme">theme</option>
+            <option value="watchlist">watchlist</option>
             <option value="portfolio">portfolio</option>
             <option value="agent">agent-derived</option>
           </select>
@@ -457,11 +475,15 @@ export function AgentsPage() {
             {universeMode} id
             <input
               name="dynamic-universe-id"
+              list="dynamic-universe-options"
               value={dynamicUniverseId}
               onChange={(event) => setDynamicUniverseId(event.currentTarget.value)}
               disabled={universeEditingDisabled}
               className={FIELD_CLASS}
             />
+            <datalist id="dynamic-universe-options">
+              {universeIdOptions.map((option) => <option key={option.id} value={option.id} label={option.label} />)}
+            </datalist>
           </label>
         )}
         <div className="grid gap-3 sm:grid-cols-[9rem_minmax(0,1fr)]">
@@ -627,6 +649,7 @@ export function AgentsPage() {
             activity={activity}
             loading={session !== null && !rosterSettled}
             loadError={loadError}
+            universeNames={universeNames}
             onSelect={setSelectedAgentId}
             onEdit={editAgent}
             onRun={(id) => void runAgent(id)}

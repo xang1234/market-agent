@@ -11,6 +11,7 @@ export type AgentUniverse =
   | { mode: 'static'; subject_refs: ReadonlyArray<SubjectRef> }
   | { mode: 'screen'; screen_id: string }
   | { mode: 'theme'; theme_id: string }
+  | { mode: 'watchlist'; watchlist_id: string }
   | { mode: 'portfolio'; portfolio_id: string }
   | { mode: 'agent'; agent_id: string }
 
@@ -98,6 +99,7 @@ export function canRoundTripUniverse(universe: unknown): boolean {
   }
   if (universe.mode === 'screen') return isUuid(universe.screen_id)
   if (universe.mode === 'theme') return isUuid(universe.theme_id)
+  if (universe.mode === 'watchlist') return isUuid(universe.watchlist_id)
   if (universe.mode === 'portfolio') return isUuid(universe.portfolio_id)
   if (universe.mode === 'agent') return isUuid(universe.agent_id)
   return false
@@ -139,6 +141,7 @@ function buildUniverse(state: AgentFormState): AgentUniverse {
   if (!isUuid(id)) throw new AgentPayloadValidationError(`${state.universeMode} universe id must be a UUID`)
   if (state.universeMode === 'screen') return { mode: 'screen', screen_id: id }
   if (state.universeMode === 'theme') return { mode: 'theme', theme_id: id }
+  if (state.universeMode === 'watchlist') return { mode: 'watchlist', watchlist_id: id }
   if (state.universeMode === 'portfolio') return { mode: 'portfolio', portfolio_id: id }
   return { mode: 'agent', agent_id: id }
 }

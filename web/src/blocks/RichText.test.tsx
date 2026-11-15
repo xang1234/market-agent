@@ -555,6 +555,14 @@ test('commentary with parts reads as one card: badged takeaways first, plain wor
   }
 })
 
+test('commentary that quotes only filings lists its quotes under "Quoted sources", with no "Supporting figures" heading', async () => {
+  const fromFilings = await renderDocument({
+    ...partsBlock,
+    commentary: [{ kind: 'figures', segments: [{ type: 'text', text: 'MU sells memory ' }, { type: 'ref', ref_kind: 'claim', ref_id: 'claim-1' }] }],
+  })
+  assert.deepEqual([...fromFilings.querySelectorAll('h4')].map((el) => el.textContent), ['Quoted sources'])
+})
+
 test('commentary with only figures shows them alone, and one saved before parts renders its Markdown as before', async () => {
   const figuresOnly = await renderDocument({ ...partsBlock, commentary: [partsBlock.commentary![0]!] })
   assert.deepEqual([...figuresOnly.querySelectorAll('h3, h4, [data-commentary-part]')].map((el) => el.textContent), ['Analysis', 'Supporting figures'])

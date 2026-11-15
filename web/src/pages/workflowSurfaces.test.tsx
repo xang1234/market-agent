@@ -1175,7 +1175,7 @@ test('Agents create/edit payloads include selected universe and alert rule polic
   assert.deepEqual(buildAgentPayload({
     name: 'No-alert monitor',
     thesis: 'Track guidance',
-    cadence: 'weekly',
+    cadence: 'hourly',
     universeMode: 'portfolio',
     staticSubjectRefsText: '',
     dynamicUniverseId: '44444444-4444-4444-8444-444444444444',
@@ -1192,7 +1192,7 @@ test('Agents create/edit payloads include selected universe and alert rule polic
   }), {
     name: 'No-alert monitor',
     thesis: 'Track guidance',
-    cadence: 'weekly',
+    cadence: 'hourly',
     universe: { mode: 'portfolio', portfolio_id: '44444444-4444-4444-8444-444444444444' },
     alert_rules: [],
   })

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { AgentPayloadValidationError, buildAgentPayload } from './agentPayload.ts'
+import { AgentPayloadValidationError, buildAgentPayload, canRoundTripUniverse } from './agentPayload.ts'
+import { dynamicUniverseIdFor, universeLabel } from './agentLabels.ts'
 
 const BASE_STATE = {
   name: 'Monitor',
@@ -68,4 +69,14 @@ test('buildAgentPayload preserves unsupported existing universes before validati
     }).universe,
     unsupportedUniverse,
   )
+})
+
+test('a watchlist universe round-trips through the form and is labelled by its name', () => {
+  const watchlistId = '22222222-2222-4222-8222-222222222222'
+  const universe = buildAgentPayload({ ...BASE_STATE, universeMode: 'watchlist', dynamicUniverseId: watchlistId }).universe
+  assert.deepEqual(universe, { mode: 'watchlist', watchlist_id: watchlistId })
+  assert.equal(canRoundTripUniverse(universe), true)
+  assert.equal(dynamicUniverseIdFor({ mode: 'watchlist', watchlist_id: watchlistId }), watchlistId)
+  assert.equal(universeLabel({ mode: 'watchlist', watchlist_id: watchlistId }, new Map([[watchlistId, 'Semis']])), 'watchlist: Semis')
+  assert.equal(universeLabel({ mode: 'watchlist', watchlist_id: watchlistId }), `watchlist: ${watchlistId}`)
 })
