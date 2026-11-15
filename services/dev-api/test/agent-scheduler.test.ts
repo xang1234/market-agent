@@ -8,7 +8,8 @@ import type { AgentLoopStages } from "../../agents/src/agent-loop.ts";
 import type { UniverseResolverDeps } from "../../analyst-grids/src/universe.ts";
 import { bootstrapDatabase, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { startAgentScheduler, startAgentSchedulerFromEnv } from "../src/agent-scheduler.ts";
-import { agentUniverseSubjectRefs } from "../src/local-runtime.ts";
+import { AgentUniverseUnavailableError, agentUniverseResolvers, agentUniverseSubjectRefs } from "../src/local-runtime.ts";
+import { DynamicWatchlistNotFoundError } from "../../watchlists/src/dynamic-membership.ts";
 
 const USER_ID = "10000000-0000-4000-8000-000000000001";
 const OTHER_USER_ID = "10000000-0000-4000-8000-000000000002";
@@ -210,6 +211,14 @@ test("screen, watchlist, portfolio, static, and theme universes resolve to their
   }
 });
 
+test("a screen universe refuses a candidate source the screener would refuse", async () => {
+  const db = { query: async () => assert.fail("the source is checked before any read") };
+  await assert.rejects(
+    agentUniverseSubjectRefs(db, USER_ID, { mode: "screen", screen_id: SCREEN_ID }, agentUniverseResolvers(db, { SCREENER_CANDIDATE_SOURCE: "vendr" })),
+    { name: "AgentUniverseUnavailableError", message: "SCREENER_CANDIDATE_SOURCE must be 'reported' or 'vendor' (got 'vendr')" },
+  );
+});
+
 test("a mirror universe borrows one of the user's own agents, never a mirror or another user's agent", docker, async (t) => {
   const pool = await seededPool(t, "dev-api-agent-mirror-universe");
   const agent = (user_id: string, universe: AgentUniverse) =>
@@ -220,6 +229,34 @@ test("a mirror universe borrows one of the user's own agents, never a mirror or 
 
   const resolve = (agent_id: string) => agentUniverseSubjectRefs(pool, USER_ID, { mode: "agent", agent_id }, resolvers);
   assert.deepEqual(await resolve(screenAgent.agent_id), [ISSUER_A, ISSUER_B]);
-  assert.deepEqual(await resolve(mirrorAgent.agent_id), []);
-  assert.deepEqual(await resolve(otherUsersAgent.agent_id), []);
+  await assert.rejects(resolve(mirrorAgent.agent_id), AgentUniverseUnavailableError);
+  await assert.rejects(resolve(otherUsersAgent.agent_id), AgentUniverseUnavailableError);
+  await assert.rejects(resolve(THEME_ID), AgentUniverseUnavailableError);
+});
+
+test("a watchlist universe resolves the watchlist's mode, not only its stored members", docker, async (t) => {
+  const pool = await seededPool(t, "dev-api-agent-watchlist-universe");
+  const watchlist = async (user_id: string, mode: string, membership_spec: object | null) =>
+    (await pool.query<{ watchlist_id: string }>(
+      `insert into watchlists (user_id, name, mode, membership_spec) values ($1::uuid, $2, $3::watchlist_mode, $4::jsonb) returning watchlist_id`,
+      [user_id, mode, mode, membership_spec === null ? null : JSON.stringify(membership_spec)],
+    )).rows[0].watchlist_id;
+  const manual = await watchlist(USER_ID, "manual", null);
+  await pool.query(`insert into watchlist_members (watchlist_id, subject_kind, subject_id) values ($1::uuid, 'issuer', $2::uuid)`, [manual, ISSUER_A.id]);
+  const { rows: [{ portfolio_id }] } = await pool.query<{ portfolio_id: string }>(
+    `insert into portfolios (user_id, name, base_currency) values ($1::uuid, 'Book', 'USD') returning portfolio_id`,
+    [USER_ID],
+  );
+  await pool.query(`insert into portfolio_holdings (portfolio_id, subject_kind, subject_id, quantity) values ($1::uuid, 'issuer', $2::uuid, 10)`, [portfolio_id, ISSUER_C.id]);
+  const agent = (universe: AgentUniverse) =>
+    createAgent(pool, { user_id: USER_ID, name: "Source", thesis: "Watch margins.", cadence: "daily", universe });
+  const staticAgent = await agent({ mode: "static", subject_refs: [ISSUER_B] });
+  const watchlistAgent = await agent({ mode: "watchlist", watchlist_id: manual });
+
+  const resolve = (watchlist_id: string) => agentUniverseSubjectRefs(pool, USER_ID, { mode: "watchlist", watchlist_id });
+  assert.deepEqual(await resolve(manual), [ISSUER_A]);
+  assert.deepEqual(await resolve(await watchlist(USER_ID, "portfolio", { portfolio_id })), [ISSUER_C]);
+  assert.deepEqual(await resolve(await watchlist(USER_ID, "agent", { agent_id: staticAgent.agent_id })), [ISSUER_B]);
+  await assert.rejects(resolve(await watchlist(USER_ID, "agent", { agent_id: watchlistAgent.agent_id })), AgentUniverseUnavailableError);
+  await assert.rejects(resolve(await watchlist(OTHER_USER_ID, "manual", null)), DynamicWatchlistNotFoundError);
 });
