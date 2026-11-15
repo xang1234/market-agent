@@ -103,3 +103,37 @@ test("an older 10-K that read Item 1A and found none, under a newer one that lef
   assert.deepEqual([result.status, "reads" in result && result.reads.map((read) => [read.state, read.newer_unread?.state])], ["incomplete_read", [["read", "unread"]]],
     "the older filing read in full is not the whole story while the newer one is unread");
 });
+
+test("a 10-K filed before the cutoff but read after it is not yet extracted at the cutoff, never read in full with none", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-analyst-extracted-after");
+  const db = await connectedClient(t, databaseUrl);
+  await db.query(`insert into sources (source_id, provider, kind, canonical_url, trust_tier, license_class, retrieved_at) values ($1, 'sec_edgar', 'filing', 'https://www.sec.gov/x', 'primary', 'public', now())`, [SOURCE]);
+  await db.query(`insert into issuers (issuer_id, legal_name) values ($1, 'NVIDIA Corp'), ($2, 'Broadcom Inc')`, [issuer(0), issuer(1)]);
+  // NVDA's only 10-K, filed in February and stored and read in November, as the fixture CLI does.
+  await seedFiling(db, 0, "new", "2026-02-25", { "1": "read", "1A": "read" });
+  await db.query(`update documents set created_at = '2026-11-15T07:00:00Z' where document_id = $1`, [doc(0, "new")]);
+  for (const item of ITEMS) await seedClaim(db, 0, "new", "2026-11-15T07:00:00Z", item);
+  // AVGO's 2025 10-K was read in 2025; its 2026 one was stored in February and read in November.
+  await seedFiling(db, 1, "old", "2025-02-01", { "1": "read", "1A": null });
+  await seedClaim(db, 1, "old", "2025-02-01", "1");
+  await seedFiling(db, 1, "new", "2026-02-01", { "1": "read", "1A": null });
+  await seedClaim(db, 1, "new", "2026-11-15T07:00:00Z", "1");
+
+  const profile = (k: number, as_of: string) => runAnalystTool(db, "get_company_profile", { issuer_ids: [issuer(k)], as_of });
+  const shown = (result: AnalystToolResult) => [
+    result.status,
+    "reads" in result && result.reads.map((read) => [read.filing.document_id, read.state, read.newer_unread?.state ?? null]),
+    analystPacketEntries([result]).map((entry) => entry.text),
+  ];
+  assert.deepEqual(shown(await profile(0, "2026-09-01T00:00:00Z")), [
+    "incomplete_read",
+    [[doc(0, "new"), "not_yet_extracted", null]],
+    ["NVIDIA Corp's 10-K, accession acc-0-new, filed 2026-02-25, https://www.sec.gov/x: Item 1 (business) was not read by the cutoff, so no claims from it are on file"],
+  ], "on the frozen 2026-09-01 clock NVDA's claims are not yet known, and the read says so");
+  assert.equal((await profile(0, "2026-11-16T00:00:00Z")).status, "ok", "after the read the claims are served");
+  assert.deepEqual(shown(await profile(1, "2026-09-01T00:00:00Z")).slice(0, 2), ["ok", [[doc(1, "old"), "read", "not_yet_extracted"]]],
+    "AVGO's 2025 10-K serves Item 1, naming the 2026 one read after the cutoff");
+  const risks = await runAnalystTool(db, "get_claims", { issuer_ids: [issuer(0)], as_of: "2026-09-01T00:00:00Z", predicates: ["risk.factor"] });
+  assert.equal(risks.status, "incomplete_read", "nor do NVDA's risk factors read as none");
+});

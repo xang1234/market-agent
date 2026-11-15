@@ -196,6 +196,7 @@ const UNREAD_TEXT: Readonly<Record<Exclude<FilingItemRead["state"], "read" | "cu
   unread: "was not read",
   not_found: "was not found in the filing",
   not_sectioned: "has not been read yet",
+  not_yet_extracted: "was not read by the cutoff",
 };
 
 // An item not read in full, or read from an older 10-K than the newest, as an

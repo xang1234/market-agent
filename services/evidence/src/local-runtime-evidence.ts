@@ -476,9 +476,11 @@ export type FilingClaim = {
 };
 
 export type TenKItemKey = keyof typeof TEN_K_ITEM_PREDICATES;
-// AA3's documents.read_state per item, and "not_sectioned" for a 10-K whose
-// read_state has no such item yet.
-export type TenKItemState = "read" | "cut" | "unread" | "not_found" | "not_sectioned";
+// AA3's documents.read_state per item, "not_sectioned" for a 10-K whose
+// read_state has no such item yet, and "not_yet_extracted" for an item read
+// or cut after the cutoff: its claims are not known at it (citableClaimSql),
+// so it cannot count as read then.
+export type TenKItemState = "read" | "cut" | "unread" | "not_found" | "not_sectioned" | "not_yet_extracted";
 
 export type FilingItemRead = {
   filer_issuer_id: string;
@@ -625,25 +627,35 @@ async function loadFilingItemReads(
         where $2::text = 'competitor' and ca.subject_kind = 'issuer' and ca.subject_id = any($1::uuid[]) and ca.role = 'competitor'
           and ${citableClaimSql("$5::uuid", "$4::timestamptz")}
      ),
-     ranked as (
-       select f.filer_issuer_id, it.item, d.read_state -> it.item as item_state,
-              coalesce(d.read_state -> it.item ->> 'state', 'not_sectioned') as state,
+     filed as (
+       select f.filer_issuer_id, it.item, d.document_id, d.published_at, d.created_at, d.read_state -> it.item as item_state,
+              case
+                when d.read_state -> it.item ->> 'state' in ('read', 'cut')
+                 and not exists (select 1 from claims c where c.document_id = d.document_id and c.predicate like it.predicates_like and c.created_at <= $4::timestamptz)
+                 and (d.created_at > $4::timestamptz
+                      or exists (select 1 from claims c where c.document_id = d.document_id and c.predicate like it.predicates_like))
+                then 'not_yet_extracted'
+                else coalesce(d.read_state -> it.item ->> 'state', 'not_sectioned')
+              end as state,
               jsonb_build_object('document_id', d.document_id, 'source_id', d.source_id, 'title', d.title,
-                                 'accession', d.provider_doc_id, 'published_at', d.published_at, 'link', s.canonical_url) as filing,
-              row_number() over (partition by f.filer_issuer_id, it.item order by d.published_at desc nulls last, d.created_at desc, d.document_id desc) as newest,
-              row_number() over (
-                partition by f.filer_issuer_id, it.item
-                order by coalesce(d.read_state -> it.item ->> 'state' in ('read', 'cut'), false) desc,
-                         d.published_at desc nulls last, d.created_at desc, d.document_id desc
-              ) as chosen
+                                 'accession', d.provider_doc_id, 'published_at', d.published_at, 'link', s.canonical_url) as filing
          from filers f
-         cross join unnest($3::text[]) as it(item)
+         cross join unnest($3::text[], $7::text[]) as it(item, predicates_like)
          join mentions m on m.subject_kind = 'issuer' and m.subject_id = f.filer_issuer_id and m.prominence = 'headline'
          join documents d on d.document_id = m.document_id and d.kind = 'filing' and d.title = '10-K'
          join sources s on s.source_id = d.source_id
         where d.deleted_at is null and d.parse_status <> 'superseded'
           and (s.user_id is null or s.user_id = $5::uuid)
           and coalesce(d.published_at, d.created_at) <= $4::timestamptz
+     ),
+     ranked as (
+       select f.*,
+              row_number() over (partition by f.filer_issuer_id, f.item order by f.published_at desc nulls last, f.created_at desc, f.document_id desc) as newest,
+              row_number() over (
+                partition by f.filer_issuer_id, f.item
+                order by f.state in ('read', 'cut') desc, f.published_at desc nulls last, f.created_at desc, f.document_id desc
+              ) as chosen
+         from filed f
      ),
      labelled as (
        select r.filer_issuer_id::text as filer_issuer_id, ${issuerLabelSql("i", "$4::timestamptz")} as filer_label,
@@ -661,7 +673,7 @@ async function loadFilingItemReads(
        from numbered n
       where n.filer_rank <= $6::int
       order by n.filer_rank, array_position($3::text[], n.item)`,
-    [input.issuerIds, input.role, input.items, input.asOf, input.user, FILERS_PER_READ],
+    [input.issuerIds, input.role, input.items, input.asOf, input.user, FILERS_PER_READ, input.items.map((item) => TEN_K_ITEM_PREDICATES[item])],
   );
   const reads = rows.map((row) => Object.freeze({
     filer_issuer_id: row.filer_issuer_id,
