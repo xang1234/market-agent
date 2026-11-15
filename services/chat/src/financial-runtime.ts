@@ -215,8 +215,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       const note = leftOutNotes(requested).join(" ");
       const noted = note === "" ? {} : { note };
       const refsOf = (subjects: ReadonlyArray<RequestedSubject>) => subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
-      const declinedGap = ({ reason, subjects, planned }: Extract<CertifiedFinancials, { status: "gap" }>) => {
-        const refs = refsOf(subjects);
+      const declinedGap = ({ reason, planned_subjects, planned }: Extract<CertifiedFinancials, { status: "declined" }>) => {
+        const refs = refsOf(planned_subjects);
         // One about no company leaves the previous answer's companies and scope.
         if (refs.length === 0) return { ...gap(reason, planned), ...noted };
         return {
@@ -268,7 +268,6 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           },
         };
       };
-      // The chat lane's key is the bare turn id, as stored runs hold it, so a retry resumes the first attempt's run.
       const certified = await certifiedFinancials(deps, {
         context,
         subjects: requested.subjects,
@@ -294,13 +293,16 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           // pick; naming its resolved companies would make the replay read
           // the still-ambiguous mention as a new company before the pick
           // applies. Only a metric or request question is answered by typing.
-          const refs = certified.clarification.kind === "subject" ? [] : refsOf(certified.subjects);
+          const refs = certified.clarification.kind === "subject" ? [] : refsOf(certified.planned_subjects);
           const clarification = certified.clarification.kind === "metric" ? await computableChoices(deps.pool, deps.evidence(deps.pool), certified.clarification, refs, (deps.clock?.() ?? new Date()).toISOString(), authority.allowed_source_classes) : certified.clarification;
           return { kind: "clarification", clarification, ...(refs.length > 0 ? { subject_refs: refs } : {}), ...noted };
         }
+        case "declined":
+          return declinedGap(certified);
         case "gap":
-          return certified.declines ? declinedGap(certified) : gap(certified.reason);
+          return gap(certified.reason);
         case "published":
+        case "existing":
           return withCommentary(await published(deps.pool, certified.run_id, context.threadId, messageId));
       }
     };
@@ -409,30 +411,29 @@ export const requestKeyFor = (turnId: string, n: number): string => `turn:${turn
 
 /** One engine request for certified figures, published to the parent artifact `persistParent` saves. */
 export type CertifiedFinancialsRequest = Readonly<{
-  // The turn it is made for: its question, thread, owner, and clarification pick.
   context: ChatFinancialTurnContext;
   subjects: ReadonlyArray<RequestedSubject>;
-  // The figures and period to plan (kept_figures), or the route a chat turn took.
   choice: PlanChoice;
-  // By issuer, lowercased, the name the packet gives each company.
+  // By issuer, the name the packet gives each company.
   labels: ReadonlyMap<string, string>;
   authority: FinancialRuntimeAuthority;
-  // A key holds one run per parent: a later call under it resumes that run, whatever it would plan.
   requestKey: string;
   persistParent: PersistParentArtifact;
 }>;
 
+// ponytail: a call that resumes a reserved run does not plan, so its planned
+// subjects are the ones requested, without a clarification pick or peers.
+type Planned = Readonly<{ planned_subjects: ReadonlyArray<RequestedSubject> }>;
+
 export type CertifiedFinancials =
-  // content and the packet are null when an earlier attempt published the
-  // run, so only its parent holds the block. The packet is built when called,
-  // so a caller that never reads it does no work after the commit.
-  | Readonly<{ status: "published"; run_id: string; content: FinancialAnswerContent | null; packet: () => Promise<EvidencePacket | null> }>
-  // subjects are the companies planned, with a clarification pick or an
-  // overview's peers. ponytail: a call that resumes a reserved run does not
-  // plan, so they are the ones requested, without a pick or peers.
-  | Readonly<{ status: "clarification"; clarification: Clarification; subjects: ReadonlyArray<RequestedSubject> }>
-  // declines: the gap declines the request, rather than being a notice about its run.
-  | Readonly<{ status: "gap"; reason: ChatGap; declines: boolean; subjects: ReadonlyArray<RequestedSubject>; planned: PlanningResult | undefined }>;
+  // The packet is built when called, so a caller that never reads it does no work after the commit.
+  | Readonly<{ status: "published"; run_id: string; content: FinancialAnswerContent; packet: () => Promise<EvidencePacket> }>
+  // An earlier attempt published the run, so only its parent holds the block.
+  | Readonly<{ status: "existing"; run_id: string }>
+  | Readonly<{ status: "clarification"; clarification: Clarification } & Planned>
+  | Readonly<{ status: "declined"; reason: ChatGap; planned: PlanningResult | undefined } & Planned>
+  // A notice about the run: running, answered otherwise, cancelled, or not this parent's.
+  | Readonly<{ status: "gap"; reason: ChatGap }>;
 
 /** Plans the request on the engine and publishes it, or says why not. A failed commit throws, and a retry under the key publishes it. */
 export async function certifiedFinancials(
@@ -440,15 +441,15 @@ export async function certifiedFinancials(
   request: CertifiedFinancialsRequest,
 ): Promise<CertifiedFinancials> {
   const { context, authority, requestKey: request_key } = request;
-  let subjects = request.subjects;
+  let planned_subjects = request.subjects;
   let planned: PlanningResult | undefined;
   const outcome = await publishRequest(deps.pool, {
     authority,
     request_key,
     plan: async (db) => {
       const received = deps.clock?.() ?? new Date();
-      planned = await planTurn(deps.planningModel, context, context.userIntent ?? "", request.subjects, authority, received, (planning) => {
-        subjects = planning;
+      planned = await planTurn(deps.planningModel, context, context.userIntent ?? "", request.subjects, authority, received, (subjects) => {
+        planned_subjects = subjects;
       }, {
         choice: request.choice,
         evidence: deps.evidence(db),
@@ -460,33 +461,32 @@ export async function certifiedFinancials(
     evidence: deps.evidence,
     persistParent: request.persistParent,
   });
-  const gapOf = (reason: ChatGap, declines: boolean) => ({ status: "gap" as const, reason, declines, subjects, planned });
+  const declined = (reason: ChatGap) => ({ status: "declined" as const, reason, planned, planned_subjects });
   switch (outcome.status) {
     case "clarification":
-      return { status: "clarification", clarification: outcome.clarification, subjects };
+      return { status: "clarification", clarification: outcome.clarification, planned_subjects };
     case "gap":
       if (outcome.reason === "publication_failed") throw new Error("the financial answer could not be committed");
-      return gapOf(outcome.reason, DECLINES[outcome.reason]);
+      return DECLINES[outcome.reason] ? declined(outcome.reason) : { status: "gap", reason: outcome.reason };
     case "driven": {
       const [unit] = outcome.report?.finalized ?? [];
-      const committed = outcome.report === null || unit?.result.status === "published" || unit?.result.status === "existing" ||
-        (!unit && outcome.report.existing > 0);
-      if (!committed) {
-        // A drive cancelled midway is a notice, as a cancelled run is.
-        if (outcome.report.execution === "cancelled") return gapOf("run_failed", false);
-        return gapOf(unit?.result.status === "rejected" ? "verification_failed" : "run_failed", true);
+      if (unit?.result.status === "published") {
+        const content = unit.result.publication.block.financial;
+        const packet = async () => {
+          const plan = planned?.outcome === "ready" ? planned.plan : await findPlanForRequest(deps.pool, { authority, request_key });
+          const labels = new Map([...request.labels].map(([issuer, label]) => [issuer.toLowerCase(), label]));
+          const tickers = new Map((plan?.subjects.members ?? []).flatMap((member) => {
+            const label = labels.get(member.subject_ref.id.toLowerCase());
+            return label === undefined ? [] : [[member.slot_id, label] as const];
+          }));
+          return enginePacket(content, tickers, plan);
+        };
+        return { status: "published", run_id: outcome.run_id, content, packet };
       }
-      const content = unit?.result.status === "published" ? unit.result.publication.block.financial : null;
-      const packet = async () => {
-        if (content === null) return null;
-        const plan = planned?.outcome === "ready" ? planned.plan : await findPlanForRequest(deps.pool, { authority, request_key });
-        const tickers = new Map((plan?.subjects.members ?? []).flatMap((member) => {
-          const label = request.labels.get(member.subject_ref.id.toLowerCase());
-          return label === undefined ? [] : [[member.slot_id, label] as const];
-        }));
-        return enginePacket(content, tickers, plan);
-      };
-      return { status: "published", run_id: outcome.run_id, content, packet };
+      if (outcome.report === null || unit?.result.status === "existing" || (!unit && outcome.report.existing > 0)) return { status: "existing", run_id: outcome.run_id };
+      // A drive cancelled midway is a notice, as a cancelled run is.
+      if (outcome.report.execution === "cancelled") return { status: "gap", reason: "run_failed" };
+      return declined(unit?.result.status === "rejected" ? "verification_failed" : "run_failed");
     }
   }
 }

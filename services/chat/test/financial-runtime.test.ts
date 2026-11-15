@@ -1123,7 +1123,6 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.equal((await db.query(`select count(*)::int as n from chat_messages where message_id = $1`, [answered.message_id])).rows[0].n, 1);
   });
 
-  // A certified-financials call outside a chat turn's message: the parent saves nothing.
   const NVDA_AS_AAA: RequestedSubject = { mention: "NVDA", resolution: { status: "resolved", subject_ref: { kind: "issuer", id: IDS.issuerA }, label: "Alpha Industries Inc." } };
   const certify = (turnId: string, n: number, choice: PlanChoice, planningModel: PlanningModel | null = null) => certifiedFinancials(
     { pool, planningModel, evidence: createEvidenceFinancialPort },
@@ -1140,8 +1139,8 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
   const PLANNER: PlanChoice = { kind: "planner" };
   const incomeStatement: PlanChoice = { kind: "kept_figures", metrics: ["income_statement"], period: { kind: "fiscal_year", fiscal_year: 2023 } };
   const figuresOf = async (result: Awaited<ReturnType<typeof certify>>) => {
-    assert.equal(result.status, "published");
-    return (await result.packet())?.figures.map(({ id, metric, value }) => `${id} ${metric}: ${value}`);
+    assert(result.status === "published");
+    return (await result.packet()).figures.map(({ id, metric, value }) => `${id} ${metric}: ${value}`);
   };
 
   await t.test("a certified-financials call returns the published content, its packet with F ids, and its run", async () => {
@@ -1176,11 +1175,10 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
   });
 
   await t.test("two calls that plan different figures under one key: one publishes, the other is request_conflict", async () => {
-    // Each call's model waits until both are planning, so neither finds the other's plan stored.
     let release!: () => void;
     const bothPlanning = new Promise<void>((resolve) => release = resolve);
     let planning = 0;
-    const waiting = (draft: PlanningModel): PlanningModel => async (...args) => {
+    const afterBothPlanning = (draft: PlanningModel): PlanningModel => async (...args) => {
       planning += 1;
       if (planning === 2) release();
       await bothPlanning;
@@ -1188,10 +1186,10 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     };
     const turnId = randomUUID();
     const results = await Promise.all([
-      certify(turnId, 1, PLANNER, waiting(revenueModel(["NVDA"]))),
-      certify(turnId, 1, PLANNER, waiting(revenueModel(["NVDA"], 2022))),
+      certify(turnId, 1, PLANNER, afterBothPlanning(revenueModel(["NVDA"]))),
+      certify(turnId, 1, PLANNER, afterBothPlanning(revenueModel(["NVDA"], 2022))),
     ]);
-    assert.deepEqual(results.map((result) => result.status === "gap" ? result.reason : result.status).sort(), ["published", "request_conflict"]);
+    assert.deepEqual(results.map((result) => "reason" in result ? result.reason : result.status).sort(), ["published", "request_conflict"]);
   });
 
   await t.test("the chat lane keys its run by the bare turn id, as stored runs are keyed", async () => {
