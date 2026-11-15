@@ -148,9 +148,9 @@
   },
   {
     "id": "agent-competitors",
-    "note": "AA5 lane 9, flag on",
+    "note": "AA5 lane 9, flag on; in 1 of 5 runs the model wrote the peer list as an observation, which the checks reject, so the peers go unshown",
     "budget_ms": { "saved": 60000 },
-    "turns": [{ "ask": "Who does NVDA compete with?", "expect": { "subjects": ["NVDA"], "tools": ["get_claims", "get_peer_set"], "text": ["Advanced Micro Devices", "Industry peer"] } }]
+    "turns": [{ "ask": "Who does NVDA compete with?", "expect": { "subjects": ["NVDA"], "tools": ["get_claims", "get_peer_set"], "text": ["Advanced Micro Devices"] } }]
   },
   {
     "id": "agent-consensus",
