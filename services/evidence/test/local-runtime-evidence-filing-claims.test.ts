@@ -15,9 +15,17 @@ const NEW_10K = "c5555555-5555-4555-8555-555555555552";
 const MU_10K = "c5555555-5555-4555-8555-555555555553";
 const MU_OLD_10K = "c5555555-5555-4555-8555-555555555554";
 const NVDA_FILE_10K = "c5555555-5555-4555-8555-555555555555";
+const AVGO = "c3333333-3333-4333-8333-333333333335";
+const QCOM = "c3333333-3333-4333-8333-333333333336";
+const AVGO_OLD_10K = "c5555555-5555-4555-8555-555555555556";
+const AVGO_NEW_10K = "c5555555-5555-4555-8555-555555555557";
+const QCOM_10K = "c5555555-5555-4555-8555-555555555558";
+const KO_LIKE = "c3333333-3333-4333-8333-333333333337";
+const LINK = "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/0001045810-26-000021-index.htm";
+const READ = JSON.stringify({ "1": { state: "read" }, "1A": { state: "read" } });
 
 async function seed(db: QueryExecutor): Promise<void> {
-  await db.query(`insert into issuers (issuer_id, legal_name) values ($1, 'NVIDIA Corp'), ($2, 'Advanced Micro Devices Inc'), ($3, 'Micron Technology Inc'), ($4, 'Intel Corp')`, [NVDA, AMD, MU, INTC]);
+  await db.query(`insert into issuers (issuer_id, legal_name) values ($1, 'NVIDIA Corp'), ($2, 'Advanced Micro Devices Inc'), ($3, 'Micron Technology Inc'), ($4, 'Intel Corp'), ($5, 'Broadcom Inc'), ($6, 'Qualcomm Inc')`, [NVDA, AMD, MU, INTC, AVGO, QCOM]);
   await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values (gen_random_uuid(), $1, 'common_stock')`, [NVDA]);
   await db.query(
     `insert into listings (instrument_id, mic, ticker, trading_currency, timezone)
@@ -30,16 +38,25 @@ async function seed(db: QueryExecutor): Promise<void> {
      select instrument_id, 'XNAS', 'MU', 'USD', 'America/New_York', '2027-01-01' from instruments where issuer_id = $1`,
     [MU],
   );
-  await db.query(`insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at) values ($1, 'sec_edgar', 'filing', 'primary', 'public', now())`, [SOURCE]);
-  await db.query(
-    `insert into documents (document_id, source_id, kind, title, provider_doc_id, published_at, content_hash, raw_blob_id, parse_status, created_at) values
-       ($1, $4, 'filing', '10-K', '0001045810-25-000023', '2025-02-26', 'h-old', 'sha256:old', 'parsed', '2025-03-01'),
-       ($2, $4, 'filing', '10-K', '0001045810-26-000021', '2026-02-25', 'h-new', 'sha256:new', 'parsed', '2026-03-01'),
-       ($3, $4, 'filing', '10-K', null, null, 'h-mu', 'sha256:mu', 'parsed', '2026-03-02'),
-       ($5, $4, 'filing', '10-K', null, null, 'h-mu-old', 'sha256:mu-old', 'parsed', '2025-03-02'),
-       ($6, $4, 'filing', '10-K', null, null, 'h-nvda-file', 'sha256:nvda-file', 'parsed', '2026-03-05')`,
-    [OLD_10K, NEW_10K, MU_10K, SOURCE, MU_OLD_10K, NVDA_FILE_10K],
-  );
+  await db.query(`insert into sources (source_id, provider, kind, canonical_url, trust_tier, license_class, retrieved_at) values ($1, 'sec_edgar', 'filing', $2, 'primary', 'public', now())`, [SOURCE, LINK]);
+  const documents: Array<[string, string, string | null, string | null, string, string | null]> = [
+    [OLD_10K, NVDA, "0001045810-25-000023", "2025-02-26", "2025-03-01", READ],
+    [NEW_10K, NVDA, "0001045810-26-000021", "2026-02-25", "2026-03-01", JSON.stringify({ "1": { state: "read" }, "1A": { state: "cut", prompts: 11, of: 13 } })],
+    [MU_10K, MU, null, null, "2026-03-02", READ],
+    [MU_OLD_10K, MU, null, null, "2025-03-02", READ],
+    [NVDA_FILE_10K, NVDA, null, null, "2026-03-05", READ],
+    [AVGO_OLD_10K, AVGO, "0001730168-25-000010", "2025-02-01", "2025-02-02", READ],
+    [AVGO_NEW_10K, AVGO, "0001730168-26-000010", "2026-02-01", "2026-02-02", JSON.stringify({ "1": { state: "read" }, "1A": { state: "unread" } })],
+    [QCOM_10K, QCOM, "0000804328-26-000005", "2026-01-05", "2026-01-06", JSON.stringify({ "1": { state: "read" }, "1A": { state: "not_found" } })],
+  ];
+  for (const [document, filer, accession, filed, created, readState] of documents) {
+    await db.query(
+      `insert into documents (document_id, source_id, kind, title, provider_doc_id, published_at, content_hash, raw_blob_id, parse_status, created_at, read_state)
+       values ($1::uuid, $2, 'filing', '10-K', $3, $4::timestamptz, $7, $7, 'parsed', $5::timestamptz, $6::jsonb)`,
+      [document, SOURCE, accession, filed, created, readState, `h-${document}`],
+    );
+    await db.query(`insert into mentions (document_id, subject_kind, subject_id, prominence, confidence) values ($1, 'issuer', $2, 'headline', 1)`, [document, filer]);
+  }
   const claims: Array<{ document: string; filer: string; predicate: string; text: string; start: number; competitor?: string }> = [
     { document: OLD_10K, filer: NVDA, predicate: "business.competition", text: "AMD competed with us last year.", start: 10, competitor: AMD },
     { document: OLD_10K, filer: NVDA, predicate: "business.competition", text: "Intel competed with us last year.", start: 15, competitor: INTC },
@@ -50,6 +67,10 @@ async function seed(db: QueryExecutor): Promise<void> {
     { document: NVDA_FILE_10K, filer: NVDA, predicate: "business.products", text: "An undated copy stored from a file.", start: 5 },
     { document: MU_OLD_10K, filer: MU, predicate: "risk.factor", text: "Memory prices fell last year.", start: 40 },
     { document: MU_10K, filer: MU, predicate: "business.competition", text: "AMD buys our memory and competes in some markets.", start: 50, competitor: AMD },
+    { document: AVGO_OLD_10K, filer: AVGO, predicate: "business.products", text: "We sold modems last year.", start: 10 },
+    { document: AVGO_OLD_10K, filer: AVGO, predicate: "risk.factor", text: "Customer concentration is high.", start: 500 },
+    { document: AVGO_NEW_10K, filer: AVGO, predicate: "business.products", text: "We sell custom accelerators.", start: 10 },
+    { document: QCOM_10K, filer: QCOM, predicate: "business.products", text: "We license wireless patents.", start: 10 },
   ];
   for (const { document, filer, predicate, text, start, competitor } of claims) {
     const { rows: [claim] } = await db.query<{ claim_id: string }>(
@@ -78,6 +99,7 @@ test("filing claims come from each filer's latest 10-K, in document order, and a
     ["NVDA", "0001045810-26-000021", "AMD competes with us."],
   ], "the dated 2026 10-K is read, not the 2025 one or a newer undated copy; start 20 comes before start 100");
   assert.equal(own.claims[0]!.published_at, "2026-02-25T00:00:00.000Z");
+  assert.equal(own.claims[0]!.link, LINK);
 
   const named = await read(AMD, "competitor", ["business.competition"]);
   assert.deepEqual(named.claims.map((claim) => [claim.filer_label, claim.text_canonical]), [
@@ -86,9 +108,26 @@ test("filing claims come from each filer's latest 10-K, in document order, and a
   ], "each filer's latest 10-K; MU's listing starts after the cutoff, so it is named by its legal name");
 
   assert.deepEqual((await read(INTC, "competitor", ["business.competition"])).claims, [], "NVDA's latest 10-K no longer names Intel");
-  assert.deepEqual((await read(MU, "subject", ["risk.factor"])).claims, [], "MU's latest 10-K has no risk factors, and an older one's do not stand in");
+  const muRisks = await read(MU, "subject", ["risk.factor"]);
+  assert.deepEqual([muRisks.claims, muRisks.reads.map((r) => [r.item, r.state, r.filing.document_id, r.newer_unread])], [[], [["1A", "read", MU_10K, null]]],
+    "MU's latest 10-K read Item 1A and found no risk factors, and an older one's do not stand in");
   assert.deepEqual((await read(AMD, "subject", ["business.competition"])).claims, [], "AMD files no claims of its own");
   assert.deepEqual((await read(NVDA, "subject", ["risk.factor"], "2000-01-01T23:59:59Z")).claims, [], "nothing was on file in 2000");
+  const shape = (r: Awaited<ReturnType<typeof read>>) => [
+    r.claims.map((claim) => [claim.accession, claim.text_canonical]),
+    r.reads.map(({ item, state, cut, filing, newer_unread }) => [item, state, cut, filing.accession, newer_unread && [newer_unread.accession, newer_unread.state]]),
+  ];
+  assert.deepEqual(shape(await read(NVDA, "subject", ["risk.factor"])), [
+    [["0001045810-26-000021", "Supply may be constrained."]],
+    [["1A", "cut", { prompts: 11, of: 13 }, "0001045810-26-000021", null]],
+  ], "a cut item's claims are served, and the read says it was cut");
+  assert.deepEqual(shape(await read(AVGO, "subject", ["business.products", "risk.factor"])), [
+    [["0001730168-26-000010", "We sell custom accelerators."], ["0001730168-25-000010", "Customer concentration is high."]],
+    [["1", "read", null, "0001730168-26-000010", null], ["1A", "read", null, "0001730168-25-000010", ["0001730168-26-000010", "unread"]]],
+  ], "Item 1 from the 2026 10-K; Item 1A from the 2025 one, since 2026 left it unread, and the read names the unread newer filing");
+  assert.deepEqual(shape(await read(QCOM, "subject", ["risk.factor"])), [[], [["1A", "not_found", null, "0000804328-26-000005", null]]],
+    "no claims, and the read says Item 1A was never found rather than read empty");
+  assert.deepEqual((await read(KO_LIKE, "subject", ["risk.factor"])).reads, [], "an issuer with no stored 10-K has no reads");
   const capped = await loadLatestFilingClaims(db, { issuer_ids: [NVDA], role: "subject", predicates: ["business.products"], as_of: "2026-11-15T00:00:00Z", limit: 1 });
   assert.deepEqual([capped.claims.length, capped.truncated], [1, true]);
   const perFiler = await loadLatestFilingClaims(db, { issuer_ids: [AMD], role: "competitor", predicates: ["business.competition"], as_of: "2026-11-15T00:00:00Z", limit: 1 });

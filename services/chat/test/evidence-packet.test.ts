@@ -360,13 +360,16 @@ test("a recorded trace carries the packet its model was sent", () => {
 test("analyst tool results are numbered C1 on in the order read, and a claim two results return is one entry", () => {
   const claim = (claim_id: string, predicate: string, text: string) => ({
     claim_id, document_id: "d-10k", source_id: "s-10k", text_canonical: text, predicate, polarity: "neutral",
-    effective_time: null, published_at: null, filer_issuer_id: NVDA.issuer_id, filer_label: "NVDA", accession: null, document_title: "10-K",
+    effective_time: null, published_at: null, filer_issuer_id: NVDA.issuer_id, filer_label: "NVDA", accession: null, document_title: "10-K", link: null,
   });
-  const profile: AnalystToolResult = { tool: "get_company_profile", status: "ok", truncated: false, claims: [claim("c-1", "business.description", "We make GPUs."), claim("c-2", "business.competition", "AMD competes with us.")] };
-  const competitors: AnalystToolResult = { tool: "get_claims", status: "ok", truncated: false, claims: [claim("c-2", "business.competition", "AMD competes with us.")] };
-  const peers: AnalystToolResult = { tool: "get_peer_set", status: "ok", company: "NVDA", industry: "Semiconductors", peers: [{ issuer_id: AMD.issuer_id, label: "AMD" }] };
-  const ids = () => analystPacketEntries([profile, competitors, peers, { tool: "get_analyst_consensus", status: "no_consensus" }]).map((entry) => [entry.id, entry.kind, entry.text]);
-  assert.deepEqual(ids(), [
+  const profile: AnalystToolResult = { tool: "get_company_profile", status: "ok", truncated: false, reads: [], claims: [claim("c-1", "business.description", "We make GPUs."), claim("c-2", "business.competition", "AMD competes with us.")] };
+  const competitors: AnalystToolResult = { tool: "get_claims", status: "ok", truncated: false, reads: [], claims: [claim("c-2", "business.competition", "AMD competes with us.")] };
+  const peers: AnalystToolResult = { tool: "get_peer_set", status: "ok", company: "NVDA", industry: "Semiconductors", industry_source_id: "s-industry", peers: [{ issuer_id: AMD.issuer_id, label: "AMD", industry_source_id: "s-industry", market_cap_source_id: null }] };
+  const results = [profile, competitors, peers, { tool: "get_analyst_consensus", status: "no_consensus" } as const];
+  const ids = (read: ReadonlyArray<AnalystToolResult>) => analystPacketEntries(read).map((entry) => [entry.id, entry.kind, entry.text]);
+  const first = ids(results);
+  assert.deepEqual(ids(structuredClone(results)), first, "a second run over the same claims gives the same C ids");
+  assert.deepEqual(first, [
     ["C1", "claim", "We make GPUs."],
     ["C2", "claim", "AMD competes with us."],
     ["C3", "peer", "AMD shares NVDA's industry (Semiconductors)"],

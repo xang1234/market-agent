@@ -450,6 +450,15 @@ export type FilingClaimLookup = {
   limit?: number;
 };
 
+export type TenKFiling = {
+  document_id: string;
+  source_id: string;
+  title: string | null;
+  accession: string | null;
+  published_at: string | null;
+  link: string | null;
+};
+
 export type FilingClaim = {
   claim_id: string;
   document_id: string;
@@ -463,48 +472,60 @@ export type FilingClaim = {
   filer_label: string;
   accession: string | null;
   document_title: string | null;
+  link: string | null;
 };
 
-// The issuers' own 10-K claims, or other filers' naming them, read only from
-// each filer's latest filing with any 10-K claim: AA3 never supersedes an
-// older 10-K's claims, and a competitor or risk the latest one drops is gone.
+export type TenKItemKey = keyof typeof TEN_K_ITEM_PREDICATES;
+// AA3's documents.read_state per item, and "not_sectioned" for a 10-K whose
+// read_state has no such item yet.
+export type TenKItemState = "read" | "cut" | "unread" | "not_found" | "not_sectioned";
+
+export type FilingItemRead = {
+  filer_issuer_id: string;
+  filer_label: string;
+  item: TenKItemKey;
+  state: TenKItemState;
+  cut: { prompts: number; of: number } | null;
+  filing: TenKFiling;
+  newer_unread: (TenKFiling & { state: Exclude<TenKItemState, "read" | "cut"> }) | null;
+};
+
+const TEN_K_ITEM_PREDICATES = { "1": "business.%", "1A": "risk.%" } as const;
+
+/**
+ * The issuers' own 10-K claims, or other filers' naming them. Per filer and per
+ * item (Item 1 holds business.*, Item 1A risk.*), the claims come from the
+ * latest 10-K whose item was read or cut, so a newer 10-K left unread does not
+ * hide an older complete one. `reads` gives that filing and the item's state
+ * per filer and item, with the newest 10-K when its item was not read. AA3 never
+ * supersedes an older 10-K's claims, so an item the chosen 10-K read without
+ * them has none, and an older 10-K's do not stand in.
+ */
 export async function loadLatestFilingClaims(
   db: RowQueryExecutor,
   input: FilingClaimLookup,
-): Promise<{ claims: ReadonlyArray<FilingClaim>; truncated: boolean }> {
+): Promise<{ claims: ReadonlyArray<FilingClaim>; truncated: boolean; reads: ReadonlyArray<FilingItemRead> }> {
   const issuerIds = unique(input.issuer_ids);
-  if (issuerIds.length === 0 || input.predicates.length === 0) return { claims: [], truncated: false };
+  const items = [...new Set(input.predicates.flatMap(tenKItemOf))];
+  if (issuerIds.length === 0 || items.length === 0) return { claims: [], truncated: false, reads: [] };
+  const user = userIdOrNull(input.user_id);
+  const reads = await loadFilingItemReads(db, { issuerIds, role: input.role, items, asOf: input.as_of, user });
+  const chosen = reads.filter((read) => read.state === "read" || read.state === "cut");
+  if (chosen.length === 0) return { claims: [], truncated: false, reads };
   const { rows } = await db.query<Omit<FilingClaim, "published_at" | "effective_time"> & { published_at: Date | string | null; effective_time: Date | string | null; matched: string }>(
-    `with filers as (
-       select distinct filer.subject_id as filer_issuer_id
-         from claim_arguments ca
-         join claims c on c.claim_id = ca.claim_id
-         join claim_arguments filer
-           on filer.claim_id = ca.claim_id and filer.role = 'subject' and filer.subject_kind = 'issuer'
-          and c.attributed_to_type = 'issuer' and c.attributed_to_id = filer.subject_id::text
-        where ca.subject_kind = 'issuer' and ca.subject_id = any($1::uuid[]) and ca.role = $2::text
-     ),
-     latest as (
-       select distinct on (f.filer_issuer_id) f.filer_issuer_id, d.document_id, d.published_at, d.provider_doc_id, d.title
-         from filers f
-         join claim_arguments filer
-           on filer.subject_id = f.filer_issuer_id and filer.role = 'subject' and filer.subject_kind = 'issuer'
-         join claims c on c.claim_id = filer.claim_id and c.attributed_to_type = 'issuer' and c.attributed_to_id = filer.subject_id::text
-         join documents d on d.document_id = c.document_id
-         join sources s on s.source_id = c.reported_by_source_id
-        where c.predicate like any($7::text[])
-          and ${citableClaimSql("$5::uuid", "$4::timestamptz")}
-        -- A 10-K stored from a file carries no filing date until a backfill names it.
-        order by f.filer_issuer_id, d.published_at desc nulls last, d.created_at desc, d.document_id desc
+    `with chosen as (
+       select * from unnest($6::uuid[], $7::uuid[], $8::text[]) as t(filer_issuer_id, document_id, predicates_like)
      ),
      matched as (
-       select c.claim_id, c.reported_by_source_id, c.text_canonical, c.predicate, c.polarity, c.effective_time, l.*
-         from latest l
-         join claims c on c.document_id = l.document_id
+       select c.claim_id, c.reported_by_source_id, c.text_canonical, c.predicate, c.polarity, c.effective_time,
+              ch.filer_issuer_id, d.document_id, d.published_at, d.provider_doc_id, d.title, ds.canonical_url
+         from chosen ch
+         join claims c on c.document_id = ch.document_id
          join documents d on d.document_id = c.document_id
+         join sources ds on ds.source_id = d.source_id
          join sources s on s.source_id = c.reported_by_source_id
          join claim_arguments filer
-           on filer.claim_id = c.claim_id and filer.role = 'subject' and filer.subject_kind = 'issuer' and filer.subject_id = l.filer_issuer_id
+           on filer.claim_id = c.claim_id and filer.role = 'subject' and filer.subject_kind = 'issuer' and filer.subject_id = ch.filer_issuer_id
           and c.attributed_to_type = 'issuer' and c.attributed_to_id = filer.subject_id::text
         where exists (
                 select 1 from claim_arguments ca
@@ -512,6 +533,7 @@ export async function loadLatestFilingClaims(
                    and ca.subject_id = any($1::uuid[]) and ca.role = $2::text
               )
           and c.predicate = any($3::text[])
+          and c.predicate like ch.predicates_like
           and ${citableClaimSql("$5::uuid", "$4::timestamptz")}
      )
      select m.claim_id::text as claim_id,
@@ -522,6 +544,7 @@ export async function loadLatestFilingClaims(
             ${issuerLabelSql("i", "$4::timestamptz")} as filer_label,
             m.provider_doc_id as accession,
             m.title as document_title,
+            m.canonical_url as link,
             m.matched
        from (
          select m.*,
@@ -535,9 +558,13 @@ export async function loadLatestFilingClaims(
            from matched m
        ) m
        join issuers i on i.issuer_id = m.filer_issuer_id
-      where m.position <= $6::int
+      where m.position <= $9::int
       order by filer_label, m.filer_issuer_id, m.position`,
-    [issuerIds, input.role, input.predicates, input.as_of, userIdOrNull(input.user_id), input.limit ?? 50, TEN_K_PREDICATE_PATTERNS],
+    [
+      issuerIds, input.role, input.predicates, input.as_of, user,
+      chosen.map((read) => read.filer_issuer_id), chosen.map((read) => read.filing.document_id), chosen.map((read) => TEN_K_ITEM_PREDICATES[read.item]),
+      input.limit ?? 50,
+    ],
   );
   const claims = rows.map(({ matched: _matched, published_at, effective_time, ...claim }) => Object.freeze({
     ...claim,
@@ -545,10 +572,85 @@ export async function loadLatestFilingClaims(
     effective_time: effective_time === null ? null : isoString(effective_time),
   }));
   const shown = Map.groupBy(rows, (row) => row.filer_issuer_id);
-  return { claims, truncated: [...shown.values()].some((filed) => Number(filed[0]!.matched) > filed.length) };
+  return { claims, truncated: [...shown.values()].some((filed) => Number(filed[0]!.matched) > filed.length), reads };
 }
 
-const TEN_K_PREDICATE_PATTERNS = ["business.%", "risk.%"];
+function tenKItemOf(predicate: string): TenKItemKey[] {
+  return (Object.keys(TEN_K_ITEM_PREDICATES) as TenKItemKey[]).filter((item) => predicate.startsWith(TEN_K_ITEM_PREDICATES[item].slice(0, -1)));
+}
+
+type FilingRow = { document_id: string; source_id: string; title: string | null; accession: string | null; published_at: Date | string | null; link: string | null };
+
+// A filer's 10-Ks are the documents titled 10-K that AA3 stored for it, which
+// it marks with a headline mention of the filer. For a competitor read, the
+// filers are those whose claims ever named the issuers as a competitor.
+async function loadFilingItemReads(
+  db: RowQueryExecutor,
+  input: { issuerIds: ReadonlyArray<string>; role: FilingClaimLookup["role"]; items: ReadonlyArray<TenKItemKey>; asOf: string; user: string | null },
+): Promise<FilingItemRead[]> {
+  const { rows } = await db.query<{ filer_issuer_id: string; filer_label: string; item: TenKItemKey; state: TenKItemState; item_state: { prompts?: number; of?: number } | null; filing: FilingRow; newer: (FilingRow & { state: string }) | null }>(
+    `with filers as (
+       select f.filer_issuer_id from unnest($1::uuid[]) as f(filer_issuer_id) where $2::text = 'subject'
+       union
+       select filer.subject_id
+         from claim_arguments ca
+         join claims c on c.claim_id = ca.claim_id
+         join claim_arguments filer
+           on filer.claim_id = ca.claim_id and filer.role = 'subject' and filer.subject_kind = 'issuer'
+          and c.attributed_to_type = 'issuer' and c.attributed_to_id = filer.subject_id::text
+        where $2::text = 'competitor' and ca.subject_kind = 'issuer' and ca.subject_id = any($1::uuid[]) and ca.role = 'competitor'
+     ),
+     ranked as (
+       select f.filer_issuer_id, it.item, d.read_state -> it.item as item_state,
+              coalesce(d.read_state -> it.item ->> 'state', 'not_sectioned') as state,
+              jsonb_build_object('document_id', d.document_id, 'source_id', d.source_id, 'title', d.title,
+                                 'accession', d.provider_doc_id, 'published_at', d.published_at, 'link', s.canonical_url) as filing,
+              row_number() over (partition by f.filer_issuer_id, it.item order by d.published_at desc nulls last, d.created_at desc, d.document_id desc) as newest,
+              row_number() over (
+                partition by f.filer_issuer_id, it.item
+                order by coalesce(d.read_state -> it.item ->> 'state' in ('read', 'cut'), false) desc,
+                         d.published_at desc nulls last, d.created_at desc, d.document_id desc
+              ) as chosen
+         from filers f
+         cross join unnest($3::text[]) as it(item)
+         join mentions m on m.subject_kind = 'issuer' and m.subject_id = f.filer_issuer_id and m.prominence = 'headline'
+         join documents d on d.document_id = m.document_id and d.kind = 'filing' and d.title = '10-K'
+         join sources s on s.source_id = d.source_id
+        where d.deleted_at is null and d.parse_status <> 'superseded'
+          and (s.user_id is null or s.user_id = $5::uuid)
+          and coalesce(d.published_at, d.created_at) <= $4::timestamptz
+     )
+     select r.filer_issuer_id::text as filer_issuer_id, ${issuerLabelSql("i", "$4::timestamptz")} as filer_label,
+            r.item, r.state, r.item_state, r.filing,
+            case when n.filer_issuer_id is not null then n.filing || jsonb_build_object('state', n.state) end as newer
+       from ranked r
+       join issuers i on i.issuer_id = r.filer_issuer_id
+       left join ranked n on n.filer_issuer_id = r.filer_issuer_id and n.item = r.item and n.newest = 1 and n.chosen <> 1
+      where r.chosen = 1
+      order by filer_label, r.filer_issuer_id, array_position($3::text[], r.item)`,
+    [input.issuerIds, input.role, input.items, input.asOf, input.user],
+  );
+  return rows.map((row) => Object.freeze({
+    filer_issuer_id: row.filer_issuer_id,
+    filer_label: row.filer_label,
+    item: row.item,
+    state: row.state,
+    cut: row.state === "cut" ? { prompts: Number(row.item_state?.prompts), of: Number(row.item_state?.of) } : null,
+    filing: tenKFiling(row.filing),
+    newer_unread: row.newer === null ? null : { ...tenKFiling(row.newer), state: row.newer.state as Exclude<TenKItemState, "read" | "cut"> },
+  }));
+}
+
+function tenKFiling(row: FilingRow): TenKFiling {
+  return {
+    document_id: row.document_id,
+    source_id: row.source_id,
+    title: row.title,
+    accession: row.accession,
+    published_at: row.published_at === null ? null : new Date(row.published_at).toISOString(),
+    link: row.link,
+  };
+}
 
 // An issuer as an answer names it at the cutoff (as perf-block.ts companyListings), from its row aliased `issuer`.
 export function issuerLabelSql(issuer: string, cutoff: string): string {

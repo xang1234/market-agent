@@ -53,10 +53,16 @@ export function parseCliArgs(args: string[], now: Date = new Date()): CliRequest
 }
 
 export function entryLine(entry: AnalystPacketEntry): string {
-  const ref = entry.kind === "claim"
-    ? [entry.filing, `claim=${entry.claim_id}`]
-    : entry.kind === "consensus" ? [`capture=${entry.capture_id}`] : [`issuer=${entry.peer_issuer_id}`];
-  return [entry.id, entry.predicate, entry.company ?? "", ...ref, entry.text].join("\t");
+  return [entry.id, entry.predicate, entry.company, ...entryRef(entry), entry.text].join("\t");
+}
+
+function entryRef(entry: AnalystPacketEntry): string[] {
+  switch (entry.kind) {
+    case "claim": return [entry.filing, `claim=${entry.claim_id}`];
+    case "consensus": return [`capture=${entry.capture_id}`, `source=${entry.source_id}`];
+    case "peer": return [`issuer=${entry.peer_issuer_id}`, `sources=${entry.source_ids.join(",") || "none"}`];
+    case "filing_read": return [`document=${entry.document_id}`, `state=${entry.state}`];
+  }
 }
 
 function databaseUrl(env: NodeJS.ProcessEnv): string {

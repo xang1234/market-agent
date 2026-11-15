@@ -15,43 +15,86 @@ const AAPL = "66666666-6666-4666-8666-666666666666";
 const AAPL_LISTING = "77777777-7777-4777-8777-777777777777";
 const AS_OF = "2026-11-15T12:00:00.000Z";
 
-const filingClaim = (claim_id: string, predicate: string, text: string) => ({
+const INTC = "88888888-8888-4888-8888-888888888888";
+const AVGO = "99999999-9999-4999-8999-999999999999";
+const NVDA_10K = "d0000000-0000-4000-8000-000000000001";
+const INTC_10K = "d0000000-0000-4000-8000-000000000002";
+const AVGO_OLD_10K = "d0000000-0000-4000-8000-000000000003";
+const AVGO_NEW_10K = "d0000000-0000-4000-8000-000000000004";
+const SEC = "50000000-0000-4000-8000-000000000001";
+const NVDA_LINK = "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/0001045810-26-000021-index.htm";
+
+const filing = (document_id: string, accession: string | null, published_at: string | null, link: string | null) =>
+  ({ document_id, source_id: SEC, title: "10-K", accession, published_at, link });
+const FILINGS: Record<string, ReturnType<typeof filing>> = {
+  [NVDA_10K]: filing(NVDA_10K, "0001045810-26-000021", "2026-02-25T00:00:00.000Z", NVDA_LINK),
+  [INTC_10K]: filing(INTC_10K, null, null, null),
+  [AVGO_OLD_10K]: filing(AVGO_OLD_10K, "0001730168-25-000010", "2025-02-01T00:00:00.000Z", null),
+  [AVGO_NEW_10K]: filing(AVGO_NEW_10K, "0001730168-26-000010", "2026-02-01T00:00:00.000Z", null),
+};
+
+const filingClaim = (claim_id: string, predicate: string, text: string, document_id = NVDA_10K, filer_issuer_id = NVDA) => ({
   claim_id,
-  document_id: "d0000000-0000-4000-8000-000000000001",
-  source_id: "50000000-0000-4000-8000-000000000001",
+  document_id,
+  source_id: SEC,
   text_canonical: text,
   predicate,
   polarity: predicate === "risk.factor" ? "negative" : "neutral",
-  effective_time: new Date("2026-02-25T00:00:00Z"),
-  published_at: new Date("2026-02-25T00:00:00Z"),
-  filer_issuer_id: NVDA,
-  filer_label: "NVDA",
-  accession: "0001045810-26-000021",
+  effective_time: FILINGS[document_id]!.published_at,
+  published_at: FILINGS[document_id]!.published_at,
+  filer_issuer_id,
+  filer_label: LABELS[filer_issuer_id],
+  accession: FILINGS[document_id]!.accession,
   document_title: "10-K",
+  link: FILINGS[document_id]!.link,
   matched: "2",
 });
 
-const PROFILE = [
+const LABELS: Record<string, string> = { [NVDA]: "NVDA", [AMD]: "AMD", [MU]: "MU", [WDC]: "WDC", [AAPL]: "AAPL", [INTC]: "INTC", [AVGO]: "AVGO" };
+
+const CLAIMS = [
   filingClaim("c0000000-0000-4000-8000-000000000001", "business.description", "NVIDIA pioneered accelerated computing."),
   filingClaim("c0000000-0000-4000-8000-000000000002", "business.products", "Our products include GPUs and networking."),
+  filingClaim("c0000000-0000-4000-8000-000000000003", "business.competition", "Our competitors include Advanced Micro Devices."),
+  filingClaim("c0000000-0000-4000-8000-000000000004", "risk.factor", "Supply may be constrained."),
+  filingClaim("c0000000-0000-4000-8000-000000000005", "business.products", "We make x86 processors.", INTC_10K, INTC),
+  filingClaim("c0000000-0000-4000-8000-000000000006", "business.products", "We sold modems.", AVGO_OLD_10K, AVGO),
 ];
-const COMPETITION = filingClaim("c0000000-0000-4000-8000-000000000003", "business.competition", "Our competitors include Advanced Micro Devices.");
+const COMPETITION_CLAIM_ID = "c0000000-0000-4000-8000-000000000003";
 
-const CONSENSUS = [
-  { capture_id: "e0000000-0000-4000-8000-000000000001", source_id: "00000000-0000-4000-a000-000000000015", provider: "finviz_dev_consensus", captured_on: "2026-11-14", field_key: "eps_next_y", raw_value: "8.49", unit: "usd_per_share", fiscal_period: null },
-  { capture_id: "e0000000-0000-4000-8000-000000000002", source_id: "00000000-0000-4000-a000-000000000015", provider: "finviz_dev_consensus", captured_on: "2026-11-14", field_key: "target_price", raw_value: "290.50", unit: "usd", fiscal_period: null },
-];
-
-const LABELS: Record<string, string> = { [NVDA]: "NVDA", [AMD]: "AMD", [MU]: "MU", [WDC]: "WDC", [AAPL]: "AAPL" };
+// Each filer's chosen 10-K per item, as loadFilingItemReads returns it.
+const READS: Record<string, Record<string, { document: string; state: string; item_state?: object; newer?: { document: string; state: string } }>> = {
+  [NVDA]: { "1": { document: NVDA_10K, state: "read" }, "1A": { document: NVDA_10K, state: "cut", item_state: { state: "cut", prompts: 11, of: 13 } } },
+  [INTC]: { "1": { document: INTC_10K, state: "read" }, "1A": { document: INTC_10K, state: "unread" } },
+  [AVGO]: { "1": { document: AVGO_OLD_10K, state: "read", newer: { document: AVGO_NEW_10K, state: "unread" } } },
+  [KO]: {},
+};
 
 function stackDb(seen: Array<{ text: string; values?: unknown[] }> = []) {
   return {
     query: fakeQuery((text, values) => {
       seen.push({ text, values });
       if (text.includes("with filers as")) {
-        const [issuers, role, predicates] = values as [string[], string, string[]];
-        if (role === "competitor") return { rows: issuers.includes(AMD) && predicates.includes("business.competition") ? [COMPETITION] : [] };
-        return { rows: issuers.includes(NVDA) ? PROFILE.filter((claim) => predicates.includes(claim.predicate)) : [] };
+        const [issuers, role, items] = values as [string[], string, string[]];
+        const filers = role === "competitor" ? (issuers.includes(AMD) ? [NVDA] : []) : issuers;
+        return {
+          rows: filers.flatMap((filer) => items.flatMap((item) => {
+            const read = READS[filer]?.[item];
+            if (!read) return [];
+            const newer = read.newer && { ...FILINGS[read.newer.document], state: read.newer.state };
+            return [{ filer_issuer_id: filer, filer_label: LABELS[filer], item, state: read.state, item_state: read.item_state ?? { state: read.state }, filing: FILINGS[read.document], newer: newer ?? null }];
+          })),
+        };
+      }
+      if (text.includes("with chosen as")) {
+        const [issuers, role, predicates, , , , documents, patterns] = values as [string[], string, string[], unknown, unknown, string[], string[], string[]];
+        return {
+          rows: CLAIMS.filter((claim) => {
+            const at = documents.indexOf(claim.document_id);
+            const named = role === "competitor" ? issuers.includes(AMD) && claim.claim_id === COMPETITION_CLAIM_ID : issuers.includes(claim.filer_issuer_id);
+            return at >= 0 && named && predicates.includes(claim.predicate) && claim.predicate.startsWith(patterns[at]!.slice(0, -1));
+          }),
+        };
       }
       if (text.includes("select industry from issuers")) return { rows: [{ industry: values?.[0] === MU ? "Semiconductors" : null }] };
       if (text.includes("from issuers peer")) return { rows: [{ issuer_id: WDC }] };
@@ -60,24 +103,37 @@ function stackDb(seen: Array<{ text: string; values?: unknown[] }> = []) {
         const refs = JSON.parse(String(values?.[0])) as Array<{ kind: string; id: string }>;
         return { rows: refs.map((ref, i) => ({ ord: i + 1, issuer_id: ref.id === AAPL_LISTING ? AAPL : ref.kind === "issuer" && LABELS[ref.id] ? ref.id : null })) };
       }
+      if (text.includes("industry_source_id")) {
+        return { rows: (values?.[0] as string[]).map((id) => ({ issuer_id: id, label: LABELS[id], industry_source_id: `ind-${LABELS[id]}`, market_cap_source_id: id === WDC ? "cap-WDC" : null })) };
+      }
       if (text.includes("as label")) return { rows: (values?.[0] as string[]).map((id) => ({ issuer_id: id, label: LABELS[id] })) };
       throw new Error(`unexpected query: ${text.slice(0, 60)}`);
     }),
   };
 }
 
+const CONSENSUS = [
+  { capture_id: "e0000000-0000-4000-8000-000000000001", source_id: "00000000-0000-4000-a000-000000000015", provider: "finviz_dev_consensus", captured_on: "2026-11-14", field_key: "eps_next_y", raw_value: "8.49", unit: "usd_per_share", fiscal_period: null },
+  { capture_id: "e0000000-0000-4000-8000-000000000002", source_id: "00000000-0000-4000-a000-000000000015", provider: "finviz_dev_consensus", captured_on: "2026-11-14", field_key: "target_price", raw_value: "290.50", unit: "usd", fiscal_period: null },
+  { capture_id: "e0000000-0000-4000-8000-000000000003", source_id: "00000000-0000-4000-a000-000000000015", provider: "finviz_dev_consensus", captured_on: "2026-11-14", field_key: "recommendation_mean", raw_value: "2.10", unit: "recommendation_1_to_5", fiscal_period: null },
+];
+
+const NVDA_FILING = `10-K, accession 0001045810-26-000021, filed 2026-02-25, ${NVDA_LINK}`;
+
 test("a company profile is the filer's business claims from its 10-K", async () => {
   const result = await runAnalystTool(stackDb(), "get_company_profile", { issuer_ids: [NVDA], as_of: AS_OF });
   assert.deepEqual(analystPacketEntries([result]).map(entryLine), [
-    "C1\tbusiness.description\tNVDA\t10-K, accession 0001045810-26-000021, filed 2026-02-25\tclaim=c0000000-0000-4000-8000-000000000001\tNVIDIA pioneered accelerated computing.",
-    "C2\tbusiness.products\tNVDA\t10-K, accession 0001045810-26-000021, filed 2026-02-25\tclaim=c0000000-0000-4000-8000-000000000002\tOur products include GPUs and networking.",
+    `C1\tbusiness.description\tNVDA\t${NVDA_FILING}\tclaim=c0000000-0000-4000-8000-000000000001\tNVIDIA pioneered accelerated computing.`,
+    `C2\tbusiness.products\tNVDA\t${NVDA_FILING}\tclaim=c0000000-0000-4000-8000-000000000002\tOur products include GPUs and networking.`,
+    `C3\tbusiness.competition\tNVDA\t${NVDA_FILING}\tclaim=c0000000-0000-4000-8000-000000000003\tOur competitors include Advanced Micro Devices.`,
   ]);
 });
 
 test("a competitor read of AMD returns NVDA's competition claim, labelled as NVDA's", async () => {
   const result = await runAnalystTool(stackDb(), "get_claims", { issuer_ids: [AMD], as_of: AS_OF, role: "competitor" });
   const [entry, ...others] = analystPacketEntries([result]);
-  assert.deepEqual(others, []);
+  assert.deepEqual(others.map((other) => [other.kind, other.company, other.text.endsWith("11 of 13 prompts, so claims from the rest of it are missing")]), [["filing_read", "NVDA", true]],
+    "NVDA's cut Item 1A might name AMD too");
   assert.equal(entry?.kind, "claim");
   assert.equal(entry?.company, "NVDA");
   assert.equal(entry?.text, "Our competitors include Advanced Micro Devices.");
@@ -88,20 +144,52 @@ test("consensus is each value labelled an attributed expectation with its captur
   assert.deepEqual(analystPacketEntries([result]).map((entry) => [entry.id, entry.company, entry.text]), [
     ["C1", "AAPL", "attributed consensus: Finviz EPS next year, captured 2026-11-14: 8.49 USD per share"],
     ["C2", "AAPL", "attributed consensus: Finviz target price, captured 2026-11-14: 290.50 USD"],
+    ["C3", "AAPL", "attributed consensus: Finviz mean recommendation score (recommendation_mean, on a 1 to 5 scale), captured 2026-11-14: 2.10"],
   ]);
+  assert.doesNotMatch(analystPacketEntries([result]).map((entry) => entry.text).join("\n"), /buy|sell|hold/i, "ADR 0005: no stance words in a factual label");
 });
 
 test("each tool says when no stored source exists, as a typed status", async () => {
   const db = stackDb();
-  assert.deepEqual(await runAnalystTool(db, "get_company_profile", { issuer_ids: [KO], as_of: AS_OF }), { tool: "get_company_profile", status: "no_business_claims" });
-  assert.deepEqual(await runAnalystTool(db, "get_claims", { issuer_ids: [KO], as_of: AS_OF }), { tool: "get_claims", status: "no_claims" });
+  assert.deepEqual(await runAnalystTool(db, "get_company_profile", { issuer_ids: [KO], as_of: AS_OF }), { tool: "get_company_profile", status: "no_business_claims", reads: [] });
+  assert.deepEqual(await runAnalystTool(db, "get_claims", { issuer_ids: [KO], as_of: AS_OF }), { tool: "get_claims", status: "no_claims", reads: [] });
   assert.deepEqual(await runAnalystTool(db, "get_analyst_consensus", { issuer_ids: [KO], as_of: AS_OF }), { tool: "get_analyst_consensus", status: "no_consensus" });
   assert.deepEqual(await runAnalystTool(db, "get_peer_set", { issuer_ids: [KO], as_of: AS_OF }), { tool: "get_peer_set", status: "no_peers", reason: "no_industry" });
 });
 
 test("a peer set is the resolver's same-industry peers, named", async () => {
   const result = await runAnalystTool(stackDb(), "get_peer_set", { issuer_ids: [MU], as_of: AS_OF });
-  assert.deepEqual(analystPacketEntries([result]).map((entry) => entry.text), ["WDC shares MU's industry (Semiconductors)"]);
+  assert.deepEqual(analystPacketEntries([result]).map((entry) => entry.kind === "peer" && [entry.text, entry.source_ids]), [
+    ["WDC shares MU's industry (Semiconductors)", ["ind-MU", "ind-WDC", "cap-WDC"]],
+  ], "a peer cites both industries' sources and the market cap fact it is ranked by");
+});
+
+test("risk factors from a 10-K whose Item 1A was never read are an incomplete read, not a filing that states none", async () => {
+  const result = await runAnalystTool(stackDb(), "get_claims", { issuer_ids: [INTC], as_of: AS_OF, predicates: ["risk.factor"] });
+  assert.equal(result.status, "incomplete_read");
+  assert.deepEqual(analystPacketEntries([result]).map(entryLine), [
+    `C1\tfiling.item_read\tINTC\tdocument=${INTC_10K}\tstate=unread\tINTC's 10-K: Item 1A (risk factors) was not read, so no claims from it are on file`,
+  ]);
+  const all = await runAnalystTool(stackDb(), "get_claims", { issuer_ids: [INTC], as_of: AS_OF });
+  assert.deepEqual(analystPacketEntries([all]).map((entry) => [entry.kind, entry.predicate]), [["claim", "business.products"], ["filing_read", "filing.item_read"]],
+    "a read with claims from Item 1 still says Item 1A was not read");
+});
+
+test("a cut Item 1A serves its claims and says how far it was read", async () => {
+  const result = await runAnalystTool(stackDb(), "get_claims", { issuer_ids: [NVDA], as_of: AS_OF, predicates: ["risk.factor"] });
+  assert.deepEqual(analystPacketEntries([result]).map((entry) => entry.text), [
+    "Supply may be constrained.",
+    `NVDA's ${NVDA_FILING}: Item 1A (risk factors) was read in part, 11 of 13 prompts, so claims from the rest of it are missing`,
+  ]);
+});
+
+test("a profile read from an older 10-K names the newer one whose Item 1 was not read", async () => {
+  const result = await runAnalystTool(stackDb(), "get_company_profile", { issuer_ids: [AVGO], as_of: AS_OF });
+  assert.equal(result.status, "ok");
+  assert.deepEqual(analystPacketEntries([result]).map(entryLine), [
+    "C1\tbusiness.products\tAVGO\t10-K, accession 0001730168-25-000010, filed 2025-02-01\tclaim=c0000000-0000-4000-8000-000000000006\tWe sold modems.",
+    `C2\tfiling.item_read\tAVGO\tdocument=${AVGO_NEW_10K}\tstate=unread\tAVGO's Item 1 (business) claims come from its 10-K, accession 0001730168-25-000010, filed 2025-02-01. In its newer 10-K, accession 0001730168-26-000010, filed 2026-02-01, Item 1 (business) was not read`,
+  ]);
 });
 
 test("a registry call reads its subject's issuer at the turn's cutoff, and refuses arguments it cannot read", async () => {

@@ -58,5 +58,41 @@ test("consensus is the newest capture within 7 days, and an empty newest capture
   });
   assert.deepEqual(await read("2026-11-17T12:00:00Z"), { tool: "get_analyst_consensus", status: "no_consensus" }, "Nov 14 is the newest, and still empty");
   await db.query(`delete from consensus_captures where captured_on = '2026-11-14'`);
+  assert.deepEqual((await shown("2026-11-19T23:59:59Z"))[0], "2026-11-12", "Nov 12 is exactly 7 days old on Nov 19, and still consensus");
   assert.deepEqual(await read("2026-11-20T12:00:00Z"), { tool: "get_analyst_consensus", status: "no_consensus" }, "Nov 12 is 8 days old on Nov 20");
+});
+
+test("each peer cites the industry sources and the market cap fact it is ranked by", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-analyst-peers");
+  const db = await connectedClient(t, databaseUrl);
+  const [MU, WDC, STX, PROFILE_OLD, PROFILE, CAP] = [
+    "d2222222-2222-4222-8222-222222222221", "d2222222-2222-4222-8222-222222222222", "d2222222-2222-4222-8222-222222222223",
+    "d3333333-3333-4333-8333-333333333331", "d3333333-3333-4333-8333-333333333332", "d3333333-3333-4333-8333-333333333333",
+  ];
+  await db.query(`insert into issuers (issuer_id, legal_name, industry) values ($1, 'Micron', 'Semiconductors'), ($2, 'Western Digital', 'Semiconductors'), ($3, 'Seagate', 'Semiconductors')`, [MU, WDC, STX]);
+  await db.query(
+    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at)
+     values ($1, 'profile_vendor', 'reference_data', 'secondary', 'free_dev', now()), ($2, 'profile_vendor', 'reference_data', 'secondary', 'free_dev', now()),
+            ($3, 'cap_vendor', 'reference_data', 'secondary', 'free_dev', now())`,
+    [PROFILE_OLD, PROFILE, CAP],
+  );
+  await db.query(
+    `insert into issuer_profile_enrichments (issuer_id, field_name, field_value, source_id, provider, retrieved_at) values
+       ($1, 'industry', 'Semiconductors', $4, 'profile_vendor', '2026-06-01'), ($1, 'industry', 'Memory', $3, 'profile_vendor', '2026-09-01'),
+       ($2, 'industry', 'Semiconductors', $3, 'profile_vendor', '2026-01-01')`,
+    [MU, WDC, PROFILE_OLD, PROFILE],
+  );
+  await db.query(`insert into metrics (metric_key, display_name, unit_class, aggregation, interpretation, canonical_source_class) values ('market_cap', 'Market Cap', 'currency', 'last', 'higher_is_better', 'market')`);
+  await db.query(
+    `insert into facts (subject_kind, subject_id, metric_id, period_kind, value_num, unit, currency, scale, as_of, observed_at, source_id, method, verification_status, freshness_class, coverage_level, confidence)
+     select 'issuer', $1, metric_id, 'point', 9e10, 'currency', 'USD', 1, '2026-11-01', '2026-11-01', $2, 'reported', 'authoritative', 'filing_time', 'full', 1
+       from metrics where metric_key = 'market_cap'`,
+    [WDC, CAP],
+  );
+  const result = await runAnalystTool(db, "get_peer_set", { issuer_ids: [MU], as_of: "2026-11-15T00:00:00Z" });
+  assert.deepEqual(result.status === "ok" && result.tool === "get_peer_set" && [result.industry_source_id, result.peers], [PROFILE, [
+    { issuer_id: WDC, label: "Western Digital", industry_source_id: PROFILE_OLD, market_cap_source_id: CAP },
+    { issuer_id: STX, label: "Seagate", industry_source_id: null, market_cap_source_id: null },
+  ]], "MU's industry from the enrichment that holds its stored value, not a newer one that differs; WDC ranked first by its cap fact; Seagate has neither stored");
 });
