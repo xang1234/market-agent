@@ -537,7 +537,7 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
 
 // The analyst agent (CHAT_ANALYST_AGENT=1, runtime.ts): its reads cut off as the analyst path's do.
 export const analystAgent = analystAgentRunner({
-  financial: financialDeps,
+  financial: { ...financialDeps, hydrate: hydrateTurn },
   router: () => analystAgentRouter(process.env),
   read: (name, args, turn) => runRegisteredAnalystTool(pool(), name, args, turn).catch((reason: unknown) => {
     if (!isUnavailableRead(reason)) throw reason;

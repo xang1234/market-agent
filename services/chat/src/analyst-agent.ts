@@ -46,7 +46,7 @@ const AGENT_CALLS = 5;
 const MAX_REQUEST_KEYS = 64;
 
 export type AnalystAgentDeps = Readonly<{
-  financial: Pick<ChatFinancialRuntimeDeps, "pool" | "planningModel" | "evidence" | "clock" | "resolveMention" | "priorSubjects" | "researchScope">;
+  financial: Pick<ChatFinancialRuntimeDeps, "pool" | "planningModel" | "evidence" | "clock" | "resolveMention" | "priorSubjects" | "researchScope" | "hydrate">;
   // The agent's router (analystAgentRouter).
   router: () => Promise<ControlledRouter | null>;
   // An AA4 read, through the registry's argument checks (analyst-tools.ts runRegisteredAnalystTool).
@@ -123,6 +123,21 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const toolCalls: ChatAnalystToolRuntimeToolCall[] = [];
     const asked = new Map<string, Promise<ToolLoopOutput>>();
     const keys = requestKeys(deps.financial.pool, authority, context.threadId, turnId);
+    // Each company's filings are fetched once a turn, before its first certified call plans, as
+    // the financial lane fetches them; the fetch streams nothing, so a turn left to the next runner shows none.
+    const fetched = new Map<string, Promise<boolean>>();
+    const stillLoading = (issuers: ReadonlyArray<string>) => Promise.all(issuers.map((issuer) => {
+      const known = fetched.get(issuer) ?? (deps.financial.hydrate
+        ? deps.financial.hydrate([{ issuer_id: issuer, label: labelOf(issuer) }], { emit: QUIET, turnId })
+          .then((loading) => loading.has(issuer))
+          .catch((reason: unknown) => {
+            console.warn("[chat] fetching a company's filings failed; the analyst agent answers from what is on file", reason);
+            return true;
+          })
+        : Promise.resolve(false));
+      fetched.set(issuer, known);
+      return known.then((loading) => (loading ? [issuer] : []));
+    })).then((lists) => lists.flat());
 
     const certify = async (args: JsonObject): Promise<ToolLoopOutput> => {
       const ask = certifiedAsk(args, known);
@@ -131,6 +146,8 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       const prior = asked.get(ask.fingerprint);
       if (prior) return prior;
       const answer = (async (): Promise<ToolLoopOutput> => {
+        const loading = await stillLoading(ask.subjects);
+        if (loading.length > 0) notes.push(`Filings for ${labelList(loading.map(labelOf))} are still loading; ask again in a minute.`);
         const key = await keys(ask.fingerprint);
         const subjects = ask.subjects.map((issuer) => known.get(issuer)!);
         const who = labelList(ask.subjects.map(labelOf));
@@ -303,6 +320,9 @@ const GATHER_RULES = [
   "get_analyst_consensus reads attributed analyst consensus.",
   "Read every company the question is about, in one step when you can.",
 ];
+
+// The fetch's progress events go nowhere: they would start the stream before the agent knows it takes the turn.
+const QUIET = (() => undefined) as unknown as ChatTurnRunContext["emit"];
 
 const NO_ANSWER = "No answer could be written from the stored sources read for this question.";
 

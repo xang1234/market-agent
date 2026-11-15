@@ -219,8 +219,8 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
   const persist = await savingMessages(t, databaseUrl(db));
   const base = { threadId, userId: IDS.owner };
 
-  const agentOf = (router: ControlledRouter, answer: string, options: { planningModel?: PlanningModel | null; read?: AnalystAgentDeps["read"]; logged?: boolean } = {}) => analystAgentRunner({
-    financial: { pool, planningModel: options.planningModel ?? null, evidence: createEvidenceFinancialPort, resolveMention },
+  const agentOf = (router: ControlledRouter, answer: string, options: { planningModel?: PlanningModel | null; read?: AnalystAgentDeps["read"]; logged?: boolean; hydrate?: AnalystAgentDeps["financial"]["hydrate"] } = {}) => analystAgentRunner({
+    financial: { pool, planningModel: options.planningModel ?? null, evidence: createEvidenceFinancialPort, resolveMention, ...(options.hydrate ? { hydrate: options.hydrate } : {}) },
     router: async () => router,
     read: options.read ?? noRead,
     compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: answer }), onAnswered }),
@@ -292,6 +292,18 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.equal(asked.length, 1);
     assert.ok(asked[0]!.includes("AAA revenue in fiscal 2023"), "the call's own ask");
     assert.ok(!asked[0]!.includes("Tell me everything"), "not the turn's question");
+  });
+
+  await t.test("a company's filings are fetched once a turn, before its first certified call, and one still loading is named", async () => {
+    const fetchedFor: string[] = [];
+    const hydrate: AnalystAgentDeps["financial"]["hydrate"] = async (companies) => {
+      fetchedFor.push(...companies.map((company) => company.issuer_id));
+      return new Set([A]);
+    };
+    const router = scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }, { toolCalls: [call("certified_financials", REVENUE)] }, { text: "DONE" }]);
+    const done = completed(await run(agentOf(router, OBSERVE_F1, { planningModel: revenueModel(["AAA"]), hydrate }), { ...base, turnId: randomUUID(), userIntent: "AAA revenue" }));
+    assert.deepEqual(fetchedFor, [A]);
+    assert.ok(JSON.stringify((done.message as { blocks: unknown }).blocks).includes("Filings for AAA are still loading; ask again in a minute."));
   });
 
   await t.test("a free-text final reply is rejected, and the turn answers with its certified blocks alone", async () => {
