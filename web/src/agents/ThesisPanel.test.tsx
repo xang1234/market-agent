@@ -271,7 +271,7 @@ test('ThesisPanel opens condition evidence with its assessment snapshot and expl
   try {
     assert.match(harness.document.body.textContent ?? '', /Checked an authoritative numeric fact/i)
     assert.match(harness.document.body.textContent ?? '', /Prompt thesis-assessment-v1/i)
-    await clickButton(harness.document, 'Inspect fact evidence F1')
+    await clickButton(harness.document, 'Inspect fact evidence F · fact 1')
     assert.deepEqual(opened, [{ snapshotId: SNAPSHOT_A, ref: { kind: 'fact', id: FACT_A } }])
   } finally {
     await harness.unmount()
@@ -380,23 +380,25 @@ test('ThesisPanel shows each condition with its two assessments newest first, ea
   history.thesis = { ...history.thesis!, conditions: [...history.thesis!.conditions, products] }
   history.versions = [history.thesis]
   const metric = history.assessments[0]!.results[0]!
-  const assessment = (id: string, at: string, cited: ThesisHistoryResponse['assessments'][number]['results'][number]) => ({
-    ...history.assessments[0]!, assessment_id: id, snapshot_id: id.replace('a', 'b'), assessed_at: at, results: [metric, cited],
+  const stale = { ...metric, status: 'unresolved' as const, method: 'no_evidence' as const, fact_refs: [], reason: 'The latest eligible value is older than the saved maximum age at the assessment cutoff.' }
+  const assessment = (id: string, at: string, cited: ThesisHistoryResponse['assessments'][number]['results'][number], gauged = metric) => ({
+    ...history.assessments[0]!, assessment_id: id, snapshot_id: id.replace('a', 'b'), assessed_at: at, results: [gauged, cited],
   })
-  // Oldest first, as no API promises: the panel orders them itself.
   history.assessments = [
     assessment('a0000000-0000-4000-8000-000000000001', '2026-09-08T01:00:00.000Z', {
       condition_id: CONDITION_B, status: 'supported', reason: 'The cited stored sources support this condition.', claim_refs: [CLAIM_B], fact_refs: [FACT_A], method: 'model',
     }),
     assessment('a0000000-0000-4000-8000-000000000002', '2026-09-09T01:00:00.000Z', {
       condition_id: CONDITION_B, status: 'unresolved', reason: 'Not enough evidence: no stored source covers this condition.', claim_refs: [], fact_refs: [], method: 'no_evidence',
-    }),
+    }, stale),
   ]
+  const labelled = { ...history, ref_labels: { [FACT_A]: 'Revenue FY2026', [CLAIM_B]: 'business.products' } }
   const opened: Array<{ snapshotId: string; ref: { kind: string; id: string } }> = []
-  const harness = await mountPanel({ fetchImpl: async () => json(history), inspector: { openInspection(input) { opened.push(input) }, openBlockInspection() {}, closeInspection() {} } })
+  const harness = await mountPanel({ fetchImpl: async () => json(labelled), inspector: { openInspection(input) { opened.push(input) }, openBlockInspection() {}, closeInspection() {} } })
   try {
     const timelines = [...harness.document.querySelectorAll('[data-condition-id]')]
     assert.deepEqual(timelines.map((timeline) => timeline.getAttribute('data-condition-id')), [CONDITION_A, CONDITION_B])
+    assert.equal(timelines[0]!.querySelector('summary')?.textContent, 'Gross margin remains above the long-term floor.unresolved2 assessments', "a metric's gap keeps its status and the engine's reason")
     const condition = timelines[1]!
     assert.equal(condition.querySelector('summary')?.textContent, 'Data center platforms stay the core product.Not enough evidence2 assessments')
     const entries = [...condition.querySelectorAll('li[data-assessment-id]')].map((entry) => [
@@ -406,9 +408,9 @@ test('ThesisPanel shows each condition with its two assessments newest first, ea
     ])
     assert.deepEqual(entries, [
       ['2026-09-09T01:00:00.000Z', ['Not enough evidence'], []],
-      ['2026-09-08T01:00:00.000Z', ['Source-linked narrative', 'supported'], ['Inspect fact evidence F1', 'Inspect claim evidence C1']],
+      ['2026-09-08T01:00:00.000Z', ['Source-linked narrative', 'supported'], ['Inspect fact evidence F · Revenue FY2026', 'Inspect claim evidence C · business.products']],
     ])
-    await clickButton(harness.document, 'Inspect claim evidence C1')
+    await clickButton(harness.document, 'Inspect claim evidence C · business.products')
     assert.deepEqual(opened, [{ snapshotId: 'b0000000-0000-4000-8000-000000000001', ref: { kind: 'claim', id: CLAIM_B } }])
   } finally {
     await harness.unmount()

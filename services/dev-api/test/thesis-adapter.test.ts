@@ -47,15 +47,18 @@ test('an unconfigured model is a setup message, not a logged failure', async t =
   assert.equal(logged.mock.callCount(), 0);
 });
 
-test('a drafted condition that states a stance is left out of the suggestions', async () => {
-  const drafted = (statement: string) => ({ statement, falsifier: 'Data center revenue falls for two quarters.', horizon: 'Next year' });
-  const adapter = createThesisAdapter(db, async () => ({ async complete() {
-    return { text: JSON.stringify({ conditions: [
-      drafted('Data center revenue keeps growing.'),
-      drafted('The stock is a buy while data center demand holds.'),
-      drafted('Customers buy accelerators in larger clusters.'),
-    ] }) };
-  } }));
-  const { conditions } = await adapter.draft({ userId: USER, agentId: AGENT, body });
-  assert.deepEqual(conditions.map(condition => condition.statement), ['Data center revenue keeps growing.', 'Customers buy accelerators in larger clusters.']);
+test('a drafted condition that states a stance is left out, and a draft of nothing else says so', async t => {
+  t.mock.method(console, 'error', () => {});
+  const drafted = (statement: string, horizon = 'Next year') => ({ statement, falsifier: 'Data center revenue falls for two quarters.', horizon });
+  const draftOf = (conditions: ReturnType<typeof drafted>[]) => createThesisAdapter(db, async () => ({ async complete() { return { text: JSON.stringify({ conditions }) }; } }));
+  const { conditions } = await draftOf([
+    drafted('Data center revenue keeps growing.'),
+    drafted('The stock is a buy while data center demand holds.'),
+    drafted('Gaming revenue recovers.', 'Until the next downgrade'),
+  ]).draft({ userId: USER, agentId: AGENT, body });
+  assert.deepEqual(conditions.map(condition => condition.statement), ['Data center revenue keeps growing.']);
+  await assert.rejects(draftOf([drafted('This is a buy.'), drafted('Rated a strong buy by us.'), drafted('Upgrade to overweight.')]).draft({ userId: USER, agentId: AGENT, body }), {
+    status: 503,
+    message: 'Every suggested condition stated a rating or recommendation, so none is shown. Try again or write your own conditions.',
+  });
 });

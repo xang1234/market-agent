@@ -3,11 +3,11 @@
 // from CONDITIONS), and the agent runs twice. Exits 1 unless the handoff
 // carries the memo's investment thesis section, and after the two runs every
 // condition shows two dated assessments, newest first, each citing F or C refs
-// or saying not enough evidence. Saves what it saw to OUT.
+// or saying not enough evidence. Records each run's model calls from the
+// dev-api log. Saves what it saw to OUT.
 import { createRequire } from 'node:module'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { analyzeThesisHandoff } from '../../../../web/src/analyze/thesisHandoff.ts'
 
 const { ROOT, WEB_URL, LISTING_ID, TICKER, OUT, STORED, CONDITIONS } = process.env
 const { chromium } = createRequire(join(ROOT, 'web/package.json'))('@playwright/test')
@@ -18,8 +18,12 @@ const check = (name, ok, detail) => checks.push({ name, ok: Boolean(ok), ...(det
 const timings = {}
 const agentName = `${TICKER} thesis ${new Date().toISOString().slice(0, 16)}`
 let failure = null
+const LLM_LOG = join(ROOT, '.dev/logs/dev-api.log')
+const logSize = () => (existsSync(LLM_LOG) ? statSync(LLM_LOG).size : 0)
+const llmCallsSince = (from) => (existsSync(LLM_LOG) ? (readFileSync(LLM_LOG).subarray(from).toString().match(/^\[llm\] /gm) ?? []).length : null)
+// Words of 12 characters or more from a block's text segments, never its refs.
+const wordsOf = (blocks) => (blocks ?? []).flatMap((block) => (block.segments ?? []).flatMap((segment) => (segment.type === 'text' && segment.text.trim().length >= 12 ? [segment.text.trim()] : [])))
 
-// Each condition as the history shows it: its summary, then each assessment's date, badges and refs.
 const readHistory = (page) => page.locator('[data-condition-id]').evaluateAll((conditions) => conditions.map((condition) => ({
   condition_id: condition.getAttribute('data-condition-id'),
   summary: condition.querySelector('summary')?.textContent ?? '',
@@ -34,9 +38,11 @@ async function runOnce(page, label) {
   const row = page.locator('li', { has: page.locator('h3', { hasText: agentName }) })
   const response = page.waitForResponse((res) => res.request().method() === 'POST' && /\/v1\/agents\/[^/]+\/runs$/.test(new URL(res.url()).pathname), { timeout: 150_000 })
   const started = Date.now()
+  const logFrom = logSize()
   await row.getByRole('button', { name: 'Run', exact: true }).click()
   const run = await (await response).json()
   timings[`${label}_ms`] = Date.now() - started
+  timings[`${label}_llm_calls`] = llmCallsSince(logFrom)
   check(`${label} completed`, run.status === 'completed', run.error ?? run.status)
   await page.waitForTimeout(1_000)
   const history = await readHistory(page)
@@ -62,16 +68,16 @@ try {
     const memo = await (await memoResponse).json()
     timings.memo_ms = Date.now() - started
     writeFileSync(join(OUT, 'memo.json'), JSON.stringify(memo, null, 2))
-    const expected = analyzeThesisHandoff(memo)?.thesis ?? ''
     await page.getByRole('button', { name: 'Monitor this thesis' }).click({ timeout: 30_000 })
     await page.waitForURL(/\/agents$/, { timeout: 30_000 })
     const handedOff = await page.locator('[name="agent-thesis"]').inputValue()
     await page.screenshot({ path: join(OUT, 'handoff.png'), fullPage: true })
     const section = memo.blocks?.find((block) => block.data_ref?.params?.playbook_section_id === 'investment_thesis')
     check('memo has an investment thesis section', section !== undefined)
-    check('handoff carries the thesis section text', handedOff.length > 0 && handedOff === expected, handedOff.slice(0, 200))
-    const otherSections = (memo.blocks ?? []).filter((block) => block.kind === 'section' && block !== section)
-    check('handoff carries no other section', otherSections.every((block) => !JSON.stringify(block.children ?? []).includes(handedOff.slice(0, 40))))
+    const own = wordsOf(section?.children)
+    check('handoff carries every passage of the thesis section', own.length > 0 && own.every((words) => handedOff.includes(words)), own.filter((words) => !handedOff.includes(words)))
+    const others = (memo.blocks ?? []).filter((block) => block.kind === 'section' && block !== section).flatMap((block) => wordsOf(block.children)).filter((words) => !own.includes(words))
+    check('handoff carries no other section', others.every((words) => !handedOff.includes(words)), others.filter((words) => handedOff.includes(words)))
 
     await page.locator('[name="agent-name"]').fill(agentName)
     await page.getByRole('button', { name: 'Create agent' }).click()

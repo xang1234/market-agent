@@ -62,7 +62,6 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       // The reuse key compares definitions, inputs, and outcomes — never run or snapshot identities.
       const packetHash = hashJsonValue({ metricResults: thesisReuseProjection(metricResults), version: input.thesis.thesis_version_id, packet: evidence, day: deltas.as_of.slice(0, 10), model: model.identity, prompt: THESIS_PROMPT_VERSION });
       const previous = await getLatestThesisAssessment(input.db, input.thesis.thesis_version_id);
-      // The same evidence reuses the last results without a model call, and the run still records its own dated assessment.
       const reused = previous?.input_hash.split('/')[0] === packetHash;
       const evaluation = reused && previous ? previous : await evaluateThesis({
         thesis: input.thesis, evidence: evidence.evidence, as_of: deltas.as_of, llm: model.llm, metric_results: metricResults,
@@ -94,23 +93,19 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       const latest = await getCurrentThesis(tx, input.agent.agent_id);
       if (latest?.thesis_version_id !== input.thesis.thesis_version_id)
         throw new ThesisConflictError('Thesis changed during assessment; run again to assess the new version.');
-      // Recheck under the agent lock: another delivery may have finished while
-      // the model was evaluating. Compared in the database, at its microsecond
-      // precision: through JS Dates an assessment finished later in the cutoff's
-      // millisecond looked equal.
       const previous = await getLatestThesisAssessment(tx, input.thesis.thesis_version_id);
-      const newer = await tx.query<{ input_hash: string }>(
+      // Compared in the database, at its microsecond precision: through JS Dates
+      // an assessment finished later in the cutoff's millisecond looked equal.
+      const finishedDuringThisRun = await tx.query<{ input_hash: string }>(
         'select input_hash from agent_thesis_assessments where thesis_version_id = $1::uuid and assessed_at > $2::timestamptz order by assessed_at desc limit 1',
         [input.thesis.thesis_version_id, deltas.as_of],
       );
-      if (newer.rows[0]?.input_hash.split('/')[0] === analysis.packet_hash) {
+      if (finishedDuringThisRun.rows[0]?.input_hash.split('/')[0] === analysis.packet_hash) {
         await activity(tx, input, 'dismissed', 'No new thesis changes: a run that finished during this one assessed the same evidence.');
         return { findings: 0, assessments: 0, reused: true };
       }
-      if (newer.rows.length > 0)
+      if (finishedDuringThisRun.rows.length > 0)
         throw new ThesisConflictError('A newer assessment finished during this run; run again.');
-      // The latest assessment's evidence is this run's: the run records its own
-      // dated row with those results, over the snapshot that already seals them.
       if (previous?.input_hash.split('/')[0] === analysis.packet_hash) {
         await recordThesisAssessment(tx, {
           thesis_version_id: input.thesis.thesis_version_id, run_id: input.runId, snapshot_id: previous.snapshot_id,
@@ -131,7 +126,6 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       for (const result of analysis.results) {
         if (result.status === 'unresolved' || previous?.results.find(r => r.condition_id === result.condition_id)?.status === result.status)
           continue;
-        // A condition alerts only with evidence sealed into this snapshot; a verified one's certificate stays on the assessment.
         if (![...result.fact_refs, ...result.claim_refs].some(id => sealed.has(id)))
           continue;
         findings.push(await generateThesisFinding(tx, {

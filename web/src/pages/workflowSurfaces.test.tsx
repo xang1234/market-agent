@@ -509,7 +509,6 @@ test('Agents roster shows only what the server sent, and says when it could not 
     })
     await act(async () => undefined)
     assert.equal(rosterText(), 'AgentsActivity · IdleLoad failed: HTTP 503')
-    // The roster and the names its universes are shown by.
     assert.deepEqual(requested.sort(), ['/v1/agents', '/v1/portfolios', '/v1/screener/screens', '/v1/watchlists'])
     await act(async () => root.unmount())
   } finally {

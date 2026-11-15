@@ -12,7 +12,7 @@ export type ThesisAdapter = {
   get(input: {
     userId: string;
     agentId: string;
-  }): Promise<ThesisHistoryResponse>;
+  }): Promise<ThesisHistoryResponse & { ref_labels: Record<string, string> }>;
   save(input: {
     userId: string;
     agentId: string;
@@ -53,7 +53,15 @@ export function createThesisAdapter(db: QueryExecutor, getModel: () => Promise<T
           metrics = result.rows;
         }
       }
-      return { ...history, metrics };
+      const cited = (key: 'fact_refs' | 'claim_refs') => [...new Set(history.assessments.flatMap(assessment => assessment.results.flatMap(result => result[key])))];
+      const { rows: labels } = await db.query<{ id: string; label: string }>(`select f.fact_id::text as id,
+          m.display_name || ' ' || case when f.fiscal_period = 'FY' then 'FY' || f.fiscal_year
+            when f.fiscal_period is not null then f.fiscal_period || ' FY' || f.fiscal_year
+            else coalesce(f.period_end, f.as_of::date)::text end as label
+        from facts f join metrics m on m.metric_id = f.metric_id where f.fact_id = any($1::uuid[])
+       union all
+       select claim_id::text, predicate from claims where claim_id = any($2::uuid[])`, [cited('fact_refs'), cited('claim_refs')]);
+      return { ...history, metrics, ref_labels: Object.fromEntries(labels.map(row => [row.id, row.label])) };
     },
     async save({ userId, agentId, body }) {
       const agent = await ownedAgent(userId, agentId);
@@ -77,9 +85,9 @@ export function createThesisAdapter(db: QueryExecutor, getModel: () => Promise<T
         if (!model)
           throw new DevApiHttpError(503, 'Configure a model in Settings to suggest conditions, or write your own.');
         // Drafted conditions are the model's words saved as the thesis, so none may state a stance (ADR 0005).
-        const conditions = (await draftThesisConditions(model, text)).filter(condition => ![condition.statement, condition.falsifier].some(statesStance));
+        const conditions = (await draftThesisConditions(model, text)).filter(condition => ![condition.statement, condition.falsifier, condition.horizon].some(statesStance));
         if (conditions.length === 0)
-          throw new Error('every drafted condition stated a stance');
+          throw new DevApiHttpError(503, 'Every suggested condition stated a rating or recommendation, so none is shown. Try again or write your own conditions.');
         return { conditions };
       }
       catch (error) {

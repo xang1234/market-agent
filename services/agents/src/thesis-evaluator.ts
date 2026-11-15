@@ -15,8 +15,8 @@ export const THESIS_PROMPT_VERSION = "living-thesis-v2";
 
 // Thinking counts against maxTokens, and claude-sonnet-5-5 spends up to 711 tokens on it unasked.
 const DRAFT_MAX_TOKENS = 4_096;
-// Five results of a status and a few refs, plus the thinking claude-sonnet-5-5 spends unasked.
-const ASSESSMENT_MAX_TOKENS = 4_096;
+// Five results citing up to a packet's 100 claims each is about 2,500 tokens, before thinking.
+const ASSESSMENT_MAX_TOKENS = 6_000;
 
 export type ThesisLlm = {
   complete(input: {
@@ -39,8 +39,7 @@ export type ThesisEvidence = Readonly<{
 
 export const NOT_ENOUGH_EVIDENCE = "Not enough evidence: no stored source covers this condition.";
 
-// An assessment holds no words of the model's: its sources speak through its refs.
-const CITED_REASONS: Readonly<Record<ConditionAssessment["status"], string>> = {
+const FIXED_REASON_BY_STATUS: Readonly<Record<ConditionAssessment["status"], string>> = {
   supported: "The cited stored sources support this condition.",
   challenged: "The cited stored sources challenge this condition.",
   unresolved: "The cited stored sources leave this condition open.",
@@ -133,7 +132,7 @@ export async function draftThesisConditions(
           "Suggest exactly three independent narrative investment-thesis conditions. " +
           "Return JSON as {\"conditions\":[{\"statement\":string,\"falsifier\":string,\"horizon\":string}]}. " +
           "Keep each statement and falsifier under 500 characters and each horizon a short phrase under 120 characters. " +
-          "Do not include IDs or numerical metric conditions.",
+          "Do not include IDs or numerical metric conditions. State no rating, recommendation, or price target.",
       },
       { role: "user", content: normalizedThesis },
     ],
@@ -198,7 +197,7 @@ function parseNarrativeResults(
     return {
       condition_id: row.condition_id,
       status: row.status,
-      reason: CITED_REASONS[row.status],
+      reason: FIXED_REASON_BY_STATUS[row.status],
       claim_refs: [...new Set(cited.flatMap((ref) => ref.claim_refs))],
       fact_refs: [...new Set(cited.flatMap((ref) => ref.fact_refs))],
       method: "model",

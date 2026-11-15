@@ -64,6 +64,7 @@ test('thesis monitoring persists, deduplicates, reassesses changed facts and pro
   assert.equal(history.assessments[0].results[0].status,'supported');
   assert.deepEqual(history.assessments[0].results[0].fact_refs,[fact1]);
   const firstSnapshot = history.assessments[0].snapshot_id;
+  assert.equal((await adapter.get({userId:USER,agentId:agent.agent_id})).ref_labels[fact1],`Gross profit FY${lastFiscalYear}`,'the history names each cited fact by its metric and period');
   const inspected = await loadEvidenceInspection(db,{user_id:USER,snapshot_id:firstSnapshot,ref:{kind:'fact',id:fact1}});
   assert.equal(inspected.ref.id,fact1);
   assert.equal(inspected.title,'$169.1B');
@@ -175,6 +176,7 @@ test('narrative monitoring includes IR and non-IR claims, rejects fabricated cit
   let history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
   assert.equal(history.assessments.length,2);
   assert.deepEqual(history.assessments[0].results[0].claim_refs,[valid.claim.claim_id],'the C id is stored as the claim it stands for');
+  assert.equal((await createThesisAdapter(db).get({userId:USER,agentId:agent.agent_id})).ref_labels[valid.claim.claim_id],'demand.change','the history names each cited claim by its predicate');
   assert.equal(history.assessments[0].model_version,'test:controlled');
   assert.equal(history.assessments[0].results[0].status,'challenged');
   assert.equal((await db.query('select severity from findings where agent_id=$1',[agent.agent_id])).rows[0].severity,'critical','direct relevance plus strong sourced impact must use existing severity policy');

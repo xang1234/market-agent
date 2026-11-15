@@ -46,7 +46,6 @@ function llmResponse(value: unknown, deployment?: { channel: string; model: stri
   };
 }
 
-// The evidence as the dev-api gathers it: the model reads F and C ids, and each id stands for stored rows.
 function evidence(refs: Record<string, { claim_refs?: string[]; fact_refs?: string[] }>): ThesisEvidence {
   return {
     packet: {
@@ -316,7 +315,7 @@ test("evaluateThesis names the model and the cause when a reply is unusable", as
   const input = { thesis: thesis([condition(BULL_ID)]), evidence: EVIDENCE, metric_results: [], as_of: AS_OF };
   await assert.rejects(
     evaluateThesis({ ...input, llm: { async complete() { return { text: '{"results":[{"condition_id":"', truncated: true, deployment }; } } }),
-    new ThesisValidationError("assessment response from anthropic/claude-sonnet-5-5 was cut off at the 4096-token limit"),
+    new ThesisValidationError("assessment response from anthropic/claude-sonnet-5-5 was cut off at the 6000-token limit"),
   );
   await assert.rejects(
     evaluateThesis({ ...input, llm: { async complete() { return { text: "Here is my assessment.", deployment }; } } }),

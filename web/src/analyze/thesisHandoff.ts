@@ -55,7 +55,6 @@ export function readThesisHandoff(state: unknown): ThesisHandoff | null {
   return analyze ? { kind: 'analyze', ...analyze } : null
 }
 
-// The memo's investment thesis section as it reads: each block's words, with the value or quote each ref shows.
 function thesisSectionText(run: AnalyzeRunDetail): string | null {
   const section = run.blocks.find((block) => isRecord(block) && block.kind === 'section' && isRecord(block.data_ref)
     && isRecord(block.data_ref.params) && block.data_ref.params.playbook_section_id === 'investment_thesis')
@@ -64,12 +63,13 @@ function thesisSectionText(run: AnalyzeRunDetail): string | null {
   return paragraphs.length > 0 ? paragraphs.join('\n\n') : null
 }
 
+// A ref reads as the value or quote it shows; one with neither is left out, with the space it leaves.
 function paragraphText(block: unknown): string {
   if (!isRecord(block) || !Array.isArray(block.segments)) return ''
   return block.segments.map((segment) => {
     const text = isRecord(segment) ? (segment.type === 'text' ? segment.text : segment.format) : null
     return typeof text === 'string' ? text : ''
-  }).join('').trim()
+  }).join('').replace(/ {2,}/g, ' ').trim()
 }
 
 function memoText(run: AnalyzeRunDetail): string {

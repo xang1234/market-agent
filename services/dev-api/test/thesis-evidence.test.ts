@@ -128,17 +128,18 @@ test("a run's evidence holds certified F ids and 10-K claim C ids, each standing
   await db.query(`insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1, 'issuer', $2, 'subject')`, [claim!.claim_id, IDS.issuerA]);
   await db.query(`insert into claim_evidence (claim_id, document_id, locator, confidence) values ($1, $2, $3, 1)`, [claim!.claim_id, tenK, JSON.stringify({ item: "1", start: 1, end: 5 })]);
 
-  const packet = await loadThesisPacket(pool, {
+  const run = {
     thesis: {
       ...thesisVersion(),
-      subject_ref: { kind: "issuer", id: IDS.issuerA },
+      subject_ref: { kind: "issuer" as const, id: IDS.issuerA },
       conditions: [{ condition_id: "60000000-0000-4000-8000-000000000003", statement: "Data center accelerators stay the core product.", falsifier: "The 10-K stops naming accelerators.", horizon: "Next 10-K" }],
     },
     userId: IDS.owner,
     asOf: new Date().toISOString(),
     runId: randomUUID(),
     financial: { pool, evidence: createEvidenceFinancialPort },
-  });
+  };
+  const packet = await loadThesisPacket(pool, run);
 
   const { packet: shown, refs } = packet.evidence;
   const figures = shown.figures as ReadonlyArray<{ id: string; metric: string; value: string }>;
@@ -155,4 +156,5 @@ test("a run's evidence holds certified F ids and 10-K claim C ids, each standing
   const modelView = JSON.stringify(shown);
   for (const stored of [revenue, grossProfit, claim!.claim_id]) assert.equal(modelView.includes(stored), false, "the model reads F and C ids, never stored ids");
   assert.equal("cutoff" in shown, false, "the packet is the same from run to run");
+  await assert.rejects(loadThesisPacket(pool, run), /Certified figures were not computed \(existing\)/, "figures that are not published fail the run instead of reading as none on file");
 });

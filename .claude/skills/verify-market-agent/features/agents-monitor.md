@@ -19,7 +19,7 @@ Symbol page, Analyze, Investment memo, Generate memo (or Open), Monitor this the
 
 ## Pass
 
-- The thesis field on the Agents page equals the memo's investment thesis section as it reads, the value or quote of each ref included, and holds no other section.
+- The thesis field on the Agents page holds every text passage of the memo's investment thesis section and none of another section's.
 - After the first run, each condition shows one assessment citing F or C refs, or reading "Not enough evidence".
 - After the second, each shows two dated assessments, newest first.
 - `report.json` passes, and `assessed.png` and `history.png` show every condition open.
@@ -33,4 +33,4 @@ Symbol page, Analyze, Investment memo, Generate memo (or Open), Monitor this the
 
 ## Evidence
 
-`.dev/verify/agents-<TICKER>-<stamp>/`: `report.json` (checks and timings), `memo.json`, `handoff.png`, `drafted.png`, `assessed.png`, `history.png`, `final.png`, and `page.txt`.
+`.dev/verify/agents-<TICKER>-<stamp>/`: `report.json` (checks, timings, and each run's model calls from `.dev/logs/dev-api.log`), `memo.json`, `handoff.png`, `drafted.png`, `assessed.png`, `history.png`, `final.png`, and `page.txt`.

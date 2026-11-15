@@ -11,7 +11,7 @@ import { certifiedFinancials } from '../../chat/src/financial-runtime.ts';
 import { LATEST } from '../../chat/src/scope-figures.ts';
 import { createRuntimeAuthority } from '../../financial-core/src/index.ts';
 import type { SavedRuleDeps } from '../../financial-engine/src/saved-rule.ts';
-import { loadLocalRuntimeEvidence, type LocalRuntimeClaimEvidence } from '../../evidence/src/local-runtime-evidence.ts';
+import { issuerLabels, loadLocalRuntimeEvidence, type LocalRuntimeClaimEvidence } from '../../evidence/src/local-runtime-evidence.ts';
 import { buildClaimBackedSealInput, buildFactBackedSealInput, toSealFactRow, type ClaimSealDocument } from '../../snapshot/src/seal-input.ts';
 import { sealSnapshotInTransaction, snapshotTransactionClient } from '../../snapshot/src/snapshot-sealer.ts';
 import { mergeSealInputs } from '../../analyze/src/seal-input-merge.ts';
@@ -54,7 +54,6 @@ export async function loadThesisPacket(db: QueryExecutor, input: {
 }): Promise<ThesisPacket> {
   const subject = input.thesis.subject_ref;
   const narrative = input.thesis.conditions.some(condition => !condition.metric);
-  // The analyst agent's claims read picks the latest 10-K's business and risk claims; the stored-claims read then returns them first.
   const filings = narrative ? await runRegisteredAnalystTool(db, 'get_claims', { subject_refs: [subject] }, { as_of: input.asOf, user_id: input.userId }) : null;
   const evidence = await loadLocalRuntimeEvidence(db, {
     subject_refs: [subject], user_id: input.userId,
@@ -97,11 +96,6 @@ export async function loadThesisPacket(db: QueryExecutor, input: {
   return { claims, documents, facts: rows, evidence: analyst };
 }
 
-/**
- * The packet chat's analyst agent answers from, for the thesis company: its
- * certified figures (F ids) and its claims (C ids). The model reads only the
- * ids; each stands for its claim, or for the facts its figure was bound to.
- */
 async function analystEvidence(
   db: QueryExecutor,
   input: { thesis: ThesisVersion; userId: string; asOf: string; runId: string; financial: SavedRuleDeps },
@@ -109,34 +103,34 @@ async function analystEvidence(
   filings: Awaited<ReturnType<typeof runRegisteredAnalystTool>>,
 ): Promise<ThesisEvidence> {
   const issuer = input.thesis.subject_ref.id.toLowerCase();
-  const label = await issuerLabel(db, issuer);
+  const [{ label }] = await issuerLabels(db, [issuer], input.asOf);
   const figures = await certifiedFigures(input, issuer, label);
-  const factsOf = await figureFacts(db, figures?.figures.flatMap(figure => figure.result_id ? [figure.result_id] : []) ?? []);
-  const cited = figures && { ...figures, figures: figures.figures.filter(figure => figure.gap === undefined && factsOf.has(figure.result_id ?? '')) };
-  const packet = mergePackets({
-    engine: cited ? [cited] : [],
+  const factsOf = await figureFacts(db, figures.figures.flatMap(figure => figure.result_id ? [figure.result_id] : []));
+  const cited = { ...figures, figures: figures.figures.filter(figure => figure.gap === undefined && factsOf.has(figure.result_id ?? '')) };
+  const tenKReadStates = 'claims' in filings ? { ...filings, claims: [] } : filings;
+  const merged = mergePackets({
+    engine: cited.figures.length ? [cited] : [],
     route: buildEvidencePacket({ factBlocks: [], cutoff: input.asOf, claims: { claims } }),
-    // Its claims come through the route, the read the snapshot seals; it adds what the 10-K left unread.
-    analyst: ['claims' in filings ? { ...filings, claims: [] } : filings],
+    analyst: [tenKReadStates],
     figuresAskedFor: [label],
-    notes: cited?.figures.length ? [] : [NO_FIGURES],
+    notes: cited.figures.length ? [] : [NO_FIGURES],
     labels: new Map([[issuer, label]]),
     cutoff: input.asOf,
   });
+  const packet = { ...merged, claims: merged.claims.filter(claim => UUID.test(claim.claim_id)) };
   const refs: Record<string, ThesisRef> = Object.fromEntries([
     ...packet.figures.map(figure => [figure.id, { claim_refs: [], fact_refs: factsOf.get(figure.result_id!)! }] as const),
-    ...packet.claims.flatMap(claim => UUID.test(claim.claim_id) ? [[claim.id, { claim_refs: [claim.claim_id], fact_refs: [] }] as const] : []),
+    ...packet.claims.map(claim => [claim.id, { claim_refs: [claim.claim_id], fact_refs: [] }] as const),
   ]);
-  // The run's cutoff is passed to the model beside the packet, so the packet, and the reuse key hashed over it, stays the same from run to run.
-  const { cutoff: _cutoff, ...shown } = packetForModel(packet);
-  return { packet: shown as JsonObject, refs };
+  const { cutoff: _cutoff, ...sameEveryRun } = packetForModel(packet);
+  return { packet: sameEveryRun as JsonObject, refs };
 }
 
 async function certifiedFigures(
   input: { thesis: ThesisVersion; userId: string; asOf: string; runId: string; financial: SavedRuleDeps },
   issuer: string,
   label: string,
-): Promise<EvidencePacket | null> {
+): Promise<EvidencePacket> {
   const outcome = await certifiedFinancials({ ...input.financial, planningModel: null, clock: () => new Date(input.asOf) }, {
     context: { threadId: input.runId, runId: input.runId, turnId: 'thesis', userId: input.userId, userIntent: FIGURES_ASK, bundleId: ANALYST_AGENT_BUNDLE_ID, emit: QUIET },
     subjects: [{ mention: label, resolution: { status: 'resolved', subject_ref: { kind: 'issuer', id: issuer }, label } }],
@@ -154,10 +148,14 @@ async function certifiedFigures(
     requestKey: `thesis:${input.runId}:figures`,
     persistParent: async () => {},
   });
-  return outcome.status === 'published' ? outcome.packet() : null;
+  // A company with nothing on file still publishes, with gap figures, so any other outcome is a fault the run fails on.
+  if (outcome.status !== 'published')
+    throw new Error(`Certified figures were not computed (${outcome.status}${'reason' in outcome ? `: ${outcome.reason}` : ''}).`);
+  return outcome.packet();
 }
 
-// ponytail: one dependency level, which every income statement figure has (a margin reads two reported lines); deeper computations add a walk.
+// ponytail: one dependency level, which every income statement figure has (a margin reads two reported lines).
+// A figure with a computed input is left out rather than cited on part of its facts; a walk would keep it.
 async function figureFacts(db: QueryExecutor, resultIds: ReadonlyArray<string>): Promise<Map<string, string[]>> {
   if (!resultIds.length) return new Map();
   const { rows } = await db.query<{ result_id: string; fact_ids: string[] }>(
@@ -166,22 +164,17 @@ async function figureFacts(db: QueryExecutor, resultIds: ReadonlyArray<string>):
        join financial_run_inputs i on i.run_id = r.run_id and i.binding_status = 'bound' and i.fact_id is not null
         and (i.input_slot = r.node_id or r.dependencies ? i.input_slot)
       where r.result_id = any($1::uuid[])
+        and not exists (
+          select 1 from jsonb_array_elements_text(r.dependencies) dependency(slot)
+           where not exists (select 1 from financial_run_inputs bound
+                              where bound.run_id = r.run_id and bound.input_slot = dependency.slot
+                                and bound.binding_status = 'bound' and bound.fact_id is not null))
       group by r.result_id`,
     [resultIds],
   );
   return new Map(rows.map(row => [row.result_id, row.fact_ids]));
 }
 
-// The label chat's agent gives a company: its active ticker, else its legal name.
-async function issuerLabel(db: QueryExecutor, issuer: string): Promise<string> {
-  const { rows } = await db.query<{ label: string }>(
-    `select coalesce((select l.ticker from listings l join instruments n on n.instrument_id = l.instrument_id
-                       where n.issuer_id = i.issuer_id order by (l.active_to is null) desc, l.ticker limit 1), i.legal_name) as label
-       from issuers i where i.issuer_id = $1::uuid`,
-    [issuer],
-  );
-  return rows[0]?.label ?? `issuer:${issuer.slice(0, 8)}`;
-}
 /**
  * Loads facts a verified condition cited that the packet's own bounded query
  * did not include: current (not superseded or invalidated) and visible to the
