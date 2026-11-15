@@ -14,6 +14,7 @@ import {
   ThesisConflictError,
   ThesisNotFoundError,
   ThesisValidationError,
+  type ConditionAssessment,
   type ThesisAssessment,
   type ThesisVersion,
 } from "./thesis-types.ts";
@@ -176,20 +177,32 @@ export async function loadThesisHistory(
   };
 }
 
-export async function getLatestThesisAssessment(
+/** A condition's latest result that was checked against the stored sources, and the assessment that holds it. */
+export type LastCheckedResult = Pick<ThesisAssessment, "input_hash" | "snapshot_id" | "model_version"> & {
+  result: ConditionAssessment;
+};
+
+/** Each condition's last checked result, by condition id. A reply that could not be checked is never a condition's baseline. */
+export async function getLastCheckedResults(
   db: QueryExecutor,
   versionId: string,
-): Promise<ThesisAssessment | null> {
+): Promise<Map<string, LastCheckedResult>> {
   assertUuid(versionId, "thesis_version_id");
-  const { rows } = await db.query<ThesisAssessmentDbRow>(
-    `select ${ASSESSMENT_COLUMNS}
-       from agent_thesis_assessments
-      where thesis_version_id = $1::uuid
-      order by assessed_at desc, assessment_id desc
-      limit 1`,
+  // ponytail: reads every assessment of the version, about 9k rows a year for an hourly agent; bound it by assessed_at if run time shows it.
+  const { rows } = await db.query<Omit<LastCheckedResult, "result"> & { result: unknown }>(
+    `select distinct on (entry.result->>'condition_id')
+            entry.result, a.input_hash, a.snapshot_id::text as snapshot_id, a.model_version
+       from agent_thesis_assessments a
+      cross join lateral jsonb_array_elements(a.results) as entry(result)
+      where a.thesis_version_id = $1::uuid
+        and entry.result->>'method' <> 'unchecked_reply'
+      order by entry.result->>'condition_id', a.assessed_at desc, a.assessment_id desc`,
     [versionId],
   );
-  return rows[0] === undefined ? null : thesisAssessmentFromDb(rows[0]);
+  return new Map(rows.map((row) => {
+    const [result] = parseConditionAssessments([jsonValue(row.result, "result")]);
+    return [result.condition_id, { result, input_hash: row.input_hash, snapshot_id: row.snapshot_id, model_version: row.model_version }];
+  }));
 }
 
 export async function recordThesisAssessment(

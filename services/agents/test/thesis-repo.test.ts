@@ -3,7 +3,7 @@ import test from "node:test";
 import type { QueryResult } from "pg";
 
 import {
-  getLatestThesisAssessment,
+  getLastCheckedResults,
   getCurrentThesis,
   loadThesisHistory,
   recordThesisAssessment,
@@ -177,10 +177,6 @@ test(
       client.release();
     }
     assert.equal(duplicate.assessment_id, assessment.assessment_id);
-    assert.deepEqual(
-      await getLatestThesisAssessment(pool as unknown as QueryExecutor, version2.thesis_version_id),
-      assessment,
-    );
 
     const history = await loadThesisHistory(pool as unknown as QueryExecutor, {
       agent_id: AGENT_ID,
@@ -191,12 +187,23 @@ test(
     assert.equal(history.assessments.length, 1);
     assert.equal(history.assessments[0]?.assessment_id, assessment.assessment_id);
 
-    const newer = await recordThesisAssessment(pool, {
+    await recordThesisAssessment(pool, {
       thesis_version_id: version2.thesis_version_id, run_id: RUN_ID, snapshot_id: SNAPSHOT_ID,
-      input_hash: 'packet-2', results: RESULTS, model_version: null, prompt_version: 'living-thesis-v1',
+      input_hash: 'packet-2', results: [{ ...RESULTS[0], status: 'unresolved', reason: 'The reply could not be checked.', claim_refs: [], method: 'unchecked_reply' }],
+      model_version: null, prompt_version: 'living-thesis-v2',
     });
-    assert.equal((await getLatestThesisAssessment(pool, version2.thesis_version_id))?.assessment_id, newer.assessment_id);
-    assert.equal(await getLatestThesisAssessment(pool, version1.thesis_version_id), null);
+    assert.deepEqual(
+      await getLastCheckedResults(pool, version2.thesis_version_id),
+      new Map([[CONDITION_ID, { result: RESULTS[0], input_hash: 'packet-1', snapshot_id: SNAPSHOT_ID, model_version: 'primary:model-42' }]]),
+      'a newer unchecked reply leaves the earlier checked result as the baseline',
+    );
+    const challenged: ConditionAssessment = { ...RESULTS[0], status: 'challenged', reason: 'The cited stored sources challenge this condition.' };
+    await recordThesisAssessment(pool, {
+      thesis_version_id: version2.thesis_version_id, run_id: RUN_ID, snapshot_id: SNAPSHOT_ID,
+      input_hash: 'packet-3', results: [challenged], model_version: null, prompt_version: 'living-thesis-v2',
+    });
+    assert.deepEqual((await getLastCheckedResults(pool, version2.thesis_version_id)).get(CONDITION_ID)?.result, challenged);
+    assert.deepEqual(await getLastCheckedResults(pool, version1.thesis_version_id), new Map());
     await assert.rejects(
       loadThesisHistory(pool as unknown as QueryExecutor, { agent_id: AGENT_ID, user_id: OTHER_USER_ID }),
       ThesisNotFoundError,

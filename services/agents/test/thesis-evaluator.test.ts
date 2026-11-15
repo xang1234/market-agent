@@ -93,7 +93,7 @@ test("evaluateThesis lets evidence support and challenge opposing narrative cond
       }),
     ]),
     evidence: EVIDENCE,
-    metric_results: [],
+    known_results: [],
     as_of: AS_OF,
     llm: guardedLlm,
   });
@@ -113,7 +113,7 @@ test("a condition backed by a business claim stores its C id, and one no entry b
   const result = await evaluateThesis({
     thesis: thesis([products, uncovered]),
     evidence: EVIDENCE,
-    metric_results: [],
+    known_results: [],
     as_of: AS_OF,
     llm: llmResponse({ results: [
       { condition_id: BULL_ID, status: "supported", refs: ["C1"] },
@@ -130,7 +130,7 @@ test("an assessment keeps none of the model's words, a stance included", async (
   const { results } = await evaluateThesis({
     thesis: thesis([condition(BULL_ID)]),
     evidence: EVIDENCE,
-    metric_results: [],
+    known_results: [],
     as_of: AS_OF,
     llm: llmResponse({ results: [{ condition_id: BULL_ID, status: "supported", refs: ["F1"], reason: "This is a buy with a raised price target of $200." }] }),
   });
@@ -143,7 +143,7 @@ test("evaluateThesis assesses every narrative condition as not enough evidence w
   const result = await evaluateThesis({
     thesis: thesis([condition(BULL_ID)]),
     evidence: NO_EVIDENCE,
-    metric_results: [],
+    known_results: [],
     as_of: AS_OF,
     llm: unreachable,
   });
@@ -166,7 +166,7 @@ test("evaluateThesis requires a model when narrative evidence is available", asy
     evaluateThesis({
       thesis: thesis([condition(BULL_ID)]),
       evidence: EVIDENCE,
-      metric_results: [],
+      known_results: [],
       as_of: AS_OF,
       llm: null,
     }),
@@ -189,7 +189,7 @@ test("evaluateThesis rejects a reply that drops or repeats a condition", async (
       evaluateThesis({
         thesis: thesis([condition(BULL_ID)]),
         evidence: EVIDENCE,
-        metric_results: [],
+        known_results: [],
         as_of: AS_OF,
         llm: llmResponse(response),
       }),
@@ -212,7 +212,7 @@ test("a condition whose status the reply cannot back is not enough evidence, say
     const { results } = await evaluateThesis({
       thesis: thesis([condition(BULL_ID), condition(BEAR_ID)]),
       evidence: EVIDENCE,
-      metric_results: [],
+      known_results: [],
       as_of: AS_OF,
       llm: llmResponse({ results: [{ condition_id: BULL_ID, ...row }, { condition_id: BEAR_ID, status: "challenged", refs: ["C1"] }] }),
     });
@@ -235,7 +235,7 @@ test("a cited figure stores its certified result beside the facts it was compute
       F1: { fact_refs: [REVENUE_FACT], figure_refs: [revenue] },
       F3: { fact_refs: [FACT_ID, REVENUE_FACT], figure_refs: [margin] },
     }),
-    metric_results: [],
+    known_results: [],
     as_of: AS_OF,
     llm: llmResponse({ results: [{ condition_id: BULL_ID, status: "supported", refs: ["F3", "F1"] }] }),
   });
@@ -258,13 +258,13 @@ test("evaluateThesis takes each metric condition's result from the engine verbat
     condition_id: METRIC_ID, status: "supported", reason: "The verified calculation at the assessment cutoff meets the saved threshold.",
     claim_refs: [], fact_refs: [FACT_ID], method: "metric",
   };
-  const result = await evaluateThesis({ thesis: thesis([metric, condition(BULL_ID)]), evidence: NO_EVIDENCE, as_of: AS_OF, llm: null, metric_results: [engine] });
+  const result = await evaluateThesis({ thesis: thesis([metric, condition(BULL_ID)]), evidence: NO_EVIDENCE, as_of: AS_OF, llm: null, known_results: [engine] });
   assert.deepEqual(result.results, [
     engine,
     { condition_id: BULL_ID, status: "unresolved", reason: NOT_ENOUGH_EVIDENCE, claim_refs: [], fact_refs: [], method: "no_evidence" },
   ]);
   await assert.rejects(
-    evaluateThesis({ thesis: thesis([metric]), evidence: NO_EVIDENCE, as_of: AS_OF, llm: null, metric_results: [] }),
+    evaluateThesis({ thesis: thesis([metric]), evidence: NO_EVIDENCE, as_of: AS_OF, llm: null, known_results: [] }),
     new ThesisValidationError(`assessment is missing condition ${METRIC_ID}`),
   );
 });
@@ -280,7 +280,7 @@ test('evaluateThesis rejects an invalid stored thesis before calling a model', a
   const llm: ThesisLlm = { async complete() { throw new Error('invalid stored thesis reached the model'); } };
   await assert.rejects(evaluateThesis({
     thesis: { ...thesis([condition(BULL_ID)]), thesis: 'x'.repeat(4001) },
-    evidence: EVIDENCE, metric_results: [], as_of: AS_OF, llm,
+    evidence: EVIDENCE, known_results: [], as_of: AS_OF, llm,
   }), ThesisValidationError);
 });
 
@@ -360,7 +360,7 @@ test("draftThesisConditions names the model and the cause when a reply is unusab
 
 test("evaluateThesis names the model and the cause when a reply is unusable", async () => {
   const deployment = { channel: "anthropic", model: "claude-sonnet-5-5" };
-  const input = { thesis: thesis([condition(BULL_ID)]), evidence: EVIDENCE, metric_results: [], as_of: AS_OF };
+  const input = { thesis: thesis([condition(BULL_ID)]), evidence: EVIDENCE, known_results: [], as_of: AS_OF };
   await assert.rejects(
     evaluateThesis({ ...input, llm: { async complete() { return { text: '{"results":[{"condition_id":"', truncated: true, deployment }; } } }),
     new ThesisValidationError("assessment response from anthropic/claude-sonnet-5-5 was cut off at the 6000-token limit"),
@@ -380,6 +380,6 @@ test('relative narrative horizons retain the saved version date across later ass
     return {text:JSON.stringify({results:[{condition_id:BULL_ID,status:'unresolved',refs:['C1']}]})};
   }};
   for (const as_of of ['2026-09-06T00:00:00.000Z',AS_OF]) {
-    await evaluateThesis({thesis:saved,evidence:EVIDENCE,metric_results:[],as_of,llm});
+    await evaluateThesis({thesis:saved,evidence:EVIDENCE,known_results:[],as_of,llm});
   }
 });

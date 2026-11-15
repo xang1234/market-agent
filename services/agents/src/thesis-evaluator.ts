@@ -56,12 +56,13 @@ export async function evaluateThesis(input: {
   evidence: ThesisEvidence;
   as_of: string;
   llm: ThesisLlm | null;
-  metric_results: ReadonlyArray<ConditionAssessment>;
+  /** At most one per condition, the engine's for each metric condition and any result kept from an earlier run. The model assesses only the other narrative conditions. */
+  known_results: ReadonlyArray<ConditionAssessment>;
 }): Promise<{ results: ConditionAssessment[]; model_version: string | null }> {
   const thesisText = parseThesisText(input.thesis.thesis);
   const conditions = parseThesisConditions(input.thesis.conditions);
-  const metricResults = new Map(input.metric_results.map(result => [result.condition_id, result]));
-  const narrativeConditions = conditions.filter(condition => condition.metric === undefined);
+  const knownResults = new Map(input.known_results.map(result => [result.condition_id, result]));
+  const narrativeConditions = conditions.filter(condition => condition.metric === undefined && !knownResults.has(condition.condition_id));
 
   let modelVersion: string | null = null;
   const narrativeResults = new Map<string, ConditionAssessment>();
@@ -114,7 +115,7 @@ export async function evaluateThesis(input: {
 
   return {
     results: conditions.map((condition) => {
-      const result = metricResults.get(condition.condition_id) ?? narrativeResults.get(condition.condition_id);
+      const result = knownResults.get(condition.condition_id) ?? narrativeResults.get(condition.condition_id);
       if (result === undefined) {
         throw new ThesisValidationError(`assessment is missing condition ${condition.condition_id}`);
       }
