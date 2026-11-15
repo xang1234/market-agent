@@ -262,6 +262,15 @@ const meteredPlanner = (model: PlanningModel, beforeModelCall: () => void): Plan
   return model(request);
 };
 
+test("an ask for the statement alone, when the question names its lines, is the planner's, keyed by the lines and not its wording", () => {
+  const ask = (question: string, lines: string[]) => certifiedAsk({ subject_refs: [{ kind: "issuer", id: A }], metrics: ["income_statement"], question } as never, KNOWN, lines);
+  const [one, two, other, whole] = [ask("AAA revenue", ["revenue"]), ask("What was AAA's revenue?", ["revenue"]), ask("AAA revenue", ["gross_margin"]), ask("AAA revenue", [])];
+  assert.ok("fingerprint" in one && "fingerprint" in two && "fingerprint" in other && "fingerprint" in whole);
+  assert.deepEqual([one.choice.kind, whole.choice.kind], ["planner", "kept_figures"]);
+  assert.equal(one.fingerprint, two.fingerprint, "a retry's rewording resumes the same ask");
+  assert.notEqual(one.fingerprint, other.fingerprint);
+});
+
 test("a planner ask says its period, and two that differ only by their year are two asks", () => {
   const ask = (fiscal_year: number) => certifiedAsk({ subject_refs: [{ kind: "issuer", id: A }], question: "AAA revenue", period: { kind: "fiscal_year", fiscal_year } } as never, KNOWN);
   const [y2024, y2025] = [ask(2024), ask(2025)];
@@ -1235,6 +1244,21 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     completed(await run(agentOf(partial, OBSERVE_F1), { ...base, turnId: randomUUID(), userIntent: "Compare AAA and BBB revenue" }, undefined, oneOfTwo));
     const both = JSON.parse(partial.sent[0]!.messages[1]!.content as string) as { companies: Array<{ subject_ref: { id: string } }> };
     assert.deepEqual(both.companies.map((company) => company.subject_ref.id), [A, B], "a written ticker the reading left out is kept");
+    const narrowing = scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }, { text: "DONE" }]);
+    const followUp = analystAgentRunner({
+      financial: {
+        pool, evidence: createEvidenceFinancialPort, resolveMention,
+        priorSubjects: async () => [await resolveMention("AAA"), await resolveMention("BBB")] as Array<Extract<Awaited<ReturnType<typeof resolveMention>>, { status: "resolved" }>>,
+      },
+      router: async () => narrowing,
+      read: noRead,
+      compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: OBSERVE_F1 }), onAnswered }),
+      asOf: () => new Date().toISOString(),
+      logToolCalls: persist.logToolCalls,
+    });
+    completed(await run(followUp, { ...base, turnId: randomUUID(), userIntent: "Just AAA now, not BBB" }, undefined, oneOfTwo));
+    const kept = JSON.parse(narrowing.sent[0]!.messages[1]!.content as string) as { companies: Array<{ subject_ref: { id: string } }> };
+    assert.deepEqual(kept.companies.map((company) => company.subject_ref.id), [A], "a follow-up's reading may leave a written company out");
   });
 
   await t.test("an income statement ask whose question names its lines is planned from its own words, and a line may be asked alone", async () => {
@@ -1253,6 +1277,9 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     const line = scripted([{ toolCalls: [call("certified_financials", { ...INCOME_2023, metrics: ["revenue"] })] }, { text: "DONE" }]);
     assert.deepEqual(resultsOf(completed(await run(agentOf(line, OBSERVE_F1, { planningModel: planner }), { ...base, turnId: randomUUID(), userIntent: "AAA revenue in fiscal 2023" }))), [1]);
     assert.equal(asked.length, 1, "a line asked alone needs no planner");
+    const mixed = scripted([{ toolCalls: [call("certified_financials", { ...INCOME_2023, metrics: ["income_statement", "free_cash_flow"] })] }, { text: "DONE" }]);
+    completed(await run(agentOf(mixed, OBSERVE_F1, { planningModel: planner }), { ...base, turnId: randomUUID(), userIntent: "AAA revenue and free cash flow in fiscal 2023" }, undefined, readingOf(FY2023_REVENUE)));
+    assert.equal(asked.length, 1, "the statement beside another metric is planned with no model, as base plans it");
   });
 
   await t.test("a step whose reads find no 10-K for every company asked about ends the reading of a question asking no figure", async () => {
@@ -1278,6 +1305,9 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     const rivals = scripted([{ toolCalls: [call("get_claims", { ...PROFILE, predicates: ["business.competition"] })] }, { toolCalls: [call("get_peer_set", PROFILE)] }, { text: "DONE" }]);
     completed(await run(agentOf(rivals, "```assertions\n[]\n```", { read: reads }), { ...base, turnId: randomUUID(), userIntent: "Who does AAA compete with?" }, undefined, readingOf(NO_ASKS)));
     assert.equal(rivals.sent.length, 3, "a competition read finding no 10-K still reads the peers");
+    const refusedToo = scripted([{ toolCalls: [call("get_company_profile", PROFILE), call("not_a_tool", {})] }, { toolCalls: [call("get_analyst_consensus", PROFILE)] }, { text: "DONE" }]);
+    completed(await run(agentOf(refusedToo, "```assertions\n[]\n```", { read: reads }), { ...base, turnId: randomUUID(), userIntent: "What does AAA sell?" }, undefined, readingOf(NO_ASKS)));
+    assert.equal(refusedToo.sent.length, 3, "a step with a refused call is not settled by the reads it ran");
   });
 
   await t.test("the reading model's own words never reach the saved answer", async () => {

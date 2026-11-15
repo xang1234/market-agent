@@ -303,7 +303,7 @@ export async function composeAnalystBlocksWithLlm(input: {
 
 function withoutInferences(report: AssertionReport, list: ReadonlyArray<unknown>): AssertionReport {
   const inferences = new Set(list.flatMap((item, index) => (isRecord(item) && item.kind === "analyst_inference" ? [index] : [])));
-  if (inferences.size === 0) return report;
+  if (report.status !== "checked" || inferences.size === 0) return report;
   return {
     ...report,
     accepted: report.accepted.filter((entry) => !inferences.has(entry.index)),

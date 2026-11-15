@@ -127,9 +127,8 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       return pending.then((loading) => (loading ? [issuer] : []));
     })).then((lists) => lists.flat());
 
-    const namesLines = (read?.income_items.length ?? 0) > 0;
     const certify = async (args: JsonObject): Promise<ToolLoopOutput> => {
-      const ask = certifiedAsk(args, known, namesLines);
+      const ask = certifiedAsk(args, known, read?.income_items ?? []);
       if ("invalid" in ask) return invalid("certified_financials", ask.invalid);
       const prior = asked.get(ask.fingerprint);
       if (prior) return prior;
@@ -194,14 +193,17 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       return { content: JSON.stringify(readSummary(result)), ...(isFailure(result) ? { isError: true } : {}) };
     };
 
+    let stepCalls = 0;
     let stepFoundNoTenK: boolean[] = [];
     const settled = () => read !== null && read.metrics.length === 0 && read.income_items.length === 0 && read.asks.size === 0 && read.period.kind === "none" &&
-      stepFoundNoTenK.length > 0 && stepFoundNoTenK.every(Boolean) && named.every((subject) => withoutTenK.has(issuerOf(subject)));
+      stepCalls > 0 && stepFoundNoTenK.length === stepCalls && stepFoundNoTenK.every(Boolean) && named.every((subject) => withoutTenK.has(issuerOf(subject)));
     const reader: ControlledRouter = {
       complete: async (request, controls) => {
         if (settled()) throw new ReadingSettled();
         stepFoundNoTenK = [];
-        return router.complete(request, controls);
+        const reply = await router.complete(request, controls);
+        stepCalls = reply.toolCalls?.length ?? 0;
+        return reply;
       },
     };
 
@@ -454,7 +456,7 @@ const QUARTERS = new Set(["Q1", "Q2", "Q3", "Q4"]);
 
 const ASKABLE_FIGURES: Readonly<Record<string, unknown>> = { ...ENGINE_READS_BY_CATALOG_METRIC, ...INCOME_LINE_READS };
 
-export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, RequestedSubject>, statementByPlanner = false): CertifiedAsk | { invalid: string } {
+export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, RequestedSubject>, incomeLines: ReadonlyArray<string> = []): CertifiedAsk | { invalid: string } {
   const refs = args.subject_refs;
   if (!Array.isArray(refs) || refs.length === 0) return { invalid: "subject_refs names the companies, as the prompt lists them" };
   const subjects = refs.map((ref) => (isRecord(ref) && ref.kind === "issuer" && typeof ref.id === "string" ? ref.id.toLowerCase() : null));
@@ -468,11 +470,11 @@ export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, Reques
   const period = readPeriod(args.period);
   if (period === null) return { invalid: "period is latest, a fiscal_year with its year, or a fiscal_quarter with its quarter" };
   const companies = [...new Set(subjects as string[])];
-  const keptMetrics = metrics === undefined || (statementByPlanner && (metrics as string[]).includes("income_statement")) ? null : [...new Set(metrics as string[])].sort();
+  const lines = Array.isArray(metrics) && metrics.length === 1 && metrics[0] === "income_statement" && incomeLines.length > 0 ? [...new Set(incomeLines)].sort() : null;
+  const keptMetrics = metrics === undefined || lines ? null : [...new Set(metrics as string[])].sort();
   const choice: PlanChoice = keptMetrics ? { kind: "kept_figures", metrics: keptMetrics, period } : { kind: "planner" };
-  const fingerprint = createHash("sha256")
-    .update(JSON.stringify({ companies: [...companies].sort(), period, ...(keptMetrics ? { metrics: keptMetrics } : { question: question.toLowerCase().replace(/\s+/g, " ") }) }))
-    .digest("hex").slice(0, 16);
+  const asked = keptMetrics ? { metrics: keptMetrics } : lines ? { metrics: ["income_statement"], lines } : { question: question.toLowerCase().replace(/\s+/g, " ") };
+  const fingerprint = createHash("sha256").update(JSON.stringify({ companies: [...companies].sort(), period, ...asked })).digest("hex").slice(0, 16);
   return { subjects: companies, choice, question: keptMetrics ? question : plannerQuestion(question, period), fingerprint };
 }
 

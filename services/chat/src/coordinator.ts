@@ -1114,7 +1114,7 @@ export async function resolveTurnSubjects(
   if (!change) return unreadChange(mentioned, prior);
   if (change.kind === "drop") return dropped(prior, change, preResolve);
   const read = await resolveNames(change.kind === "compare" ? change.add : change.names, preResolve);
-  const names = byReading ? withWritten(read, mentioned) : read;
+  const names = byReading && prior.length === 0 ? withWritten(read, mentioned) : read;
   if (change.kind === "compare" || names.named.length === 0) return listed(prior, names);
   if (change.kind === "unclear" && prior.length >= 2) {
     const added = newNames(names, prior);
@@ -1221,8 +1221,10 @@ async function dropped(
 // The reading's names, and each company the message writes that the reading left out.
 function withWritten(names: Names, written: Names): Names {
   const keys = new Set(names.resolved.map(companyKey));
-  const more = written.resolved.filter((subject) => !keys.has(companyKey(subject)));
-  return { ...names, resolved: [...names.resolved, ...more], named: [...names.named, ...more] };
+  const inputs = new Set(names.ambiguous.map((resolution) => resolution.input_text.toLowerCase()));
+  const resolved = written.resolved.filter((subject) => !keys.has(companyKey(subject)));
+  const ambiguous = written.ambiguous.filter((resolution) => !inputs.has(resolution.input_text.toLowerCase()));
+  return { ...names, resolved: [...names.resolved, ...resolved], ambiguous: [...names.ambiguous, ...ambiguous], named: [...names.named, ...resolved, ...ambiguous] };
 }
 
 async function resolveNames(names: ReadonlyArray<string>, preResolve: ChatSubjectPreResolver): Promise<Names> {
