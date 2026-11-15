@@ -176,7 +176,7 @@ test('narrative monitoring includes IR and non-IR claims, rejects fabricated cit
   let history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
   assert.equal(history.assessments.length,2);
   assert.deepEqual(history.assessments[0].results[0].claim_refs,[valid.claim.claim_id],'the C id is stored as the claim it stands for');
-  assert.equal((await createThesisAdapter(db).get({userId:USER,agentId:agent.agent_id})).ref_labels[valid.claim.claim_id],'demand.change','the history names each cited claim by its predicate');
+  assert.equal((await createThesisAdapter(db).get({userId:USER,agentId:agent.agent_id})).ref_labels[valid.claim.claim_id],'demand.change · Current customers canceled their orders.','the history names each cited claim by its predicate and words');
   assert.equal(history.assessments[0].model_version,'test:controlled');
   assert.equal(history.assessments[0].results[0].status,'challenged');
   assert.equal((await db.query('select severity from findings where agent_id=$1',[agent.agent_id])).rows[0].severity,'critical','direct relevance plus strong sourced impact must use existing severity policy');

@@ -33,4 +33,4 @@ Symbol page, Analyze, Investment memo, Generate memo (or Open), Monitor this the
 
 ## Evidence
 
-`.dev/verify/agents-<TICKER>-<stamp>/`: `report.json` (checks, timings, and each run's model calls from `.dev/logs/dev-api.log`), `memo.json`, `handoff.png`, `drafted.png`, `assessed.png`, `history.png`, `final.png`, and `page.txt`.
+`.dev/verify/agents-<TICKER>-<stamp>/`: `report.json` (checks, timings, and each run's model calls from `.dev/logs/dev-api.log`, failed attempts included, as the memo's count does), `memo.json`, `handoff.png`, `drafted.png`, `assessed.png`, `history.png`, `final.png`, and `page.txt`.

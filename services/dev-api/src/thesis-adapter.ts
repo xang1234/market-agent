@@ -55,12 +55,13 @@ export function createThesisAdapter(db: QueryExecutor, getModel: () => Promise<T
       }
       const cited = (key: 'fact_refs' | 'claim_refs') => [...new Set(history.assessments.flatMap(assessment => assessment.results.flatMap(result => result[key])))];
       const { rows: labels } = await db.query<{ id: string; label: string }>(`select f.fact_id::text as id,
-          m.display_name || ' ' || case when f.fiscal_period = 'FY' then 'FY' || f.fiscal_year
-            when f.fiscal_period is not null then f.fiscal_period || ' FY' || f.fiscal_year
-            else coalesce(f.period_end, f.as_of::date)::text end as label
+          concat_ws(' ', m.display_name, case when f.fiscal_year is null then coalesce(f.period_end, f.as_of::date)::text
+            when f.fiscal_period = 'FY' then 'FY' || f.fiscal_year
+            else concat_ws(' ', f.fiscal_period, 'FY' || f.fiscal_year) end) as label
         from facts f join metrics m on m.metric_id = f.metric_id where f.fact_id = any($1::uuid[])
        union all
-       select claim_id::text, predicate from claims where claim_id = any($2::uuid[])`, [cited('fact_refs'), cited('claim_refs')]);
+       select claim_id::text, predicate || ' · ' || case when length(text_canonical) > 48 then left(text_canonical, 47) || '…' else text_canonical end
+         from claims where claim_id = any($2::uuid[])`, [cited('fact_refs'), cited('claim_refs')]);
       return { ...history, metrics, ref_labels: Object.fromEntries(labels.map(row => [row.id, row.label])) };
     },
     async save({ userId, agentId, body }) {

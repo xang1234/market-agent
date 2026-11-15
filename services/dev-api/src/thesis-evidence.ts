@@ -40,7 +40,6 @@ export type ThesisPacket = {
   evidence: ThesisEvidence;
 };
 const NO_EVIDENCE: ThesisEvidence = { packet: {}, refs: {} };
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const QUIET = (() => undefined) as unknown as ChatTurnRunContext['emit'];
 const FIGURES_ASK = "The company's latest fiscal year income statement, as certified figures.";
 const NO_FIGURES = 'No certified figures were computed for this run.';
@@ -103,12 +102,14 @@ async function analystEvidence(
   filings: Awaited<ReturnType<typeof runRegisteredAnalystTool>>,
 ): Promise<ThesisEvidence> {
   const issuer = input.thesis.subject_ref.id.toLowerCase();
-  const [{ label }] = await issuerLabels(db, [issuer], input.asOf);
+  const label = (await issuerLabels(db, [issuer], input.asOf))[0]?.label;
+  if (label === undefined)
+    throw new Error(`The thesis company ${issuer} is not on file.`);
   const figures = await certifiedFigures(input, issuer, label);
   const factsOf = await figureFacts(db, figures.figures.flatMap(figure => figure.result_id ? [figure.result_id] : []));
   const cited = { ...figures, figures: figures.figures.filter(figure => figure.gap === undefined && factsOf.has(figure.result_id ?? '')) };
   const tenKReadStates = 'claims' in filings ? { ...filings, claims: [] } : filings;
-  const merged = mergePackets({
+  const packet = mergePackets({
     engine: cited.figures.length ? [cited] : [],
     route: buildEvidencePacket({ factBlocks: [], cutoff: input.asOf, claims: { claims } }),
     analyst: [tenKReadStates],
@@ -117,7 +118,6 @@ async function analystEvidence(
     labels: new Map([[issuer, label]]),
     cutoff: input.asOf,
   });
-  const packet = { ...merged, claims: merged.claims.filter(claim => UUID.test(claim.claim_id)) };
   const refs: Record<string, ThesisRef> = Object.fromEntries([
     ...packet.figures.map(figure => [figure.id, { claim_refs: [], fact_refs: factsOf.get(figure.result_id!)! }] as const),
     ...packet.claims.map(claim => [claim.id, { claim_refs: [claim.claim_id], fact_refs: [] }] as const),
