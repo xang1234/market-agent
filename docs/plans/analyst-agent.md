@@ -544,7 +544,7 @@ Each live lane runs in its own worktree at the PR head. Drive through the contro
 - [ ] In `thesis-evaluator.ts`, make `evaluateThesis` assess each condition over those F and C ids. Store the refs with each row in `agent_thesis_assessments`. A condition with no sourced evidence is assessed as not enough evidence.
 - [ ] In `thesisHandoff.ts`, make `analyzeThesisHandoff` carry the memo's `investment_thesis` section text, not the prompt dump.
 - [ ] In `AgentsPage.tsx` and `ThesisHistory.tsx`, show each condition's assessments over time, newest first, with the cited refs.
-- [ ] In `AgentsPage.tsx`, show a watchlist universe by name. AA7 added a `watchlist` universe mode, and today the page labels it "Universe: agent: undefined". The create form offers the watchlist mode too.
+- [ ] In `AgentsPage.tsx`, show a watchlist universe by name. AA7 added a `watchlist` universe mode, and today the page labels it "Universe: agent: undefined". The create form offers the watchlist mode too. Remove the `weekly` cadence option the form offers (`AgentsPage.tsx:416`), which the backend rejects (pre-existing on trunk).
 - [ ] Add `$V agents [TICKER]` with `agents-flow.mjs`. It drives Analyze to the handoff, creates the agent, runs it, and writes `report.json` and screenshots.
 
 **You see.**
