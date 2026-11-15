@@ -158,7 +158,7 @@ function resultEntries(result: AnalystToolResult): Array<readonly [string, Unnum
     case "get_analyst_consensus":
       return result.values.map((value) => [`consensus:${value.capture_id}`, {
         kind: "consensus",
-        text: `attributed consensus: ${value.provider} ${value.label}${value.fiscal_period ? ` (${value.fiscal_period})` : ""}, captured ${result.captured_on}: ${value.raw_value}`,
+        text: `attributed consensus: ${value.provider} ${value.label}${value.fiscal_period ? ` (${value.fiscal_period})` : ""}, captured ${result.captured_on}: ${value.raw_value}${CONSENSUS_UNIT_TEXT[value.unit]}`,
         predicate: `consensus.${value.field_key}`,
         company: result.company,
         captured_on: result.captured_on,
@@ -166,9 +166,9 @@ function resultEntries(result: AnalystToolResult): Array<readonly [string, Unnum
         source_id: value.source_id,
       }] as const);
     case "get_peer_set":
-      return result.peers.map((peer, index) => [`peer:${result.company}:${peer.issuer_id}`, {
+      return result.peers.map((peer) => [`peer:${result.company}:${peer.issuer_id}`, {
         kind: "peer",
-        text: `${peer.label} is ${result.company}'s peer ${index + 1} of ${result.peers.length} in its industry (${result.industry}), by market cap`,
+        text: `${peer.label} shares ${result.company}'s industry (${result.industry})`,
         predicate: "peer_set.industry",
         company: result.company,
         peer_issuer_id: peer.issuer_id,
@@ -512,6 +512,13 @@ function packetClaims(
     claims_truncated: evidence?.truncated === true,
   };
 }
+
+const CONSENSUS_UNIT_TEXT: Readonly<Record<string, string>> = {
+  usd: " USD",
+  usd_per_share: " USD per share",
+  percent: "",
+  recommendation_1_to_5: "",
+};
 
 const STANCE: Readonly<Record<string, PacketClaim["stance"]>> = {
   positive: "supporting",

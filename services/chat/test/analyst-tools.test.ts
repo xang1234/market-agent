@@ -38,8 +38,8 @@ const PROFILE = [
 const COMPETITION = filingClaim("c0000000-0000-4000-8000-000000000003", "business.competition", "Our competitors include Advanced Micro Devices.");
 
 const CONSENSUS = [
-  { capture_id: "e0000000-0000-4000-8000-000000000001", source_id: "00000000-0000-4000-a000-000000000015", provider: "finviz_dev_consensus", captured_on: "2026-11-14", field_key: "eps_next_y", raw_value: "8.49", fiscal_period: null },
-  { capture_id: "e0000000-0000-4000-8000-000000000002", source_id: "00000000-0000-4000-a000-000000000015", provider: "finviz_dev_consensus", captured_on: "2026-11-14", field_key: "target_price", raw_value: "290.50", fiscal_period: null },
+  { capture_id: "e0000000-0000-4000-8000-000000000001", source_id: "00000000-0000-4000-a000-000000000015", provider: "finviz_dev_consensus", captured_on: "2026-11-14", field_key: "eps_next_y", raw_value: "8.49", unit: "usd_per_share", fiscal_period: null },
+  { capture_id: "e0000000-0000-4000-8000-000000000002", source_id: "00000000-0000-4000-a000-000000000015", provider: "finviz_dev_consensus", captured_on: "2026-11-14", field_key: "target_price", raw_value: "290.50", unit: "usd", fiscal_period: null },
 ];
 
 const LABELS: Record<string, string> = { [NVDA]: "NVDA", [AMD]: "AMD", [MU]: "MU", [WDC]: "WDC", [AAPL]: "AAPL" };
@@ -86,8 +86,8 @@ test("a competitor read of AMD returns NVDA's competition claim, labelled as NVD
 test("consensus is each value labelled an attributed expectation with its capture date", async () => {
   const result = await runAnalystTool(stackDb(), "get_analyst_consensus", { issuer_ids: [AAPL], as_of: AS_OF });
   assert.deepEqual(analystPacketEntries([result]).map((entry) => [entry.id, entry.company, entry.text]), [
-    ["C1", "AAPL", "attributed consensus: Finviz EPS next year, captured 2026-11-14: 8.49"],
-    ["C2", "AAPL", "attributed consensus: Finviz target price, captured 2026-11-14: 290.50"],
+    ["C1", "AAPL", "attributed consensus: Finviz EPS next year, captured 2026-11-14: 8.49 USD per share"],
+    ["C2", "AAPL", "attributed consensus: Finviz target price, captured 2026-11-14: 290.50 USD"],
   ]);
 });
 
@@ -101,7 +101,7 @@ test("each tool says when no stored source exists, as a typed status", async () 
 
 test("a peer set is the resolver's same-industry peers, named", async () => {
   const result = await runAnalystTool(stackDb(), "get_peer_set", { issuer_ids: [MU], as_of: AS_OF });
-  assert.deepEqual(analystPacketEntries([result]).map((entry) => entry.text), ["WDC is MU's peer 1 of 1 in its industry (Semiconductors), by market cap"]);
+  assert.deepEqual(analystPacketEntries([result]).map((entry) => entry.text), ["WDC shares MU's industry (Semiconductors)"]);
 });
 
 test("a registry call reads its subject's issuer at the turn's cutoff, and refuses arguments it cannot read", async () => {
@@ -119,6 +119,10 @@ test("a registry call reads its subject's issuer at the turn's cutoff, and refus
     { tool: "get_peer_set", status: "invalid_arguments", reason: "peers are chosen by industry only" },
   );
   assert.equal((await runRegisteredAnalystTool(db, "get_peer_set", { subject_ref: { kind: "issuer", id: MU }, criteria: "industry", n: 5 }, { as_of: AS_OF })).status, "ok");
+  assert.deepEqual(
+    await runRegisteredAnalystTool(db, "get_peer_set", { subject_ref: { kind: "issuer", id: MU }, criteria: "industry", n: 50 }, { as_of: AS_OF }),
+    { tool: "get_peer_set", status: "invalid_arguments", reason: "n is a whole number from 1 to 20" },
+  );
   assert.deepEqual(
     await runRegisteredAnalystTool(db, "get_claims", { subject_refs: [{ kind: "issuer", id: NVDA }, { kind: "issuer", id: KO }] }, { as_of: AS_OF }),
     { tool: "get_claims", status: "no_subject", reason: "a subject_ref names no stored issuer" },

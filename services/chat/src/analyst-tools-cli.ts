@@ -2,6 +2,7 @@
 // entries one per line, then its status and each run's wall-clock:
 //   node --experimental-strip-types --env-file=.env.dev services/chat/src/analyst-tools-cli.ts \
 //     <tool> <TICKER> [--predicate <p> ...] [--role subject|competitor] [--as-of YYYY-MM-DD] [--n N] [--runs N]
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { Pool } from "pg";
 
@@ -101,7 +102,7 @@ async function main(): Promise<void> {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

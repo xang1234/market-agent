@@ -82,4 +82,6 @@ test("filing claims come from each filer's latest 10-K, in document order, and a
   assert.deepEqual((await read(NVDA, "subject", ["risk.factor"], "2000-01-01T23:59:59Z")).claims, [], "nothing was on file in 2000");
   const capped = await loadLatestFilingClaims(db, { issuer_ids: [NVDA], role: "subject", predicates: ["business.products"], as_of: "2026-11-15T00:00:00Z", limit: 1 });
   assert.deepEqual([capped.claims.length, capped.truncated], [1, true]);
+  const perFiler = await loadLatestFilingClaims(db, { issuer_ids: [AMD], role: "competitor", predicates: ["business.competition"], as_of: "2026-11-15T00:00:00Z", limit: 1 });
+  assert.deepEqual([perFiler.claims.map((claim) => claim.filer_label), perFiler.truncated], [["Micron Technology Inc", "NVDA"], false], "the limit is each filer's");
 });

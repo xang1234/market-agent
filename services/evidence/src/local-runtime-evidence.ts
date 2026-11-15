@@ -446,6 +446,7 @@ export type FilingClaimLookup = {
   predicates: ReadonlyArray<string>;
   as_of: string;
   user_id?: string | null;
+  // Claims per filer.
   limit?: number;
 };
 
@@ -517,13 +518,21 @@ export async function loadLatestFilingClaims(
             ${issuerLabelSql("i")} as filer_label,
             m.provider_doc_id as accession,
             m.title as document_title,
-            count(*) over () as matched
-       from matched m
+            m.matched
+       from (
+         select m.*,
+                count(*) over (partition by m.filer_issuer_id) as matched,
+                row_number() over (
+                  partition by m.filer_issuer_id
+                  order by array_position($3::text[], m.predicate),
+                           (select min((ce.locator->>'start')::int) from claim_evidence ce where ce.claim_id = m.claim_id and ce.locator->>'start' ~ '^[0-9]{1,9}$') nulls last,
+                           m.claim_id
+                ) as position
+           from matched m
+       ) m
        join issuers i on i.issuer_id = m.filer_issuer_id
-      order by filer_label, m.filer_issuer_id, array_position($3::text[], m.predicate),
-               (select min((ce.locator->>'start')::int) from claim_evidence ce where ce.claim_id = m.claim_id and ce.locator->>'start' ~ '^[0-9]{1,9}$') nulls last,
-               m.claim_id
-      limit $6::int`,
+      where m.position <= $6::int
+      order by filer_label, m.filer_issuer_id, m.position`,
     [issuerIds, input.role, input.predicates, input.as_of, userIdOrNull(input.user_id), input.limit ?? 50, TEN_K_PREDICATE_PATTERNS],
   );
   const claims = rows.map(({ matched: _matched, published_at, effective_time, ...claim }) => Object.freeze({
@@ -531,7 +540,8 @@ export async function loadLatestFilingClaims(
     published_at: published_at === null ? null : isoString(published_at),
     effective_time: effective_time === null ? null : isoString(effective_time),
   }));
-  return { claims, truncated: Number(rows[0]?.matched ?? 0) > rows.length };
+  const shown = Map.groupBy(rows, (row) => row.filer_issuer_id);
+  return { claims, truncated: [...shown.values()].some((filed) => Number(filed[0]!.matched) > filed.length) };
 }
 
 const TEN_K_PREDICATE_PATTERNS = ["business.%", "risk.%"];

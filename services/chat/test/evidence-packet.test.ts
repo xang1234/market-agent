@@ -357,7 +357,7 @@ test("a recorded trace carries the packet its model was sent", () => {
 });
 
 
-test("analyst tool results get the same C ids on every run, and a claim two results return is one entry", () => {
+test("analyst tool results are numbered C1 on in the order read, and a claim two results return is one entry", () => {
   const claim = (claim_id: string, predicate: string, text: string) => ({
     claim_id, document_id: "d-10k", source_id: "s-10k", text_canonical: text, predicate, polarity: "neutral",
     effective_time: null, published_at: null, filer_issuer_id: NVDA.issuer_id, filer_label: "NVDA", accession: null, document_title: "10-K",
@@ -369,7 +369,6 @@ test("analyst tool results get the same C ids on every run, and a claim two resu
   assert.deepEqual(ids(), [
     ["C1", "claim", "We make GPUs."],
     ["C2", "claim", "AMD competes with us."],
-    ["C3", "peer", "AMD is NVDA's peer 1 of 1 in its industry (Semiconductors), by market cap"],
+    ["C3", "peer", "AMD shares NVDA's industry (Semiconductors)"],
   ]);
-  assert.deepEqual(ids(), ids());
 });

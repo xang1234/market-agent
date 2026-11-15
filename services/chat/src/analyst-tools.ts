@@ -24,6 +24,7 @@ export type ConsensusValue = {
   field_key: string;
   label: string;
   raw_value: string;
+  unit: "usd_per_share" | "percent" | "usd" | "recommendation_1_to_5";
   fiscal_period: string | null;
 };
 
@@ -75,15 +76,15 @@ const EXECUTORS: Readonly<Record<AnalystToolName, Executor>> = {
       `with cutoff as (select ($2::timestamptz at time zone 'UTC')::date as day),
             newest as (
               select max(captured_on) as day from consensus_captures, cutoff
-               where issuer_id = $1::uuid and captured_on <= cutoff.day
+               where issuer_id = $1::uuid and captured_on <= cutoff.day and retrieved_at <= $2::timestamptz
             )
        select cc.capture_id::text as capture_id, cc.source_id::text as source_id, s.provider,
-              cc.captured_on::text as captured_on, cc.field_key, cc.raw_value, cc.fiscal_period
+              cc.captured_on::text as captured_on, cc.field_key, cc.raw_value, cc.unit, cc.fiscal_period
          from consensus_captures cc
          join sources s on s.source_id = cc.source_id
          join newest on cc.captured_on = newest.day
          cross join cutoff
-        where cc.issuer_id = $1::uuid and cc.value is not null and newest.day >= cutoff.day - $4::int
+        where cc.issuer_id = $1::uuid and cc.value is not null and cc.retrieved_at <= $2::timestamptz and newest.day >= cutoff.day - $4::int
         order by array_position($3::text[], cc.field_key), cc.source_id`,
       [issuerId, input.as_of, Object.keys(CONSENSUS_FIELDS), CONSENSUS_MAX_AGE_DAYS],
     );
@@ -146,6 +147,10 @@ export async function runRegisteredAnalystTool(
   if (args.criteria !== undefined && args.criteria !== "industry") {
     return { tool: name, status: "invalid_arguments", reason: "peers are chosen by industry only" };
   }
+  const n = args.n;
+  if (n !== undefined && !(typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 20)) {
+    return { tool: name, status: "invalid_arguments", reason: "n is a whole number from 1 to 20" };
+  }
   const issuerIds = await issuersOfSubjects(db, refs);
   if (issuerIds.includes(null)) return { tool: name, status: "no_subject", reason: "a subject_ref names no stored issuer" };
   return runAnalystTool(db, name, {
@@ -154,7 +159,7 @@ export async function runRegisteredAnalystTool(
     user_id: turn.user_id ?? null,
     ...(predicates === undefined ? {} : { predicates: predicates as string[] }),
     ...(role === undefined ? {} : { role: role as AnalystToolInput["role"] }),
-    ...(typeof args.n === "number" && Number.isInteger(args.n) && args.n >= 1 && args.n <= 20 ? { peer_limit: args.n } : {}),
+    ...(n === undefined ? {} : { peer_limit: n as number }),
   });
 }
 

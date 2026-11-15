@@ -44,11 +44,12 @@ test("consensus is the newest capture within 7 days, and an empty newest capture
   };
   assert.deepEqual(await shown("2026-11-13T12:00:00Z"), [
     "2026-11-12",
-    { source_id: FINVIZ, provider: "Finviz", field_key: "eps_next_y", label: "EPS next year", raw_value: "8.49", fiscal_period: null },
-    { source_id: FINVIZ, provider: "Finviz", field_key: "target_price", label: "target price", raw_value: "290.50", fiscal_period: null },
+    { source_id: FINVIZ, provider: "Finviz", field_key: "eps_next_y", label: "EPS next year", raw_value: "8.49", unit: "usd_per_share", fiscal_period: null },
+    { source_id: FINVIZ, provider: "Finviz", field_key: "target_price", label: "target price", raw_value: "290.50", unit: "usd", fiscal_period: null },
   ], "the Nov 12 capture, its empty recommendation left out");
   assert.deepEqual(await shown("2026-11-14T12:00:00Z"), "no_consensus", "Nov 14 showed every cell empty: Nov 12 does not stand in");
   assert.deepEqual((await shown("2026-11-11T12:00:00Z"))[0], "2026-11-09", "the Nov 9 capture is within 7 days of Nov 11");
+  assert.deepEqual((await shown("2026-11-12T08:00:00Z"))[0], "2026-11-09", "Nov 12's capture was retrieved at 09:00, after an 08:00 cutoff");
   assert.deepEqual(await read("2026-11-17T12:00:00Z"), { tool: "get_analyst_consensus", status: "no_consensus" }, "Nov 14 is the newest, and still empty");
   await db.query(`delete from consensus_captures where captured_on = '2026-11-14'`);
   assert.deepEqual(await read("2026-11-20T12:00:00Z"), { tool: "get_analyst_consensus", status: "no_consensus" }, "Nov 12 is 8 days old on Nov 20");
