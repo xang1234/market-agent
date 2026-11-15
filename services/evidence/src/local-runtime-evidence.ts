@@ -522,8 +522,7 @@ export async function loadLatestFilingClaims(db: RowQueryExecutor, input: Filing
   const items = [...new Set(input.predicates.flatMap(tenKItemOf))];
   if (issuerIds.length === 0 || items.length === 0) return { claims: [], truncated: false, reads: [], no_filing: [] };
   const user = userIdOrNull(input.user_id);
-  const { reads, filersCut } = await loadFilingItemReads(db, { issuerIds, role: input.role, items, asOf: input.as_of, user });
-  const filed = new Set(reads.map((read) => read.filer_issuer_id));
+  const { reads, filed, filersCut } = await loadFilingItemReads(db, { issuerIds, role: input.role, items, asOf: input.as_of, user });
   const unfiled = input.role === "subject" ? issuerIds.filter((id) => !filed.has(id)) : [];
   const no_filing = unfiled.length === 0 ? [] : await issuerLabels(db, unfiled, input.as_of);
   const chosen = reads.filter((read) => read.state === "read" || read.state === "cut");
@@ -611,8 +610,8 @@ type FilingRow = { document_id: string; source_id: string; title: string | null;
 async function loadFilingItemReads(
   db: RowQueryExecutor,
   input: { issuerIds: ReadonlyArray<string>; role: FilingClaimLookup["role"]; items: ReadonlyArray<TenKItemKey>; asOf: string; user: string | null },
-): Promise<{ reads: FilingItemRead[]; filersCut: boolean }> {
-  const { rows } = await db.query<{ filer_issuer_id: string; filer_label: string; item: TenKItemKey; state: TenKItemState; item_state: { prompts?: number; of?: number } | null; filing: FilingRow; newer: (FilingRow & { state: string }) | null; filers: number }>(
+): Promise<{ reads: FilingItemRead[]; filed: Set<string>; filersCut: boolean }> {
+  const { rows } = await db.query<{ filer_issuer_id: string; filer_label: string; item: TenKItemKey; state: TenKItemState; item_state: { prompts?: number; of?: number } | null; filing: FilingRow; newer: (FilingRow & { state: string }) | null; filed: string[] }>(
     `with filers as (
        select f.filer_issuer_id from unnest($1::uuid[]) as f(filer_issuer_id) where $2::text = 'subject'
        union
@@ -631,21 +630,27 @@ async function loadFilingItemReads(
        select f.filer_issuer_id, it.item, d.document_id, d.published_at, d.created_at, d.read_state -> it.item as item_state,
               case
                 when d.read_state -> it.item ->> 'state' in ('read', 'cut')
-                 and not exists (select 1 from claims c where c.document_id = d.document_id and c.predicate like it.predicates_like and c.created_at <= $4::timestamptz)
+                 and not exists (
+                       select 1 from claims c join sources s on s.source_id = c.reported_by_source_id
+                        where c.document_id = d.document_id and c.predicate like it.predicates_like
+                          and ${citableClaimSql("$5::uuid", "$4::timestamptz")})
                  and (d.created_at > $4::timestamptz
-                      or exists (select 1 from claims c where c.document_id = d.document_id and c.predicate like it.predicates_like))
+                      or exists (
+                       select 1 from claims c join sources s on s.source_id = c.reported_by_source_id
+                        where c.document_id = d.document_id and c.predicate like it.predicates_like
+                          and ${citableClaimSql("$5::uuid", "null")}))
                 then 'not_yet_extracted'
                 else coalesce(d.read_state -> it.item ->> 'state', 'not_sectioned')
               end as state,
               jsonb_build_object('document_id', d.document_id, 'source_id', d.source_id, 'title', d.title,
-                                 'accession', d.provider_doc_id, 'published_at', d.published_at, 'link', s.canonical_url) as filing
+                                 'accession', d.provider_doc_id, 'published_at', d.published_at, 'link', fs.canonical_url) as filing
          from filers f
          cross join unnest($3::text[], $7::text[]) as it(item, predicates_like)
          join mentions m on m.subject_kind = 'issuer' and m.subject_id = f.filer_issuer_id and m.prominence = 'headline'
          join documents d on d.document_id = m.document_id and d.kind = 'filing' and d.title = '10-K'
-         join sources s on s.source_id = d.source_id
+         join sources fs on fs.source_id = d.source_id
         where d.deleted_at is null and d.parse_status <> 'superseded'
-          and (s.user_id is null or s.user_id = $5::uuid)
+          and (fs.user_id is null or fs.user_id = $5::uuid)
           and coalesce(d.published_at, d.created_at) <= $4::timestamptz
      ),
      ranked as (
@@ -669,7 +674,8 @@ async function loadFilingItemReads(
      numbered as (
        select l.*, dense_rank() over (order by l.filer_label, l.filer_issuer_id) as filer_rank from labelled l
      )
-     select n.*, (select max(filer_rank) from numbered)::int as filers
+     -- Whether a filer has a 10-K is known before the limit cuts it.
+     select n.*, (select array_agg(distinct filer_issuer_id) from numbered) as filed
        from numbered n
       where n.filer_rank <= $6::int
       order by n.filer_rank, array_position($3::text[], n.item)`,
@@ -684,7 +690,8 @@ async function loadFilingItemReads(
     filing: tenKFiling(row.filing),
     newer_unread: row.newer === null ? null : { ...tenKFiling(row.newer), state: row.newer.state as Exclude<TenKItemState, "read" | "cut"> },
   }));
-  return { reads, filersCut: (rows[0]?.filers ?? 0) > FILERS_PER_READ };
+  const filed = new Set(rows[0]?.filed ?? []);
+  return { reads, filed, filersCut: filed.size > FILERS_PER_READ };
 }
 
 export async function issuerLabels(db: RowQueryExecutor, issuerIds: ReadonlyArray<string>, asOf: string): Promise<Array<{ issuer_id: string; label: string }>> {

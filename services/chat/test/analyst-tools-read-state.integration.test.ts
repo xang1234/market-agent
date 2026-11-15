@@ -137,3 +137,56 @@ test("a 10-K filed before the cutoff but read after it is not yet extracted at t
   const risks = await runAnalystTool(db, "get_claims", { issuer_ids: [issuer(0)], as_of: "2026-09-01T00:00:00Z", predicates: ["risk.factor"] });
   assert.equal(risks.status, "incomplete_read", "nor do NVDA's risk factors read as none");
 });
+
+test("a subject left out by the filer limit is a truncated read, never an issuer with no 10-K", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-analyst-filer-cap");
+  const db = await connectedClient(t, databaseUrl);
+  await db.query(`insert into sources (source_id, provider, kind, canonical_url, trust_tier, license_class, retrieved_at) values ($1, 'sec_edgar', 'filing', 'https://www.sec.gov/x', 'primary', 'public', now())`, [SOURCE]);
+  for (let k = 0; k < 21; k += 1) {
+    await db.query(`insert into issuers (issuer_id, legal_name) values ($1, $2)`, [issuer(k), `Issuer ${String(k).padStart(2, "0")}`]);
+    await seedFiling(db, k, "new", "2026-02-01", { "1": null, "1A": "read" });
+  }
+  const read = async (n: number) => {
+    const result = await runAnalystTool(db, "get_claims", { issuer_ids: Array.from({ length: n }, (_, k) => issuer(k)), as_of: AS_OF, predicates: ["risk.factor"] });
+    assert.ok("reads" in result);
+    return [result.status, result.reads.length, result.truncated, result.no_filing, analystPacketEntries([result]).filter((entry) => entry.kind === "no_filing").length];
+  };
+  assert.deepEqual(await read(20), ["no_claims", 20, false, [], 0], "twenty filers fit the limit and were read in full");
+  assert.deepEqual(await read(21), ["incomplete_read", 20, true, [], 0], "the twenty-first has a 10-K the limit left unread");
+});
+
+test("another user's private claim does not change whether a 10-K item was extracted by the cutoff", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-analyst-private-state");
+  const db = await connectedClient(t, databaseUrl);
+  const owner = "e6666666-6666-4666-8666-666666666666";
+  const privateSource = "e7777777-7777-4777-8777-777777777777";
+  await db.query(`insert into users (user_id, email) values ($1, 'owner@example.invalid')`, [owner]);
+  await db.query(
+    `insert into sources (source_id, provider, kind, canonical_url, trust_tier, license_class, retrieved_at, user_id)
+     values ($1, 'sec_edgar', 'filing', 'https://www.sec.gov/x', 'primary', 'public', now(), null),
+            ($2, 'upload', 'reference_data', null, 'secondary', 'private', now(), $3)`,
+    [SOURCE, privateSource, owner],
+  );
+  await db.query(`insert into issuers (issuer_id, legal_name) values ($1, 'Qualcomm Inc')`, [issuer(0)]);
+  await seedFiling(db, 0, "new", "2026-02-01", { "1": "read", "1A": null });
+  await seedClaim(db, 0, "new", "2027-01-01", "1");
+  const profile = async (user_id: string | null) => {
+    const result = await runAnalystTool(db, "get_company_profile", { issuer_ids: [issuer(0)], as_of: AS_OF, user_id });
+    return [result.status, "reads" in result && result.reads.map((read) => read.state)];
+  };
+  assert.deepEqual(await profile(null), ["incomplete_read", ["not_yet_extracted"]]);
+
+  const { rows: [early] } = await db.query<{ claim_id: string }>(
+    `insert into claims (document_id, predicate, text_canonical, polarity, modality, reported_by_source_id, attributed_to_type, attributed_to_id, confidence, status, created_at)
+     values ($1, 'business.products', 'private early', 'neutral', 'quoted', $2, 'issuer', $3, 0.9, 'extracted', '2026-02-01') returning claim_id::text`,
+    [doc(0, "new"), privateSource, issuer(0)],
+  );
+  await db.query(`insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1, 'issuer', $2, 'subject')`, [early!.claim_id, issuer(0)]);
+  assert.deepEqual(await profile(null), ["incomplete_read", ["not_yet_extracted"]], "the anonymous read ignores the private claim");
+  assert.deepEqual(await profile("e8888888-8888-4888-8888-888888888888"), ["incomplete_read", ["not_yet_extracted"]], "so does another user's");
+
+  await db.query(`update claims set reported_by_source_id = $1, created_at = '2027-01-01'`, [privateSource]);
+  assert.deepEqual(await profile(null), ["no_business_claims", ["read"]], "a private claim alone, even a later one, does not make the item look unextracted to others");
+});

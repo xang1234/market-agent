@@ -80,12 +80,13 @@ function stackDb(seen: Array<{ text: string; values?: unknown[] }> = []) {
       if (text.includes("with filers as")) {
         const [issuers, role, items] = values as [string[], string, string[]];
         const filers = role === "competitor" ? (issuers.includes(AMD) ? [NVDA] : []) : issuers;
+        const filed = filers.filter((filer) => items.some((item) => READS[filer]?.[item]));
         return {
           rows: filers.flatMap((filer) => items.flatMap((item) => {
             const read = READS[filer]?.[item];
             if (!read) return [];
             const newer = read.newer && { ...FILINGS[read.newer.document], state: read.newer.state };
-            return [{ filer_issuer_id: filer, filer_label: LABELS[filer], item, state: read.state, item_state: read.item_state ?? { state: read.state }, filing: FILINGS[read.document], newer: newer ?? null }];
+            return [{ filer_issuer_id: filer, filer_label: LABELS[filer], item, state: read.state, item_state: read.item_state ?? { state: read.state }, filing: FILINGS[read.document], newer: newer ?? null, filed }];
           })),
         };
       }
