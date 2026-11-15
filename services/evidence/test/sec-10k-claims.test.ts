@@ -151,6 +151,12 @@ test("a competitor resolves by the name a 10-K writes, with or without its corpo
 
 const REFUSAL = "Sorry, I can't help with that.";
 
+const readState = async (client: QueryExecutor, documentId: string) =>
+  (await client.query<{ read_state: unknown }>(`select read_state from documents where document_id = $1`, [documentId])).rows[0]!.read_state;
+const READ = { state: "read" };
+const UNREAD = { state: "unread" };
+const NOT_FOUND = { state: "not_found" };
+
 test("a 10-K the model answers badly stays unread, with nothing stored", dockerTest, async (t) => {
   const { client, nvda } = await nvdaDatabase(t, "tenk-unparseable");
   const tenK = await storedTenK(client, nvda, NVDA_HTML);
@@ -165,8 +171,10 @@ test("a 10-K the model answers badly stays unread, with nothing stored", dockerT
   const cut: Extract10kDeps["llm"] = { complete: async () => ({ text: '{"claims":[{"predicate":"risk.factor","quote":"Delaware', truncated: true, deployment: { channel: "test", model: "test-model" } }) as Awaited<ReturnType<Extract10kDeps["llm"]["complete"]>> };
   assert.equal((await extract10kClaims({ db: client, llm: cut, resolveCompetitor }, tenK)).outcome, "unparseable", "a reply cut at its token cap");
   assert.deepEqual(await counts(client), { claims: 0, competitors: 0 });
+  assert.deepEqual(await readState(client, tenK.documentId), { "1": UNREAD, "1A": UNREAD });
   const { llm } = llmAnswering({ "1": JSON.stringify({ claims: [{ predicate: "business.competition", quote: COMPETITION_LIST_ITEM }] }), "1A": RISK_REPLY });
   assert.equal((await extract10kClaims({ db: client, llm, resolveCompetitor }, tenK)).extracted, 2, "read again by the next run");
+  assert.deepEqual(await readState(client, tenK.documentId), { "1": READ, "1A": READ });
 });
 
 const parseStatus = async (client: QueryExecutor, documentId: string) =>
@@ -183,18 +191,21 @@ test("an item the model answers badly stays unread while the other is stored, an
   const first = await extract10kClaims({ db: client, llm: refused.llm, resolveCompetitor }, tenK);
   assert.deepEqual([first.outcome, first.extracted, first.unread, refused.calls()], ["extracted", 1, ["1"], 3]);
   assert.equal(await parseStatus(client, tenK.documentId), "failed");
+  assert.deepEqual(await readState(client, tenK.documentId), { "1": UNREAD, "1A": READ });
 
   const answered = llmAnswering({ "1": JSON.stringify({ claims: [{ predicate: "business.competition", quote: COMPETITION_LIST_ITEM }] }), "1A": RISK_REPLY });
   const rerun = await extract10kClaims({ db: client, llm: answered.llm, resolveCompetitor }, tenK);
   assert.deepEqual([rerun.outcome, rerun.extracted, rerun.unread, answered.calls()], ["extracted", 1, [], 1], "only Item 1's prompt is asked again");
   assert.equal(await parseStatus(client, tenK.documentId), "parsed");
+  assert.deepEqual(await readState(client, tenK.documentId), { "1": READ, "1A": READ });
   assert.deepEqual(await counts(client), { claims: 2, competitors: 0 });
 });
 
 test("a 10-K is read in at most 12 model calls, and an item cut short is counted", dockerTest, async (t) => {
   const { client, nvda } = await nvdaDatabase(t, "tenk-call-cap");
   const longRisks = `<div>${OWN_RISK}</div>${"<div>Supply of our products depends on third parties we do not control and cannot replace quickly.</div>".repeat(8_000)}`;
-  const tenK = await storedTenK(client, nvda, new TextEncoder().encode(`<div>Item 1. Business</div><div>${DESCRIPTION}</div>${BODY}<div>Item 1A. Risk Factors</div>${longRisks}<div>Item 1B. Unresolved Staff Comments</div>`));
+  const tenKBytes = new TextEncoder().encode(`<div>Item 1. Business</div><div>${DESCRIPTION}</div>${BODY}<div>Item 1A. Risk Factors</div>${longRisks}<div>Item 1B. Unresolved Staff Comments</div>`);
+  const tenK = await storedTenK(client, nvda, tenKBytes);
   const { llm, calls } = llmAnswering({
     "1": JSON.stringify({ claims: [{ predicate: "business.description", quote: DESCRIPTION }] }),
     "1A": JSON.stringify({ claims: [{ predicate: "risk.factor", quote: OWN_RISK }] }),
@@ -203,8 +214,13 @@ test("a 10-K is read in at most 12 model calls, and an item cut short is counted
   assert.deepEqual([result.outcome, result.extracted, result.cut, result.llmCalls, calls()], ["extracted", 2, [{ item: "1A", prompts: 11, of: 13 }], 12, 12]);
   const { rows } = await client.query<{ status: string }>(`select status from tool_call_logs where tool_name = 'extract_10k_claims'`);
   assert.deepEqual(rows, [{ status: "partial" }]);
-  const evidence = await client.query<{ item: string; cut: unknown }>(`select locator->>'item' as item, locator->'cut' as cut from claim_evidence order by 1`);
-  assert.deepEqual(evidence.rows, [{ item: "1", cut: null }, { item: "1A", cut: { prompts: 11, of: 13 } }], "the stored claims say how far a cut item was read");
+  assert.deepEqual(await readState(client, tenK.documentId), { "1": READ, "1A": { state: "cut", prompts: 11, of: 13 } });
+
+  const unclaimed = await storedTenK(client, nvda, new TextEncoder().encode(`${new TextDecoder().decode(tenKBytes)}<div>Item 2. Properties</div>`));
+  const noRisks = llmAnswering({ "1": JSON.stringify({ claims: [{ predicate: "business.description", quote: DESCRIPTION }] }) });
+  assert.equal((await extract10kClaims({ db: client, llm: noRisks.llm, resolveCompetitor: async () => null }, unclaimed)).extracted, 1);
+  assert.deepEqual(await readState(client, unclaimed.documentId), { "1": READ, "1A": { state: "cut", prompts: 11, of: 13 } }, "a cut item with no claims is recorded cut");
+  assert.equal((await extract10kClaims({ db: client, llm: noRisks.llm, resolveCompetitor: async () => null }, unclaimed)).llmCalls, 0, "and is not read again");
 });
 
 test("two stores of one 10-K's bytes at once keep one source", dockerTest, async (t) => {
@@ -251,10 +267,12 @@ test("a 10-K with neither item is recorded failed, rechecked with no fetch or mo
   assert.deepEqual(fetched, ["nvda-20260125.htm"], "the rerun reads the stored bytes");
   const { rows: [doc] } = await client.query<{ document_id: string; source_id: string }>(`select document_id::text as document_id, source_id::text as source_id from documents`);
   assert.equal(await parseStatus(client, doc!.document_id), "failed");
+  assert.deepEqual(await readState(client, doc!.document_id), { "1": NOT_FOUND, "1A": NOT_FOUND });
 
   const asALearnedParserSeesIt = { documentId: doc!.document_id, sourceId: doc!.source_id, issuerId: nvda, effectiveTime: null, html: `<div>Item 1. Business</div><div>${DESCRIPTION}</div>${BODY}` };
   const read = await extract10kClaims(deps, asALearnedParserSeesIt);
   assert.deepEqual([read.outcome, read.extracted, read.missing, calls()], ["extracted", 1, ["1A"], 1]);
+  assert.deepEqual(await readState(client, doc!.document_id), { "1": READ, "1A": NOT_FOUND });
 });
 
 test("a 10-K read in part is recorded failed, and a rerun reads only the item it newly finds", dockerTest, async (t) => {
@@ -271,9 +289,11 @@ test("a 10-K read in part is recorded failed, and a rerun reads only the item it
   };
   assert.deepEqual(await summary(), ["extracted", 1, ["1A"], 1, "failed"]);
   assert.deepEqual(await summary(), ["already_extracted", 0, ["1A"], 1, "failed"], "Item 1 is not read again");
+  assert.deepEqual(await readState(client, tenK.documentId), { "1": READ, "1A": NOT_FOUND });
 
   tenK.html = `<div>Item 1. Business</div><div>${DESCRIPTION}</div>${BODY}<div>Item 1A. Risk Factors</div><div>${OWN_RISK}</div>${BODY}<div>Item 2. Properties</div>`;
   assert.deepEqual(await summary(), ["extracted", 1, [], 2, "parsed"], "a parser that finds Item 1A reads only Item 1A");
+  assert.deepEqual(await readState(client, tenK.documentId), { "1": READ, "1A": READ });
   assert.deepEqual(await counts(client), { claims: 2, competitors: 0 });
 });
 

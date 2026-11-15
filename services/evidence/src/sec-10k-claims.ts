@@ -51,23 +51,24 @@ export type TenKDocument = {
   effectiveTime: string | null;
 };
 
-// parse_status "parsed" means every item was read, and "failed" that an item
-// was not. Either the parser missed it, as for a 10-K laid out by a
-// cross-reference index (Intel's) or a smaller reporting company with no Item
-// 1A, or the model's reply for it was unusable. An item counts as read once it has
-// claims, so a rerun sections a failed document again from its stored bytes
-// and asks the model only about the items still unread.
-// ponytail: an item whose reply held no claim reads as unread, so each rerun of
-// a failed document asks the model about it again. Record the items read on the
-// document if that costs.
-// "unread": items whose reply had the wrong shape, or none of whose quotes is
-// in the filing, so none of their claims is stored. The other items are.
+// documents.read_state holds each item's state. "read": its claims are stored,
+// if it had any. "cut": read for its first `prompts` of `of` prompts, as far as
+// the run's MAX_LLM_CALLS went. "unread": its reply had the wrong shape, or
+// none of its quotes is in the filing, so none of its claims is stored, or the
+// cap left it no prompt. "not_found": the parser found no such section, as in
+// a 10-K laid out by a cross-reference index (Intel's) or a smaller reporting
+// company's with no Item 1A.
+// parse_status "parsed" means every item is read or cut, and "failed" that one
+// is unread or not found, so a rerun sections the stored bytes again and asks
+// the model only about the items not read.
+// ponytail: a cut item counts as read, since the cap is per run and a rerun
+// would cut it again. Read on from its `prompts` if the rest is ever needed.
 // "unparseable": every item asked is unread, so nothing is stored.
-// "cut": items longer than the run's MAX_LLM_CALLS prompts allow, read as far
-// as the budget went. An item cut before its first prompt stays unread.
 // "no_sections": no item is found or read.
 export type Extract10kOutcome = "extracted" | "already_extracted" | "unparseable" | "no_sections";
 export type CutItem = { item: TenKItem; prompts: number; of: number };
+export type ItemReadState = { state: "read" | "unread" | "not_found" } | { state: "cut"; prompts: number; of: number };
+export type TenKReadState = Partial<Record<TenKItem, ItemReadState>>;
 export type Extract10kResult = {
   outcome: Extract10kOutcome;
   extracted: number;
@@ -167,33 +168,31 @@ type VerifiedClaim = TenKClaim & { item: TenKItem; start: number; end: number; i
 
 const TEXT_BASIS = "sec_10k_item_canonical_text.v1";
 const readThrough = (parseStatus: string | undefined) => parseStatus === "parsed" || parseStatus === "superseded";
-async function itemsRead(db: QueryExecutor, documentId: string): Promise<Set<TenKItem>> {
-  const { rows } = await db.query<{ item: TenKItem }>(
-    `select distinct locator->>'item' as item from claim_evidence where document_id = $1 and locator->>'text_basis' = $2`,
-    [documentId, TEXT_BASIS],
-  );
-  return new Set(rows.map((row) => row.item));
-}
+const itemsRead = (readState: TenKReadState | null) =>
+  new Set(TEN_K_ITEMS.filter((item) => readState?.[item]?.state === "read" || readState?.[item]?.state === "cut"));
+type DocumentReadState = { parse_status: string; read_state: TenKReadState | null };
 
 // Extract one 10-K document's claims and store the verified ones. Transport
 // errors propagate and store nothing, so the document stays unread.
 export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument): Promise<Extract10kResult> {
   const started = { extracted: 0, droppedUnquoted: 0, competitors: { resolved: 0, named: 0 }, unread: [], cut: [], llmCalls: 0 };
-  const { rows: [status] } = await deps.db.query<{ parse_status: string }>(
-    `select parse_status from documents where document_id = $1`,
+  const { rows: [status] } = await deps.db.query<DocumentReadState>(
+    `select parse_status, read_state from documents where document_id = $1`,
     [doc.documentId],
   );
   if (status === undefined) throw new Error(`no document ${doc.documentId}`);
   if (readThrough(status.parse_status)) return { ...started, outcome: "already_extracted", missing: [] };
   const sections = tenKSections(doc.html);
-  const read = await itemsRead(deps.db, doc.documentId);
+  const read = itemsRead(status.read_state);
   const missingAfter = (readNow: Set<TenKItem>) => TEN_K_ITEMS.filter((item) => "error" in sections[item] && !readNow.has(item));
   const found = TEN_K_ITEMS.flatMap((item) => "error" in sections[item] || read.has(item) ? [] : [sections[item] as TenKSection]);
   const missing = missingAfter(read);
   if (found.length === 0) {
+    const notFound = Object.fromEntries(missing.map((item) => [item, { state: "not_found" }]));
     await deps.db.query(
-      `update documents set parse_status = $2 where document_id = $1 and parse_status in ('pending', 'failed')`,
-      [doc.documentId, missing.length === 0 ? "parsed" : "failed"],
+      `update documents set parse_status = $2, read_state = coalesce(read_state, '{}') || $3::jsonb
+        where document_id = $1 and parse_status in ('pending', 'failed')`,
+      [doc.documentId, missing.length === 0 ? "parsed" : "failed", JSON.stringify(notFound)],
     );
     return { ...started, outcome: read.size === 0 ? "no_sections" : "already_extracted", missing };
   }
@@ -246,10 +245,6 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
   const model = replies[0]?.model ?? null;
   const args = { document_id: doc.documentId, model };
   const proposed = replies.map((reply) => reply.claims?.length ?? null);
-  if (unread.length === found.length) {
-    await writeToolCallLog(deps.db, { tool_name: "extract_10k_claims", args, result: { outcome: "unparseable", unread, cut, proposed, dropped_unquoted: droppedUnquoted }, status: "partial" });
-    return { ...started, outcome: "unparseable", droppedUnquoted, missing, unread, cut, llmCalls: prompts.length };
-  }
 
   let named = 0;
   for (const claim of verified.values()) {
@@ -263,26 +258,33 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
   return withTransaction(deps.db, async (tx) => {
     // The row lock orders this with a concurrent read of the same document and
     // with storeTenK adopting the filing's date.
-    const { rows: [locked] } = await tx.db.query<{ parse_status: string; published_at: Date | null }>(
-      `select parse_status, published_at from documents where document_id = $1 for update`,
+    const { rows: [locked] } = await tx.db.query<DocumentReadState & { published_at: Date | null }>(
+      `select parse_status, read_state, published_at from documents where document_id = $1 for update`,
       [doc.documentId],
     );
     // A concurrent run may have read some items meanwhile, so store the others.
-    const readNow = await itemsRead(tx.db, doc.documentId);
+    const readNow = itemsRead(locked!.read_state);
     const missingNow = missingAfter(readNow);
     const storing = found.map((section) => section.type).filter((item) => !unread.includes(item) && !readNow.has(item));
     const unreadNow = unread.filter((item) => !readNow.has(item));
-    if (readThrough(locked!.parse_status) || storing.length === 0) {
+    if (readThrough(locked!.parse_status) || storing.length + unreadNow.length === 0) {
       return { ...started, outcome: "already_extracted" as const, missing: missingNow, unread: unreadNow };
     }
-    const effectiveTime = doc.effectiveTime ?? locked!.published_at?.toISOString() ?? null;
-    // A cut item counts as read, and each of its claims' locators says how far.
-    // ponytail: the call cap is per run, so a rerun would cut it again. Read on
-    // from locator.cut.prompts if the rest of a long item is ever needed.
-    const cutOf = (item: TenKItem) => {
+    const readState: TenKReadState = { ...locked!.read_state };
+    for (const item of missingNow) readState[item] = { state: "not_found" };
+    for (const item of unreadNow) readState[item] = { state: "unread" };
+    for (const item of storing) {
       const short = cut.find((entry) => entry.item === item);
-      return short === undefined ? {} : { cut: { prompts: short.prompts, of: short.of } };
-    };
+      readState[item] = short === undefined ? { state: "read" } : { state: "cut", prompts: short.prompts, of: short.of };
+    }
+    const allRead = missingNow.length === 0 && unreadNow.length === 0;
+    await tx.db.query(`update documents set parse_status = $2, read_state = $3 where document_id = $1`, [doc.documentId, allRead ? "parsed" : "failed", JSON.stringify(readState)]);
+    if (storing.length === 0) {
+      const outcome = unread.length === found.length ? "unparseable" : "already_extracted";
+      await writeToolCallLog(tx.db, { tool_name: "extract_10k_claims", args, result: { outcome, unread: unreadNow, cut, proposed, dropped_unquoted: droppedUnquoted }, status: "partial" });
+      return { ...started, outcome, droppedUnquoted, missing: missingNow, unread: unreadNow, cut, llmCalls: prompts.length };
+    }
+    const effectiveTime = doc.effectiveTime ?? locked!.published_at?.toISOString() ?? null;
     const claimIds: string[] = [];
     let resolved = 0;
     for (const claim of [...verified.values()].filter((claim) => storing.includes(claim.item))) {
@@ -307,15 +309,13 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
       await createClaimEvidence(tx.db, {
         claim_id: row.claim_id,
         document_id: doc.documentId,
-        locator: { item: claim.item, start: claim.start, end: claim.end, text_basis: TEXT_BASIS, ...cutOf(claim.item) },
+        locator: { item: claim.item, start: claim.start, end: claim.end, text_basis: TEXT_BASIS },
         excerpt_hash: createHash("sha256").update(claim.quote).digest("hex"),
         confidence: 1,
       });
       claimIds.push(row.claim_id);
     }
     const competitors = { resolved, named };
-    const allRead = missingNow.length === 0 && unreadNow.length === 0;
-    await tx.db.query(`update documents set parse_status = $2 where document_id = $1`, [doc.documentId, allRead ? "parsed" : "failed"]);
     await writeToolCallLog(tx.db, {
       tool_name: "extract_10k_claims",
       args,
