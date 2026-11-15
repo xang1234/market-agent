@@ -9,6 +9,7 @@ import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { listRecoverableRuns, recoverRun } from "../../financial-engine/src/recovery.ts";
+import { createFinancialWorker } from "../../financial-engine/src/worker.ts";
 import { requestCancellation } from "../../financial-engine/src/run-repo.ts";
 import { IDS, seedCashResilience } from "../../financial-engine/test/db-fixtures.ts";
 import { snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
@@ -137,6 +138,26 @@ test("analyze memo financial publication", { timeout: 300_000 }, async (t) => {
     };
     assert.equal(await recovered(await figure("1 second")), "pending", "reserved a moment ago, before its Generate leased it");
     assert.equal(await recovered(await figure("1 hour")), "erased", "older than any Generate lives, with no memo saved");
+  });
+
+  await t.test("young agent figures left to their Generate do not hold every recovery batch", async () => {
+    const memo = await createMemoRun(db, pool, { templateId, playbookId: "investment_memo" });
+    await memo.publish();
+    const figure = async (parentId: string, age: string, updatedAgo: string) => (await db.query<{ run_id: string }>(
+      `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode, knowledge_cutoff, policies, created_at, updated_at)
+       select user_id, parent_kind, $2::uuid, parent_version, 'agent:investment_thesis:' || md5(random()::text), request_hash, plan_id, feature_mode, knowledge_cutoff, policies, now() - $3::interval, now() - $4::interval
+         from financial_runs where parent_id = $1 and request_key = $1::text
+       returning run_id::text`,
+      [memo.runId, parentId, age, updatedAgo],
+    )).rows[0]!.run_id;
+    const generating = randomUUID();
+    for (let i = 0; i < 3; i++) await figure(generating, "2 minutes", "2 minutes");
+    const abandoned = await figure(randomUUID(), "1 hour", "1 minute");
+    const worker = createFinancialWorker({ pool, worker_id: "recovery-test", ttl_ms: 60_000, evidence: createEvidenceFinancialPort, parents: { analyze_memo_run: analyzeFinancialRecovery(pool) }, interval_ms: 60_000, max_runs_per_tick: 3 });
+    await worker.tick();
+    await worker.tick();
+    const { rows } = await db.query(`select 1 from financial_runs where run_id = $1`, [abandoned]);
+    assert.equal(rows.length, 0, "the second batch reaches the abandoned figure behind the young ones and erases it");
   });
 
   await t.test("a memo saved under investment_memo v1 reads its optional sections from v1", async () => {

@@ -221,13 +221,16 @@ async function retireOnceGenerateEnded(db: FinancialPool, run: RunRecord): Promi
   return null;
 }
 
+/** A figure left to its Generate moves to the back of the oldest-first recovery queue, so young figures never fill every batch. */
 async function generateMayRun(db: SqlExecutor, run: RunRecord): Promise<boolean> {
-  const { rows } = await db.query<{ running: boolean }>(
-    `select not exists (select 1 from analyze_template_runs where run_id = $1::uuid) and created_at > now() - $3::interval as running
-       from financial_runs where run_id = $2::uuid`,
+  const { rows } = await db.query(
+    `update financial_runs set updated_at = now()
+      where run_id = $2::uuid and created_at > now() - $3::interval
+        and not exists (select 1 from analyze_template_runs where run_id = $1::uuid)
+      returning run_id`,
     [run.parent_id, run.run_id, LONGER_THAN_ANY_GENERATE],
   );
-  return rows[0]?.running === true;
+  return rows.length === 1;
 }
 
 export async function eraseUnsavedMemoFigures(db: SqlExecutor, analyzeRunId: string): Promise<void> {
