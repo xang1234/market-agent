@@ -13,7 +13,7 @@ import {
   prepareAnalyzeFinancialContext,
   publishAnalyzeFinancialSections,
 } from "../src/financial-section.ts";
-import { ANALYZE_PLAYBOOKS, type AnalyzePlaybook } from "../src/playbook.ts";
+import { ANALYZE_PLAYBOOKS, playbookAt, type AnalyzePlaybook } from "../src/playbook.ts";
 import { serializeAnalyzeRunMetadataV1, type AnalyzeRunFinancialMetadata } from "../src/runMetadata.ts";
 import { persistAnalyzeTemplateRunAfterSnapshotSealWithPool } from "../src/template-runner.ts";
 
@@ -43,7 +43,7 @@ export async function createMemoRun(
   pool: Pool,
   input: { templateId: string; playbookId: string; playbookVersion?: number; peers?: string[]; cutoff?: string; context?: AnalyzeRunFinancialMetadata },
 ) {
-  const book = playbook(input.playbookId);
+  const book = input.playbookVersion === undefined ? playbook(input.playbookId) : playbookAt(input.playbookId, input.playbookVersion)!;
   const context = input.context ?? prepareAnalyzeFinancialContext({
     playbook: book,
     primary: { kind: "issuer", id: IDS.issuerA },
@@ -68,7 +68,7 @@ export async function createMemoRun(
       template_id: input.templateId,
       template_version: 1,
       playbook_id: book.playbook_id,
-      playbook_version: input.playbookVersion ?? book.version,
+      playbook_version: book.version,
       instructions: book.default_instructions,
       source_categories: book.default_source_categories,
       subject_refs: [{ kind: "issuer", id: IDS.issuerA }],

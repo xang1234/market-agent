@@ -113,7 +113,7 @@ test("analyze memo financial publication", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await committed(db, memo.runId), { sections: 3, certificates: 3, plans: 1 }, "nothing is filed as a memo section");
   });
 
-  await t.test("an agent figure whose Generate may still run is left to it, and one whose Generate ended unsaved is cancelled", async () => {
+  await t.test("an agent figure whose Generate may still run is left to it, and one whose Generate ended unsaved is erased", async () => {
     const memo = await createMemoRun(db, pool, { templateId, playbookId: "investment_memo" });
     await memo.publish();
     const unsaved = randomUUID();
@@ -133,10 +133,10 @@ test("analyze memo financial publication", { timeout: 300_000 }, async (t) => {
       } finally {
         client.release();
       }
-      return (await db.query<{ execution_state: string }>(`select execution_state from financial_runs where run_id = $1`, [runId])).rows[0]!.execution_state;
+      return (await db.query<{ execution_state: string }>(`select execution_state from financial_runs where run_id = $1`, [runId])).rows[0]?.execution_state ?? "erased";
     };
     assert.equal(await recovered(await figure("1 second")), "pending", "reserved a moment ago, before its Generate leased it");
-    assert.equal(await recovered(await figure("1 hour")), "cancelled", "older than any Generate lives, with no memo saved");
+    assert.equal(await recovered(await figure("1 hour")), "erased", "older than any Generate lives, with no memo saved");
   });
 
   await t.test("a memo saved under investment_memo v1 reads its optional sections from v1", async () => {

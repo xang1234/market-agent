@@ -108,7 +108,6 @@ export const ANALYZE_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = Object.freeze([
   }),
 ]);
 
-// Versions no Generate runs any more, kept so a memo saved under one is read by the sections it was saved with.
 const RETIRED_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = Object.freeze([
   Object.freeze({
     playbook_id: "investment_memo",

@@ -1077,7 +1077,6 @@ async function readJson(req: AsyncIterable<Uint8Array | string>): Promise<unknow
   return JSON.parse(text);
 }
 
-// Aborts when the client goes away before it has been answered.
 function clientLeft(res: ServerResponse): AbortSignal {
   const left = new AbortController();
   res.on("close", () => {

@@ -70,8 +70,8 @@ if (claimIds.length > 0) {
 }
 const { report, passed } = memoVerdict({
   run,
-  canvas,
-  text,
+  unquotedArticle: canvas,
+  page: text,
   url,
   listingId: LISTING_ID,
   predicates,

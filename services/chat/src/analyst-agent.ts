@@ -11,7 +11,7 @@ import { isRecord } from "../../shared/src/http.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import { createTurnToolPolicy, loadToolRegistry, type ToolRegistry } from "../../tools/src/index.ts";
 import { CLAIM_PREDICATES, isAnalystToolName, type AnalystToolName, type AnalystToolResult } from "./analyst-tools.ts";
-import { answerTurn, type AnsweredTurn, type AnswerTraceInput, type TurnTrace } from "./answer-trace.ts";
+import { answerPath, answerTurn, type AnsweredTurn, type AnswerTraceInput, type TurnTrace } from "./answer-trace.ts";
 import { isUuid, noteBlock } from "./chat-ids.ts";
 import { COMMENTARY_UNAVAILABLE } from "./engine-commentary.ts";
 import { ANALYST_AGENT_BUNDLE_ID } from "./bundle-routing.ts";
@@ -127,8 +127,7 @@ type AgentAsk = Readonly<{
   meter: Meter;
   snapshotId: string;
   scopedKey: (name: string) => string;
-  // A memo reads as of its cutoff, so a company with no 10-K then is said to have had none as of that day.
-  datedFilings: boolean;
+  noFilingAsOfCutoff: boolean;
   trace: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id">;
   logToolCalls?: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
 }>;
@@ -183,7 +182,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       meter,
       snapshotId: randomUUID(),
       scopedKey: (name) => name,
-      datedFilings: false,
+      noFilingAsOfCutoff: false,
       trace: { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}) },
       ...(logToolCalls ? { logToolCalls: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => logToolCalls(context.threadId, calls) } : {}),
     };
@@ -249,7 +248,7 @@ export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystS
       meter: callMeter(SECTION_CALLS),
       snapshotId: input.snapshotId,
       scopedKey: (name) => `${input.sectionId}:${name}`,
-      datedFilings: true,
+      noFilingAsOfCutoff: true,
       trace: { thread_id: input.runId, run_id: input.runId, turn_id: input.sectionId },
       ...(deps.logToolCalls ? { logToolCalls: deps.logToolCalls } : {}),
     };
@@ -429,7 +428,7 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
   if (loop) notes.push(...stopNotes(loop, whoOf));
 
   const covered = [...new Set([...job.named.map(issuerOf), ...certified.flatMap((entry) => entry.subjects)])];
-  const read = job.datedFilings ? datedNoFiling(analyst, asOf, labelOf) : { analyst, notes: [] };
+  const read = job.noFilingAsOfCutoff ? datedNoFiling(analyst, asOf, labelOf) : { analyst, notes: [] };
   const packet = mergePackets({
     engine: certified.map((entry) => entry.packet),
     analyst: read.analyst,
@@ -529,10 +528,10 @@ const GATHER_RULES = [
 
 const QUIET = (() => undefined) as unknown as ChatTurnRunContext["emit"];
 
-// ADR 0005: a factual answer never states a stance, so an inference worded as one is left out, whatever the judge found.
+// ADR 0005
 const STANCE_WORDS = /\b(?:buy|sell|hold|overweight|underweight|outperform|underperform|ratings?|conviction|upside|recommend(?:s|ed|ations?)?|price targets?|target prices?|expected returns?)\b/iu;
 
-function withoutStance(input: AnswerInput, packet: EvidencePacket, report: AssertionReport): Pick<AnsweredTurn, "assertions" | "blocks" | "without"> | null {
+function withoutStance(input: AnswerInput & Pick<AnswerTraceInput, "context">, packet: EvidencePacket, report: AssertionReport): Pick<AnsweredTurn, "assertions" | "blocks" | "without"> | null {
   const stance = report.accepted.filter((entry) => entry.kind === "analyst_inference" && STANCE_WORDS.test(entry.text));
   if (stance.length === 0) return null;
   const rendering = renderedAnswer(input, packet, {
@@ -541,7 +540,7 @@ function withoutStance(input: AnswerInput, packet: EvidencePacket, report: Asser
     rejected: [...report.rejected, ...stance.map((entry) => ({ index: entry.index, text: entry.text, check: "limit" as const, reason: "states a stance" }))].sort((a, b) => a.index - b.index),
   });
   const shown = new Map((report.judged ?? []).flatMap((verdict) => {
-    const as = shownAs(verdict, "agent");
+    const as = shownAs(verdict, answerPath({ ...input, packet }));
     return as === "hidden" ? [] : [[verdict.index, as] as const];
   }));
   return { assertions: rendering.report, blocks: rendering.blocks(shown), without: (dropped) => ({ blocks: rendering.blocks(shown, dropped) }) };

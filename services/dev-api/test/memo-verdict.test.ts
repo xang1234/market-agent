@@ -19,8 +19,8 @@ function seen(note: string, canvasExtra = "", figure = false) {
   };
   return {
     run,
-    canvas: [...TITLES, note, canvasExtra].join("\n"),
-    text: `Memo generated\n${TITLES.join("\n")}`,
+    unquotedArticle: [...TITLES, note, canvasExtra].join("\n"),
+    page: `Memo generated\n${TITLES.join("\n")}`,
     url: `http://127.0.0.1:5173/analyze?subject=listing:${LISTING}`,
     listingId: LISTING,
     predicates: new Map<string, string>(),

@@ -7,6 +7,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   ANALYZE_PLAYBOOKS,
+  playbookAt,
   AnalyzePlaybookError,
   AnalyzeRunMetadataError,
   getAnalyzeTemplate,
@@ -111,7 +112,6 @@ export type DevApiAnalyzeAdapter = {
     next_cursor: string | null;
   }>;
   getRun(input: { userId: string; runId: string }): Promise<DevAnalyzeRun>;
-  // signal: aborts when the client leaves, which stops the Generate before it saves.
   createRun(input: {
     userId: string;
     body: Record<string, unknown>;
@@ -395,7 +395,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
       });
       const runId = randomUUID();
       const workflow = deps.runAnalyzeWorkflow;
-      return generateMemo(deps, runId, signal, () => workflow({
+      return stoppableGenerate(deps, runId, signal, () => workflow({
         userId,
         template,
         body,
@@ -440,14 +440,16 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
       const playbook = metadata.playbook_id === null
         ? undefined
         : ANALYZE_PLAYBOOKS.find((candidate) => candidate.playbook_id === metadata.playbook_id);
+      const instructions = playbook && metadata.instructions === playbookAt(playbook.playbook_id, metadata.playbook_version)?.default_instructions
+        ? playbook.default_instructions
+        : metadata.instructions;
       const financial = metadata.financial ?? (playbook ? await newFinancialContext(deps, playbook, subjectRefs) : null);
       const rerunMetadata = serializeAnalyzeRunMetadataV1({
         template_id: template.template_id,
         template_version: template.version,
         playbook_id: metadata.playbook_id,
-        // The playbook as it is now, which the rerun writes, and not the one the original was saved under.
         playbook_version: playbook?.version ?? metadata.playbook_version,
-        instructions: metadata.instructions,
+        instructions,
         source_categories: sourceCategories,
         subject_refs: subjectRefs,
         rerun_of_run_id: original.run_id,
@@ -458,18 +460,18 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
       const body = {
         template_id: template.template_id,
         ...(metadata.playbook_id ? { playbook_id: metadata.playbook_id } : {}),
-        instructions: metadata.instructions,
+        instructions,
         source_categories: sourceCategories,
         ...(subjectRefs[0] ? { subject_ref: subjectRefs[0] } : {}),
       };
       const workflow = deps.runAnalyzeWorkflow;
-      return generateMemo(deps, rerunId, signal, () => workflow({
+      return stoppableGenerate(deps, rerunId, signal, () => workflow({
         userId,
         template,
         body,
         runId: rerunId,
         snapshotId,
-        instructions: metadata.instructions,
+        instructions,
         ...(playbook ? { playbook } : {}),
         ...(financial ? { knowledgeCutoff: financial.knowledge_cutoff } : {}),
         sourceCategories,
@@ -565,9 +567,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
 
 const STOPPED = "the memo was stopped before it was saved";
 
-// A Generate whose client leaves stops its model calls and calculations and saves nothing. One that stops or
-// fails before its memo is saved keeps none of what its analyst agent certified for it.
-async function generateMemo(
+async function stoppableGenerate(
   deps: AnalyzeServiceDeps,
   runId: string,
   signal: AbortSignal | undefined,

@@ -28,10 +28,8 @@ const FILING = "4f000000-0000-4000-8000-0000000000e3";
 type Section = { kind: string; title?: string; data_ref: { params?: { playbook_section_id?: string } }; claim_refs: string[]; children: Array<Record<string, unknown>> };
 
 type Script = Readonly<{
-  // Written after the answer's figures and claims, each resting on its first entry.
   inferences?: ReadonlyArray<string>;
   verdict?: "entailed" | "unsupported";
-  // Hears each model call before it answers, with whether it writes an answer over certified figures.
   onCall?: (kind: "read" | "answer" | "judge", certified: boolean) => void;
 }>;
 
@@ -288,7 +286,9 @@ test("the analyst agent writes an investment memo's sections from stored sources
   await t.test("a rerun reads at the original memo's cutoff, says what was on file then, and runs the current playbook", async () => {
     const original = await createMemoRun(db, pool, { templateId, playbookId: "investment_memo", playbookVersion: 1 });
     const rerun = await adapters.analyze.rerun({ userId: IDS.owner, runId: original.runId });
-    assert.equal((rerun.run_metadata as { playbook_version: number }).playbook_version, 2, "the rerun records the playbook version it ran");
+    const recorded = rerun.run_metadata as { playbook_version: number; instructions: string };
+    assert.equal(recorded.playbook_version, 2, "the rerun records the playbook version it ran");
+    assert.equal(recorded.instructions, playbook("investment_memo").default_instructions, "an unedited v1 default is not carried under v2");
     const sections = sectionsOf(rerun.blocks);
     assert.deepEqual(sections.map((section) => section.data_ref.params?.playbook_section_id), AGENT_SECTIONS);
     for (const section of sections) {
@@ -335,6 +335,9 @@ test("the analyst agent writes an investment memo's sections from stored sources
     const memos = await savedMemos();
     const unconfigured = adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps({}, () => async () => assert.fail("no model call"))));
     await assert.rejects(unconfigured.analyze.createRun({ userId: IDS.owner, body: memoBody }), { status: 503, message: "the analyst agent's model is not configured" });
+    const agentOnly = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "o3", AGENT_LITELLM_MODEL: "openai/o3" };
+    const unwritable = adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps(agentOnly, () => async () => assert.fail("no model call"))));
+    await assert.rejects(unwritable.analyze.createRun({ userId: IDS.owner, body: memoBody }), { status: 503 }, "a model to read with and none to write the answer with");
     assert.equal(await savedMemos(), memos);
   });
 });

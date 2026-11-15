@@ -55,7 +55,11 @@ export function analyzeAgentWorkflow(deps: AnalyzeAgentDeps): (input: DevApiAnal
       const note = noteBlock({ snapshotId: input.snapshotId, asOf }, "analyze:unwritten", sections.length === 0 ? NO_AGENT_SECTION : NO_COMPANY);
       return { blocks: [{ ...note, subject_refs: input.subjectRefs }] };
     }
-    if (buildLlmDeploymentOrder(await loadLlmSettingsFromEnv(deps.env), "agent").length === 0) throw new DevApiHttpError(503, "the analyst agent's model is not configured");
+    const settings = await loadLlmSettingsFromEnv(deps.env);
+    // A section reads on the agent's model and writes its answer on the default one.
+    if ((["agent", "default"] as const).some((purpose) => buildLlmDeploymentOrder(settings, purpose).length === 0)) {
+      throw new DevApiHttpError(503, "the analyst agent's model is not configured");
+    }
     const authority = analyzeAuthority(input.userId, input.runId, input.template.template_id, input.template.version);
     const settled = await Promise.allSettled(sections.map((entry) => section({
       subject: company,
