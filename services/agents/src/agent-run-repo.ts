@@ -79,6 +79,21 @@ export async function claimAgentRun(
 
   await expireStaleAgentRuns(db, input.agent_id);
 
+  // A conflict with a run that ends before the readback leaves the slot free, so the claim tries again.
+  for (let attempt = 1; attempt <= CLAIM_ATTEMPTS; attempt += 1) {
+    const claim = await attemptAgentRunClaim(db, input, values);
+    if (claim !== null) return claim;
+  }
+  throw new AgentRunStateError("agent run claim conflicted but no duplicate or active run was found");
+}
+
+const CLAIM_ATTEMPTS = 3;
+
+async function attemptAgentRunClaim(
+  db: QueryExecutor,
+  input: { run_id: string; agent_id: string; admit?: AgentRunAdmission },
+  values: unknown[],
+): Promise<AgentRunClaim | null> {
   if (input.admit !== undefined) {
     const admit = input.admit;
     // The agent row lock orders this check against a disable, a delete, and every other admitted claim.
@@ -105,17 +120,14 @@ async function unclaimedAgentRun(
   db: QueryExecutor,
   input: { run_id: string; agent_id: string },
   notAdmitted: boolean,
-): Promise<AgentRunClaim> {
+): Promise<AgentRunClaim | null> {
   const duplicate = await getAgentRun(db, input.run_id);
   if (duplicate !== null) {
     return Object.freeze({ claimed: false, reason: "duplicate", row: duplicate });
   }
   if (notAdmitted) return Object.freeze({ claimed: false, reason: "not_admitted" });
   const active = await findActiveAgentRun(db, input);
-  if (active === null) {
-    throw new AgentRunStateError("agent run claim conflicted but no duplicate or active run was found");
-  }
-  return Object.freeze({ claimed: false, reason: "concurrency_limit", row: active });
+  return active === null ? null : Object.freeze({ claimed: false, reason: "concurrency_limit", row: active });
 }
 
 async function expireStaleAgentRuns(db: QueryExecutor, agentId: string): Promise<void> {

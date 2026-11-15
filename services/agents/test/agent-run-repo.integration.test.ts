@@ -7,6 +7,7 @@ import { Pool } from "pg";
 
 import {
   claimAgentRun,
+  completeAgentRun,
 } from "../src/agent-run-repo.ts";
 
 const RUN_ID_A = "11111111-1111-4111-8111-111111111111";
@@ -195,5 +196,63 @@ test(
         { id: RUN_ID_C, status: "running", ended: false },
       ],
     );
+  },
+);
+
+test(
+  "claimAgentRun claims the slot when the run it conflicted with finishes before the readback",
+  { skip: !dockerAvailable(), timeout: 120000 },
+  async (t) => {
+    const { containerName, databaseUrl } = await bootstrapDatabase(t, "agent-run-vanished-conflict");
+    if (databaseUrl === "") return;
+    const pool = new Pool({ connectionString: databaseUrl, max: 4 });
+    t.after(async () => {
+      await pool.end().catch(() => {});
+      stopPostgres(containerName);
+    });
+
+    // Completes the active run right after the claim's insert conflicts with it.
+    const finishingAfterConflict = (activeRunId: string) => {
+      let fired = false;
+      const wrap = (run: (text: string, values?: unknown[]) => Promise<{ rows: unknown[] }>) =>
+        async (text: string, values?: unknown[]) => {
+          const finish = async () => {
+            if (fired || !text.startsWith("insert into agent_run_logs")) return;
+            fired = true;
+            await completeAgentRun(pool, { run_id: activeRunId, outputs_summary: {} });
+          };
+          try {
+            const result = await run(text, values);
+            if (result.rows.length === 0) await finish();
+            return result;
+          } catch (error) {
+            await finish();
+            throw error;
+          }
+        };
+      return {
+        query: wrap((text, values) => pool.query(text, values)),
+        connect: async () => {
+          const client = await pool.connect();
+          return { query: wrap((text, values) => client.query(text, values)), release: (error?: Error) => client.release(error) };
+        },
+      } as unknown as Pool;
+    };
+
+    for (const [label, admit] of [["plain", undefined], ["admitted", async () => true]] as const) {
+      await pool.query("delete from agent_run_logs");
+      await claimAgentRun(pool, { run_id: RUN_ID_A, agent_id: AGENT_ID, lease_expires_at: FUTURE_LEASE_EXPIRES_AT });
+      const claim = await claimAgentRun(finishingAfterConflict(RUN_ID_A), {
+        run_id: RUN_ID_B,
+        agent_id: AGENT_ID,
+        lease_expires_at: FUTURE_LEASE_EXPIRES_AT,
+        admit,
+      });
+      assert.deepEqual(
+        { claimed: claim.claimed, run: claim.claimed ? claim.row.agent_run_log_id : null },
+        { claimed: true, run: RUN_ID_B },
+        label,
+      );
+    }
   },
 );
