@@ -503,13 +503,19 @@ async function fetchReleaseExhibits(secClient: SecFilingFetcher, cik: number, ac
 // ran, not what it said). Low reasoning: it picks sentences, and the quote
 // check does the rest; a large model's default reasoning took 4 minutes on one
 // release in a probe.
-export async function completeLogged(deps: Pick<ExtractReleaseDeps, "db" | "llm">, toolName: string, args: JsonObject, messages: LlmChatMessage[]): Promise<{ model: string; text: string }> {
+export async function completeLogged(
+  deps: Pick<ExtractReleaseDeps, "db" | "llm">,
+  toolName: string,
+  args: JsonObject,
+  messages: LlmChatMessage[],
+  maxTokens = 3_000,
+): Promise<{ model: string; text: string; truncated: boolean }> {
   return runLoggedToolCall(deps.db, {
     tool_name: toolName,
     args,
     invoke: async () => {
-      const reply = await deps.llm.complete({ messages, temperature: 0, maxTokens: 3_000, reasoning: "low" });
-      return { model: reply.deployment.model, text: reply.text };
+      const reply = await deps.llm.complete({ messages, temperature: 0, maxTokens, reasoning: "low" });
+      return { model: reply.deployment.model, text: reply.text, truncated: reply.truncated === true };
     },
   });
 }

@@ -18,7 +18,7 @@ import {
   verifyStatement,
   type ExtractReleaseLlm,
 } from "./sec-earnings-release-extraction.ts";
-import { recentSubmissionRows, type SecFilingFetcher, type SecSubmissions } from "./sec-edgar.ts";
+import { cleanupSourceAfterFailedIngest, recentSubmissionRows, type SecFilingFetcher, type SecSubmissions } from "./sec-edgar.ts";
 import { tenKSections, TEN_K_ITEMS, type TenKItem, type TenKSection } from "./sec-10k-sections.ts";
 import { createSource } from "./source-repo.ts";
 import { withTransaction } from "./transaction.ts";
@@ -33,6 +33,8 @@ export type TenKPredicate = (typeof TEN_K_PREDICATES)[TenKItem][number];
 export type TenKClaim = { predicate: TenKPredicate; quote: string; competitors: string[] };
 
 const MAX_CLAIMS: Readonly<Record<TenKItem, number>> = { "1": 16, "1A": 15 };
+// 16 quotes of up to 600 characters, with their keys and low reasoning.
+const MAX_REPLY_TOKENS = 8_000;
 const TEN_K_CONFIDENCE = 0.8;
 
 export type ResolveCompetitor = (name: string) => Promise<string | null>;
@@ -76,16 +78,11 @@ export function parseTenKReply(text: string, item: TenKItem): TenKClaim[] | null
   if (!Array.isArray(items)) return null;
   const claims: TenKClaim[] = [];
   for (const entry of items.slice(0, MAX_CLAIMS[item])) {
-    const { predicate, quote, competitors = [] } = (entry ?? {}) as Record<string, unknown>;
-    if (
-      typeof quote !== "string" ||
-      !(TEN_K_PREDICATES[item] as ReadonlyArray<unknown>).includes(predicate) ||
-      !Array.isArray(competitors) ||
-      !competitors.every((name) => typeof name === "string")
-    ) {
-      return null;
-    }
-    claims.push({ predicate: predicate as TenKPredicate, quote, competitors });
+    const { predicate, quote, competitors } = (entry ?? {}) as Record<string, unknown>;
+    if (typeof quote !== "string" || !(TEN_K_PREDICATES[item] as ReadonlyArray<unknown>).includes(predicate)) return null;
+    // A slip in the competitor list costs only the competitors.
+    const names = Array.isArray(competitors) ? competitors.filter((name): name is string => typeof name === "string") : [];
+    claims.push({ predicate: predicate as TenKPredicate, quote, competitors: names });
   }
   return claims;
 }
@@ -122,14 +119,14 @@ function buildMessages(item: TenKItem, text: string): LlmChatMessage[] {
 // Kept beside verifyStatement, not in it, so earnings-release claims keep
 // their sentence rule: a 10-K list item ends in a semicolon, or opens with a
 // bullet ("*") no sentence starts after.
-const BULLETS = "•▪◦●■*";
+const BULLETS = "•▪◦●■*·\uf0b7";
 const LEADING_BULLET = new RegExp(`^[${BULLETS}]\\s*`);
 function wholeListItem(claim: TenKClaim, section: TenKSection): (TenKClaim & { exhibit: string; start: number; end: number }) | null {
   const quote = canonicalText(claim.quote).replace(LEADING_BULLET, "");
   if (quote.length < MIN_QUOTE_CHARS || quote.length > MAX_QUOTE_CHARS) return null;
   for (let start = section.text.indexOf(quote); start >= 0; start = section.text.indexOf(quote, start + 1)) {
     const end = start + quote.length;
-    if (BULLETS.includes(section.text[start - 2] ?? "") && section.text[start - 1] === " " && section.edges.has(start - 2) && section.edges.has(end)) {
+    if (start >= 2 && BULLETS.includes(section.text[start - 2]!) && section.text[start - 1] === " " && section.edges.has(start - 2) && section.edges.has(end)) {
       return { ...claim, quote, exhibit: section.type, start, end };
     }
   }
@@ -141,7 +138,7 @@ function wholeListItem(claim: TenKClaim, section: TenKSection): (TenKClaim & { e
 function competitorsNamedIn(claim: TenKClaim): string[] {
   if (claim.predicate !== "business.competition") return [];
   const quote = claim.quote.toLowerCase();
-  return claim.competitors.map((name) => name.trim()).filter((name) => name !== "" && quote.includes(name.toLowerCase()));
+  return claim.competitors.map(canonicalText).filter((name) => name !== "" && quote.includes(name.toLowerCase()));
 }
 
 type VerifiedClaim = TenKClaim & { item: TenKItem; start: number; end: number; issuerIds: string[] };
@@ -154,10 +151,11 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
     `select parse_status from documents where document_id = $1`,
     [doc.documentId],
   );
+  if (status === undefined) throw new Error(`no document ${doc.documentId}`);
+  if (status.parse_status !== "pending") return { ...started, outcome: "already_extracted", missing: [] };
   const sections = tenKSections(doc.html);
   const found = TEN_K_ITEMS.flatMap((item) => "error" in sections[item] ? [] : [sections[item] as TenKSection]);
   const missing = TEN_K_ITEMS.filter((item) => "error" in sections[item]);
-  if (status?.parse_status !== "pending") return { ...started, outcome: "already_extracted", missing };
   if (found.length === 0) return { ...started, outcome: "no_sections", missing };
 
   const prompts = found.flatMap((section) => releasePrompts([section]).map((text) => ({ section, text })));
@@ -167,13 +165,17 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
       "extract_10k_claims.prompt",
       { document_id: doc.documentId, item: section.type, prompt: index + 1, prompts: prompts.length },
       buildMessages(section.type, text),
+      MAX_REPLY_TOKENS,
     );
-    return { section, model: completion.model, claims: parseTenKReply(completion.text, section.type) };
+    return { section, model: completion.model, claims: completion.truncated ? null : parseTenKReply(completion.text, section.type) };
   }));
 
-  let unparseable = false;
   let droppedUnquoted = 0;
   const verified = new Map<string, VerifiedClaim>();
+  // A reply cut short or of the wrong shape, one whose every quote is
+  // invented, or a found item none of whose prompts names a claim is the
+  // model failing, so the document is read again.
+  let unparseable = found.some((section) => replies.every((reply) => reply.section !== section || reply.claims?.length === 0));
   for (const { section, claims } of replies) {
     const checked = (claims ?? []).map((claim) => ({ claim, found: verifyStatement(claim, [section]) ?? wholeListItem(claim, section) }));
     if (claims === null || (checked.length > 0 && checked.every((pick) => pick.found === null))) unparseable = true;
@@ -195,7 +197,7 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
   const model = replies[0]?.model ?? null;
   const args = { document_id: doc.documentId, model };
   if (unparseable) {
-    await writeToolCallLog(deps.db, { tool_name: "extract_10k_claims", args, result: { outcome: "unparseable", proposed: replies.length }, status: "partial" });
+    await writeToolCallLog(deps.db, { tool_name: "extract_10k_claims", args, result: { outcome: "unparseable", proposed: replies.map((reply) => reply.claims?.length ?? null), dropped_unquoted: droppedUnquoted }, status: "partial" });
     return { ...started, outcome: "unparseable", droppedUnquoted, missing, llmCalls: prompts.length };
   }
 
@@ -217,6 +219,13 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
     const claimIds: string[] = [];
     let resolved = 0;
     for (const claim of verified.values()) {
+      // Keyed on the document, predicate and quote, so a re-read of the
+      // document (once its items parse) adds only what is new.
+      const { rowCount: stored } = await tx.db.query(
+        `select 1 from claims where document_id = $1 and predicate = $2 and text_canonical = $3`,
+        [doc.documentId, claim.predicate, claim.quote],
+      );
+      if ((stored ?? 0) > 0) continue;
       const row = await createClaim(tx.db, {
         document_id: doc.documentId,
         predicate: claim.predicate,
@@ -265,22 +274,31 @@ export async function resolveCompetitorByName(db: QueryExecutor, name: string): 
   const written = normalizeNameForLookup(name);
   const stem = written.replace(WRITTEN_SUFFIX, "");
   if (stem === "") return null;
-  for (const candidate of new Set([written, ...ISSUER_SUFFIXES.map((suffix) => stem + suffix)])) {
+  const exact = await resolveByNameCandidate(db, written);
+  if (exact.outcome !== "not_found") return exact.outcome === "resolved" && exact.subject_ref.kind === "issuer" ? exact.subject_ref.id : null;
+  // One issuer across every short form: "Acme" names neither of "Acme Inc"
+  // and "Acme Corp".
+  const ids = new Set<string>();
+  for (const candidate of new Set(ISSUER_SUFFIXES.map((suffix) => stem + suffix))) {
     const envelope = await resolveByNameCandidate(db, candidate);
-    if (envelope.outcome === "resolved" && envelope.subject_ref.kind === "issuer") return envelope.subject_ref.id;
     if (envelope.outcome === "ambiguous") return null;
+    if (envelope.outcome === "resolved" && envelope.subject_ref.kind === "issuer") ids.add(envelope.subject_ref.id);
   }
-  return null;
+  return ids.size === 1 ? [...ids][0]! : null;
 }
 
 export async function storeTenK(
   deps: { db: QueryExecutor; objectStore: ObjectStore },
   input: { issuerId: string; bytes: Uint8Array; url: string | null; accession: string | null; filedDate: string | null; retrievedAt: string },
 ): Promise<{ documentId: string; sourceId: string }> {
+  // The same bytes stored by --file carry no accession until the backfill
+  // names it, so the next backfill finds them without a fetch.
   const { rows: [existing] } = await deps.db.query<{ document_id: string; source_id: string }>(
-    `select document_id::text as document_id, source_id::text as source_id from documents
-      where content_hash = $1 and deleted_at is null order by created_at limit 1`,
-    [contentHashFromBytes(input.bytes)],
+    `update documents set provider_doc_id = coalesce(provider_doc_id, $2)
+      where document_id = (select document_id from documents
+                            where content_hash = $1 and deleted_at is null order by created_at limit 1)
+      returning document_id::text as document_id, source_id::text as source_id`,
+    [contentHashFromBytes(input.bytes), input.accession],
   );
   let stored = existing ? { documentId: existing.document_id, sourceId: existing.source_id } : null;
   if (stored === null) {
@@ -301,7 +319,7 @@ export async function storeTenK(
         title: "10-K",
         published_at: input.filedDate === null ? null : `${input.filedDate}T00:00:00Z`,
       },
-    });
+    }).catch((error: unknown) => cleanupSourceAfterFailedIngest(deps.db, source.source_id, error));
     stored = { documentId: document.document_id, sourceId: document.source_id };
   }
   await createMention(deps.db, {

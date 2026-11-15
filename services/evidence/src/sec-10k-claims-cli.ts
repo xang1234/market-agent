@@ -29,23 +29,25 @@ function databaseUrlFromDevParts(env: NodeJS.ProcessEnv): string | undefined {
   return port ? `postgresql://${user}:${password}@127.0.0.1:${port}/${database}` : undefined;
 }
 
-type Issuer = { issuer_id: string; legal_name: string; cik: string | null; ticker: string | null };
+type Issuer = { issuer_id: string; legal_name: string; cik: string | null; tickers: string[] };
 
 async function issuers(db: QueryExecutor, tickers: string[]): Promise<Issuer[]> {
   const { rows } = await db.query<Issuer>(
-    `select distinct on (iss.issuer_id) iss.issuer_id::text as issuer_id, iss.legal_name, iss.cik, l.ticker
+    `select iss.issuer_id::text as issuer_id, iss.legal_name, iss.cik,
+            coalesce(array_agg(distinct l.ticker) filter (where l.ticker is not null), '{}') as tickers
        from issuers iss
        left join instruments i on i.issuer_id = iss.issuer_id
        left join listings l on l.instrument_id = i.instrument_id and (l.active_to is null or l.active_to > now())
       where ($1::text[] is null and iss.cik is not null) or l.ticker = any($1::text[])
-      order by iss.issuer_id, l.ticker`,
+      group by iss.issuer_id`,
     [tickers.length > 0 ? tickers.map((ticker) => ticker.toUpperCase()) : null],
   );
   return rows.sort((a, b) => a.legal_name.localeCompare(b.legal_name));
 }
 
-async function main(): Promise<void> {
+export function parseCliArgs(args: string[]): { file?: string; backfill: boolean; tickers: string[]; limit: number; concurrency: number } {
   const { values: flags } = parseArgs({
+    args,
     options: {
       file: { type: "string" },
       ticker: { type: "string", multiple: true },
@@ -55,13 +57,18 @@ async function main(): Promise<void> {
     },
   });
   const tickers = flags.ticker ?? [];
+  const backfill = flags.backfill === true;
   const limit = flags.limit === undefined ? Infinity : Number(flags.limit);
   const concurrency = flags.concurrency === undefined ? 1 : Number(flags.concurrency);
   if (!(limit === Infinity || (Number.isInteger(limit) && limit > 0))) throw new Error("--limit takes a whole number of issuers");
   if (!(Number.isInteger(concurrency) && concurrency > 0 && concurrency <= 8)) throw new Error("--concurrency takes 1 to 8");
-  if (flags.backfill === (flags.file !== undefined)) throw new Error("pass one of --file <path> --ticker <TICKER>, or --backfill");
+  if (backfill === (flags.file !== undefined)) throw new Error("pass one of --file <path> --ticker <TICKER>, or --backfill");
   if (flags.file !== undefined && tickers.length !== 1) throw new Error("--file needs one --ticker");
+  return { file: flags.file, backfill, tickers, limit, concurrency };
+}
 
+async function main(): Promise<void> {
+  const { file, tickers, limit, concurrency } = parseCliArgs(process.argv.slice(2));
   const devDatabaseUrl = databaseUrlFromDevParts(process.env);
   if (!process.env.DATABASE_URL && devDatabaseUrl) process.env.DATABASE_URL = devDatabaseUrl;
   const llm = await createLlmRouterFromEnv(process.env, { purpose: "extraction" });
@@ -70,25 +77,26 @@ async function main(): Promise<void> {
   const deps: TenKBackfillDeps = { db, llm, objectStore, secClient, resolveCompetitor: (name) => resolveCompetitorByName(db, name) };
   let failed = false;
   try {
-    if (flags.file !== undefined) {
+    if (file !== undefined) {
       const [issuer, ...others] = await issuers(db, tickers);
       if (issuer === undefined || others.length > 0) throw new Error(`${tickers[0]} must name exactly one stored issuer`);
       const started = Date.now();
-      const bytes = readFileSync(flags.file);
+      const bytes = readFileSync(file);
       const doc = await storeTenK(deps, { issuerId: issuer.issuer_id, bytes, url: null, accession: null, filedDate: null, retrievedAt: new Date().toISOString() });
       const result = await extract10kClaims(deps, { ...doc, issuerId: issuer.issuer_id, html: bytes.toString("utf8"), effectiveTime: null });
       console.log(resultLine(result, Date.now() - started));
       failed = result.outcome === "unparseable";
     } else {
-      const queue = (await issuers(db, tickers)).slice(0, limit);
+      const stored = await issuers(db, tickers);
+      const queue = stored.slice(0, limit);
       const totals: Record<string, number> = {};
-      for (const ticker of tickers.filter((ticker) => !queue.some((issuer) => issuer.ticker === ticker.toUpperCase()))) {
+      for (const ticker of tickers.filter((ticker) => !stored.some((issuer) => issuer.tickers.includes(ticker.toUpperCase())))) {
         failed = true;
         console.error(`${ticker}: no stored issuer`);
       }
       const work = async () => {
         for (let issuer = queue.shift(); issuer !== undefined; issuer = queue.shift()) {
-          const label = `${issuer.ticker ?? "-"} ${issuer.legal_name}`;
+          const label = `${issuer.tickers.join("/") || "-"} ${issuer.legal_name}`;
           const started = Date.now();
           if (issuer.cik === null) {
             totals.no_cik = (totals.no_cik ?? 0) + 1;

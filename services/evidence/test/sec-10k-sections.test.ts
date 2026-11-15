@@ -44,3 +44,9 @@ test("a heading reads through a word markup split, and Item 1 may be the Descrip
   assert.equal((sections["1A"] as TenKSection).text.slice(0, 22), "ITEM 1A. R ISK FACTORS");
   assert.ok(!(sections["1A"] as TenKSection).text.includes("Properties"));
 });
+
+test("an HTML list item, whose bullet the browser draws, reads as a bulleted block", () => {
+  const body = "<div>We make things that people use every day in many places.</div>".repeat(30);
+  const sections = tenKSections(`<div>Item 1. Business</div><ul><li>suppliers of GPUs, such as AMD;</li></ul>${body}<div>Item 1A. Risk Factors</div>${body}`);
+  assert.ok((sections["1"] as TenKSection).text.includes("Item 1. Business • suppliers of GPUs, such as AMD; We make"));
+});

@@ -6,17 +6,18 @@ export type TenKItem = (typeof TEN_K_ITEMS)[number];
 // canonicalText turns every tag into a space, so a tag inside a word splits it.
 const tagSplitTolerant = (title: string) => title.split(" ").map((word) => [...word].join(" ?")).join("\\s+");
 const HEADINGS: Readonly<Record<TenKItem, RegExp>> = {
-  "1": new RegExp(`^item\\s*1\\s*[.:-]?\\s*(?:description\\s+of\\s+)?${tagSplitTolerant("business")}\\b`, "i"),
+  "1": new RegExp(`^items?\\s*1(?:\\s*and\\s*2)?\\s*[.:-]?\\s*(?:description\\s+of\\s+)?${tagSplitTolerant("business")}\\b`, "i"),
   "1A": new RegExp(`^item\\s*1a\\s*[.:-]?\\s*${tagSplitTolerant("risk factors")}\\b`, "i"),
 };
-const ANY_HEADING = /^(?:ITEM|Item)\s*\d{1,2}[A-Ca-c]?\s*[.:-]?\s*[A-Z[]/;
+const ANY_HEADING = /^(?:ITEMS?|Items?)\s*\d{1,2}[A-Ca-c]?\s*[.:-]?\s*[A-Z[]/;
 const MIN_ITEM_BODY_CHARS = 1_000;
 
 export type TenKSection = ReleaseExhibit & { type: TenKItem };
 export type SectionNotFound = { type: TenKItem; error: "section_not_found" };
 
 export function tenKSections(html: string): Record<TenKItem, TenKSection | SectionNotFound> {
-  const { text, edges } = blockText(html);
+  // A list item's bullet may be the browser's, not a glyph in the text.
+  const { text, edges } = blockText(html.replace(/<li\b[^>]*>/gi, "$&• "));
   const starts = [...edges].sort((a, b) => a - b);
   const headings = starts.filter((at) => ANY_HEADING.test(text.slice(at, at + 40)));
   const longestHeadedSpan = (item: TenKItem): TenKSection | SectionNotFound => {
