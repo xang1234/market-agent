@@ -20,7 +20,7 @@ import {
 } from "./sec-earnings-release-extraction.ts";
 import { cleanupSourceAfterFailedIngest, recentSubmissionRows, type SecFilingFetcher, type SecSubmissions } from "./sec-edgar.ts";
 import { tenKSections, TEN_K_ITEMS, type TenKItem, type TenKSection } from "./sec-10k-sections.ts";
-import { createSource } from "./source-repo.ts";
+import { createSource, deleteSource } from "./source-repo.ts";
 import { withTransaction } from "./transaction.ts";
 import type { QueryExecutor } from "./types.ts";
 
@@ -33,6 +33,8 @@ export type TenKPredicate = (typeof TEN_K_PREDICATES)[TenKItem][number];
 export type TenKClaim = { predicate: TenKPredicate; quote: string; competitors: string[] };
 
 const MAX_CLAIMS: Readonly<Record<TenKItem, number>> = { "1": 16, "1A": 15 };
+// A 10-K's model calls per run; the plan's perf rule fails one above 12.
+const MAX_LLM_CALLS = 12;
 // 16 quotes of up to 600 characters, with their keys and low reasoning.
 const MAX_REPLY_TOKENS = 8_000;
 const TEN_K_CONFIDENCE = 0.8;
@@ -49,24 +51,31 @@ export type TenKDocument = {
   effectiveTime: string | null;
 };
 
-// parse_status "parsed" means every item was read, and "failed" that the
-// parser missed an item, as for a 10-K laid out by a cross-reference index
-// (Intel's) or a smaller reporting company with no Item 1A. An item counts as
-// read once it has claims, so a rerun sections a failed document again from its
-// stored bytes and asks the model only about the items it newly finds.
+// parse_status "parsed" means every item was read, and "failed" that an item
+// was not: the parser missed it, as for a 10-K laid out by a cross-reference
+// index (Intel's) or a smaller reporting company with no Item 1A, or the
+// model's reply for it was unusable. An item counts as read once it has
+// claims, so a rerun sections a failed document again from its stored bytes
+// and asks the model only about the items still unread.
 // ponytail: an item whose reply held no claim reads as unread, so each rerun of
 // a failed document asks the model about it again. Record the items read on the
 // document if that costs.
-// "unparseable": a reply of the wrong shape, or none of whose quotes is in the
-// filing, so nothing is stored and its items stay unread for the next run.
+// "unread": items whose reply had the wrong shape, or none of whose quotes is
+// in the filing, so none of their claims is stored. The other items are.
+// "unparseable": every item asked is unread, so nothing is stored.
+// "cut": items longer than the run's MAX_LLM_CALLS prompts allow, read as far
+// as the budget went. An item cut before its first prompt stays unread.
 // "no_sections": no item is found or read.
 export type Extract10kOutcome = "extracted" | "already_extracted" | "unparseable" | "no_sections";
+export type CutItem = { item: TenKItem; prompts: number; of: number };
 export type Extract10kResult = {
   outcome: Extract10kOutcome;
   extracted: number;
   droppedUnquoted: number;
   competitors: { resolved: number; named: number };
   missing: TenKItem[];
+  unread: TenKItem[];
+  cut: CutItem[];
   llmCalls: number;
 };
 
@@ -143,11 +152,14 @@ function wholeListItem(claim: TenKClaim, section: TenKSection): (TenKClaim & { e
 }
 
 // A risk factor names partners and customers too, so only a competition
-// claim has competitors.
+// claim has competitors. A competitor is a proper name, matched as the quote
+// writes it: "target customers" names no Target, and "custom chips" no
+// Custom Inc. ponytail: a capitalized common word that opens the quote
+// ("Target customers") still matches.
 function competitorsNamedIn(claim: TenKClaim): string[] {
   if (claim.predicate !== "business.competition") return [];
-  const namedAsWord = (name: string) =>
-    new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(claim.quote);
+  const namedAsWord = (name: string) => /[\p{Lu}\p{N}]/u.test(name) &&
+    new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u").test(claim.quote);
   return claim.competitors.map(canonicalText).filter((name) => name !== "" && namedAsWord(name));
 }
 
@@ -166,7 +178,7 @@ async function itemsRead(db: QueryExecutor, documentId: string): Promise<Set<Ten
 // Extract one 10-K document's claims and store the verified ones. Transport
 // errors propagate and store nothing, so the document stays unread.
 export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument): Promise<Extract10kResult> {
-  const started = { extracted: 0, droppedUnquoted: 0, competitors: { resolved: 0, named: 0 }, llmCalls: 0 };
+  const started = { extracted: 0, droppedUnquoted: 0, competitors: { resolved: 0, named: 0 }, unread: [], cut: [], llmCalls: 0 };
   const { rows: [status] } = await deps.db.query<{ parse_status: string }>(
     `select parse_status from documents where document_id = $1`,
     [doc.documentId],
@@ -186,7 +198,15 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
     return { ...started, outcome: read.size === 0 ? "no_sections" : "already_extracted", missing };
   }
 
-  const prompts = found.flatMap((section) => releasePrompts([section]).map((text) => ({ section, text })));
+  let callsLeft = MAX_LLM_CALLS;
+  const cut: CutItem[] = [];
+  const prompts = found.flatMap((section) => {
+    const all = releasePrompts([section]);
+    const asked = all.slice(0, callsLeft);
+    callsLeft -= asked.length;
+    if (asked.length < all.length) cut.push({ item: section.type, prompts: asked.length, of: all.length });
+    return asked.map((text) => ({ section, text }));
+  });
   const replies = await Promise.all(prompts.map(async ({ section, text }, index) => {
     const completion = await completeLogged(
       deps,
@@ -200,30 +220,35 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
 
   let droppedUnquoted = 0;
   const verified = new Map<string, VerifiedClaim>();
-  let unparseable = false;
-  for (const { section, claims } of replies) {
-    const checked = (claims ?? []).map((claim) => ({ claim, found: verifyStatement(claim, [section]) ?? wholeListItem(claim, section) }));
-    if (claims === null || (checked.length > 0 && checked.every((pick) => pick.found === null))) unparseable = true;
-    for (const { found } of checked) {
-      if (found === null) {
+  const checkedReplies = replies.map(({ section, claims }) => {
+    const checked = (claims ?? []).map((claim) => verifyStatement(claim, [section]) ?? wholeListItem(claim, section));
+    return { section, checked, usable: claims !== null && (checked.length === 0 || checked.some((pick) => pick !== null)) };
+  });
+  const unread = found.map((section) => section.type).filter((item) =>
+    !prompts.some(({ section }) => section.type === item) || checkedReplies.some((reply) => reply.section.type === item && !reply.usable));
+  for (const { section, checked } of checkedReplies) {
+    if (unread.includes(section.type)) continue;
+    for (const claim of checked) {
+      if (claim === null) {
         droppedUnquoted += 1;
         continue;
       }
-      const key = JSON.stringify([found.predicate, found.quote]);
+      const key = JSON.stringify([claim.predicate, claim.quote]);
       const prior = verified.get(key);
       verified.set(key, {
-        ...found,
+        ...claim,
         item: section.type,
-        competitors: [...new Set([...(prior?.competitors ?? []), ...competitorsNamedIn(found)])],
+        competitors: [...new Set([...(prior?.competitors ?? []), ...competitorsNamedIn(claim)])],
         issuerIds: [],
       });
     }
   }
   const model = replies[0]?.model ?? null;
   const args = { document_id: doc.documentId, model };
-  if (unparseable) {
-    await writeToolCallLog(deps.db, { tool_name: "extract_10k_claims", args, result: { outcome: "unparseable", proposed: replies.map((reply) => reply.claims?.length ?? null), dropped_unquoted: droppedUnquoted }, status: "partial" });
-    return { ...started, outcome: "unparseable", droppedUnquoted, missing, llmCalls: prompts.length };
+  const proposed = replies.map((reply) => reply.claims?.length ?? null);
+  if (unread.length === found.length) {
+    await writeToolCallLog(deps.db, { tool_name: "extract_10k_claims", args, result: { outcome: "unparseable", unread, cut, proposed, dropped_unquoted: droppedUnquoted }, status: "partial" });
+    return { ...started, outcome: "unparseable", droppedUnquoted, missing, unread, cut, llmCalls: prompts.length };
   }
 
   let named = 0;
@@ -242,15 +267,18 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
       `select parse_status, published_at from documents where document_id = $1 for update`,
       [doc.documentId],
     );
+    // A concurrent run may have read some items meanwhile: store the others.
     const readNow = await itemsRead(tx.db, doc.documentId);
     const missingNow = missingAfter(readNow);
-    if (readThrough(locked!.parse_status) || found.some((section) => readNow.has(section.type))) {
-      return { ...started, outcome: "already_extracted" as const, missing: missingNow };
+    const storing = found.map((section) => section.type).filter((item) => !unread.includes(item) && !readNow.has(item));
+    const unreadNow = unread.filter((item) => !readNow.has(item));
+    if (readThrough(locked!.parse_status) || storing.length === 0) {
+      return { ...started, outcome: "already_extracted" as const, missing: missingNow, unread: unreadNow };
     }
     const effectiveTime = doc.effectiveTime ?? locked!.published_at?.toISOString() ?? null;
     const claimIds: string[] = [];
     let resolved = 0;
-    for (const claim of verified.values()) {
+    for (const claim of [...verified.values()].filter((claim) => storing.includes(claim.item))) {
       const row = await createClaim(tx.db, {
         document_id: doc.documentId,
         predicate: claim.predicate,
@@ -279,14 +307,15 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
       claimIds.push(row.claim_id);
     }
     const competitors = { resolved, named };
-    await tx.db.query(`update documents set parse_status = $2 where document_id = $1`, [doc.documentId, missingNow.length === 0 ? "parsed" : "failed"]);
+    const allRead = missingNow.length === 0 && unreadNow.length === 0;
+    await tx.db.query(`update documents set parse_status = $2 where document_id = $1`, [doc.documentId, allRead ? "parsed" : "failed"]);
     await writeToolCallLog(tx.db, {
       tool_name: "extract_10k_claims",
       args,
-      result: { outcome: "extracted", missing: missingNow, claim_ids: claimIds, dropped_unquoted: droppedUnquoted, competitors },
-      status: claimIds.length > 0 ? "ok" : "skipped",
+      result: { outcome: "extracted", missing: missingNow, unread: unreadNow, cut, proposed, claim_ids: claimIds, dropped_unquoted: droppedUnquoted, competitors },
+      status: allRead && cut.length === 0 ? (claimIds.length > 0 ? "ok" : "skipped") : "partial",
     });
-    return { outcome: "extracted" as const, extracted: claimIds.length, droppedUnquoted, competitors, missing: missingNow, llmCalls: prompts.length };
+    return { outcome: "extracted" as const, extracted: claimIds.length, droppedUnquoted, competitors, missing: missingNow, unread: unreadNow, cut, llmCalls: prompts.length };
   });
 }
 
@@ -342,6 +371,8 @@ export async function storeTenK(
         published_at: input.filedDate === null ? null : `${input.filedDate}T00:00:00Z`,
       },
     }).catch((error: unknown) => cleanupSourceAfterFailedIngest(deps.db, source.source_id, error));
+    // A concurrent run stored the same bytes first: its document keeps its source.
+    if (document.source_id !== source.source_id) await deleteSource(deps.db, source.source_id);
     stored = { documentId: document.document_id, sourceId: document.source_id };
   }
   // Bytes stored first by --file (before, or by a concurrent run) carry no
@@ -389,7 +420,7 @@ export async function backfillIssuer10k(
     [latest.accession],
   );
   if (readThrough(existing?.parse_status)) {
-    return { outcome: "already_extracted", extracted: 0, droppedUnquoted: 0, competitors: { resolved: 0, named: 0 }, missing: [], llmCalls: 0, accession: latest.accession };
+    return { outcome: "already_extracted", extracted: 0, droppedUnquoted: 0, competitors: { resolved: 0, named: 0 }, missing: [], unread: [], cut: [], llmCalls: 0, accession: latest.accession };
   }
   // The filings backfill stores 10-Ks too: claims cite the stored bytes.
   const blob = existing === undefined ? null : await deps.objectStore.get(existing.raw_blob_id);

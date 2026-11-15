@@ -1,5 +1,5 @@
 //   DATABASE_URL=... S3_*=... LLM_*=... SEC_EDGAR_USER_AGENT=... \
-//     npm run extract:10k-claims -- --file <10-K.htm> --ticker <TICKER>
+//     npm run extract:10k-claims -- --file <10-K.htm> --ticker <TICKER> [--accession <0001045810-26-000021> --filed <2026-02-25>]
 //     npm run extract:10k-claims -- --backfill [--ticker <TICKER> ...] [--limit N] [--concurrency N]
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -8,6 +8,7 @@ import { createLlmRouterFromEnv } from "../../llm/src/settings-loader.ts";
 import { createEvidenceCliRuntime } from "./evidence-cli-runtime.ts";
 import {
   backfillIssuer10k,
+  type CutItem,
   extract10kClaims,
   resolveCompetitorByName,
   storeTenK,
@@ -20,15 +21,19 @@ import type { QueryExecutor } from "./types.ts";
 export function resultLine(result: Extract10kResult, ms: number): string {
   return `outcome=${result.outcome} extracted=${result.extracted} dropped_unquoted=${result.droppedUnquoted} ` +
     `competitors=${result.competitors.resolved}/${result.competitors.named} missing=${result.missing.join(",") || "none"} ` +
+    `unread=${result.unread.join(",") || "none"} cut=${result.cut.map((cut) => `${cut.item}:${cut.prompts}/${cut.of}`).join(",") || "none"} ` +
     `ms=${ms} llm_calls=${result.llmCalls}`;
 }
 
-export function summaryLine(results: ReadonlyArray<{ outcome: string; missing?: ReadonlyArray<TenKItem> }>): string {
+type Outcome = { outcome: string; missing?: ReadonlyArray<TenKItem>; unread?: ReadonlyArray<TenKItem>; cut?: ReadonlyArray<CutItem> };
+export function summaryLine(results: ReadonlyArray<Outcome>): string {
   const totals = new Map<string, number>();
   const count = (key: string) => totals.set(key, (totals.get(key) ?? 0) + 1);
   for (const result of results) {
     count(result.outcome);
     if (result.outcome !== "no_sections" && (result.missing?.length ?? 0) > 0) count("partial");
+    if (result.outcome !== "unparseable" && (result.unread?.length ?? 0) > 0) count("unread");
+    if ((result.cut?.length ?? 0) > 0) count("cut");
   }
   return `done: ${[...totals].map(([key, n]) => `${key}=${n}`).join(" ") || "no issuers"}`;
 }
@@ -56,11 +61,24 @@ async function issuers(db: QueryExecutor, tickers: string[]): Promise<Issuer[]> 
   return rows.sort((a, b) => a.legal_name.localeCompare(b.legal_name));
 }
 
-export function parseCliArgs(args: string[]): { file?: string; backfill: boolean; tickers: string[]; limit: number; concurrency: number } {
+// A 10-K's own filer, from its inline XBRL cover page.
+export function filerCik(html: string): number | null {
+  const cik = /name="dei:EntityCentralIndexKey"[^>]*>\s*(\d{1,10})\s*</.exec(html);
+  return cik === null ? null : Number(cik[1]);
+}
+
+// A model reply that left an item unread exits 1, so a scheduler reruns it.
+const needsRerun = (result: { outcome: string; unread?: ReadonlyArray<TenKItem> }) =>
+  result.outcome === "unparseable" || (result.unread?.length ?? 0) > 0;
+
+type CliArgs = { file?: string; accession: string | null; filed: string | null; backfill: boolean; tickers: string[]; limit: number; concurrency: number };
+export function parseCliArgs(args: string[]): CliArgs {
   const { values: flags } = parseArgs({
     args,
     options: {
       file: { type: "string" },
+      accession: { type: "string" },
+      filed: { type: "string" },
       ticker: { type: "string", multiple: true },
       backfill: { type: "boolean" },
       limit: { type: "string" },
@@ -75,11 +93,20 @@ export function parseCliArgs(args: string[]): { file?: string; backfill: boolean
   if (!(Number.isInteger(concurrency) && concurrency > 0 && concurrency <= 8)) throw new Error("--concurrency takes 1 to 8");
   if (backfill === (flags.file !== undefined)) throw new Error("pass one of --file <path> --ticker <TICKER>, or --backfill");
   if (flags.file !== undefined && tickers.length !== 1) throw new Error("--file needs one --ticker");
-  return { file: flags.file, backfill, tickers, limit, concurrency };
+  const accession = flags.accession ?? null;
+  const filed = flags.filed ?? null;
+  if ((accession !== null || filed !== null) && flags.file === undefined) throw new Error("--accession and --filed go with --file");
+  if ((accession === null) !== (filed === null)) throw new Error("--accession and --filed go together");
+  if (accession !== null && !/^\d{10}-\d{2}-\d{6}$/.test(accession)) throw new Error("--accession takes 0001045810-26-000021");
+  const filedDay = new Date(`${filed}T00:00:00Z`);
+  if (filed !== null && !(/^\d{4}-\d{2}-\d{2}$/.test(filed) && !Number.isNaN(filedDay.getTime()) && filedDay.toISOString().startsWith(filed))) {
+    throw new Error("--filed takes a date, 2026-02-25");
+  }
+  return { file: flags.file, accession, filed, backfill, tickers, limit, concurrency };
 }
 
 async function main(): Promise<void> {
-  const { file, tickers, limit, concurrency } = parseCliArgs(process.argv.slice(2));
+  const { file, accession, filed, tickers, limit, concurrency } = parseCliArgs(process.argv.slice(2));
   const devDatabaseUrl = databaseUrlFromDevParts(process.env);
   if (!process.env.DATABASE_URL && devDatabaseUrl) process.env.DATABASE_URL = devDatabaseUrl;
   const llm = await createLlmRouterFromEnv(process.env, { purpose: "extraction" });
@@ -93,14 +120,20 @@ async function main(): Promise<void> {
       if (issuer === undefined || others.length > 0) throw new Error(`${tickers[0]} must name exactly one stored issuer`);
       const started = Date.now();
       const bytes = readFileSync(file);
-      const doc = await storeTenK(deps, { issuerId: issuer.issuer_id, bytes, url: null, accession: null, filedDate: null, retrievedAt: new Date().toISOString() });
-      const result = await extract10kClaims(deps, { ...doc, issuerId: issuer.issuer_id, html: bytes.toString("utf8"), effectiveTime: null });
+      const html = bytes.toString("utf8");
+      const filer = filerCik(html);
+      if (filer !== null && issuer.cik !== null && filer !== Number(issuer.cik)) {
+        throw new Error(`${file} is filed by CIK ${filer}, not ${tickers[0]}'s ${Number(issuer.cik)}`);
+      }
+      const doc = await storeTenK(deps, { issuerId: issuer.issuer_id, bytes, url: null, accession, filedDate: filed, retrievedAt: new Date().toISOString() });
+      const effectiveTime = filed === null ? null : `${filed}T00:00:00Z`;
+      const result = await extract10kClaims(deps, { ...doc, issuerId: issuer.issuer_id, html, effectiveTime });
       console.log(resultLine(result, Date.now() - started));
-      failed = result.outcome === "unparseable";
+      failed = needsRerun(result);
     } else {
       const stored = await issuers(db, tickers);
       const queue = stored.slice(0, limit);
-      const results: Array<{ outcome: string; missing?: TenKItem[] }> = [];
+      const results: Outcome[] = [];
       for (const ticker of tickers.filter((ticker) => !stored.some((issuer) => issuer.tickers.includes(ticker.toUpperCase())))) {
         failed = true;
         console.error(`${ticker}: no stored issuer`);
@@ -117,7 +150,7 @@ async function main(): Promise<void> {
           try {
             const result = await backfillIssuer10k(deps, { issuerId: issuer.issuer_id, cik: Number(issuer.cik) });
             results.push(result);
-            if (result.outcome === "unparseable") failed = true;
+            if (needsRerun(result)) failed = true;
             console.log(`${label}: ${"accession" in result ? `${result.accession} ${resultLine(result, Date.now() - started)}` : "outcome=no_10k"}`);
           } catch (error) {
             failed = true;
