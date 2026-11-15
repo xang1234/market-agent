@@ -11,10 +11,11 @@ function verificationOf(result: ConditionAssessment): VerificationKind | null {
   return null
 }
 
-const METHOD_LABELS: Readonly<Record<ConditionAssessment['method'], string>> = {
+// A condition with no evidence has no method line: its reason says why.
+const METHOD_LABELS: Readonly<Record<ConditionAssessment['method'], string | null>> = {
   metric: 'Checked an authoritative numeric fact against this threshold.',
   model: 'Assessed against the cited certified figures (F) and stored claims (C) only.',
-  no_evidence: 'No stored source covered this condition at the assessment cutoff.',
+  no_evidence: null,
 }
 
 type Entry = { assessment: ThesisAssessment; result: ConditionAssessment; version: ThesisVersion | undefined }
@@ -101,11 +102,11 @@ function AssessmentEntry({ entry: { assessment, result, version }, currentVersio
         {assessment.model_version ? `Model ${assessment.model_version}` : 'Deterministic assessment'} · Prompt {assessment.prompt_version}
       </p>
       <p className="mt-2 break-words text-sm text-fg-soft">{result.reason}</p>
-      <p className="mt-2 text-xs text-muted">
-        {result.financial
-          ? `Verified against the saved threshold at the assessment cutoff · certificate ${result.financial.certificate_digest?.slice(0, 12) ?? 'unavailable'}`
-          : METHOD_LABELS[result.method]}
-      </p>
+      {result.financial ? (
+        <p className="mt-2 text-xs text-muted">
+          Verified against the saved threshold at the assessment cutoff · certificate {result.financial.certificate_digest?.slice(0, 12) ?? 'unavailable'}
+        </p>
+      ) : METHOD_LABELS[result.method] ? <p className="mt-2 text-xs text-muted">{METHOD_LABELS[result.method]}</p> : null}
       {(result.fact_refs.length > 0 || result.claim_refs.length > 0) ? (
         <div className="mt-2 flex flex-wrap gap-2" aria-label="Cited refs">
           {result.fact_refs.map((id, index) => (
