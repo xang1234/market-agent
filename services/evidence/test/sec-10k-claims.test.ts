@@ -8,11 +8,13 @@ import {
   parseTenKReply,
   resolveCompetitorByName,
   storeTenK,
+  TEN_K_PREDICATES,
   type Extract10kDeps,
   type TenKBackfillDeps,
   type TenKDocument,
 } from "../src/sec-10k-claims.ts";
 import { checkFiler, filerCik, parseCliArgs, summaryLine } from "../src/sec-10k-claims-cli.ts";
+import { loadLocalRuntimeEvidence } from "../src/local-runtime-evidence.ts";
 import { MemoryObjectStore } from "../src/object-store.ts";
 import type { SecSubmissions } from "../src/sec-edgar.ts";
 import type { QueryExecutor } from "../src/types.ts";
@@ -299,11 +301,12 @@ test("a 10-K extracted from a file takes its filing's accession and date from th
   await storeTenK({ db: client, objectStore }, {
     issuerId: nvda, bytes: NVDA_HTML, url: "https://www.sec.gov/x", accession: "0001045810-26-000021", filedDate: "2026-02-25", retrievedAt: "2026-11-15T00:00:00.000Z",
   });
-  const { rows } = await client.query<{ provider_doc_id: string; published_at: Date; effective_time: Date }>(
-    `select distinct d.provider_doc_id, d.published_at, c.effective_time from documents d join claims c using (document_id)`,
+  const { rows } = await client.query<{ provider_doc_id: string; published_at: Date; effective_time: Date; canonical_url: string }>(
+    `select distinct d.provider_doc_id, d.published_at, c.effective_time, s.canonical_url
+       from documents d join claims c using (document_id) join sources s on s.source_id = d.source_id`,
   );
   const filed = new Date("2026-02-25T00:00:00Z");
-  assert.deepEqual(rows, [{ provider_doc_id: "0001045810-26-000021", published_at: filed, effective_time: filed }]);
+  assert.deepEqual(rows, [{ provider_doc_id: "0001045810-26-000021", published_at: filed, effective_time: filed, canonical_url: "https://www.sec.gov/x" }]);
 });
 
 test("a --file run on a 10-K the backfill stored but could not read dates its claims by the filing", dockerTest, async (t) => {
@@ -496,4 +499,80 @@ test("the backfill reads a 10-K the filings backfill stored from the object stor
   assert.equal(result.outcome, "extracted");
   assert.deepEqual(fetched, []);
   assert.equal((await client.query(`select 1 from documents`)).rowCount, 1, "the claims cite the stored document");
+});
+
+// A model that quotes the first whole sentences of each prompt, under each of
+// the item's predicates in turn.
+const quotingLlm: Extract10kDeps["llm"] = {
+  complete: async (request) => {
+    const item = String(request.messages[0]!.content).includes("Item 1 (Business)") ? "1" : "1A";
+    const sentences = String(request.messages[1]!.content).split(/(?<=\.) (?=[A-Z])/).filter((sentence) => sentence.length >= 80 && sentence.length <= 400);
+    const predicates = TEN_K_PREDICATES[item];
+    const claims = sentences.slice(0, 12).map((quote, n) => ({ predicate: predicates[n % predicates.length], quote, competitors: [] }));
+    return { text: JSON.stringify({ claims }), deployment: { channel: "test", model: "test-model" } } as Awaited<ReturnType<Extract10kDeps["llm"]["complete"]>>;
+  },
+};
+
+async function seedEightKClaims(client: QueryExecutor, issuerId: string): Promise<void> {
+  const { rows: [source] } = await client.query<{ id: string }>(
+    `insert into sources (provider, kind, trust_tier, license_class, retrieved_at) values ('sec_edgar', 'filing', 'primary', 'public', now()) returning source_id::text as id`,
+  );
+  const releases = [
+    ["management.explanation.gross_margin", "2025-08-27T00:00:00Z"],
+    ["guidance.revenue", "2025-11-19T00:00:00Z"],
+    ["kpi.commentary", "2025-11-19T00:00:00Z"],
+    ["material_event.material_event", "2026-01-10T00:00:00Z"],
+    ["insider.transaction", "2026-02-01T00:00:00Z"],
+  ];
+  for (const [n, [predicate, at]] of releases.entries()) {
+    const { rows: [document] } = await client.query<{ id: string }>(
+      `insert into documents (source_id, kind, title, content_hash, raw_blob_id, published_at) values ($1, 'filing', '8-K', $2, $2, $3) returning document_id::text as id`,
+      [source!.id, `sha256:eight-k-${n}`, at],
+    );
+    const { rows: [claim] } = await client.query<{ id: string }>(
+      `insert into claims (document_id, predicate, text_canonical, polarity, modality, reported_by_source_id, effective_time, confidence, status)
+       values ($1, $2, $3, 'neutral', 'asserted', $4, $5, 0.9, 'extracted') returning claim_id::text as id`,
+      [document!.id, predicate, `NVIDIA's 8-K statement number ${n}.`, source!.id, at],
+    );
+    await client.query(`insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1, 'issuer', $2, 'subject')`, [claim!.id, issuerId]);
+  }
+}
+
+test("a 10-K's claims enter an evidence read only when the read names their predicates", dockerTest, async (t) => {
+  const { client, nvda } = await nvdaDatabase(t, "tenk-evidence-read");
+  await seedEightKClaims(client, nvda);
+  const subject_refs = [{ kind: "issuer" as const, id: nvda }];
+  const chatRoute = { predicate_prefixes: ["management.explanation.", "guidance.", "kpi.", "material_event."], effective_from: "2025-01-01T00:00:00Z" };
+  const ids = (evidence: Awaited<ReturnType<typeof loadLocalRuntimeEvidence>>) => evidence.claims.map((claim) => claim.claim_id);
+  const unselected = async () => ids(await loadLocalRuntimeEvidence(client, { subject_refs }));
+  const chat = async () => ids(await loadLocalRuntimeEvidence(client, { subject_refs, selection: chatRoute, limit: 6 }));
+  const [unselectedBefore, chatBefore] = [await unselected(), await chat()];
+
+  const doc = await storeTenK({ db: client, objectStore: new MemoryObjectStore() }, {
+    issuerId: nvda, bytes: NVDA_HTML, url: null, accession: "0001045810-26-000021", filedDate: "2026-02-25", retrievedAt: "2026-11-15T00:00:00.000Z",
+  });
+  await extract10kClaims({ db: client, llm: quotingLlm, resolveCompetitor: async () => null }, { ...doc, issuerId: nvda, html: NVDA_HTML.toString("utf8"), effectiveTime: "2026-02-25T00:00:00Z" });
+  const { rows: stored } = await client.query<{ predicate: string; n: number }>(
+    `select predicate, count(*)::int as n from claims where document_id = $1 group by 1 order by 1`,
+    [doc.documentId],
+  );
+  assert.deepEqual(stored.map((row) => row.predicate), Object.values(TEN_K_PREDICATES).flat().sort(), "the 10-K stores claims of every predicate");
+
+  await t.test("a read with no selection returns the 8-K claims it did before the 10-K", async () => {
+    assert.deepEqual(await unselected(), unselectedBefore);
+  });
+  await t.test("a chat route's read fills its leftover slots with no 10-K claim", async () => {
+    assert.deepEqual(await chat(), chatBefore);
+  });
+  await t.test("a read naming risk.factor gets every risk factor and no business claim", async () => {
+    const risks = await loadLocalRuntimeEvidence(client, { subject_refs, selection: { predicate_prefixes: ["risk.factor"], effective_from: null }, limit: 100 });
+    const predicates = risks.claims.map((claim) => claim.predicate);
+    assert.equal(predicates.filter((predicate) => predicate === "risk.factor").length, stored.find((row) => row.predicate === "risk.factor")!.n);
+    assert.deepEqual(predicates.filter((predicate) => predicate.startsWith("business.")), []);
+  });
+  await t.test("a read that pins a 10-K claim by id gets it", async () => {
+    const { rows: [pinned] } = await client.query<{ id: string }>(`select claim_id::text as id from claims where document_id = $1 limit 1`, [doc.documentId]);
+    const read = await loadLocalRuntimeEvidence(client, { subject_refs, selection: chatRoute, first_claim_ids: [pinned!.id] });
+    assert.equal(read.claims[0]!.claim_id, pinned!.id);
+  });
 });

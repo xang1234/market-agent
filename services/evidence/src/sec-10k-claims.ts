@@ -384,8 +384,10 @@ export async function storeTenK(
   }
   // Bytes stored first by --file (before, or by a concurrent run) carry no
   // filing until the backfill names it: its accession, so the next backfill
-  // finds them without a fetch, and its date, for the document and its claims.
+  // finds them without a fetch, its date, for the document and its claims, and
+  // its EDGAR link, for the source.
   if (input.accession !== null) {
+    await deps.db.query(`update sources set canonical_url = coalesce(canonical_url, $2) where source_id = $1`, [stored.sourceId, input.url]);
     const filedAt = input.filedDate === null ? null : `${input.filedDate}T00:00:00Z`;
     await deps.db.query(
       `update documents set provider_doc_id = coalesce(provider_doc_id, $2), published_at = coalesce(published_at, $3::timestamptz)

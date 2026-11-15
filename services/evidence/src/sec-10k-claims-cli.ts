@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 
 import { createLlmRouterFromEnv } from "../../llm/src/settings-loader.ts";
 import { createEvidenceCliRuntime } from "./evidence-cli-runtime.ts";
+import { filingIndexUrl } from "./sec-edgar.ts";
 import {
   backfillIssuer10k,
   type CutItem,
@@ -132,7 +133,9 @@ async function main(): Promise<void> {
       const html = bytes.toString("utf8");
       const warning = checkFiler(html, tickers[0]!, issuer.cik);
       if (warning !== null) console.warn(`${file}: warning: ${warning}`);
-      const doc = await storeTenK(deps, { issuerId: issuer.issuer_id, bytes, url: null, accession, filedDate: filed, retrievedAt: new Date().toISOString() });
+      const cik = filerCik(html) ?? (issuer.cik === null ? null : Number(issuer.cik));
+      const url = accession === null || cik === null ? null : filingIndexUrl({ cik, accession_number: accession });
+      const doc = await storeTenK(deps, { issuerId: issuer.issuer_id, bytes, url, accession, filedDate: filed, retrievedAt: new Date().toISOString() });
       const effectiveTime = filed === null ? null : `${filed}T00:00:00Z`;
       const result = await extract10kClaims(deps, { ...doc, issuerId: issuer.issuer_id, html, effectiveTime });
       console.log(resultLine(result, Date.now() - started));
