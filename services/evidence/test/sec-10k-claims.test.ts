@@ -335,11 +335,15 @@ test("a competitor counts only when the quote names it as a whole word", dockerT
   const { client, nvda } = await nvdaDatabase(t, "tenk-competitor-word");
   const body = "<div>During 2025, the Company derived revenue abroad.</div>".repeat(25);
   const quote = "We compete with providers of metaverse platforms and with Intel's foundry.";
-  const tenK = await storedTenK(client, nvda, new TextEncoder().encode(`<div>Item 1. Business</div><div>${quote}</div>${body}<div>Item 2. Properties</div>`));
-  const { llm } = llmAnswering({ "1": JSON.stringify({ claims: [{ predicate: "business.competition", quote, competitors: ["Meta", "Intel", "Intel's foundry"] }] }) });
+  const patents = "We compete on intellectual property with other chip designers.";
+  const tenK = await storedTenK(client, nvda, new TextEncoder().encode(`<div>Item 1. Business</div><div>${quote}</div><div>${patents}</div>${body}<div>Item 2. Properties</div>`));
+  const { llm } = llmAnswering({ "1": JSON.stringify({ claims: [
+    { predicate: "business.competition", quote, competitors: ["Meta", "Intel", "Intel's foundry"] },
+    { predicate: "business.competition", quote: patents, competitors: ["Intel"] },
+  ] }) });
   const ids: Record<string, string> = { Meta: "7a1f3c1e-5b6a-4c2e-9f0a-0a5e2b7c8d91", Intel: "8b1f3c1e-5b6a-4c2e-9f0a-0a5e2b7c8d91" };
   const result = await extract10kClaims({ db: client, llm, resolveCompetitor: async (name) => ids[name] ?? null }, tenK);
-  assert.deepEqual(result.competitors, { resolved: 1, named: 2 }, "metaverse names no Meta");
+  assert.deepEqual(result.competitors, { resolved: 1, named: 2 }, "metaverse names no Meta, and intellectual property no Intel");
   const { rows } = await client.query<{ subject_id: string }>(`select subject_id::text as subject_id from claim_arguments where role = 'competitor'`);
   assert.deepEqual(rows, [{ subject_id: ids.Intel }]);
 });
