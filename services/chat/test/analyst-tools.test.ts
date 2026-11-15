@@ -66,7 +66,10 @@ const COMPETITION_CLAIM_ID = "c0000000-0000-4000-8000-000000000003";
 const READS: Record<string, Record<string, { document: string; state: string; item_state?: object; newer?: { document: string; state: string } }>> = {
   [NVDA]: { "1": { document: NVDA_10K, state: "read" }, "1A": { document: NVDA_10K, state: "cut", item_state: { state: "cut", prompts: 11, of: 13 } } },
   [INTC]: { "1": { document: INTC_10K, state: "read" }, "1A": { document: INTC_10K, state: "unread" } },
-  [AVGO]: { "1": { document: AVGO_OLD_10K, state: "read", newer: { document: AVGO_NEW_10K, state: "unread" } } },
+  [AVGO]: {
+    "1": { document: AVGO_OLD_10K, state: "read", newer: { document: AVGO_NEW_10K, state: "unread" } },
+    "1A": { document: AVGO_OLD_10K, state: "cut", item_state: { state: "cut", prompts: 3, of: 9 }, newer: { document: AVGO_NEW_10K, state: "not_found" } },
+  },
   [KO]: {},
 };
 
@@ -96,17 +99,16 @@ function stackDb(seen: Array<{ text: string; values?: unknown[] }> = []) {
           }),
         };
       }
-      if (text.includes("select industry from issuers")) return { rows: [{ industry: values?.[0] === MU ? "Semiconductors" : null }] };
-      if (text.includes("from issuers peer")) return { rows: [{ issuer_id: WDC }] };
+      if (text.includes("with evidenced as")) {
+        const peer = (id: string, market_cap_source_id: string | null) => ({ issuer_id: id, label: LABELS[id], industry: "Semiconductors", industry_source_id: `ind-${LABELS[id]}`, market_cap_source_id });
+        return { rows: values?.[0] === MU ? [peer(MU, null), peer(WDC, "cap-WDC")] : [] };
+      }
       if (text.includes("from consensus_captures cc")) return { rows: values?.[0] === AAPL ? CONSENSUS : [] };
       if (text.includes("jsonb_array_elements")) {
         const refs = JSON.parse(String(values?.[0])) as Array<{ kind: string; id: string }>;
         return { rows: refs.map((ref, i) => ({ ord: i + 1, issuer_id: ref.id === AAPL_LISTING ? AAPL : ref.kind === "issuer" && LABELS[ref.id] ? ref.id : null })) };
       }
-      if (text.includes("industry_source_id")) {
-        return { rows: (values?.[0] as string[]).map((id) => ({ issuer_id: id, label: LABELS[id], industry_source_id: `ind-${LABELS[id]}`, market_cap_source_id: id === WDC ? "cap-WDC" : null })) };
-      }
-      if (text.includes("as label")) return { rows: (values?.[0] as string[]).map((id) => ({ issuer_id: id, label: LABELS[id] })) };
+      if (text.includes("as label")) return { rows: (values?.[0] as string[]).map((id) => ({ issuer_id: id, label: LABELS[id] ?? (id === KO ? "KO" : null) })) };
       throw new Error(`unexpected query: ${text.slice(0, 60)}`);
     }),
   };
@@ -151,8 +153,14 @@ test("consensus is each value labelled an attributed expectation with its captur
 
 test("each tool says when no stored source exists, as a typed status", async () => {
   const db = stackDb();
-  assert.deepEqual(await runAnalystTool(db, "get_company_profile", { issuer_ids: [KO], as_of: AS_OF }), { tool: "get_company_profile", status: "no_business_claims", reads: [] });
-  assert.deepEqual(await runAnalystTool(db, "get_claims", { issuer_ids: [KO], as_of: AS_OF }), { tool: "get_claims", status: "no_claims", reads: [] });
+  const profile = await runAnalystTool(db, "get_company_profile", { issuer_ids: [KO], as_of: AS_OF });
+  assert.deepEqual(profile, { tool: "get_company_profile", status: "no_filing", reads: [], truncated: false, no_filing: [{ issuer_id: KO, label: "KO" }] });
+  assert.deepEqual(analystPacketEntries([profile]).map(entryLine), [`C1\tfiling.none\tKO\tissuer=${KO}\tKO has no 10-K on file, so no business or risk factor claims from one`],
+    "no 10-K on file is said, not taken for a filing read in full that holds none");
+  assert.equal((await runAnalystTool(db, "get_claims", { issuer_ids: [KO], as_of: AS_OF })).status, "no_filing");
+  assert.equal((await runAnalystTool(db, "get_claims", { issuer_ids: [KO, INTC], as_of: AS_OF, predicates: ["business.description"] })).status, "incomplete_read",
+    "INTC read Item 1 in full and holds no description, but KO has no 10-K to read");
+  assert.equal((await runAnalystTool(db, "get_claims", { issuer_ids: [KO], as_of: AS_OF, role: "competitor" })).status, "no_claims", "no stored claim names KO as a competitor");
   assert.deepEqual(await runAnalystTool(db, "get_analyst_consensus", { issuer_ids: [KO], as_of: AS_OF }), { tool: "get_analyst_consensus", status: "no_consensus" });
   assert.deepEqual(await runAnalystTool(db, "get_peer_set", { issuer_ids: [KO], as_of: AS_OF }), { tool: "get_peer_set", status: "no_peers", reason: "no_industry" });
 });
@@ -188,7 +196,15 @@ test("a profile read from an older 10-K names the newer one whose Item 1 was not
   assert.equal(result.status, "ok");
   assert.deepEqual(analystPacketEntries([result]).map(entryLine), [
     "C1\tbusiness.products\tAVGO\t10-K, accession 0001730168-25-000010, filed 2025-02-01\tclaim=c0000000-0000-4000-8000-000000000006\tWe sold modems.",
-    `C2\tfiling.item_read\tAVGO\tdocument=${AVGO_NEW_10K}\tstate=unread\tAVGO's Item 1 (business) claims come from its 10-K, accession 0001730168-25-000010, filed 2025-02-01. In its newer 10-K, accession 0001730168-26-000010, filed 2026-02-01, Item 1 (business) was not read`,
+    `C2\tfiling.item_read\tAVGO\tdocument=${AVGO_OLD_10K}\tstate=read\tnewer=${AVGO_NEW_10K}\tnewer_state=unread\tAVGO's Item 1 (business) claims come from its 10-K, accession 0001730168-25-000010, filed 2025-02-01. In its newer 10-K, accession 0001730168-26-000010, filed 2026-02-01, Item 1 (business) was not read`,
+  ]);
+});
+
+test("a cut item read from an older 10-K says both that it was cut and that the newer one left it unread", async () => {
+  const result = await runAnalystTool(stackDb(), "get_claims", { issuer_ids: [AVGO], as_of: AS_OF, predicates: ["risk.factor"] });
+  assert.equal(result.status, "incomplete_read");
+  assert.deepEqual(analystPacketEntries([result]).map(entryLine), [
+    `C1\tfiling.item_read\tAVGO\tdocument=${AVGO_OLD_10K}\tstate=cut\tnewer=${AVGO_NEW_10K}\tnewer_state=not_found\tAVGO's Item 1A (risk factors) claims come from its 10-K, accession 0001730168-25-000010, filed 2025-02-01, where Item 1A (risk factors) was read in part, 3 of 9 prompts, so claims from the rest of it are missing. In its newer 10-K, accession 0001730168-26-000010, filed 2026-02-01, Item 1A (risk factors) was not found in the filing`,
   ]);
 });
 

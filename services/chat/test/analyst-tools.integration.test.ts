@@ -34,6 +34,21 @@ test("consensus is the newest capture within 7 days, and an empty newest capture
   await capture("2026-11-12", "eps_next_y", "8.49", "8.49", "usd_per_share");
   await capture("2026-11-12", "recommendation_mean", "-", null, "recommendation_1_to_5");
   await capture("2026-11-14", "target_price", "-", null, "usd");
+  const [OWNER, OTHER, PRIVATE] = ["d9999999-9999-4999-8999-999999999991", "d9999999-9999-4999-8999-999999999992", "d9999999-9999-4999-8999-999999999993"];
+  await db.query(`insert into users (user_id, email) values ($1, 'owner@example.invalid'), ($2, 'other@example.invalid')`, [OWNER, OTHER]);
+  await db.query(`insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at, user_id) values ($1, 'upload', 'reference_data', 'secondary', 'private', now(), $2)`, [PRIVATE, OWNER]);
+  await db.query(
+    `insert into consensus_captures (issuer_id, listing_id, source_id, captured_on, retrieved_at, field_key, raw_label, raw_value, value, unit)
+     select $1, l.listing_id, $2, '2026-11-13', '2026-11-13T09:00:00Z', 'target_price', 'target price', 'PRIVATE 999', 999, 'usd' from listings l where l.ticker = 'AAPL'`,
+    [AAPL, PRIVATE],
+  );
+  const asUser = async (user_id: string) => {
+    const result = await runAnalystTool(db, "get_analyst_consensus", { issuer_ids: [AAPL], as_of: "2026-11-13T12:00:00Z", user_id });
+    return result.status === "ok" && result.tool === "get_analyst_consensus" ? [result.captured_on, result.values.map((value) => value.raw_value)] : result.status;
+  };
+  assert.deepEqual(await asUser(OTHER), ["2026-11-12", ["8.49", "290.50"]], "another user's private capture is neither the newest day nor a value");
+  assert.deepEqual(await asUser(OWNER), ["2026-11-13", ["PRIVATE 999"]], "its owner reads it");
+  await db.query(`delete from consensus_captures where source_id = $1`, [PRIVATE]);
 
   const read = (as_of: string) => runAnalystTool(db, "get_analyst_consensus", { issuer_ids: [AAPL], as_of });
   const shown = async (as_of: string) => {
@@ -90,9 +105,41 @@ test("each peer cites the industry sources and the market cap fact it is ranked 
        from metrics where metric_key = 'market_cap'`,
     [WDC, CAP],
   );
-  const result = await runAnalystTool(db, "get_peer_set", { issuer_ids: [MU], as_of: "2026-11-15T00:00:00Z" });
-  assert.deepEqual(result.status === "ok" && result.tool === "get_peer_set" && [result.industry_source_id, result.peers], [PROFILE, [
+  const peers = async (as_of: string, user_id: string | null = null) => {
+    const result = await runAnalystTool(db, "get_peer_set", { issuer_ids: [MU], as_of, user_id });
+    return result.status === "ok" && result.tool === "get_peer_set" ? [result.industry_source_id, result.peers] : result;
+  };
+  assert.deepEqual(await peers("2026-11-15T00:00:00Z"), [PROFILE, [
     { issuer_id: WDC, label: "Western Digital", industry_source_id: PROFILE_OLD, market_cap_source_id: CAP },
-    { issuer_id: STX, label: "Seagate", industry_source_id: null, market_cap_source_id: null },
-  ]], "MU's industry from the enrichment that holds its stored value, not a newer one that differs; WDC ranked first by its cap fact; Seagate has neither stored");
+  ]], "MU's industry from the enrichment that holds its stored value, not a newer one that differs; WDC cites its cap fact; Seagate has no industry source and is no peer");
+
+  const [OWNER, OTHER, PRIVATE, FUTURE] = ["d4444444-4444-4444-8444-444444444441", "d4444444-4444-4444-8444-444444444442", "d4444444-4444-4444-8444-444444444443", "d4444444-4444-4444-8444-444444444444"];
+  await db.query(`insert into users (user_id, email) values ($1, 'owner@example.invalid'), ($2, 'other@example.invalid')`, [OWNER, OTHER]);
+  await db.query(
+    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at, user_id)
+     values ($1, 'upload', 'reference_data', 'secondary', 'private', now(), $2), ($3, 'profile_vendor', 'reference_data', 'secondary', 'free_dev', now(), null)`,
+    [PRIVATE, OWNER, FUTURE],
+  );
+  await db.query(`insert into issuer_profile_enrichments (issuer_id, field_name, field_value, source_id, provider, retrieved_at) values ($1, 'industry', 'Semiconductors', $2, 'upload', '2026-10-01')`, [STX, PRIVATE]);
+  await db.query(
+    `insert into facts (subject_kind, subject_id, metric_id, period_kind, value_num, unit, currency, scale, as_of, observed_at, source_id, method, verification_status, freshness_class, coverage_level, confidence)
+     select 'issuer', $1, metric_id, 'point', 9e12, 'currency', 'USD', 1, '2026-11-02', '2026-11-02', $2, 'reported', 'authoritative', 'filing_time', 'full', 1
+       from metrics where metric_key = 'market_cap'`,
+    [WDC, PRIVATE],
+  );
+  assert.deepEqual(await peers("2026-11-15T00:00:00Z", OTHER), [PROFILE, [
+    { issuer_id: WDC, label: "Western Digital", industry_source_id: PROFILE_OLD, market_cap_source_id: CAP },
+  ]], "another user's private industry and cap sources are neither cited nor used");
+  assert.deepEqual(await peers("2026-11-15T00:00:00Z", OWNER), [PROFILE, [
+    { issuer_id: WDC, label: "Western Digital", industry_source_id: PROFILE_OLD, market_cap_source_id: PRIVATE },
+    { issuer_id: STX, label: "Seagate", industry_source_id: PRIVATE, market_cap_source_id: null },
+  ]], "the owner's own sources count: Seagate is a peer by their enrichment, and WDC cites their newer cap fact");
+
+  assert.deepEqual(await peers("2026-05-01T00:00:00Z"), { tool: "get_peer_set", status: "no_peers", reason: "no_industry" },
+    "in May no enrichment held MU's industry yet, so none is read from later evidence");
+  await db.query(`insert into issuer_profile_enrichments (issuer_id, field_name, field_value, source_id, provider, retrieved_at) values ($1, 'industry', 'Semiconductors', $2, 'profile_vendor', '2027-01-01')`, [STX, FUTURE]);
+  assert.deepEqual(await peers("2026-11-15T00:00:00Z"), await peers("2026-11-15T00:00:00Z", OTHER), "Seagate's industry retrieved in 2027 is no evidence in 2026");
+  assert.deepEqual((await peers("2026-10-31T00:00:00Z") as unknown[])[1], [
+    { issuer_id: WDC, label: "Western Digital", industry_source_id: PROFILE_OLD, market_cap_source_id: null },
+  ], "WDC's Nov 1 cap fact is not known on Oct 31");
 });

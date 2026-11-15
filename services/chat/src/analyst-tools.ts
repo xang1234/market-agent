@@ -1,6 +1,7 @@
-import { issuerLabelSql, loadLatestFilingClaims, type FilingClaim, type FilingItemRead } from "../../evidence/src/local-runtime-evidence.ts";
+import { factKnownAtSql } from "../../evidence/src/fact-activity.ts";
+import { issuerLabels, issuerLabelSql, loadLatestFilingClaims, type FilingClaim, type FilingClaimRead } from "../../evidence/src/local-runtime-evidence.ts";
 import type { RowQueryExecutor } from "../../evidence/src/types.ts";
-import { createSqlPeerSetResolver, DEFAULT_PEER_LIMIT } from "../../fundamentals/src/peer-set-resolver.ts";
+import { DEFAULT_PEER_LIMIT } from "../../fundamentals/src/peer-set-resolver.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
@@ -28,20 +29,23 @@ export type ConsensusValue = {
   fiscal_period: string | null;
 };
 
-type Reads = { reads: ReadonlyArray<FilingItemRead> };
+type Reads = Omit<FilingClaimRead, "claims">;
 
-export type PeerEntry = { issuer_id: string; label: string; industry_source_id: string | null; market_cap_source_id: string | null };
+// Every peer has a visible industry source known at the cutoff; one without
+// is no peer. Its market cap source is null when no cap fact ranks it.
+export type PeerEntry = { issuer_id: string; label: string; industry_source_id: string; market_cap_source_id: string | null };
 
 // "no_business_claims" and "no_claims" mean every 10-K item read for them was
-// read in full and holds none; "incomplete_read" means no claim came back and
-// an item was cut, unread, not found, or has an unread newer 10-K. Either way
-// `reads` says which filing was read and how far.
+// read in full and holds none; "no_filing" means no issuer read as the subject
+// has a 10-K on file; "incomplete_read" means no claim came back and an item
+// was cut, unread, not found, or has an unread newer 10-K, an issuer has no
+// 10-K, or a limit left filers out. `reads` and `no_filing` say what was read.
 export type AnalystToolResult =
-  | ({ tool: "get_company_profile" | "get_claims"; status: "ok"; claims: ReadonlyArray<FilingClaim>; truncated: boolean } & Reads)
+  | ({ tool: "get_company_profile" | "get_claims"; status: "ok"; claims: ReadonlyArray<FilingClaim> } & Reads)
   | ({ tool: "get_company_profile"; status: "no_business_claims" } & Reads)
   | ({ tool: "get_claims"; status: "no_claims" } & Reads)
-  | ({ tool: "get_company_profile" | "get_claims"; status: "incomplete_read" } & Reads)
-  | { tool: "get_peer_set"; status: "ok"; company: string; industry: string; industry_source_id: string | null; peers: ReadonlyArray<PeerEntry> }
+  | ({ tool: "get_company_profile" | "get_claims"; status: "no_filing" | "incomplete_read" } & Reads)
+  | { tool: "get_peer_set"; status: "ok"; company: string; industry: string; industry_source_id: string; peers: ReadonlyArray<PeerEntry> }
   | { tool: "get_peer_set"; status: "no_peers"; reason: "no_industry" | "no_same_industry_issuer" }
   | { tool: "get_analyst_consensus"; status: "ok"; company: string; captured_on: string; values: ReadonlyArray<ConsensusValue> }
   | { tool: "get_analyst_consensus"; status: "no_consensus" }
@@ -54,57 +58,57 @@ type Executor = (db: RowQueryExecutor, input: AnalystToolInput) => Promise<Analy
 
 const EXECUTORS: Readonly<Record<AnalystToolName, Executor>> = {
   get_company_profile: async (db, input) => {
-    const read = await loadLatestFilingClaims(db, { ...input, role: "subject", predicates: BUSINESS_PREDICATES });
-    if (read.claims.length > 0) return { tool: "get_company_profile", status: "ok", ...read };
-    return { tool: "get_company_profile", status: fullyRead(read.reads) ? "no_business_claims" : "incomplete_read", reads: read.reads };
+    const { claims, ...read } = await loadLatestFilingClaims(db, { ...input, role: "subject", predicates: BUSINESS_PREDICATES });
+    if (claims.length > 0) return { tool: "get_company_profile", status: "ok", claims, ...read };
+    return { tool: "get_company_profile", status: emptyStatus(read) ?? "no_business_claims", ...read };
   },
   get_claims: async (db, input) => {
     const predicates = input.predicates ?? CLAIM_PREDICATES;
-    const read = await loadLatestFilingClaims(db, { ...input, role: input.role ?? "subject", predicates });
-    if (read.claims.length > 0) return { tool: "get_claims", status: "ok", ...read };
-    return { tool: "get_claims", status: fullyRead(read.reads) ? "no_claims" : "incomplete_read", reads: read.reads };
+    const { claims, ...read } = await loadLatestFilingClaims(db, { ...input, role: input.role ?? "subject", predicates });
+    if (claims.length > 0) return { tool: "get_claims", status: "ok", claims, ...read };
+    return { tool: "get_claims", status: emptyStatus(read) ?? "no_claims", ...read };
   },
   get_peer_set: async (db, input) => {
     const issuerId = input.issuer_ids[0]!;
-    const { rows: [issuer] } = await db.query<{ industry: string | null }>(`select industry from issuers where issuer_id = $1::uuid`, [issuerId]);
-    if (!issuer?.industry) return { tool: "get_peer_set", status: "no_peers", reason: "no_industry" };
-    const peers = await createSqlPeerSetResolver(db).resolvePeers(issuerId, { limit: input.peer_limit ?? DEFAULT_PEER_LIMIT });
+    const [primary, ...peers] = await sameIndustry(db, issuerId, input);
+    if (primary?.issuer_id !== issuerId) return { tool: "get_peer_set", status: "no_peers", reason: "no_industry" };
     if (peers.length === 0) return { tool: "get_peer_set", status: "no_peers", reason: "no_same_industry_issuer" };
-    const named = await peerSources(db, [issuerId, ...peers.map((peer) => peer.id)], input.as_of);
-    const primary = named.get(issuerId)!;
     return {
       tool: "get_peer_set",
       status: "ok",
       company: primary.label,
-      industry: issuer.industry,
+      industry: primary.industry,
       industry_source_id: primary.industry_source_id,
-      peers: peers.map((peer) => named.get(peer.id)!),
+      peers: peers.map(({ industry: _industry, ...peer }) => peer),
     };
   },
   get_analyst_consensus: async (db, input) => {
     const issuerId = input.issuer_ids[0]!;
     const { rows } = await db.query<Omit<ConsensusValue, "label" | "provider"> & { provider: string; captured_on: string }>(
       `with cutoff as (select ($2::timestamptz at time zone 'UTC')::date as day),
+            visible as (
+              select cc.* from consensus_captures cc join sources s on s.source_id = cc.source_id
+               where cc.issuer_id = $1::uuid and cc.retrieved_at <= $2::timestamptz and (s.user_id is null or s.user_id = $5::uuid)
+            ),
             newest as (
-              select max(captured_on) as day from consensus_captures, cutoff
-               where issuer_id = $1::uuid and captured_on <= cutoff.day and retrieved_at <= $2::timestamptz
+              select max(captured_on) as day from visible, cutoff where captured_on <= cutoff.day
             )
        select cc.capture_id::text as capture_id, cc.source_id::text as source_id, s.provider,
               cc.captured_on::text as captured_on, cc.field_key, cc.raw_value, cc.unit, cc.fiscal_period
-         from consensus_captures cc
+         from visible cc
          join sources s on s.source_id = cc.source_id
          join newest on cc.captured_on = newest.day
          cross join cutoff
-        where cc.issuer_id = $1::uuid and cc.value is not null and cc.retrieved_at <= $2::timestamptz and newest.day >= cutoff.day - $4::int
+        where cc.value is not null and newest.day >= cutoff.day - $4::int
         order by array_position($3::text[], cc.field_key), cc.source_id`,
-      [issuerId, input.as_of, Object.keys(CONSENSUS_FIELDS), CONSENSUS_MAX_AGE_DAYS],
+      [issuerId, input.as_of, Object.keys(CONSENSUS_FIELDS), CONSENSUS_MAX_AGE_DAYS, input.user_id ?? null],
     );
     if (rows.length === 0) return { tool: "get_analyst_consensus", status: "no_consensus" };
-    const labels = await issuerLabels(db, [issuerId], input.as_of);
+    const [company] = await issuerLabels(db, [issuerId], input.as_of);
     return {
       tool: "get_analyst_consensus",
       status: "ok",
-      company: labels.get(issuerId)!,
+      company: company!.label,
       captured_on: rows[0]!.captured_on,
       values: rows.map(({ captured_on: _day, provider, ...value }) => ({
         ...value,
@@ -223,35 +227,45 @@ async function issuersOfSubjects(db: RowQueryExecutor, refs: ReadonlyArray<Subje
   return rows.map((row) => row.issuer_id);
 }
 
-function fullyRead(reads: ReadonlyArray<FilingItemRead>): boolean {
-  return reads.every((read) => read.state === "read" && read.newer_unread === null);
+// Null when every item was read in full and nothing was left out.
+function emptyStatus(read: Reads): "no_filing" | "incomplete_read" | null {
+  if (read.reads.length === 0 && read.no_filing.length > 0) return "no_filing";
+  const full = !read.truncated && read.no_filing.length === 0 && read.reads.every((item) => item.state === "read" && item.newer_unread === null);
+  return full ? null : "incomplete_read";
 }
 
-// Each issuer's label, the source of its stored industry, and the source of
-// the market cap fact the peer resolver ranks it by (the same fact it reads).
-async function peerSources(db: RowQueryExecutor, issuerIds: ReadonlyArray<string>, asOf: string): Promise<Map<string, PeerEntry>> {
-  const { rows } = await db.query<PeerEntry>(
-    `select i.issuer_id::text as issuer_id,
-            ${issuerLabelSql("i", "$2::timestamptz")} as label,
-            (select e.source_id::text from issuer_profile_enrichments e
-              where e.issuer_id = i.issuer_id and e.field_name = 'industry' and e.field_value = i.industry
-              order by e.retrieved_at desc, e.source_id limit 1) as industry_source_id,
-            (select f.source_id::text from facts f join metrics m on m.metric_id = f.metric_id
-              where f.subject_kind = 'issuer' and f.subject_id = i.issuer_id and m.metric_key = 'market_cap'
-                and f.method = 'reported' and f.invalidated_at is null and f.superseded_by is null
-              order by f.as_of desc, f.created_at desc limit 1) as market_cap_source_id
-       from issuers i where i.issuer_id = any($1::uuid[])`,
-    [issuerIds, asOf],
+// The issuer first, then its peers in the resolver's order (peer-set-resolver.ts),
+// each of the same stored industry and evidenced by an enrichment holding that
+// value, retrieved by the cutoff from a source the user may see; ranked by the
+// latest such market cap fact known at the cutoff. Empty, or without the
+// issuer first, when the issuer's own industry has no such evidence.
+async function sameIndustry(db: RowQueryExecutor, issuerId: string, input: AnalystToolInput): Promise<Array<PeerEntry & { industry: string }>> {
+  const { rows } = await db.query<PeerEntry & { industry: string }>(
+    `with evidenced as (
+       select i.issuer_id, i.industry,
+              (select e.source_id from issuer_profile_enrichments e join sources s on s.source_id = e.source_id
+                where e.issuer_id = i.issuer_id and e.field_name = 'industry' and e.field_value = i.industry
+                  and e.retrieved_at <= $2::timestamptz and (s.user_id is null or s.user_id = $3::uuid)
+                order by e.retrieved_at desc, e.source_id limit 1) as industry_source_id
+         from issuers i
+        where i.industry = (select industry from issuers where issuer_id = $1::uuid)
+     )
+     select ev.issuer_id::text as issuer_id, ${issuerLabelSql("i", "$2::timestamptz")} as label, ev.industry,
+            ev.industry_source_id::text as industry_source_id, cap.source_id::text as market_cap_source_id
+       from evidenced ev
+       join issuers i on i.issuer_id = ev.issuer_id
+       left join lateral (
+         select f.value_num, f.source_id from facts f
+           join metrics m on m.metric_id = f.metric_id
+           join sources s on s.source_id = f.source_id
+          where f.subject_kind = 'issuer' and f.subject_id = ev.issuer_id and m.metric_key = 'market_cap' and f.method = 'reported'
+            and ${factKnownAtSql("f", "$2::timestamptz")} and (s.user_id is null or s.user_id = $3::uuid)
+          order by f.as_of desc, f.created_at desc limit 1
+       ) cap on true
+      where ev.industry_source_id is not null
+      order by ev.issuer_id = $1::uuid desc, cap.value_num desc nulls last, ev.issuer_id
+      limit $4::int + 1`,
+    [issuerId, input.as_of, input.user_id ?? null, input.peer_limit ?? DEFAULT_PEER_LIMIT],
   );
-  return new Map(rows.map((row) => [row.issuer_id, row]));
-}
-
-async function issuerLabels(db: RowQueryExecutor, issuerIds: ReadonlyArray<string>, asOf: string): Promise<Map<string, string>> {
-  const { rows } = await db.query<{ issuer_id: string; label: string }>(
-    `select i.issuer_id::text as issuer_id,
-            ${issuerLabelSql("i", "$2::timestamptz")} as label
-       from issuers i where i.issuer_id = any($1::uuid[])`,
-    [issuerIds, asOf],
-  );
-  return new Map(rows.map((row) => [row.issuer_id, row.label]));
+  return rows;
 }
