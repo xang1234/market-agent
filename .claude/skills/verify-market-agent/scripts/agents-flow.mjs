@@ -3,8 +3,8 @@
 // from CONDITIONS), and the agent runs twice. Exits 1 unless the handoff
 // carries the memo's investment thesis section, and after the two runs every
 // condition shows two dated assessments, newest first, each citing F or C refs
-// or saying not enough evidence. Records each run's model calls from the
-// dev-api log. Saves what it saw to OUT.
+// or saying not enough evidence, and at 390 px nothing scrolls sideways.
+// Records each run's model calls from the dev-api log. Saves what it saw to OUT.
 import { createRequire } from 'node:module'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -116,6 +116,15 @@ try {
     check('every condition shows two dated assessments, newest first',
       second.length === drafted.length && second.every((condition) => condition.entries.length === 2
         && Date.parse(condition.entries[0].assessed_at) > Date.parse(condition.entries[1].assessed_at) && condition.entries.every(cites)), second)
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.getByRole('button', { name: 'Collapse sidebar' }).click()
+    const sideways = await page.evaluate(() => [...document.querySelectorAll('*')]
+      .filter((element) => element.scrollWidth > element.clientWidth + 1 && (element === document.documentElement || ['auto', 'scroll'].includes(getComputedStyle(element).overflowX)))
+      .map((element) => `${element.tagName}.${String(element.className).slice(0, 60)} ${element.scrollWidth}/${element.clientWidth}`))
+    await page.locator('textarea[name$="-statement"]').first().scrollIntoViewIfNeeded()
+    await page.screenshot({ path: join(OUT, 'narrow.png') })
+    check('at 390 px nothing scrolls sideways, the thesis editor and open history included', sideways.length === 0, sideways)
   } catch (error) {
     failure = error.message
   }
