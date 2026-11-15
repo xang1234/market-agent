@@ -52,9 +52,9 @@ export type TenKDocument = {
 };
 
 // parse_status "parsed" means every item was read, and "failed" that an item
-// was not: the parser missed it, as for a 10-K laid out by a cross-reference
-// index (Intel's) or a smaller reporting company with no Item 1A, or the
-// model's reply for it was unusable. An item counts as read once it has
+// was not. Either the parser missed it, as for a 10-K laid out by a
+// cross-reference index (Intel's) or a smaller reporting company with no Item
+// 1A, or the model's reply for it was unusable. An item counts as read once it has
 // claims, so a rerun sections a failed document again from its stored bytes
 // and asks the model only about the items still unread.
 // ponytail: an item whose reply held no claim reads as unread, so each rerun of
@@ -153,7 +153,7 @@ function wholeListItem(claim: TenKClaim, section: TenKSection): (TenKClaim & { e
 
 // A risk factor names partners and customers too, so only a competition
 // claim has competitors. A competitor is a proper name, matched as the quote
-// writes it: "target customers" names no Target, and "custom chips" no
+// writes it, so "target customers" names no Target and "custom chips" no
 // Custom Inc. ponytail: a capitalized common word that opens the quote
 // ("Target customers") still matches.
 function competitorsNamedIn(claim: TenKClaim): string[] {
@@ -267,7 +267,7 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
       `select parse_status, published_at from documents where document_id = $1 for update`,
       [doc.documentId],
     );
-    // A concurrent run may have read some items meanwhile: store the others.
+    // A concurrent run may have read some items meanwhile, so store the others.
     const readNow = await itemsRead(tx.db, doc.documentId);
     const missingNow = missingAfter(readNow);
     const storing = found.map((section) => section.type).filter((item) => !unread.includes(item) && !readNow.has(item));
@@ -371,7 +371,7 @@ export async function storeTenK(
         published_at: input.filedDate === null ? null : `${input.filedDate}T00:00:00Z`,
       },
     }).catch((error: unknown) => cleanupSourceAfterFailedIngest(deps.db, source.source_id, error));
-    // A concurrent run stored the same bytes first: its document keeps its source.
+    // A concurrent run stored the same bytes first, and its document keeps its source.
     if (document.source_id !== source.source_id) await deleteSource(deps.db, source.source_id);
     stored = { documentId: document.document_id, sourceId: document.source_id };
   }

@@ -68,7 +68,7 @@ type Heading = { at: number; item: string; title: string };
 // page header that repeats its own heading ("Item 1A. Risk Factors
 // (continued)") stays inside it. A repeat closer than an item body restarts
 // it, as after a table of contents written as one block. Of an item's
-// headings, the one with the longest span is the item: the table of
+// headings, the one with the longest span is the item, since the table of
 // contents' entry spans one line.
 // ponytail: a heading inside a block ("Employees: 100. Item 1A. Risk
 // Factors") heads nothing, so that 10-K's Item 1 runs through its Item 1A.
