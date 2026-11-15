@@ -11,7 +11,7 @@ import { analystAgentRouter, analystAgentRunner, certifiedAsk, perStepDeadlines,
 import type { AnalystToolResult } from "../src/analyst-tools.ts";
 import { answerTurn } from "../src/answer-trace.ts";
 import { createChatCoordinator, type ChatAssistantMessagePersistence, type ChatTurnInput } from "../src/coordinator.ts";
-import { mergePackets, type EvidencePacket, type PacketClaim } from "../src/evidence-packet.ts";
+import { figureCompanies, mergePackets, type EvidencePacket, type PacketClaim } from "../src/evidence-packet.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC } from "../src/scope-figures.ts";
 import { loadToolRegistry } from "../../tools/src/registry.ts";
 import { chatDatabase, resolveMention, revenueModel } from "./financial-fixtures.ts";
@@ -146,8 +146,13 @@ test("the agent's packet numbers every certified figure and every claim in one p
     "C4 AAA Industry peer: BBB shares AAA's industry (Widgets)",
   ]);
   assert.deepEqual(packet.claims.slice(2).map((claim) => claim.claim_id.split(":")[0]), ["consensus", "peer"], "no claim row stores these");
-  assert.deepEqual(packet.gaps, ["AAA: no analyst consensus captured in the 7 days to the cutoff is on file.", "BBB has no 10-K on file, so no business or risk factor claims from one"]);
+  assert.deepEqual(packet.gaps, ["AAA: no analyst consensus captured in the 7 days to the cutoff is on file.", "BBB has no 10-K on file, so no business or risk factor claims from one."]);
   assert.deepEqual([packet.route, packet.companies, packet.claims_truncated, packet.claims_status, packet.periods_shown], ["financial_engine", ["AAA"], true, "available", true]);
+});
+
+test("each certified call's figures keep their company in the agent's packet", () => {
+  const packet = mergePackets({ engine: [engine("AAA", ["$1.0B"]), engine("BBB", ["$2.0B"])], analyst: [], notes: [], labels: new Map(), cutoff: "2026-11-01T00:00:00.000Z" });
+  assert.deepEqual(packet.figures.map((figure) => [figure.id, ...figureCompanies(figure, packet)]), [["F1", "AAA"], ["F2", "BBB"]]);
 });
 
 test("a read that could not be made marks the packet's claims unavailable, and its note says nothing is known of them", () => {

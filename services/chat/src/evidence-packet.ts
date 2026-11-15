@@ -207,7 +207,10 @@ export function mergePackets(input: {
   const figures = input.engine.flatMap((packet) => {
     const ids = new Map(packet.figures.map((figure) => [figure.id, `F${++figureCount}`]));
     const renumbered = (id: string) => ids.get(id) ?? id;
+    // A one-company answer leaves its figures' company to the packet's, which a merge loses.
+    const company = packet.companies.length === 1 ? packet.companies[0] : undefined;
     return packet.figures.map(({ derived_from, ...figure }) => ({
+      ...(company ? { company } : {}),
       ...figure,
       id: renumbered(figure.id),
       ...(derived_from ? { derived_from: [renumbered(derived_from[0]), renumbered(derived_from[1])] as const } : {}),
@@ -236,7 +239,7 @@ export function mergePackets(input: {
     companies,
     figures,
     coverage: companies.map((company) => ({ company, status: shown.has(company) ? "shown" : "not_shown" })),
-    gaps: [...input.notes, ...entries.flatMap((entry) => (entry.kind === "filing_read" || entry.kind === "no_filing" ? [entry.text] : []))],
+    gaps: [...input.notes, ...entries.flatMap((entry) => (entry.kind === "filing_read" || entry.kind === "no_filing" ? [`${entry.text}.`] : []))],
     query_bounds: {},
     claims,
     disagreements: (input.route?.disagreements ?? []).map(({ claims: [a, b], basis }) => ({ claims: [routeIds.get(a) ?? a, routeIds.get(b) ?? b] as const, basis })),
