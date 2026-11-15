@@ -945,6 +945,48 @@ test('Agents form follows the agent being edited when a delete response arrives 
   }
 })
 
+test('Agents roster names a watchlist universe, and the cadence choices are the ones the server accepts', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  const AGENT = '11111111-1111-4111-8111-111111111111'
+  const WATCHLIST = '55555555-5555-4555-8555-555555555555'
+  const bodies: Record<string, unknown> = {
+    '/v1/agents': { agents: [{
+      agent_id: AGENT, name: 'Semis monitor', thesis: 'Track the semis watchlist', cadence: 'daily', enabled: true,
+      universe: { mode: 'watchlist', watchlist_id: WATCHLIST }, alert_rules: [], updated_at: '2026-05-06T00:00:00.000Z',
+    }], runs: [] },
+    '/v1/watchlists': { watchlists: [{ watchlist_id: WATCHLIST, name: 'Semis' }] },
+    '/v1/portfolios': { portfolios: [] },
+    '/v1/screener/screens': { screens: [] },
+    [`/v1/agents/${AGENT}/findings`]: { findings: [] },
+    [`/v1/agents/${AGENT}/activity`]: { activity: [] },
+    [`/v1/agents/${AGENT}/thesis`]: { thesis: null, versions: [], assessments: [], metrics: [] },
+  }
+  try {
+    globalThis.fetch = async (input) => {
+      const body = bodies[String(input)]
+      if (body === undefined) throw new Error(`unexpected fetch: ${String(input)}`)
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(wrapWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>))
+    })
+    await act(async () => undefined)
+    await act(async () => undefined)
+
+    const universe = [...dom.window.document.querySelectorAll('p')].find((line) => line.textContent?.startsWith('Universe:'))
+    assert.equal(universe?.textContent, 'Universe: watchlist: Semis')
+    const cadence = dom.window.document.querySelector<HTMLSelectElement>('[name="agent-cadence"]')!
+    assert.deepEqual([...cadence.options].map((option) => option.value), ['hourly', 'daily'])
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restore()
+  }
+})
+
 test('Agents surface loads selected agent findings and activity routes', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const restore = installDomGlobals(dom.window as unknown as Window)
