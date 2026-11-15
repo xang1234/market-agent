@@ -34,6 +34,35 @@ test('Analyze thesis handoff uses the opened run subject and rendered memo text'
   assert.deepEqual(readAnalyzeThesisHandoff({ thesisHandoff: handoff }), handoff)
 })
 
+test("Analyze thesis handoff carries the memo's investment thesis section as it reads, not the rest of the memo", () => {
+  const section = (id: string, children: ReadonlyArray<Record<string, unknown>>) => ({
+    id: `section-${id}`, kind: 'section', title: id, snapshot_id: '33333333-3333-4333-8333-333333333333',
+    data_ref: { kind: 'section', id: `analyze:${id}`, params: { playbook_section_id: id } }, children,
+  })
+  const run = runDetail({
+    subjectRefs: [{ kind: 'issuer', id: CURRENT_SUBJECT_ID }],
+    blocks: [
+      section('investment_thesis', [
+        { id: 'thesis-1', kind: 'rich_text', segments: [
+          { type: 'text', text: 'NVIDIA sells ' },
+          { type: 'ref', ref_kind: 'claim', ref_id: '66666666-6666-4666-8666-666666666666', format: 'data center platforms' },
+          { type: 'text', text: '. Its revenue was ' },
+          { type: 'ref', ref_kind: 'result', ref_id: '77777777-7777-4777-8777-777777777777', format: '$130.5B', period: 'FY2026' },
+          { type: 'text', text: ' in its latest fiscal year.' },
+        ] },
+        { id: 'thesis-2', kind: 'rich_text', segments: [{ type: 'text', text: 'Its 10-K names gaming as its other market.' }] },
+      ]),
+      { id: 'figures', kind: 'financial_answer', segments: [{ type: 'text', text: 'Revenue table' }] },
+      section('downside_risks', [{ id: 'risk-1', kind: 'rich_text', segments: [{ type: 'text', text: 'Export controls limit sales.' }] }]),
+    ],
+  })
+
+  assert.equal(
+    analyzeThesisHandoff(run)?.thesis,
+    'NVIDIA sells data center platforms. Its revenue was $130.5B in its latest fiscal year.\n\nIts 10-K names gaming as its other market.',
+  )
+})
+
 test('Analyze thesis handoff is unavailable for empty, multiple, or unsupported subjects', () => {
   assert.equal(analyzeThesisHandoff(runDetail({ subjectRefs: [] })), null)
   assert.equal(analyzeThesisHandoff(runDetail({

@@ -24,7 +24,7 @@ export function analyzeThesisHandoff(run: AnalyzeRunDetail): AnalyzeThesisHandof
   return {
     sourceRunId: run.run_id,
     subjectRef,
-    thesis: memoText(run),
+    thesis: (thesisSectionText(run) ?? memoText(run)).slice(0, 4000),
     name: `${run.display_title} monitor`,
   }
 }
@@ -55,11 +55,28 @@ export function readThesisHandoff(state: unknown): ThesisHandoff | null {
   return analyze ? { kind: 'analyze', ...analyze } : null
 }
 
+// The memo's investment thesis section as it reads: each block's words, with the value or quote each ref shows.
+function thesisSectionText(run: AnalyzeRunDetail): string | null {
+  const section = run.blocks.find((block) => isRecord(block) && block.kind === 'section' && isRecord(block.data_ref)
+    && isRecord(block.data_ref.params) && block.data_ref.params.playbook_section_id === 'investment_thesis')
+  if (!isRecord(section) || !Array.isArray(section.children)) return null
+  const paragraphs = section.children.map(paragraphText).filter(Boolean)
+  return paragraphs.length > 0 ? paragraphs.join('\n\n') : null
+}
+
+function paragraphText(block: unknown): string {
+  if (!isRecord(block) || !Array.isArray(block.segments)) return ''
+  return block.segments.map((segment) => {
+    const text = isRecord(segment) ? (segment.type === 'text' ? segment.text : segment.format) : null
+    return typeof text === 'string' ? text : ''
+  }).join('').trim()
+}
+
 function memoText(run: AnalyzeRunDetail): string {
   const parts = run.blocks.flatMap(blockText).map((part) => part.trim()).filter(Boolean)
-  if (parts.length > 0) return parts.join('\n\n').slice(0, 4000)
+  if (parts.length > 0) return parts.join('\n\n')
   const instructions = isRecord(run.run_metadata) ? run.run_metadata.instructions : null
-  return typeof instructions === 'string' ? instructions.trim().slice(0, 4000) : ''
+  return typeof instructions === 'string' ? instructions.trim() : ''
 }
 
 function blockText(value: unknown): string[] {
