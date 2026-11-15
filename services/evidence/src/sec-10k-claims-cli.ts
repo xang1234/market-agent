@@ -1,13 +1,6 @@
-// Extract business and risk claims from 10-Ks (sec-10k-claims.ts).
-//
 //   DATABASE_URL=... S3_*=... LLM_*=... SEC_EDGAR_USER_AGENT=... \
 //     npm run extract:10k-claims -- --file <10-K.htm> --ticker <TICKER>
 //     npm run extract:10k-claims -- --backfill [--ticker <TICKER> ...] [--limit N] [--concurrency N]
-//
-// --file reads a local 10-K and sends no SEC request. --backfill reads each
-// issuer's latest 10-K from EDGAR, every issuer with a CIK unless --ticker
-// names some, behind the client's Fair Access limiter. A document is read
-// once, so a rerun adds no rows and calls no model.
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
@@ -27,6 +20,13 @@ export function resultLine(result: Extract10kResult, ms: number): string {
   return `outcome=${result.outcome} extracted=${result.extracted} dropped_unquoted=${result.droppedUnquoted} ` +
     `competitors=${result.competitors.resolved}/${result.competitors.named} missing=${result.missing.join(",") || "none"} ` +
     `ms=${ms} llm_calls=${result.llmCalls}`;
+}
+
+// The dev stack's .env.dev, which the verify boot recipe passes with
+// --env-file, names its Postgres by parts.
+function databaseUrlFromDevParts(env: NodeJS.ProcessEnv): string | undefined {
+  const { DEV_POSTGRES_USER: user = "postgres", DEV_POSTGRES_PASSWORD: password = "postgres", DEV_POSTGRES_PORT: port, DEV_POSTGRES_DB: database = "market_agent" } = env;
+  return port ? `postgresql://${user}:${password}@127.0.0.1:${port}/${database}` : undefined;
 }
 
 type Issuer = { issuer_id: string; legal_name: string; cik: string | null; ticker: string | null };
@@ -62,10 +62,8 @@ async function main(): Promise<void> {
   if (flags.backfill === (flags.file !== undefined)) throw new Error("pass one of --file <path> --ticker <TICKER>, or --backfill");
   if (flags.file !== undefined && tickers.length !== 1) throw new Error("--file needs one --ticker");
 
-  // Run with --env-file=.env.dev, as the verify boot recipe does, the dev
-  // stack's Postgres is named only by its parts.
-  const { DEV_POSTGRES_USER: user = "postgres", DEV_POSTGRES_PASSWORD: password = "postgres", DEV_POSTGRES_PORT: port, DEV_POSTGRES_DB: database = "market_agent" } = process.env;
-  if (!process.env.DATABASE_URL && port) process.env.DATABASE_URL = `postgresql://${user}:${password}@127.0.0.1:${port}/${database}`;
+  const devDatabaseUrl = databaseUrlFromDevParts(process.env);
+  if (!process.env.DATABASE_URL && devDatabaseUrl) process.env.DATABASE_URL = devDatabaseUrl;
   const llm = await createLlmRouterFromEnv(process.env, { purpose: "extraction" });
   if (!llm) throw new Error("no LLM deployment configured: set LLM_CHANNELS and LITELLM_MODEL (or LLM_SETTINGS_ENV_FILE)");
   const { db, objectStore, secClient } = createEvidenceCliRuntime();
@@ -115,8 +113,6 @@ async function main(): Promise<void> {
   } finally {
     await db.end();
   }
-  // A document left unread (an error, or a reply the model answered badly) is
-  // read again by the next run; automation sees a non-zero exit until then.
   if (failed) process.exitCode = 1;
 }
 

@@ -1,14 +1,3 @@
-// Business and risk claims from a 10-K's Item 1 and Item 1A. A model picks the
-// sentences that describe the business, its products, customers and
-// competition, and the risk factors; each is kept only if it is a verbatim
-// quote of its section (verifyStatement), so the stored claim is the filing's
-// own words. Each competitor a quote names becomes a claim argument when the
-// resolver finds exactly one issuer for it.
-//
-// A document is read once: its parse_status leaves 'pending' in the same
-// transaction that stores its claims, guarded by rowCount, so a rerun or a
-// concurrent run adds nothing.
-
 import { createHash } from "node:crypto";
 
 import { normalizeNameForLookup, resolveByNameCandidate } from "../../resolver/src/lookup.ts";
@@ -20,7 +9,15 @@ import { createClaim } from "./claim-repo.ts";
 import { ingestDocument } from "./ingest.ts";
 import { createMention } from "./mention-repo.ts";
 import { contentHashFromBytes, type ObjectStore } from "./object-store.ts";
-import { canonicalText, completeLogged, releasePrompts, verifyStatement, type ExtractReleaseLlm } from "./sec-earnings-release-extraction.ts";
+import {
+  canonicalText,
+  completeLogged,
+  MAX_QUOTE_CHARS,
+  MIN_QUOTE_CHARS,
+  releasePrompts,
+  verifyStatement,
+  type ExtractReleaseLlm,
+} from "./sec-earnings-release-extraction.ts";
 import { recentSubmissionRows, type SecFilingFetcher, type SecSubmissions } from "./sec-edgar.ts";
 import { tenKSections, TEN_K_ITEMS, type TenKItem, type TenKSection } from "./sec-10k-sections.ts";
 import { createSource } from "./source-repo.ts";
@@ -36,13 +33,8 @@ export type TenKPredicate = (typeof TEN_K_PREDICATES)[TenKItem][number];
 export type TenKClaim = { predicate: TenKPredicate; quote: string; competitors: string[] };
 
 const MAX_CLAIMS: Readonly<Record<TenKItem, number>> = { "1": 16, "1A": 15 };
-// verifyStatement's bounds on a quote.
-const MIN_QUOTE_CHARS = 20;
-const MAX_QUOTE_CHARS = 600;
-// The words are verified; their reading as a predicate is the model's.
 const TEN_K_CONFIDENCE = 0.8;
 
-// The issuer id a competitor's name resolves to, or null.
 export type ResolveCompetitor = (name: string) => Promise<string | null>;
 
 export type Extract10kDeps = { db: QueryExecutor; llm: ExtractReleaseLlm; resolveCompetitor: ResolveCompetitor };
@@ -55,7 +47,6 @@ export type TenKDocument = {
   effectiveTime: string | null;
 };
 
-// "already_extracted": the document was read before, so nothing ran.
 // "unparseable": a reply of the wrong shape, or none of whose quotes is in the
 // filing, so nothing is stored and the document stays unread for the next run.
 // "no_sections": neither item was found (a 10-K laid out by a cross-reference
@@ -128,15 +119,13 @@ function buildMessages(item: TenKItem, text: string): LlmChatMessage[] {
   return [{ role: "system", content: rules.join("\n") }, { role: "user", content: text }];
 }
 
-// One whole bulleted list item, which a 10-K uses where a release writes a
-// sentence ("Our current competitors include: • suppliers ..., such as
-// Advanced Micro Devices, Inc., or AMD, ...; • large cloud services
-// companies..."): an item ending in a semicolon is no sentence, and a
-// bullet verifyStatement does not know ("* The Company's results are
-// impacted by...") starts none. The stored quote leaves out the bullet.
+// Kept beside verifyStatement, not in it, so earnings-release claims keep
+// their sentence rule: a 10-K list item ends in a semicolon, or opens with a
+// bullet ("*") no sentence starts after.
 const BULLETS = "•▪◦●■*";
+const LEADING_BULLET = new RegExp(`^[${BULLETS}]\\s*`);
 function wholeListItem(claim: TenKClaim, section: TenKSection): (TenKClaim & { exhibit: string; start: number; end: number }) | null {
-  const quote = canonicalText(claim.quote).replace(/^[•▪◦●■*]\s*/, "");
+  const quote = canonicalText(claim.quote).replace(LEADING_BULLET, "");
   if (quote.length < MIN_QUOTE_CHARS || quote.length > MAX_QUOTE_CHARS) return null;
   for (let start = section.text.indexOf(quote); start >= 0; start = section.text.indexOf(quote, start + 1)) {
     const end = start + quote.length;
@@ -145,6 +134,14 @@ function wholeListItem(claim: TenKClaim, section: TenKSection): (TenKClaim & { e
     }
   }
   return null;
+}
+
+// A risk factor names partners and customers too, so only a competition
+// claim has competitors.
+function competitorsNamedIn(claim: TenKClaim): string[] {
+  if (claim.predicate !== "business.competition") return [];
+  const quote = claim.quote.toLowerCase();
+  return claim.competitors.map((name) => name.trim()).filter((name) => name !== "" && quote.includes(name.toLowerCase()));
 }
 
 type VerifiedClaim = TenKClaim & { item: TenKItem; start: number; end: number; issuerIds: string[] };
@@ -163,8 +160,6 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
   if (status?.parse_status !== "pending") return { ...started, outcome: "already_extracted", missing };
   if (found.length === 0) return { ...started, outcome: "no_sections", missing };
 
-  // Every prompt runs at once: a 10-K is three or four, and run one by one
-  // they take minutes.
   const prompts = found.flatMap((section) => releasePrompts([section]).map((text) => ({ section, text })));
   const replies = await Promise.all(prompts.map(async ({ section, text }, index) => {
     const completion = await completeLogged(
@@ -189,13 +184,10 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
       }
       const key = JSON.stringify([found.predicate, found.quote]);
       const prior = verified.get(key);
-      // A competitor counts only on a competition claim, and only if its
-      // quote names it: a risk factor names partners and customers too.
-      const named = found.predicate !== "business.competition" ? [] : found.competitors.map((name) => name.trim()).filter((name) => name !== "" && found.quote.toLowerCase().includes(name.toLowerCase()));
       verified.set(key, {
         ...found,
         item: section.type,
-        competitors: [...new Set([...(prior?.competitors ?? []), ...named])],
+        competitors: [...new Set([...(prior?.competitors ?? []), ...competitorsNamedIn(found)])],
         issuerIds: [],
       });
     }
@@ -263,18 +255,17 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
   });
 }
 
-// A competitor's issuer by name: as written, else its stem with each
-// corporate suffix, since a 10-K writes "Intel Corporation" and "Qualcomm
-// Incorporated" and the issuers are "Intel Corp" and "Qualcomm Inc". Only a
-// single issuer counts; an ambiguous name stores no row. ponytail: a brand
-// that is not the legal name ("Google", "AMD") stays unresolved.
-const SUFFIX = / (?:inc|incorporated|corp|corporation|co|company|ltd|limited|plc)$/;
-const SUFFIXES = [" inc", " corp", " corporation", " co", " ltd", " plc"];
+// normalizeNameForLookup keeps corporate suffixes, so a 10-K's "Intel
+// Corporation" misses the issuer "Intel Corp": strip the written suffix, then
+// try each short form issuers are named with. ponytail: a brand that is not
+// the legal name ("Google", "AMD") stays unresolved.
+const WRITTEN_SUFFIX = / (?:inc|incorporated|corp|corporation|co|company|ltd|limited|plc)$/;
+const ISSUER_SUFFIXES = [" inc", " corp", " corporation", " co", " ltd", " plc"];
 export async function resolveCompetitorByName(db: QueryExecutor, name: string): Promise<string | null> {
   const written = normalizeNameForLookup(name);
-  const stem = written.replace(SUFFIX, "");
+  const stem = written.replace(WRITTEN_SUFFIX, "");
   if (stem === "") return null;
-  for (const candidate of new Set([written, ...SUFFIXES.map((suffix) => stem + suffix)])) {
+  for (const candidate of new Set([written, ...ISSUER_SUFFIXES.map((suffix) => stem + suffix)])) {
     const envelope = await resolveByNameCandidate(db, candidate);
     if (envelope.outcome === "resolved" && envelope.subject_ref.kind === "issuer") return envelope.subject_ref.id;
     if (envelope.outcome === "ambiguous") return null;
@@ -282,9 +273,6 @@ export async function resolveCompetitorByName(db: QueryExecutor, name: string): 
   return null;
 }
 
-// Store a 10-K's bytes as an evidence document of the issuer, or find the one
-// already stored with the same bytes, and assert the issuer mention reader
-// document selection queries on.
 export async function storeTenK(
   deps: { db: QueryExecutor; objectStore: ObjectStore },
   input: { issuerId: string; bytes: Uint8Array; url: string | null; accession: string | null; filedDate: string | null; retrievedAt: string },
@@ -350,21 +338,12 @@ export async function backfillIssuer10k(
   if (existing !== undefined && existing.parse_status !== "pending") {
     return { outcome: "already_extracted", extracted: 0, droppedUnquoted: 0, competitors: { resolved: 0, named: 0 }, missing: [], llmCalls: 0, accession: latest.accession };
   }
-  // Stored but unread (the filings backfill stores 10-Ks too): read from the
-  // object store, so the claims cite the stored bytes.
+  // The filings backfill stores 10-Ks too: claims cite the stored bytes.
   const blob = existing === undefined ? null : await deps.objectStore.get(existing.raw_blob_id);
-  const fetched = blob === null
-    ? await deps.secClient.fetchFiling({ cik: issuer.cik, accession_number: latest.accession, document: latest.primaryDocument })
-    : null;
-  const bytes = blob?.bytes ?? fetched!.bytes;
-  const doc = await storeTenK(deps, {
-    issuerId: issuer.issuerId,
-    bytes,
-    url: fetched?.url ?? null,
-    accession: latest.accession,
-    filedDate: latest.filedDate,
-    retrievedAt: fetched?.retrievedAt ?? new Date().toISOString(),
-  });
+  const { bytes, url, retrievedAt } = blob !== null
+    ? { bytes: blob.bytes, url: null, retrievedAt: new Date().toISOString() }
+    : await deps.secClient.fetchFiling({ cik: issuer.cik, accession_number: latest.accession, document: latest.primaryDocument });
+  const doc = await storeTenK(deps, { issuerId: issuer.issuerId, bytes, url, accession: latest.accession, filedDate: latest.filedDate, retrievedAt });
   const result = await extract10kClaims(deps, {
     ...doc,
     issuerId: issuer.issuerId,

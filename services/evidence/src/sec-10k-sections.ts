@@ -1,30 +1,17 @@
-// Item 1 (Business) and Item 1A (Risk Factors) of a 10-K's primary document,
-// as canonical text (blockText), each opening with its own heading. A heading
-// counts only at the start of a block, so a cross-reference in prose ("see
-// Item 1A") is never one. The table of contents repeats every heading, so each
-// item is the occurrence that runs longest before the next item's heading.
-
 import { blockText, type ReleaseExhibit } from "./sec-earnings-release-extraction.ts";
 
 export const TEN_K_ITEMS = ["1", "1A"] as const;
 export type TenKItem = (typeof TEN_K_ITEMS)[number];
 
-// A title's letters may be split by a space, where markup broke a word
-// ("Item 1. B usiness").
-const spaced = (title: string) => title.split(" ").map((word) => [...word].join(" ?")).join("\\s+");
+// canonicalText turns every tag into a space, so a tag inside a word splits it.
+const tagSplitTolerant = (title: string) => title.split(" ").map((word) => [...word].join(" ?")).join("\\s+");
 const HEADINGS: Readonly<Record<TenKItem, RegExp>> = {
-  "1": new RegExp(`^item\\s*1\\s*[.:-]?\\s*(?:description\\s+of\\s+)?${spaced("business")}\\b`, "i"),
-  "1A": new RegExp(`^item\\s*1a\\s*[.:-]?\\s*${spaced("risk factors")}\\b`, "i"),
+  "1": new RegExp(`^item\\s*1\\s*[.:-]?\\s*(?:description\\s+of\\s+)?${tagSplitTolerant("business")}\\b`, "i"),
+  "1A": new RegExp(`^item\\s*1a\\s*[.:-]?\\s*${tagSplitTolerant("risk factors")}\\b`, "i"),
 };
-// Any item's heading: its number, then a capitalized title ("Item 2 .
-// Properties", "ITEM 6. [RESERVED]", "Item 1C Cybersecurity").
 const ANY_HEADING = /^(?:ITEM|Item)\s*\d{1,2}[A-Ca-c]?\s*[.:-]?\s*[A-Z[]/;
-// Shorter than this, an occurrence is a table-of-contents row or an item
-// marked "Not applicable", with nothing to extract.
-const MIN_SECTION_CHARS = 1_000;
+const MIN_ITEM_BODY_CHARS = 1_000;
 
-// A section's text: the exhibit shape, so verifyStatement and releasePrompts
-// read it as they read an earnings release.
 export type TenKSection = ReleaseExhibit & { type: TenKItem };
 export type SectionNotFound = { type: TenKItem; error: "section_not_found" };
 
@@ -32,17 +19,17 @@ export function tenKSections(html: string): Record<TenKItem, TenKSection | Secti
   const { text, edges } = blockText(html);
   const starts = [...edges].sort((a, b) => a - b);
   const headings = starts.filter((at) => ANY_HEADING.test(text.slice(at, at + 40)));
-  const section = (item: TenKItem): TenKSection | SectionNotFound => {
+  const longestHeadedSpan = (item: TenKItem): TenKSection | SectionNotFound => {
     let best: { start: number; end: number } | null = null;
     for (const [n, start] of headings.entries()) {
       if (!HEADINGS[item].test(text.slice(start, start + 60))) continue;
       const end = headings[n + 1] ?? text.length;
       if (best === null || end - start > best.end - best.start) best = { start, end };
     }
-    if (best === null || best.end - best.start < MIN_SECTION_CHARS) return { type: item, error: "section_not_found" };
+    if (best === null || best.end - best.start < MIN_ITEM_BODY_CHARS) return { type: item, error: "section_not_found" };
     const sectionText = text.slice(best.start, best.end).trimEnd();
     const sectionEdges = new Set(starts.filter((at) => at >= best.start && at - best.start <= sectionText.length).map((at) => at - best.start));
     return { type: item, text: sectionText, edges: sectionEdges };
   };
-  return { "1": section("1"), "1A": section("1A") };
+  return { "1": longestHeadedSpan("1"), "1A": longestHeadedSpan("1A") };
 }

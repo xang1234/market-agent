@@ -67,8 +67,8 @@ export type ReleaseMetric = (typeof RELEASE_METRICS)[number];
 // explanation or guidance is the model's (as for enriched 8-K narratives).
 const RELEASE_CONFIDENCE = 0.8;
 const MAX_STATEMENTS = 8;
-const MIN_QUOTE_CHARS = 20;
-const MAX_QUOTE_CHARS = 600;
+export const MIN_QUOTE_CHARS = 20;
+export const MAX_QUOTE_CHARS = 600;
 // The release and the CFO commentary together run to ~40k characters.
 const MAX_PROMPT_CHARS = 60_000;
 // A release reports a quarter ended at most this long before it is filed. A
@@ -183,12 +183,13 @@ export function blockText(body: string): Omit<ReleaseExhibit, "type"> {
     edges.add(at);
     at += block.length;
     edges.add(at);
-    at += 1; // the space joining blocks
+    at += BLOCK_JOIN.length;
   }
-  return { text: blocks.join(" "), edges };
+  return { text: blocks.join(BLOCK_JOIN), edges };
 }
 
 // A closing block tag, or a line break (with any attributes).
+const BLOCK_JOIN = " ";
 const BLOCK_BREAK = /<(?:\/(?:div|p|li|tr|td|th|h[1-6]|table|ul|ol)\s*|br\b[^>]*)>/i;
 const MARKUP = /<\/?(?:html|body|div|p|br|table|font|span)\b/i;
 
