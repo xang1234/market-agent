@@ -7,14 +7,16 @@ import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { LlmRouterError, type ControlledRouter, type LlmChatRequest, type LlmExecutionControls, type LlmToolCall } from "../../llm/src/router.ts";
-import { analystAgentRouter, analystAgentRunner, certifiedAsk, perStepDeadlines, statusNote, type AnalystAgentDeps } from "../src/analyst-agent.ts";
+import { analystAgentRouter, analystAgentRunner, certifiedAsk, perStepDeadlines, statusNote, stopNotes, type AnalystAgentDeps } from "../src/analyst-agent.ts";
 import type { AnalystToolResult } from "../src/analyst-tools.ts";
-import { answerTurn } from "../src/answer-trace.ts";
+import { answerPath, answerTurn } from "../src/answer-trace.ts";
 import { createChatCoordinator, type ChatAssistantMessagePersistence, type ChatTurnInput } from "../src/coordinator.ts";
 import { figureCompanies, mergePackets, type EvidencePacket, type PacketClaim } from "../src/evidence-packet.ts";
+import { proposedMetric, resolveResearchScope, type ResearchScope } from "../src/research-scope.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC } from "../src/scope-figures.ts";
+import { loadPriorSubjects } from "../src/thread-context.ts";
 import { loadToolRegistry } from "../../tools/src/registry.ts";
-import { chatDatabase, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { chatDatabase, comparing, FY2023_REVENUE, NO_ASKS, readingOf, resolveMention, revenueModel } from "./financial-fixtures.ts";
 
 const LLM_ENV = {
   LLM_CHANNELS: "openai",
@@ -133,6 +135,7 @@ test("the agent's packet numbers every certified figure and every claim in one p
     engine: [engine("AAA", ["$1.0B", "$2.0B"]), engine("AAA", ["$3.0B"])],
     route,
     analyst: [profile, consensus, peers, noFiling],
+    asked: ["AAA"],
     notes: ["AAA: no analyst consensus captured in the 7 days to the cutoff is on file."],
     labels: new Map([[A, "AAA"]]),
     cutoff: "2026-11-01T00:00:00.000Z",
@@ -151,13 +154,13 @@ test("the agent's packet numbers every certified figure and every claim in one p
 });
 
 test("each certified call's figures keep their company in the agent's packet", () => {
-  const packet = mergePackets({ engine: [engine("AAA", ["$1.0B"]), engine("BBB", ["$2.0B"])], analyst: [], notes: [], labels: new Map(), cutoff: "2026-11-01T00:00:00.000Z" });
+  const packet = mergePackets({ engine: [engine("AAA", ["$1.0B"]), engine("BBB", ["$2.0B"])], analyst: [], asked: ["AAA", "BBB"], notes: [], labels: new Map(), cutoff: "2026-11-01T00:00:00.000Z" });
   assert.deepEqual(packet.figures.map((figure) => [figure.id, ...figureCompanies(figure, packet)]), [["F1", "AAA"], ["F2", "BBB"]]);
 });
 
 test("a read that could not be made marks the packet's claims unavailable, and its note says nothing is known of them", () => {
   const unavailable: AnalystToolResult = { tool: "get_claims", status: "unavailable", reason: "the read failed" };
-  const packet = mergePackets({ engine: [], analyst: [unavailable], notes: [], labels: new Map(), cutoff: "2026-11-01T00:00:00.000Z" });
+  const packet = mergePackets({ engine: [], analyst: [unavailable], asked: [], notes: [], labels: new Map(), cutoff: "2026-11-01T00:00:00.000Z" });
   assert.deepEqual([packet.route, packet.claims_status], ["analyst_agent", "unavailable"]);
   assert.equal(statusNote(unavailable, "AAA"), "AAA: the stored sources could not be read just now, so this says nothing about what is on file.");
 });
@@ -215,6 +218,39 @@ const REVENUE = { subject_refs: [{ kind: "issuer", id: A }], question: "AAA reve
 const OBSERVE_F1 = '```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]}]\n```';
 const noRead: AnalystAgentDeps["read"] = async () => assert.fail("no stored read in this turn");
 
+test("a planner ask says its period, and two that differ only by their year are two asks", () => {
+  const ask = (fiscal_year: number) => certifiedAsk({ subject_refs: [{ kind: "issuer", id: A }], question: "AAA revenue", period: { kind: "fiscal_year", fiscal_year } } as never, KNOWN);
+  const [y2024, y2025] = [ask(2024), ask(2025)];
+  assert.ok("fingerprint" in y2024 && "fingerprint" in y2025);
+  assert.notEqual(y2024.fingerprint, y2025.fingerprint);
+  assert.deepEqual([y2024.question, y2025.question], ["AAA revenue (for fiscal year 2024)", "AAA revenue (for fiscal year 2025)"]);
+  const latest = certifiedAsk({ subject_refs: [{ kind: "issuer", id: A }], question: "AAA revenue" } as never, KNOWN);
+  assert.ok("question" in latest);
+  assert.equal(latest.question, "AAA revenue", "no period given, none said");
+});
+
+test("a reading that stopped before its model was done names what it left unread", () => {
+  const profile = call("get_company_profile", { subject_ref: { kind: "issuer", id: A } });
+  const reply = (toolCalls: LlmToolCall[] = []) => ({ text: "", toolCalls, deployment: { channel: "openai", model: "o3" } });
+  const who = () => "AAA";
+  assert.deepEqual(stopNotes({ stop: "final", steps: [] }, who), []);
+  assert.deepEqual(stopNotes({ stop: "truncated", steps: [{ reply: reply([profile]), results: [] }] }, who), ["The business profile for AAA went unread, as the reading was cut off."]);
+  assert.deepEqual(stopNotes({ stop: "truncated", steps: [{ reply: reply(), results: [] }] }, who), ["Reading was cut off, so part of the question may be unanswered."]);
+  assert.deepEqual(stopNotes({ stop: "step_cap", steps: [] }, who), ["Reading stopped at its step limit, so part of the question may be unanswered."]);
+  const refused = { call: call("get_analyst_consensus", {}), outcome: "refused" as const, content: "refused (budget_exceeded) the turn's medium calls are spent" };
+  const run = { call: profile, outcome: "ok" as const, content: "{}" };
+  assert.deepEqual(stopNotes({ stop: "budget", steps: [{ reply: reply(), results: [run, refused] }] }, who), ["Analyst consensus for AAA went unread, as the turn reached its limit of reads."]);
+});
+
+test("only a company a certified call asked figures of can be said to have none, and claims beside figures take the analyst's rules", () => {
+  const profile: AnalystToolResult = { tool: "get_company_profile", status: "ok", truncated: false, reads: [readOf(A)], no_filing: [], claims: [filingClaim(randomUUID(), "We sell widgets.")] };
+  const claimsOnly = mergePackets({ engine: [], analyst: [profile], asked: [], notes: [], labels: new Map([[A, "AAA"]]), cutoff: "2026-11-01T00:00:00.000Z" });
+  assert.deepEqual(claimsOnly.coverage, []);
+  const mixed = mergePackets({ engine: [engine("AAA", ["$1.0B"])], analyst: [profile], asked: ["AAA", "BBB"], notes: [], labels: new Map([[A, "AAA"]]), cutoff: "2026-11-01T00:00:00.000Z" });
+  assert.deepEqual(mixed.coverage, [{ company: "AAA", status: "shown" }, { company: "BBB", status: "not_shown" }]);
+  assert.deepEqual([answerPath({ packet: mixed }), answerPath({ packet: engine("AAA", ["$1.0B"]) })], ["analyst", "engine"]);
+});
+
 test("the analyst agent", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("docker is not available");
@@ -224,16 +260,31 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
   const persist = await savingMessages(t, databaseUrl(db));
   const base = { threadId, userId: IDS.owner };
 
-  const agentOf = (router: ControlledRouter, answer: string, options: { planningModel?: PlanningModel | null; read?: AnalystAgentDeps["read"]; logged?: boolean; hydrate?: AnalystAgentDeps["financial"]["hydrate"] } = {}) => analystAgentRunner({
-    financial: { pool, planningModel: options.planningModel ?? null, evidence: createEvidenceFinancialPort, resolveMention, ...(options.hydrate ? { hydrate: options.hydrate } : {}) },
+  type AgentOptions = {
+    planningModel?: PlanningModel | null;
+    read?: AnalystAgentDeps["read"];
+    logged?: boolean;
+    hydrate?: AnalystAgentDeps["financial"]["hydrate"];
+    evidence?: AnalystAgentDeps["financial"]["evidence"];
+    researchScope?: AnalystAgentDeps["financial"]["researchScope"];
+  };
+  const agentOf = (router: ControlledRouter, answer: string, options: AgentOptions = {}) => analystAgentRunner({
+    financial: {
+      pool,
+      planningModel: options.planningModel ?? null,
+      evidence: options.evidence ?? createEvidenceFinancialPort,
+      resolveMention,
+      ...(options.hydrate ? { hydrate: options.hydrate } : {}),
+      ...(options.researchScope ? { researchScope: options.researchScope } : {}),
+    },
     router: async () => router,
     read: options.read ?? noRead,
     compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: answer }), onAnswered }),
     asOf: () => new Date().toISOString(),
     ...(options.logged === false ? {} : { logToolCalls: persist.logToolCalls }),
   });
-  const run = async (agent: ReturnType<typeof agentOf>, input: Omit<ChatTurnInput, "runId"> & { turnId: string }, during?: (stop: () => void) => void) => {
-    const coordinator = createChatCoordinator({ analystAgent: agent, persistAssistantMessage: persist, runner: () => assert.fail("the agent takes the turn") });
+  const run = async (agent: ReturnType<typeof agentOf>, input: Omit<ChatTurnInput, "runId"> & { turnId: string }, during?: (stop: () => void) => void, readQuestion?: ReturnType<typeof readingOf>) => {
+    const coordinator = createChatCoordinator({ analystAgent: agent, persistAssistantMessage: persist, runner: () => assert.fail("the agent takes the turn"), ...(readQuestion ? { readQuestion } : {}) });
     const handle = coordinator.getOrCreateTurn({ ...input, runId: input.turnId });
     during?.(() => coordinator.stopTurn({ userId: input.userId, threadId: input.threadId, runId: input.turnId, turnId: input.turnId }));
     await handle.completed;
@@ -365,7 +416,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.equal(rows[0].n, 0);
   });
 
-  await t.test("a retried turn keeps each ask's key, and shows a call an earlier attempt published as a typed gap", async () => {
+  await t.test("a retried turn computes again each call an earlier attempt published, as its figures left with that attempt", async () => {
     const turnId = randomUUID();
     let stop: () => void = () => assert.fail("not started");
     const first = scripted([{ toolCalls: [call("certified_financials", INCOME_2023), call("certified_financials", REVENUE)] }, { text: "DONE" }]);
@@ -379,20 +430,74 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
       stop = given;
     });
     assert.equal(events.at(-1)!.type, "turn.stopped");
-    const keys = await keysOf(turnId);
-    assert.deepEqual(keys, [`turn:${turnId}:1`, `turn:${turnId}:2`]);
+    assert.deepEqual(await keysOf(turnId), [`turn:${turnId}:1`, `turn:${turnId}:2`]);
     const ANOTHER = { ...REVENUE, question: "AAA top line in fiscal 2023" };
     const retry = scripted([{ toolCalls: [call("certified_financials", REVENUE), call("certified_financials", INCOME_2023), call("certified_financials", ANOTHER)] }, { text: "DONE" }]);
-    const planner = revenueModel(["AAA"]);
-    const done = completed(await run(agentOf(retry, '```assertions\n[]\n```', { planningModel: planner }), { ...base, turnId, userIntent: "AAA revenue and income statement" }));
-    assert.equal(planner.calls, 1, "a reused key resumes its plan; only the new ask plans");
-    assert.deepEqual(await keysOf(turnId), [`turn:${turnId}:1`, `turn:${turnId}:2`, `turn:${turnId}:3`], "the new ask takes a new key");
+    const done = completed(await run(agentOf(retry, '```assertions\n[]\n```', { planningModel: revenueModel(["AAA"]) }), { ...base, turnId, userIntent: "AAA revenue and income statement" }));
+    assert.equal((await keysOf(turnId)).length, 5, "each published ask takes a new key, and the new ask one more");
     const blocks = (done.message as { blocks: Array<Record<string, unknown>> }).blocks;
-    assert.deepEqual(blocks.filter((block) => block.kind === "financial_answer").length, 1, "only the new ask's figures are shown");
-    const note = blocks.find((block) => block.kind === "rich_text" && JSON.stringify(block.segments).includes("earlier attempt"));
-    assert.ok(note, "the published calls read as a typed gap");
+    assert.equal(blocks.filter((block) => block.kind === "financial_answer").length, 3, "every ask's figures are shown");
+    assert.ok(!JSON.stringify(blocks).includes("earlier attempt"));
     const contents = retry.sent[1]!.messages.flatMap((message) => (message.role === "toolResult" ? [JSON.parse(message.content).status] : []));
-    assert.deepEqual(contents, ["existing", "existing", "published"]);
+    assert.deepEqual(contents, ["published", "published", "published"]);
+  });
+
+  await t.test("an ask resumes the run an earlier attempt left unfinished, whatever order the asks come in", async () => {
+    const turnId = randomUUID();
+    const B_ASK = { subject_refs: [{ kind: "issuer", id: B }], question: "BBB revenue in fiscal 2023" };
+    const noPlannerForB = (async (request: Parameters<PlanningModel>[0]) => {
+      if (JSON.stringify(request).includes("BBB")) throw new Error("the planner is down");
+      return revenueModel(["AAA"])(request);
+    }) as PlanningModel;
+    let stop: () => void = () => assert.fail("not started");
+    let stopped = false;
+    const stopMidDrive: AgentOptions["evidence"] = (executor) => {
+      const port = createEvidenceFinancialPort(executor);
+      return {
+        ...port,
+        listInputCandidates: async (request) => {
+          if (!stopped) {
+            stopped = true;
+            stop();
+          }
+          return port.listInputCandidates(request);
+        },
+      };
+    };
+    const first = scripted([{ toolCalls: [call("certified_financials", B_ASK), call("certified_financials", INCOME_2023)] }, { text: "DONE" }]);
+    const events = await run(agentOf(first, OBSERVE_F1, { planningModel: noPlannerForB, evidence: stopMidDrive }), { ...base, turnId, userIntent: "BBB revenue and AAA income statement" }, (given) => {
+      stop = given;
+    });
+    assert.equal(events.at(-1)!.type, "turn.stopped");
+    const again = scripted([{ toolCalls: [call("certified_financials", INCOME_2023), call("certified_financials", B_ASK)] }, { text: "DONE" }]);
+    completed(await run(agentOf(again, OBSERVE_F1, { planningModel: noPlannerForB }), { ...base, turnId, userIntent: "BBB revenue and AAA income statement" }));
+    const { rows } = await db.query(
+      `select r.execution_state from financial_runs r join financial_plans p using (plan_id) where r.request_key like $1`,
+      [`turn:${turnId}:%`],
+    );
+    assert.deepEqual(rows.map((row) => row.execution_state), ["completed"], "the one run of the asks that planned, resumed and completed");
+  });
+
+  await t.test("a read that throws while a certified call runs fails the turn only once that call is done, and a retry shows its figures", async () => {
+    const turnId = randomUUID();
+    const slow = revenueModel(["AAA"]);
+    const planner = (async (request: Parameters<PlanningModel>[0]) => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return slow(request);
+    }) as PlanningModel;
+    const read: AnalystAgentDeps["read"] = async () => {
+      throw new Error("a defect in a read");
+    };
+    const router = scripted([{ toolCalls: [call("get_company_profile", { subject_ref: { kind: "issuer", id: A } }), call("certified_financials", REVENUE)] }, { text: "DONE" }]);
+    const events = await run(agentOf(router, OBSERVE_F1, { planningModel: planner, read }), { ...base, turnId, userIntent: "AAA revenue and what it sells" });
+    assert.equal(events.at(-1)!.type, "turn.error");
+    const atEnd = await keysOf(turnId);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    assert.deepEqual(await keysOf(turnId), atEnd, "nothing of the turn still runs once it has failed");
+    assert.equal(atEnd.length, 1);
+    const retry = scripted([{ toolCalls: [call("certified_financials", REVENUE)] }, { text: "DONE" }]);
+    const done = completed(await run(agentOf(retry, OBSERVE_F1, { planningModel: planner }), { ...base, turnId, userIntent: "AAA revenue and what it sells" }));
+    assert.deepEqual((done.message as { blocks: Array<{ kind: string }> }).blocks.map((block) => block.kind), ["financial_answer", "rich_text"]);
   });
 
   await t.test("a stored read gets lowercase issuer ids, and its typed status reaches the model and the notes", async () => {
@@ -437,10 +542,12 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     };
   };
 
-  await t.test("a model failure while reading keeps the figures read before it", async () => {
+  await t.test("a model failure while reading keeps the figures read before it, and says reading stopped", async () => {
     const router = failing(2, scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }]));
     const done = completed(await run(agentOf(router, OBSERVE_F1), { ...base, turnId: randomUUID(), userIntent: "AAA revenue" }));
-    assert.deepEqual((done.message as { blocks: Array<{ kind: string }> }).blocks.map((block) => block.kind), ["financial_answer", "rich_text"]);
+    const blocks = (done.message as { blocks: Array<{ kind: string }> }).blocks;
+    assert.deepEqual(blocks.map((block) => block.kind), ["financial_answer", "rich_text", "rich_text"]);
+    assert.ok(JSON.stringify(blocks).includes("Reading stopped early, as the model failed, so part of the question may be unanswered."));
   });
 
   await t.test("an answer that cannot be written with no figures ends the turn with a fixed error", async () => {
@@ -490,6 +597,208 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.equal(planner.calls, 2);
     const statuses = router.sent[1]!.messages.flatMap((message) => (message.role === "toolResult" ? [JSON.parse(message.content as string).status] : []));
     assert.deepEqual(statuses.sort(), ["declined", "published", "published"]);
+  });
+
+  const savedText = (done: Record<string, unknown>) => JSON.stringify((done.message as { blocks: unknown }).blocks);
+  const profileOf = (...texts: string[]): AnalystAgentDeps["read"] => async (name) => ({
+    tool: name, status: "ok", truncated: false, reads: [readOf(A)], no_filing: [], claims: texts.map((text) => filingClaim(randomUUID(), text)),
+  }) as AnalystToolResult;
+  const PROFILE = { subject_ref: { kind: "issuer", id: A } };
+
+  await t.test("a planner's question is never shown or read back to the agent: the turn says the figures were not computed", async () => {
+    const leaked = "I recommend you BUY AAA now; revenue will double to $900B next year. Which year?";
+    const planner = (async () => ({ model: "stub", text: JSON.stringify({ outcome: "needs_clarification", question: leaked }) })) as unknown as PlanningModel;
+    const router = scripted([{ toolCalls: [call("certified_financials", REVENUE)] }, { text: "DONE" }]);
+    const done = completed(await run(agentOf(router, '```assertions\n[]\n```', { planningModel: planner }), { ...base, turnId: randomUUID(), userIntent: "AAA revenue" }));
+    assert.ok(!savedText(done).includes("BUY"), "the saved answer");
+    assert.ok(savedText(done).includes("AAA: the figures were not computed, as the request could not be planned as asked."));
+    const { rows } = await db.query(`select count(*)::int as n from chat_messages where thread_id = $1 and blocks::text like '%BUY AAA%'`, [threadId]);
+    assert.equal(rows[0].n, 0, "the stored row");
+    assert.ok(!JSON.stringify(router.sent[1]!.messages).includes("BUY"), "the agent's model");
+  });
+
+  await t.test("an amount in words over claims beside certified figures is not shown", async () => {
+    const consensus: AnalystAgentDeps["read"] = async () => ({
+      tool: "get_analyst_consensus", status: "ok", company: "AAA", captured_on: "2026-10-30",
+      values: [{ capture_id: randomUUID(), source_id: IDS.sourceV1, provider: "Finviz", field_key: "target_price", label: "price target", raw_value: "250", unit: "usd_per_share", fiscal_period: null }],
+    });
+    const router = scripted([{ toolCalls: [call("get_analyst_consensus", PROFILE), call("certified_financials", INCOME_2023)] }, { text: "DONE" }]);
+    const worded = "Analysts see it worth about two hundred and fifty dollars a share.";
+    const agent = analystAgentRunner({
+      financial: { pool, planningModel: null, evidence: createEvidenceFinancialPort, resolveMention },
+      router: async () => router,
+      read: consensus,
+      compose: (input, turn, onAnswered) => answerTurn(input, turn, {
+        env: { ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" },
+        createClient: () => async (_deployment, request) => {
+          if (request.messages.map((message) => message.content).join("\n").startsWith("You check the analyst inferences")) return { text: '{"verdicts":[{"id":1,"verdict":"entailed","worded_amount":true}]}' };
+          return { text: `\`\`\`assertions\n[{"kind":"management_attribution","text":"Analysts target 250.","evidence":["C1"]},{"kind":"analyst_inference","text":"${worded}","supports":[0]}]\n\`\`\`` };
+        },
+        onAnswered,
+      }),
+      asOf: () => new Date().toISOString(),
+      logToolCalls: persist.logToolCalls,
+    });
+    const done = completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: "AAA analysts and income" }));
+    assert.ok(!savedText(done).includes("two hundred and fifty"));
+  });
+
+  await t.test("a step cut off names the read it never ran", async () => {
+    const steps = [
+      { text: "", toolCalls: [call("certified_financials", INCOME_2023)] },
+      { text: "I also need what AAA sells", toolCalls: [call("get_company_profile", PROFILE)], truncated: true },
+    ];
+    let n = 0;
+    const router: ControlledRouter = { complete: async () => ({ ...steps[n++]!, deployment: { channel: "openai", model: "o3" } }) };
+    const done = completed(await run(agentOf(router, OBSERVE_F1), { ...base, turnId: randomUUID(), userIntent: "AAA revenue and what it sells" }));
+    assert.ok(savedText(done).includes("The business profile for AAA went unread, as the reading was cut off."));
+  });
+
+  await t.test("a turn makes at most eight model calls across its reading, planner, answer, judge and repair", async () => {
+    const planner = revenueModel(["AAA"]);
+    const router = scripted([
+      { toolCalls: [call("certified_financials", REVENUE), call("certified_financials", { ...REVENUE, question: "AAA sales in fiscal 2023" })] },
+      { toolCalls: [call("get_analyst_consensus", PROFILE)] },
+      { toolCalls: [call("get_company_profile", PROFILE)] },
+    ]);
+    const kinds: string[] = [];
+    const list = '```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]},{"kind":"analyst_inference","text":"Its revenue base gives it scale.","supports":[0]},{"kind":"analyst_inference","text":"Scale may help it absorb costs.","supports":[0]}]\n```';
+    const agent = analystAgentRunner({
+      financial: { pool, planningModel: planner, evidence: createEvidenceFinancialPort, resolveMention },
+      router: async () => router,
+      read: async (name) => ({ tool: name, status: name === "get_analyst_consensus" ? "no_consensus" : "no_business_claims", truncated: false, reads: [readOf(A)], no_filing: [] }) as AnalystToolResult,
+      compose: (input, turn, onAnswered, guard) => answerTurn(input, turn, {
+        env: { ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" },
+        createClient: () => async (_deployment, request) => {
+          guard();
+          if (request.messages.map((message) => message.content).join("\n").startsWith("You check the analyst inferences")) {
+            kinds.push("judge");
+            return { text: '{"verdicts":[{"id":1,"verdict":"contradicted","worded_amount":false}]}' };
+          }
+          kinds.push(kinds.includes("answer") ? "repair" : "answer");
+          return { text: kinds.at(-1) === "answer" ? list : '```assertions\n[]\n```' };
+        },
+        onAnswered,
+      }),
+      asOf: () => new Date().toISOString(),
+      logToolCalls: persist.logToolCalls,
+    });
+    const done = completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: "AAA revenue and what it sells" }));
+    assert.equal(router.sent.length + planner.calls + kinds.length, 8, JSON.stringify({ loop: router.sent.length, planner: planner.calls, answer: kinds }));
+    assert.ok(savedText(done).includes("Reading stopped at its step limit, so part of the question may be unanswered."));
+  });
+
+  await t.test("a turn's reading ends at its deadline, and the figures it read are still shown", async () => {
+    let calls = 0;
+    const router = await analystAgentRouter(LLM_ENV, {
+      createClient: () => async () => {
+        calls += 1;
+        if (calls === 1) return { text: "", toolCalls: [call("certified_financials", INCOME_2023)] };
+        return new Promise<never>(() => {});
+      },
+    });
+    const agent = analystAgentRunner({
+      financial: { pool, planningModel: null, evidence: createEvidenceFinancialPort, resolveMention },
+      router: async () => router,
+      read: noRead,
+      compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: OBSERVE_F1 }), onAnswered }),
+      asOf: () => new Date().toISOString(),
+      logToolCalls: persist.logToolCalls,
+      turnMs: 1_500,
+    });
+    const started = Date.now();
+    const done = completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: "AAA revenue" }));
+    assert.ok(Date.now() - started < 20_000, "the hung step did not hold the turn");
+    assert.ok(savedText(done).includes("Reading stopped at the turn's time limit, so part of the question may be unanswered."));
+    assert.equal((done.message as { blocks: Array<{ kind: string }> }).blocks[0]!.kind, "financial_answer");
+  });
+
+  await t.test("a comparison naming a company still to be picked is left to the runner that asks, with a page's company or without", async () => {
+    for (const [input, readQuestion] of [[{ userIntent: "Compare AAA and AMB revenue" }, undefined], [{ subjectText: "AAA", userIntent: "Compare revenue with AMB" }, comparing("AMB")]] as const) {
+      const router = scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }, { text: "DONE" }]);
+      const coordinator = createChatCoordinator({
+        analystAgent: agentOf(router, OBSERVE_F1),
+        persistAssistantMessage: persist,
+        runner: async (context) => {
+          context.emit("turn.completed", {});
+        },
+        ...(readQuestion ? { readQuestion } : {}),
+      });
+      const turnId = randomUUID();
+      const handle = coordinator.getOrCreateTurn({ ...base, runId: turnId, turnId, ...input });
+      await handle.completed;
+      assert.equal(router.sent.length, 0, `${input.userIntent}: the agent read nothing`);
+      assert.ok(!handle.events.some((event) => event.bundle_id === "analyst_agent"), input.userIntent);
+    }
+  });
+
+  await t.test("the saved scope is the turn's reading, as two turns change its figure and year", async () => {
+    const thread = randomUUID();
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [thread, IDS.owner]);
+    let prior: ResearchScope | null = null;
+    const researchScope: AgentOptions["researchScope"] = async (_context, read) => {
+      prior = resolveResearchScope({ companies: [{ issuer_id: A, label: "AAA" }], prior, asOf: new Date().toISOString(), served: true, proposal: await read });
+      return prior;
+    };
+    const ask = async (userIntent: string, reading: typeof FY2023_REVENUE) => {
+      const router = scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }, { text: "DONE" }]);
+      completed(await run(agentOf(router, OBSERVE_F1, { researchScope }), { threadId: thread, userId: IDS.owner, turnId: randomUUID(), userIntent }, undefined, readingOf(reading)));
+      const { rows } = await db.query(`select research_scope from chat_messages where thread_id = $1 and role = 'assistant' order by created_at desc limit 1`, [thread]);
+      const scope = rows[0].research_scope as { fiscal_year: number | null; metrics: Array<{ metric_key: string }> };
+      return [scope.fiscal_year, scope.metrics.map((metric) => metric.metric_key)];
+    };
+    assert.deepEqual(await ask("AAA revenue in fiscal 2023", FY2023_REVENUE), [2023, ["income_statement"]]);
+    const freeCashFlow2024 = { ...NO_ASKS, metrics: [proposedMetric("free_cash_flow", null, null)!], period: { kind: "fiscal_year" as const, fiscal_year: 2024 } };
+    assert.deepEqual(await ask("AAA free cash flow in fiscal 2024", freeCashFlow2024), [2024, ["free_cash_flow"]]);
+  });
+
+  await t.test("a peer a certified call compared is a company the next turn continues, kept as a peer", async () => {
+    const thread = randomUUID();
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [thread, IDS.owner]);
+    const peers: AnalystAgentDeps["read"] = async () => ({
+      tool: "get_peer_set", status: "ok", company: "AAA", industry: "Widgets", industry_source_id: IDS.sourceV1,
+      peers: [{ issuer_id: B, label: "BBB", industry_source_id: IDS.sourceV1, market_cap_source_id: null }],
+    });
+    const both = { ...INCOME_2023, subject_refs: [{ kind: "issuer", id: A }, { kind: "issuer", id: B }], question: "AAA and BBB income statements for fiscal 2023" };
+    const router = scripted([{ toolCalls: [call("get_peer_set", PROFILE)] }, { toolCalls: [call("certified_financials", both)] }, { text: "DONE" }]);
+    const researchScope: AgentOptions["researchScope"] = async () => resolveResearchScope({ companies: [{ issuer_id: A, label: "AAA" }], prior: null, asOf: new Date().toISOString(), served: true, proposal: null });
+    completed(await run(agentOf(router, OBSERVE_F1, { read: peers, researchScope }), { threadId: thread, userId: IDS.owner, turnId: randomUUID(), userIntent: "How does AAA compare with its peers?" }));
+    const prior = await loadPriorSubjects(pool, { threadId: thread });
+    assert.deepEqual(prior.map((subject) => subject.subject_ref.id.toLowerCase()).sort(), [A, B].sort());
+    const { rows } = await db.query(`select research_scope from chat_messages where thread_id = $1 and role = 'assistant'`, [thread]);
+    assert.deepEqual(rows[0].research_scope.companies, [{ issuer_id: A, label: "AAA" }, { issuer_id: B }]);
+  });
+
+  await t.test("an ask for no figures is answered as its sources describe it, and one for figures keeps its counterpoint", async () => {
+    const rules: string[][] = [];
+    const recording = (router: ControlledRouter, read: AnalystAgentDeps["read"]) => analystAgentRunner({
+      financial: { pool, planningModel: null, evidence: createEvidenceFinancialPort, resolveMention },
+      router: async () => router,
+      read,
+      compose: (input, turn, onAnswered) => {
+        rules.push([...(input.instructions ?? [])]);
+        return answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: '```assertions\n[{"kind":"management_attribution","text":"It sells widgets.","evidence":["C1"]}]\n```' }), onAnswered });
+      },
+      asOf: () => new Date().toISOString(),
+      logToolCalls: persist.logToolCalls,
+    });
+    const describe = completed(await run(recording(scripted([{ toolCalls: [call("get_company_profile", PROFILE)] }, { text: "DONE" }]), profileOf("We sell widgets.")), { ...base, turnId: randomUUID(), userIntent: "What does AAA sell?" }));
+    completed(await run(recording(scripted([{ toolCalls: [call("get_company_profile", PROFILE), call("certified_financials", INCOME_2023)] }, { text: "DONE" }]), profileOf("We sell widgets.")), { ...base, turnId: randomUUID(), userIntent: "AAA revenue, and what it sells" }));
+    assert.deepEqual(rules.map((given) => [given.some((rule) => rule.includes("write no analyst_inference")), given.some((rule) => rule.includes("the takeaway and the counterpoint"))]), [[true, false], [false, true]]);
+    assert.ok(!savedText(describe).includes("No figures are shown"), "a company no certified call asked about lacks none");
+  });
+
+  await t.test("that no other filer names a company a competitor is said only when the turn read competition", async () => {
+    const reads: AnalystAgentDeps["read"] = async (name, args) => {
+      if (name === "get_peer_set") return { tool: name, status: "no_peers", reason: "no_industry" } as AnalystToolResult;
+      if (name === "get_claims" && args.role === "competitor") return { tool: name, status: "no_claims", truncated: false, reads: [], no_filing: [] } as AnalystToolResult;
+      return { tool: name, status: "no_filing", truncated: false, reads: [], no_filing: [{ issuer_id: A, label: "AAA" }] } as AnalystToolResult;
+    };
+    const asking = (extra: LlmToolCall[]) => scripted([{ toolCalls: [call("get_company_profile", PROFILE), call("get_claims", { ...PROFILE, role: "competitor" }), ...extra] }, { text: "DONE" }]);
+    const products = completed(await run(agentOf(asking([]), OBSERVE_F1, { read: reads }), { ...base, turnId: randomUUID(), userIntent: "What does AAA sell?" }));
+    assert.ok(!savedText(products).includes("names it as a competitor"));
+    const rivals = completed(await run(agentOf(asking([call("get_peer_set", PROFILE)]), OBSERVE_F1, { read: reads }), { ...base, turnId: randomUUID(), userIntent: "Who does AAA compete with?" }));
+    assert.ok(savedText(rivals).includes("AAA: no other company's 10-K on file names it as a competitor."));
   });
 
   await t.test("a turn the agent reads nothing for goes on to the next runner", async () => {
