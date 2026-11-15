@@ -276,6 +276,13 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
       return { ...started, outcome: "already_extracted" as const, missing: missingNow, unread: unreadNow };
     }
     const effectiveTime = doc.effectiveTime ?? locked!.published_at?.toISOString() ?? null;
+    // A cut item counts as read, and each of its claims' locators says how far.
+    // ponytail: the call cap is per run, so a rerun would cut it again. Read on
+    // from locator.cut.prompts if the rest of a long item is ever needed.
+    const cutOf = (item: TenKItem) => {
+      const short = cut.find((entry) => entry.item === item);
+      return short === undefined ? {} : { cut: { prompts: short.prompts, of: short.of } };
+    };
     const claimIds: string[] = [];
     let resolved = 0;
     for (const claim of [...verified.values()].filter((claim) => storing.includes(claim.item))) {
@@ -300,7 +307,7 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
       await createClaimEvidence(tx.db, {
         claim_id: row.claim_id,
         document_id: doc.documentId,
-        locator: { item: claim.item, start: claim.start, end: claim.end, text_basis: TEXT_BASIS },
+        locator: { item: claim.item, start: claim.start, end: claim.end, text_basis: TEXT_BASIS, ...cutOf(claim.item) },
         excerpt_hash: createHash("sha256").update(claim.quote).digest("hex"),
         confidence: 1,
       });

@@ -61,10 +61,20 @@ async function issuers(db: QueryExecutor, tickers: string[]): Promise<Issuer[]> 
   return rows.sort((a, b) => a.legal_name.localeCompare(b.legal_name));
 }
 
-// A 10-K's own filer, from its inline XBRL cover page.
+// A 10-K's own filer, from its inline XBRL cover page, where markup may wrap
+// the number.
 export function filerCik(html: string): number | null {
-  const cik = /name="dei:EntityCentralIndexKey"[^>]*>\s*(\d{1,10})\s*</.exec(html);
+  const cik = /name\s*=\s*["']?dei:EntityCentralIndexKey\b["']?[^>]*>(?:\s|<[^>]*>)*(\d{1,10})\s*</i.exec(html);
   return cik === null ? null : Number(cik[1]);
+}
+
+// Throws on another filer's 10-K, and returns a warning when either CIK is unknown.
+export function checkFiler(html: string, ticker: string, issuerCik: string | null): string | null {
+  const filer = filerCik(html);
+  if (filer === null) return "filer check skipped: the file has no dei:EntityCentralIndexKey";
+  if (issuerCik === null) return `filer check skipped: ${ticker} has no CIK`;
+  if (filer !== Number(issuerCik)) throw new Error(`the file is filed by CIK ${filer}, not ${ticker}'s ${Number(issuerCik)}`);
+  return null;
 }
 
 // A model reply that left an item unread exits 1, so a scheduler reruns it.
@@ -121,10 +131,8 @@ async function main(): Promise<void> {
       const started = Date.now();
       const bytes = readFileSync(file);
       const html = bytes.toString("utf8");
-      const filer = filerCik(html);
-      if (filer !== null && issuer.cik !== null && filer !== Number(issuer.cik)) {
-        throw new Error(`${file} is filed by CIK ${filer}, not ${tickers[0]}'s ${Number(issuer.cik)}`);
-      }
+      const warning = checkFiler(html, tickers[0]!, issuer.cik);
+      if (warning !== null) console.warn(`${file}: warning: ${warning}`);
       const doc = await storeTenK(deps, { issuerId: issuer.issuer_id, bytes, url: null, accession, filedDate: filed, retrievedAt: new Date().toISOString() });
       const effectiveTime = filed === null ? null : `${filed}T00:00:00Z`;
       const result = await extract10kClaims(deps, { ...doc, issuerId: issuer.issuer_id, html, effectiveTime });

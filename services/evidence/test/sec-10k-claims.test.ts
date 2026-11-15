@@ -12,7 +12,7 @@ import {
   type TenKBackfillDeps,
   type TenKDocument,
 } from "../src/sec-10k-claims.ts";
-import { filerCik, parseCliArgs, summaryLine } from "../src/sec-10k-claims-cli.ts";
+import { checkFiler, filerCik, parseCliArgs, summaryLine } from "../src/sec-10k-claims-cli.ts";
 import { MemoryObjectStore } from "../src/object-store.ts";
 import type { SecSubmissions } from "../src/sec-edgar.ts";
 import type { QueryExecutor } from "../src/types.ts";
@@ -201,6 +201,8 @@ test("a 10-K is read in at most 12 model calls, and an item cut short is counted
   assert.deepEqual([result.outcome, result.extracted, result.cut, result.llmCalls, calls()], ["extracted", 2, [{ item: "1A", prompts: 11, of: 13 }], 12, 12]);
   const { rows } = await client.query<{ status: string }>(`select status from tool_call_logs where tool_name = 'extract_10k_claims'`);
   assert.deepEqual(rows, [{ status: "partial" }]);
+  const evidence = await client.query<{ item: string; cut: unknown }>(`select locator->>'item' as item, locator->'cut' as cut from claim_evidence order by 1`);
+  assert.deepEqual(evidence.rows, [{ item: "1", cut: null }, { item: "1A", cut: { prompts: 11, of: 13 } }], "the stored claims say how far a cut item was read");
 });
 
 test("two stores of one 10-K's bytes at once keep one source", dockerTest, async (t) => {
@@ -455,7 +457,17 @@ test("a --file run takes the filing's accession and filed date", () => {
 
 test("a 10-K names its own filer on its cover page", () => {
   assert.equal(filerCik(NVDA_HTML.toString("utf8")), 1045810);
+  assert.equal(filerCik('<ix:nonNumeric contextRef="c-1" name="dei:EntityCentralIndexKey" id="f-31"><span>0000723125</span></ix:nonNumeric>'), 723125, "markup inside the tag");
+  assert.equal(filerCik("<ix:nonNumeric name='dei:EntityCentralIndexKey' contextRef='c-1'>\n  0000723125\n</ix:nonNumeric>"), 723125, "single quotes");
   assert.equal(filerCik("<div>Item 1. Business</div>"), null);
+});
+
+test("a --file run refuses another filer's 10-K, and warns when it cannot check", () => {
+  const nvda = NVDA_HTML.toString("utf8");
+  assert.equal(checkFiler(nvda, "NVDA", "0001045810"), null);
+  assert.throws(() => checkFiler(nvda, "MU", "0000723125"), /filed by CIK 1045810, not MU's 723125/);
+  assert.equal(checkFiler("<div>Item 1. Business</div>", "NVDA", "0001045810"), "filer check skipped: the file has no dei:EntityCentralIndexKey");
+  assert.equal(checkFiler(nvda, "NVDA", null), "filer check skipped: NVDA has no CIK");
 });
 
 test("the backfill reads a 10-K the filings backfill stored from the object store, with no fetch", dockerTest, async (t) => {
