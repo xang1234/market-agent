@@ -219,12 +219,13 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
   const persist = await savingMessages(t, databaseUrl(db));
   const base = { threadId, userId: IDS.owner };
 
-  const agentOf = (router: ControlledRouter, answer: string, options: { planningModel?: PlanningModel | null; read?: AnalystAgentDeps["read"] } = {}) => analystAgentRunner({
+  const agentOf = (router: ControlledRouter, answer: string, options: { planningModel?: PlanningModel | null; read?: AnalystAgentDeps["read"]; logged?: boolean } = {}) => analystAgentRunner({
     financial: { pool, planningModel: options.planningModel ?? null, evidence: createEvidenceFinancialPort, resolveMention },
     router: async () => router,
     read: options.read ?? noRead,
     compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: answer }), onAnswered }),
     asOf: () => new Date().toISOString(),
+    ...(options.logged === false ? {} : { logToolCalls: persist.logToolCalls }),
   });
   const run = async (agent: ReturnType<typeof agentOf>, input: Omit<ChatTurnInput, "runId"> & { turnId: string }, during?: (stop: () => void) => void) => {
     const coordinator = createChatCoordinator({ analystAgent: agent, persistAssistantMessage: persist, runner: () => assert.fail("the agent takes the turn") });
@@ -356,6 +357,21 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(blocks.map((block) => block.segments.map((segment) => segment.text).join("")), ["AAA: no analyst consensus captured in the 7 days to the cutoff is on file."]);
   });
 
+  await t.test("a card quoting a stored source seals with the tool calls that read it", async () => {
+    const consensus: AnalystAgentDeps["read"] = async () => ({
+      tool: "get_analyst_consensus", status: "ok", company: "AAA", captured_on: "2026-10-30",
+      values: [{ capture_id: randomUUID(), source_id: IDS.sourceV1, provider: "Finviz", field_key: "target_price", label: "price target", raw_value: "250", unit: "usd_per_share", fiscal_period: null }],
+    });
+    const cites = '```assertions\n[{"kind":"management_attribution","text":"Analysts target 250.","evidence":["C1"]}]\n```';
+    const ask = () => scripted([{ toolCalls: [call("get_analyst_consensus", { subject_ref: { kind: "issuer", id: A } })] }, { text: "DONE" }]);
+    const done = completed(await run(agentOf(ask(), cites, { read: consensus }), { ...base, turnId: randomUUID(), userIntent: "What do analysts expect for AAA?" }));
+    const [card] = (done.message as { blocks: Array<Record<string, unknown>> }).blocks;
+    assert.deepEqual([card!.analyst_commentary, card!.source_refs], [true, [IDS.sourceV1]]);
+    assert.ok(JSON.stringify(card!.segments).includes("attributed consensus: Finviz price target, captured 2026-10-30: 250 USD per share"));
+    const unlogged = await run(agentOf(ask(), cites, { read: consensus, logged: false }), { ...base, turnId: randomUUID(), userIntent: "What do analysts expect for AAA?" });
+    assert.equal(unlogged.at(-1)!.type, "turn.error", "a source no logged call read does not seal");
+  });
+
   await t.test("a turn the agent reads nothing for goes on to the next runner", async () => {
     const turnId = randomUUID();
     let next = 0;
@@ -373,7 +389,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
 });
 
 // The chat server's own seal and save (local-runtime.ts) on this database.
-async function savingMessages(t: TestContext, url: string): Promise<ChatAssistantMessagePersistence> {
+async function savingMessages(t: TestContext, url: string): Promise<ChatAssistantMessagePersistence & { logToolCalls: AnalystAgentDeps["logToolCalls"] }> {
   const previous = process.env.CHAT_DATABASE_URL;
   process.env.CHAT_DATABASE_URL = url;
   const runtime = await import("../src/local-runtime.ts");
@@ -382,5 +398,5 @@ async function savingMessages(t: TestContext, url: string): Promise<ChatAssistan
     if (previous === undefined) delete process.env.CHAT_DATABASE_URL;
     else process.env.CHAT_DATABASE_URL = previous;
   });
-  return runtime.persistAssistantMessage;
+  return Object.assign(runtime.persistAssistantMessage, { logToolCalls: runtime.writeLocalToolCallLogs });
 }

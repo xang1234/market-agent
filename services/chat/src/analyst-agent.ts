@@ -56,6 +56,8 @@ export type AnalystAgentDeps = Readonly<{
   // The cutoff the analyst tools read at.
   asOf: () => string;
   conversation?: (threadId: string) => Promise<ReadonlyArray<{ role: string; text: string }>>;
+  // Records the calls that read the answer's evidence, which its seal checks (tool_call_logs).
+  logToolCalls?: (threadId: string, calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
   registry?: ToolRegistry;
 }>;
 
@@ -215,6 +217,9 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       labels: new Map([...known.keys()].map((issuer) => [issuer, labelOf(issuer)])),
       cutoff: asOf,
     });
+    await deps.logToolCalls?.(context.threadId, toolCalls);
+    // The calls that read the evidence: a seal that binds a source or claim checks each against its log.
+    const readCalls = toolCalls.filter((entry) => entry.status === "ok").map((entry) => entry.tool_call_id);
     const snapshotId = randomUUID();
     const subjectRefs = named.map((subject) => ({ kind: "issuer" as const, id: issuerOf(subject) }));
     const cardId = randomUUID();
@@ -222,7 +227,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       id: cardId, kind: "rich_text", snapshot_id: snapshotId, data_ref: { kind: "rich_text", id: cardId },
       source_refs: [], as_of: asOf, analyst_commentary: true, segments: [], subject_refs: subjectRefs,
     };
-    const noted = packet.gaps.length === 0 ? [] : [{ ...noteBlock({ snapshotId, asOf }, "agent:not-covered", packet.gaps.join(" ")), subject_refs: subjectRefs }];
+    const noted = packet.gaps.length === 0 ? [] : [{ ...noteBlock({ snapshotId, asOf }, "agent:not-covered", packet.gaps.join(" ")), subject_refs: subjectRefs, tool_call_ids: readCalls }];
     let answeredBy: string | undefined;
     let answer: Pick<AnsweredTurn, "assertions" | "blocks" | "judging" | "without">;
     try {
@@ -253,10 +258,11 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const unwritten = [{
       ...noteBlock({ snapshotId, asOf }, "agent:unwritten", certified.length > 0 ? COMMENTARY_UNAVAILABLE : NO_ANSWER),
       subject_refs: subjectRefs,
+      tool_call_ids: readCalls,
     }];
     const turnBlocks = (written: ReadonlyArray<Record<string, unknown>>) => {
       // An answer that rendered no assertion is not shown: the certified blocks stand alone.
-      const own = [...written.filter(rendered).map((block) => withRefs(block, claims, cited)), ...noted];
+      const own = [...written.filter(rendered).map((block) => ({ ...withRefs(block, claims, cited), tool_call_ids: readCalls })), ...noted];
       return [...certifiedBlocks, ...(own.length > 0 ? own : unwritten)];
     };
     const turnAnswer = (shown: Pick<AnsweredTurn, "blocks" | "judging">): Pick<ChatAnalystToolRuntimeResult, "blocks" | "judging"> => ({

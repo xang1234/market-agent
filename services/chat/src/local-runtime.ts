@@ -547,6 +547,7 @@ export const analystAgent = analystAgentRunner({
   compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered }),
   asOf: () => turnNow(process.env),
   conversation: (threadId) => loadRecentConversation(pool(), { threadId, limit: CONVERSATION_MESSAGES }),
+  logToolCalls: writeLocalToolCallLogs,
 });
 
 export const persistAssistantMessage: ChatAssistantMessagePersistence = async (message) =>
@@ -760,7 +761,7 @@ async function loadToolCallResultHashes(
   );
 }
 
-async function writeLocalToolCallLogs(
+export async function writeLocalToolCallLogs(
   threadId: string,
   toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>,
 ): Promise<void> {
