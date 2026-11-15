@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { randomUUID, createHash } from 'node:crypto';
 import { createClaim } from '../../evidence/src/claim-repo.ts';
 import { createClaimArgument } from '../../evidence/src/claim-argument-repo.ts';
@@ -25,6 +25,7 @@ const USER = IDS.owner;
 const OTHER = IDS.other;
 const ISSUER = IDS.issuerA;
 const CONDITION = '30000000-0000-4000-8000-000000000001';
+const OTHER_CONDITION = '30000000-0000-4000-8000-000000000002';
 
 test('thesis monitoring persists, deduplicates, reassesses changed facts and protects history', { skip: !dockerAvailable(), timeout: 120000 }, async t => {
   const db = await engineDatabase(t, 'living-thesis-runtime');
@@ -210,4 +211,87 @@ test('narrative monitoring includes IR and non-IR claims, never stores a fabrica
   history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
   assert.equal(history.assessments[0].results[0].status,'unresolved');
   assert.equal((await db.query('select count(*)::int as n from findings where agent_id=$1',[agent.agent_id])).rows[0].n,1);
+});
+
+// Supports each condition it is asked about with the packet's one claim, or cites an id the packet never supplied for a condition in unchecked. Logs the condition ids of every call in asked.
+function scripted(unchecked: string[] = [], asked: string[][] = []): ThesisLlm {
+  return {async complete(input) {
+    const {conditions,evidence}=JSON.parse(input.messages[1].content) as {conditions:Array<{condition_id:string}>;evidence:{claims:Array<{id:string}>}};
+    asked.push(conditions.map(c=>c.condition_id));
+    return {text:JSON.stringify({results:conditions.map(c=>({condition_id:c.condition_id,status:'supported',refs:[unchecked.includes(c.condition_id)?'C99':evidence.claims[0].id]}))}),deployment:{channel:'test',model:'scripted'}};
+  }};
+}
+
+async function narrativeMonitor(t:TestContext,name:string,conditionIds:string[]) {
+  const {databaseUrl}=await bootstrapDatabase(t,name);
+  const db=await connectedClient(t,databaseUrl);
+  const pool=await connectedPool(t,databaseUrl);
+  await db.query('insert into users(user_id,email) values($1,$2)',[USER,`${name}@example.test`]);
+  await db.query("insert into issuers(issuer_id,legal_name) values($1,'Narrative issuer')",[ISSUER]);
+  const agent=await createAgent(db,{user_id:USER,name,thesis:'Demand remains durable throughout the year.',cadence:'daily',universe:{mode:'static',subject_refs:[{kind:'issuer',id:ISSUER}]}});
+  const thesis=await saveThesis(db,{agent_id:agent.agent_id,user_id:USER,expected_version:0,thesis:agent.thesis,subject_ref:{kind:'issuer',id:ISSUER},
+    conditions:conditionIds.map((condition_id,index)=>({condition_id,statement:`Demand holds in segment ${index+1}.`,falsifier:`Segment ${index+1} customers cancel orders.`,horizon:'This year'}))});
+  const published=new Date(Date.now()-86400000).toISOString();
+  const source=await createSource(db,{provider:name,kind:'filing',trust_tier:'primary',license_class:'public',retrieved_at:published,user_id:USER});
+  const document=(await createDocument(db,{source_id:source.source_id,kind:'filing',title:name,published_at:published,content_hash:'sha256:'+createHash('sha256').update(name).digest('hex'),raw_blob_id:ephemeralRawBlobIdForSource(source.source_id),parse_status:'parsed'})).document;
+  const claim=await createClaim(db,{document_id:document.document_id,predicate:'demand.change',text_canonical:'Customers kept their orders.',polarity:'positive',modality:'asserted',reported_by_source_id:source.source_id,effective_time:published,confidence:0.9,status:'extracted'});
+  await createClaimArgument(db,{claim_id:claim.claim_id,subject_kind:'issuer',subject_id:ISSUER,role:'subject'});
+  await createClaimEvidence(db,{claim_id:claim.claim_id,document_id:document.document_id,locator:{kind:'paragraph',index:1},confidence:0.9});
+  async function run(llm:ThesisLlm,identity:string,beforePersist?:()=>Promise<unknown>) {
+    const fresh=(await getAgent(db,agent.agent_id))!;
+    const stages=createThesisAgentLoopStages({db:pool,userId:USER,runId:randomUUID(),agent:fresh,thesis,financial:{pool,evidence:createEvidenceFinancialPort},getModel:async()=>({llm,identity})});
+    if (beforePersist) {
+      const analyze=stages.analyze;
+      stages.analyze=async input=>{const result=await analyze(input); await beforePersist(); return result;};
+    }
+    return runAgentLoop({pool,agent_id:agent.agent_id,current_watermarks:fresh.watermarks,stages});
+  }
+  const assessments=async()=>(await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments;
+  return {
+    run, assessments,
+    statuses:async()=>(await assessments()).map(a=>a.results.map(r=>r.method==='unchecked_reply'?'unchecked':r.status)),
+    findings:async()=>(await db.query<{n:number}>('select count(*)::int as n from findings where agent_id=$1',[agent.agent_id])).rows[0].n,
+  };
+}
+
+test('a condition supported, then left unchecked, then supported again raises one finding', {skip:!dockerAvailable(),timeout:120000}, async t => {
+  const monitor=await narrativeMonitor(t,'thesis-last-checked-findings',[CONDITION]);
+  await monitor.run(scripted(),'first');
+  await monitor.run(scripted([CONDITION]),'second');
+  await monitor.run(scripted(),'third');
+  assert.deepEqual(await monitor.statuses(),[['supported'],['unchecked'],['supported']]);
+  assert.equal(await monitor.findings(),1,'an unchecked reply is no baseline, so supported again is no transition');
+});
+
+test('a rerun on the same evidence asks the model again only for the condition whose reply was unchecked', {skip:!dockerAvailable(),timeout:120000}, async t => {
+  const monitor=await narrativeMonitor(t,'thesis-last-checked-reuse',[CONDITION,OTHER_CONDITION]);
+  const asked:string[][]=[];
+  await monitor.run(scripted([OTHER_CONDITION],asked),'same');
+  await monitor.run(scripted([],asked),'same');
+  await monitor.run(scripted([],asked),'same');
+  assert.deepEqual(asked,[[CONDITION,OTHER_CONDITION],[OTHER_CONDITION]]);
+  assert.deepEqual(await monitor.statuses(),[['supported','supported'],['supported','supported'],['supported','unchecked']]);
+  const [third,second,first]=await monitor.assessments();
+  assert.deepEqual(second.results[0],first.results[0],'the checked result stands as it was');
+  assert.notEqual(second.snapshot_id,first.snapshot_id);
+  assert.equal(third.snapshot_id,second.snapshot_id,'once every condition is checked, the next run reuses that snapshot');
+  assert.equal(await monitor.findings(),2);
+});
+
+test('a run overlapped by one that left the condition unchecked records its own checked reply', {skip:!dockerAvailable(),timeout:120000}, async t => {
+  const monitor=await narrativeMonitor(t,'thesis-overlap-unchecked',[CONDITION]);
+  const overlapped=await monitor.run(scripted(),'same',()=>monitor.run(scripted([CONDITION]),'same'));
+  assert.deepEqual(overlapped.outputs_summary,{findings:1,assessments:1,reused:false});
+  assert.deepEqual(await monitor.statuses(),[['supported'],['unchecked']]);
+  assert.equal(await monitor.findings(),1);
+});
+
+test('a run overlapped by one that checked every condition on the same evidence records nothing, and on other evidence fails', {skip:!dockerAvailable(),timeout:120000}, async t => {
+  const monitor=await narrativeMonitor(t,'thesis-overlap-checked',[CONDITION]);
+  const overlapped=await monitor.run(scripted(),'same',()=>monitor.run(scripted(),'same'));
+  assert.deepEqual(overlapped.outputs_summary,{findings:0,assessments:0,reused:true});
+  assert.deepEqual(await monitor.statuses(),[['supported']]);
+  await assert.rejects(monitor.run(scripted(),'older',()=>monitor.run(scripted(),'newer')),/newer assessment finished during this run/);
+  assert.equal((await monitor.assessments()).length,2);
+  assert.equal(await monitor.findings(),1);
 });
