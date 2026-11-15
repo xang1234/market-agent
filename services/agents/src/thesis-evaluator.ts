@@ -43,6 +43,7 @@ export type ThesisEvidence = Readonly<{
 }>;
 
 export const NOT_ENOUGH_EVIDENCE = "Not enough evidence: no stored source covers this condition.";
+export const UNCHECKED_REPLY = "Not enough evidence: the model's reply for this condition could not be checked against the stored sources.";
 
 const FIXED_REASON_BY_STATUS: Readonly<Record<ConditionAssessment["status"], string>> = {
   supported: "The cited stored sources support this condition.",
@@ -195,10 +196,11 @@ function parseNarrativeResults(
 }
 
 function assessmentOrNotEnoughEvidence(conditionId: string, status: unknown, refIds: unknown, refs: ThesisEvidence["refs"]): ConditionAssessment {
-  if (status !== "supported" && status !== "challenged" && status !== "unresolved") return notEnoughEvidence(conditionId);
-  if (!Array.isArray(refIds) || refIds.length === 0) return notEnoughEvidence(conditionId);
+  if (status !== "supported" && status !== "challenged" && status !== "unresolved") return notEnoughEvidence(conditionId, UNCHECKED_REPLY);
+  if (!Array.isArray(refIds)) return notEnoughEvidence(conditionId, UNCHECKED_REPLY);
+  if (refIds.length === 0) return notEnoughEvidence(conditionId, status === "unresolved" ? NOT_ENOUGH_EVIDENCE : UNCHECKED_REPLY);
   const cited = refIds.map((ref) => (typeof ref === "string" && Object.hasOwn(refs, ref) ? refs[ref] : undefined));
-  if (!cited.every((ref) => ref !== undefined)) return notEnoughEvidence(conditionId);
+  if (!cited.every((ref) => ref !== undefined)) return notEnoughEvidence(conditionId, UNCHECKED_REPLY);
   const figures = [...new Map(cited.flatMap((ref) => ref.figure_refs).map((figure) => [figure.result_id, figure])).values()];
   return {
     condition_id: conditionId,
@@ -211,11 +213,11 @@ function assessmentOrNotEnoughEvidence(conditionId: string, status: unknown, ref
   };
 }
 
-function notEnoughEvidence(conditionId: string): ConditionAssessment {
+function notEnoughEvidence(conditionId: string, reason = NOT_ENOUGH_EVIDENCE): ConditionAssessment {
   return {
     condition_id: conditionId,
     status: "unresolved",
-    reason: NOT_ENOUGH_EVIDENCE,
+    reason,
     claim_refs: [],
     fact_refs: [],
     method: "no_evidence",

@@ -1,8 +1,8 @@
 import type { AgentRow, QueryExecutor } from '../../agents/src/agent-repo.ts';
 import type { AgentLoopStages } from '../../agents/src/agent-loop.ts';
 import { getCurrentThesis, getLatestThesisAssessment, recordThesisAssessment } from '../../agents/src/thesis-repo.ts';
-import { evaluateThesis, THESIS_PROMPT_VERSION, type ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
-import { ThesisConflictError, type ThesisVersion, type ConditionAssessment } from '../../agents/src/thesis-types.ts';
+import { evaluateThesis, THESIS_PROMPT_VERSION, UNCHECKED_REPLY, type ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
+import { ThesisConflictError, type ThesisAssessment, type ThesisVersion, type ConditionAssessment } from '../../agents/src/thesis-types.ts';
 import { generateThesisFinding } from './thesis-finding.ts';
 import type { FindingRow } from '../../agents/src/finding-generator.ts';
 import { writeRunActivity } from '../../observability/src/run-activity.ts';
@@ -62,7 +62,7 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       // The reuse key compares definitions, inputs, and outcomes — never run or snapshot identities.
       const packetHash = hashJsonValue({ metricResults: thesisReuseProjection(metricResults), version: input.thesis.thesis_version_id, packet: withoutResultIds(evidence), day: deltas.as_of.slice(0, 10), model: model.identity, prompt: THESIS_PROMPT_VERSION });
       const previous = await getLatestThesisAssessment(input.db, input.thesis.thesis_version_id);
-      const reused = previous?.input_hash.split('/')[0] === packetHash;
+      const reused = previous !== null && reusable(previous, packetHash);
       const evaluation = reused && previous ? previous : await evaluateThesis({
         thesis: input.thesis, evidence: evidence.evidence, as_of: deltas.as_of, llm: model.llm, metric_results: metricResults,
       });
@@ -106,7 +106,7 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       }
       if (finishedDuringThisRun.rows.length > 0)
         throw new ThesisConflictError('A newer assessment finished during this run; run again.');
-      if (previous?.input_hash.split('/')[0] === analysis.packet_hash) {
+      if (previous !== null && reusable(previous, analysis.packet_hash)) {
         await recordThesisAssessment(tx, {
           thesis_version_id: input.thesis.thesis_version_id, run_id: input.runId, snapshot_id: previous.snapshot_id,
           input_hash: analysis.input_hash, results: previous.results, model_version: previous.model_version, prompt_version: THESIS_PROMPT_VERSION,
@@ -134,11 +134,18 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       }
       await activity(tx, input, 'reading', `Considered ${evidence.claims.length} current claims and sealed ${evidence.facts.length} stored facts for the configured metrics.`);
       await activity(tx, input, 'investigating', `Assessed ${analysis.results.length} saved conditions using ${analysis.model_version ?? 'the financial engine and missing-evidence handling'}.`);
+      const unchecked = analysis.results.filter(result => result.reason === UNCHECKED_REPLY).length;
+      if (unchecked > 0)
+        await activity(tx, input, 'investigating', `The model's reply for ${unchecked} of ${analysis.results.length} conditions could not be checked against the stored sources, so they read as not enough evidence. The next run asks again.`);
       await activity(tx, input, findings.length ? 'found' : 'dismissed', findings.length ? `Recorded ${findings.length} thesis condition changes.` : 'Recorded the assessment; no new supported or challenged states.');
       return { findings: findings.length, assessments: 1, reused: false };
     },
     async alertFindings() { return findings; },
   };
+}
+// A reply the evidence could not back is asked again on the next run, not reused for the day.
+function reusable(previous: ThesisAssessment, packetHash: string): boolean {
+  return previous.input_hash.split('/')[0] === packetHash && !previous.results.some(result => result.reason === UNCHECKED_REPLY);
 }
 // The engine numbers each run's results anew, so a cited figure's result id stays out of the reuse key. Its measure, period and value are in the packet.
 function withoutResultIds(packet: ThesisPacket) {

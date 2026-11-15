@@ -122,17 +122,20 @@ function AssessmentEntry({ entry, shown, currentVersion, refLabels }: { entry: E
       ) : METHOD_LABELS[result.method] ? <p className="mt-2 text-xs text-muted">{METHOD_LABELS[result.method]}</p> : null}
       {(figures.length > 0 || result.fact_refs.length > 0 || result.claim_refs.length > 0) ? (
         <div className="mt-2 flex flex-wrap gap-2" aria-label="Cited refs">
-          {figures.map((figure) => (
-            <InspectableResult
-              key={figure.result_id}
-              resultId={figure.result_id}
-              label={figure.period ? `${figure.value}, ${figure.period}` : figure.value}
-              shown={{ subject: null, measure: figure.measure, period: figure.period, value: figure.value }}
-              className={REF_CLASS}
-            >
-              F · {figure.measure}{figure.period ? ` ${figure.period}` : ''} · {figure.value}
-            </InspectableResult>
-          ))}
+          {figures.map((figure) => {
+            const text = `F · ${figure.measure}${figure.period ? ` ${figure.period}` : ''} · ${figure.value}`
+            return (
+              <InspectableResult
+                key={figure.result_id}
+                resultId={figure.result_id}
+                label={text}
+                shown={{ subject: null, measure: figure.measure, period: figure.period, value: figure.value }}
+                className={REF_CLASS}
+              >
+                {text}
+              </InspectableResult>
+            )
+          })}
           {figures.length === 0 ? factRefs('F · ') : null}
           {result.claim_refs.map((id, index) => (
             <InspectableRef key={id} snapshotId={assessment.snapshot_id} inspectionRef={{ kind: 'claim', id }} className={REF_CLASS}>

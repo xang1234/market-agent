@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { draftThesisConditions, evaluateThesis, NOT_ENOUGH_EVIDENCE, type ThesisEvidence, type ThesisLlm } from "../src/thesis-evaluator.ts";
+
+const UNCHECKED = "Not enough evidence: the model's reply for this condition could not be checked against the stored sources.";
 import { ThesisValidationError, type ConditionAssessment, type ConditionFigureRef, type ThesisCondition, type ThesisVersion } from "../src/thesis-types.ts";
 
 const ISSUER_ID = "11111111-1111-4111-8111-111111111111";
@@ -199,7 +201,7 @@ test("evaluateThesis rejects a reply that drops or repeats a condition", async (
   }
 });
 
-test("a condition whose status the reply cannot back is not enough evidence, and the other conditions keep theirs", async () => {
+test("a condition whose status the reply cannot back is not enough evidence, says why, and the other conditions keep theirs", async () => {
   const rows: Array<[string, Record<string, unknown>]> = [
     ["uncited conclusion", { status: "supported", refs: [] }],
     ["uncited challenge", { status: "challenged", refs: [] }],
@@ -217,7 +219,7 @@ test("a condition whose status the reply cannot back is not enough evidence, and
       llm: llmResponse({ results: [{ condition_id: BULL_ID, ...row }, { condition_id: BEAR_ID, status: "challenged", refs: ["C1"] }] }),
     });
     assert.deepEqual(results, [
-      { condition_id: BULL_ID, status: "unresolved", reason: NOT_ENOUGH_EVIDENCE, claim_refs: [], fact_refs: [], method: "no_evidence" },
+      { condition_id: BULL_ID, status: "unresolved", reason: UNCHECKED, claim_refs: [], fact_refs: [], method: "no_evidence" },
       { condition_id: BEAR_ID, status: "challenged", reason: "The cited stored sources challenge this condition.", claim_refs: [CLAIM_ID], fact_refs: [], method: "model" },
     ], name);
   }

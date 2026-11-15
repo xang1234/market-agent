@@ -441,7 +441,7 @@ test('a cited figure shows as its certified result with its value and formula, a
       'F · Gross margin (gross profit / revenue) FY2025 (ended 2025-12-31) · 74.99%',
     ])
     const chip = condition.querySelector<HTMLButtonElement>(`[data-inspect-result="${RESULT}"]`)!
-    assert.equal(chip.getAttribute('aria-label'), 'Inspect the verified calculation for 74.99%, FY2025 (ended 2025-12-31)')
+    assert.equal(chip.getAttribute('aria-label'), 'Inspect the verified calculation for F · Gross margin (gross profit / revenue) FY2025 (ended 2025-12-31) · 74.99%')
     await act(async () => chip.click())
     assert.deepEqual(calculations, [[RESULT, { subject: null, measure: 'Gross margin (gross profit / revenue)', period: 'FY2025 (ended 2025-12-31)', value: '74.99%' }]])
     assert.deepEqual([...condition.querySelectorAll('[aria-label="Inputs"] button')].map((ref) => ref.textContent), [

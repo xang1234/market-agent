@@ -62,11 +62,14 @@ test('a v1 memo hands over the rich text blocks its thesis section tags, and no 
   assert.equal(thesisOf([flat('investment_thesis', 'THESIS TEXT'), flat('downside_risks', 'RISK TEXT'), flat('final_verdict', 'Rating: Buy')]), 'THESIS TEXT')
 })
 
-test('a memo with no thesis, or an empty one, hands over nothing and says why', () => {
+test('a memo with no thesis, or too little checked thesis text to save, hands over nothing and says why', () => {
   const none = { kind: 'no_thesis', note: 'This memo has no investment thesis section to monitor.' }
   assert.deepEqual(thesisOf([section('downside_risks', [paragraph('RISK TEXT')])]), none)
-  assert.deepEqual(thesisOf([section('investment_thesis', []), section('downside_risks', [paragraph('RISK TEXT')])]), none)
   assert.deepEqual(thesisOf([paragraph('Margins are expanding while cash conversion remains stable.')]), none, 'untagged memo text is not a thesis')
+  const unchecked = { kind: 'no_thesis', note: "This memo's investment thesis section has too little checked text to monitor." }
+  assert.deepEqual(thesisOf([section('investment_thesis', []), section('downside_risks', [paragraph('RISK TEXT')])]), unchecked)
+  assert.deepEqual(thesisOf([section('investment_thesis', [paragraph('Buy.')])]), unchecked, 'shorter than a thesis can be saved')
+  assert.deepEqual(thesisOf([section('investment_thesis', [{ id: 'card', kind: 'rich_text', analyst_commentary: true, segments: [], commentary: [{ kind: 'unverified', subject: null, text: 'Demand will outlast supply.' }] }])]), unchecked)
 })
 
 test('commentary hands over its verified inferences and figures, never an unverified or pending inference or its label', () => {

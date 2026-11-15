@@ -122,7 +122,7 @@ async function analystEvidence(
     ...packet.figures.map(figure => [figure.id, {
       claim_refs: [],
       fact_refs: factsOf.get(figure.result_id!)!,
-      figure_refs: [{ result_id: figure.result_id!, measure: figure.metric, period: figure.period || null, value: figure.value }],
+      figure_refs: [{ result_id: figure.result_id!, measure: figure.metric.trim(), period: figure.period?.trim() || null, value: figure.value.trim() }],
     }] as const),
     ...packet.claims.map(claim => [claim.id, { claim_refs: [claim.claim_id], fact_refs: [], figure_refs: [] }] as const),
   ]);

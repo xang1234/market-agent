@@ -3,7 +3,7 @@ import { readResearchHandoff, type DiscoveryResearchHandoff } from '../discovery
 import { isSubjectRef, type SubjectRef } from '../subject/subjectRef.ts'
 import { refSegmentText } from '../blocks/richText.ts'
 import type { RefSegment } from '../blocks/types.ts'
-import { THESIS_TEXT_MAX } from '../../../services/agents/src/thesis-types.ts'
+import { THESIS_TEXT_MAX, THESIS_TEXT_MIN } from '../../../services/agents/src/thesis-types.ts'
 
 export type AnalyzeThesisHandoff = {
   sourceRunId: string
@@ -17,10 +17,11 @@ export type ThesisHandoff =
   | DiscoveryResearchHandoff
 
 export const NO_THESIS_SECTION = 'This memo has no investment thesis section to monitor.'
+export const NO_CHECKED_THESIS = "This memo's investment thesis section has too little checked text to monitor."
 
 export type AnalyzeThesisOffer =
   | { kind: 'handoff'; handoff: AnalyzeThesisHandoff }
-  | { kind: 'no_thesis'; note: typeof NO_THESIS_SECTION }
+  | { kind: 'no_thesis'; note: typeof NO_THESIS_SECTION | typeof NO_CHECKED_THESIS }
 
 export function analyzeThesisHandoff(run: AnalyzeRunDetail): AnalyzeThesisOffer | null {
   const metadata = run.run_metadata
@@ -30,8 +31,10 @@ export function analyzeThesisHandoff(run: AnalyzeRunDetail): AnalyzeThesisOffer 
   const [subjectRef] = metadata.subject_refs
   if (!isMonitorableSubject(subjectRef)) return null
 
-  const thesis = clipToWholeCodePoints(thesisSectionText(run))
-  if (thesis === '') return { kind: 'no_thesis', note: NO_THESIS_SECTION }
+  const section = thesisSectionText(run)
+  if (section === null) return { kind: 'no_thesis', note: NO_THESIS_SECTION }
+  const thesis = clipToWholeCodePoints(section)
+  if (thesis.length < THESIS_TEXT_MIN) return { kind: 'no_thesis', note: NO_CHECKED_THESIS }
   return { kind: 'handoff', handoff: { sourceRunId: run.run_id, subjectRef, thesis, name: `${run.display_title} monitor` } }
 }
 
@@ -61,9 +64,10 @@ export function readThesisHandoff(state: unknown): ThesisHandoff | null {
   return analyze ? { kind: 'analyze', ...analyze } : null
 }
 
-function thesisSectionText(run: AnalyzeRunDetail): string {
-  return run.blocks
-    .filter((block) => isRecord(block.data_ref) && isRecord(block.data_ref.params) && block.data_ref.params.playbook_section_id === 'investment_thesis')
+function thesisSectionText(run: AnalyzeRunDetail): string | null {
+  const tagged = run.blocks.filter((block) => isRecord(block.data_ref) && isRecord(block.data_ref.params) && block.data_ref.params.playbook_section_id === 'investment_thesis')
+  if (tagged.length === 0) return null
+  return tagged
     .flatMap(thesisParagraphBlocks)
     .map(paragraphText)
     .filter(Boolean)

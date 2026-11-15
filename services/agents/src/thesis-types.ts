@@ -289,9 +289,9 @@ function parseFigureRefs(value: unknown, label: string): ConditionFigureRef[] {
     const row = requireRecord(item, `${label}[${index}]`);
     return {
       result_id: requireUuid(row.result_id, `${label}[${index}].result_id`),
-      measure: requireTrimmedString(row.measure, `${label}[${index}].measure`, 1, 200),
-      period: row.period === null ? null : requireTrimmedString(row.period, `${label}[${index}].period`, 1, 120),
-      value: requireTrimmedString(row.value, `${label}[${index}].value`, 1, 200),
+      measure: requireTrimmedString(row.measure, `${label}[${index}].measure`, 1, THESIS_REASON_MAX),
+      period: row.period === null ? null : requireTrimmedString(row.period, `${label}[${index}].period`, 1, THESIS_REASON_MAX),
+      value: requireTrimmedString(row.value, `${label}[${index}].value`, 1, THESIS_REASON_MAX),
     };
   });
 }
