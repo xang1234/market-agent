@@ -44,9 +44,9 @@ async function seed(db: QueryExecutor): Promise<void> {
   ];
   for (const { document, filer, predicate, text, start, competitor } of claims) {
     const { rows: [claim] } = await db.query<{ claim_id: string }>(
-      `insert into claims (document_id, predicate, text_canonical, polarity, modality, reported_by_source_id, confidence, status, created_at)
-       values ($1, $2, $3, 'neutral', 'quoted', $4, 0.9, 'extracted', '2026-03-03') returning claim_id::text`,
-      [document, predicate, text, SOURCE],
+      `insert into claims (document_id, predicate, text_canonical, polarity, modality, reported_by_source_id, attributed_to_type, attributed_to_id, confidence, status, created_at)
+       values ($1, $2, $3, 'neutral', 'quoted', $4, 'issuer', $5, 0.9, 'extracted', '2026-03-03') returning claim_id::text`,
+      [document, predicate, text, SOURCE, filer],
     );
     await db.query(`insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1, 'issuer', $2, 'subject')`, [claim!.claim_id, filer]);
     if (competitor) await db.query(`insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1, 'issuer', $2, 'competitor')`, [claim!.claim_id, competitor]);

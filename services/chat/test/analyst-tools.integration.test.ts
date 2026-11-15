@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { runAnalystTool } from "../src/analyst-tools.ts";
+import { runAnalystTool, runRegisteredAnalystTool } from "../src/analyst-tools.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 
 const AAPL = "d1111111-1111-4111-8111-111111111111";
@@ -50,6 +50,12 @@ test("consensus is the newest capture within 7 days, and an empty newest capture
   assert.deepEqual(await shown("2026-11-14T12:00:00Z"), "no_consensus", "Nov 14 showed every cell empty: Nov 12 does not stand in");
   assert.deepEqual((await shown("2026-11-11T12:00:00Z"))[0], "2026-11-09", "the Nov 9 capture is within 7 days of Nov 11");
   assert.deepEqual((await shown("2026-11-12T08:00:00Z"))[0], "2026-11-09", "Nov 12's capture was retrieved at 09:00, after an 08:00 cutoff");
+  const { rows: [listing] } = await db.query<{ listing_id: string }>(`select listing_id::text from listings where ticker = 'AAPL'`);
+  const byListing = await runRegisteredAnalystTool(db, "get_analyst_consensus", { subject_ref: { kind: "listing", id: listing!.listing_id.toUpperCase() } }, { as_of: "2026-11-13T12:00:00Z" });
+  assert.deepEqual([byListing.status, "company" in byListing && byListing.company], ["ok", "AAPL"], "a listing ref, written in capitals, reads its issuer");
+  assert.deepEqual(await runRegisteredAnalystTool(db, "get_analyst_consensus", { subject_ref: { kind: "theme", id: AAPL } }, { as_of: "2026-11-13T12:00:00Z" }), {
+    tool: "get_analyst_consensus", status: "no_subject", reason: "a subject_ref names no stored issuer",
+  });
   assert.deepEqual(await read("2026-11-17T12:00:00Z"), { tool: "get_analyst_consensus", status: "no_consensus" }, "Nov 14 is the newest, and still empty");
   await db.query(`delete from consensus_captures where captured_on = '2026-11-14'`);
   assert.deepEqual(await read("2026-11-20T12:00:00Z"), { tool: "get_analyst_consensus", status: "no_consensus" }, "Nov 12 is 8 days old on Nov 20");

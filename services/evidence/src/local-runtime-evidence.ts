@@ -478,8 +478,10 @@ export async function loadLatestFilingClaims(
     `with filers as (
        select distinct filer.subject_id as filer_issuer_id
          from claim_arguments ca
+         join claims c on c.claim_id = ca.claim_id
          join claim_arguments filer
            on filer.claim_id = ca.claim_id and filer.role = 'subject' and filer.subject_kind = 'issuer'
+          and c.attributed_to_type = 'issuer' and c.attributed_to_id = filer.subject_id::text
         where ca.subject_kind = 'issuer' and ca.subject_id = any($1::uuid[]) and ca.role = $2::text
      ),
      latest as (
@@ -487,12 +489,13 @@ export async function loadLatestFilingClaims(
          from filers f
          join claim_arguments filer
            on filer.subject_id = f.filer_issuer_id and filer.role = 'subject' and filer.subject_kind = 'issuer'
-         join claims c on c.claim_id = filer.claim_id
+         join claims c on c.claim_id = filer.claim_id and c.attributed_to_type = 'issuer' and c.attributed_to_id = filer.subject_id::text
          join documents d on d.document_id = c.document_id
          join sources s on s.source_id = c.reported_by_source_id
         where c.predicate like any($7::text[])
           and ${citableClaimSql("$5::uuid", "$4::timestamptz")}
-        order by f.filer_issuer_id, coalesce(d.published_at, d.created_at) desc, d.document_id desc
+        -- A 10-K stored from a file carries no filing date until a backfill names it.
+        order by f.filer_issuer_id, d.published_at desc nulls last, d.created_at desc, d.document_id desc
      ),
      matched as (
        select c.claim_id, c.reported_by_source_id, c.text_canonical, c.predicate, c.polarity, c.effective_time, l.*
@@ -502,6 +505,7 @@ export async function loadLatestFilingClaims(
          join sources s on s.source_id = c.reported_by_source_id
          join claim_arguments filer
            on filer.claim_id = c.claim_id and filer.role = 'subject' and filer.subject_kind = 'issuer' and filer.subject_id = l.filer_issuer_id
+          and c.attributed_to_type = 'issuer' and c.attributed_to_id = filer.subject_id::text
         where exists (
                 select 1 from claim_arguments ca
                  where ca.claim_id = c.claim_id and ca.subject_kind = 'issuer'
@@ -515,7 +519,7 @@ export async function loadLatestFilingClaims(
             m.reported_by_source_id::text as source_id,
             m.text_canonical, m.predicate, m.polarity, m.effective_time, m.published_at,
             m.filer_issuer_id::text as filer_issuer_id,
-            ${issuerLabelSql("i")} as filer_label,
+            ${issuerLabelSql("i", "$4::timestamptz")} as filer_label,
             m.provider_doc_id as accession,
             m.title as document_title,
             m.matched
@@ -546,10 +550,12 @@ export async function loadLatestFilingClaims(
 
 const TEN_K_PREDICATE_PATTERNS = ["business.%", "risk.%"];
 
-// An issuer as an answer names it, from its row aliased `issuer`.
-export function issuerLabelSql(issuer: string): string {
+// An issuer as an answer names it at the cutoff (as perf-block.ts companyListings), from its row aliased `issuer`.
+export function issuerLabelSql(issuer: string, cutoff: string): string {
   return `coalesce((select l.ticker from instruments n join listings l on l.instrument_id = n.instrument_id
-                     where n.issuer_id = ${issuer}.issuer_id and (l.active_to is null or l.active_to > now())
+                     where n.issuer_id = ${issuer}.issuer_id
+                       and (l.active_from is null or l.active_from <= ${cutoff})
+                       and (l.active_to is null or l.active_to > ${cutoff})
                      order by l.ticker limit 1), ${issuer}.legal_name)`;
 }
 

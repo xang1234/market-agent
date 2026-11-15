@@ -61,7 +61,7 @@ const EXECUTORS: Readonly<Record<AnalystToolName, Executor>> = {
     if (!issuer?.industry) return { tool: "get_peer_set", status: "no_peers", reason: "no_industry" };
     const peers = await createSqlPeerSetResolver(db).resolvePeers(issuerId, { limit: input.peer_limit ?? DEFAULT_PEER_LIMIT });
     if (peers.length === 0) return { tool: "get_peer_set", status: "no_peers", reason: "no_same_industry_issuer" };
-    const labels = await issuerLabels(db, [issuerId, ...peers.map((peer) => peer.id)]);
+    const labels = await issuerLabels(db, [issuerId, ...peers.map((peer) => peer.id)], input.as_of);
     return {
       tool: "get_peer_set",
       status: "ok",
@@ -89,7 +89,7 @@ const EXECUTORS: Readonly<Record<AnalystToolName, Executor>> = {
       [issuerId, input.as_of, Object.keys(CONSENSUS_FIELDS), CONSENSUS_MAX_AGE_DAYS],
     );
     if (rows.length === 0) return { tool: "get_analyst_consensus", status: "no_consensus" };
-    const labels = await issuerLabels(db, [issuerId]);
+    const labels = await issuerLabels(db, [issuerId], input.as_of);
     return {
       tool: "get_analyst_consensus",
       status: "ok",
@@ -147,6 +147,8 @@ export async function runRegisteredAnalystTool(
   if (args.criteria !== undefined && args.criteria !== "industry") {
     return { tool: name, status: "invalid_arguments", reason: "peers are chosen by industry only" };
   }
+  const ignored = ["range", "trust_min"].filter((key) => args[key] !== undefined);
+  if (ignored.length > 0) return { tool: name, status: "invalid_arguments", reason: `${ignored.join(", ")} not supported` };
   const n = args.n;
   if (n !== undefined && !(typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 20)) {
     return { tool: name, status: "invalid_arguments", reason: "n is a whole number from 1 to 20" };
@@ -172,11 +174,16 @@ function isSubjectRef(value: JsonValue | undefined): value is SubjectRef {
 // One per ref, null where it names no stored issuer.
 async function issuersOfSubjects(db: RowQueryExecutor, refs: ReadonlyArray<SubjectRef>): Promise<Array<string | null>> {
   const { rows } = await db.query<{ ord: number; issuer_id: string | null }>(
-    `select r.ord::int as ord, coalesce(i.issuer_id, n.issuer_id, ln.issuer_id)::text as issuer_id
-       from jsonb_array_elements($1::jsonb) with ordinality as r(ref, ord)
-       left join issuers i on r.ref->>'kind' = 'issuer' and i.issuer_id::text = r.ref->>'id'
-       left join instruments n on r.ref->>'kind' = 'instrument' and n.instrument_id::text = r.ref->>'id'
-       left join listings l on r.ref->>'kind' = 'listing' and l.listing_id::text = r.ref->>'id'
+    `with refs as (
+       select r.ord, r.ref->>'kind' as kind,
+              case when r.ref->>'id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (r.ref->>'id')::uuid end as id
+         from jsonb_array_elements($1::jsonb) with ordinality as r(ref, ord)
+     )
+     select r.ord::int as ord, coalesce(i.issuer_id, n.issuer_id, ln.issuer_id)::text as issuer_id
+       from refs r
+       left join issuers i on r.kind = 'issuer' and i.issuer_id = r.id
+       left join instruments n on r.kind = 'instrument' and n.instrument_id = r.id
+       left join listings l on r.kind = 'listing' and l.listing_id = r.id
        left join instruments ln on ln.instrument_id = l.instrument_id
       order by r.ord`,
     [JSON.stringify(refs)],
@@ -184,12 +191,12 @@ async function issuersOfSubjects(db: RowQueryExecutor, refs: ReadonlyArray<Subje
   return rows.map((row) => row.issuer_id);
 }
 
-async function issuerLabels(db: RowQueryExecutor, issuerIds: ReadonlyArray<string>): Promise<Map<string, string>> {
+async function issuerLabels(db: RowQueryExecutor, issuerIds: ReadonlyArray<string>, asOf: string): Promise<Map<string, string>> {
   const { rows } = await db.query<{ issuer_id: string; label: string }>(
     `select i.issuer_id::text as issuer_id,
-            ${issuerLabelSql("i")} as label
+            ${issuerLabelSql("i", "$2::timestamptz")} as label
        from issuers i where i.issuer_id = any($1::uuid[])`,
-    [issuerIds],
+    [issuerIds, asOf],
   );
   return new Map(rows.map((row) => [row.issuer_id, row.label]));
 }
