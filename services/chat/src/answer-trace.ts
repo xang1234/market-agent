@@ -61,9 +61,10 @@ export type TracedAnswer = Pick<TurnTrace, "exchange" | "assertions" | "blocks">
 // The answer as composed, its inferences not yet judged.
 export type ComposedAnswer = Pick<TurnTrace, "exchange" | "assertions"> & { blocks: AnswerBlocks; path: AnswerPath };
 
-// An engine answer's commentary is written from that answer's packet (enginePacket); any other answer is the analyst's.
+// An engine answer's commentary is written from that answer's packet (enginePacket); any other answer is the analyst's,
+// and so is one whose packet also holds claims (the analyst agent's), whose amounts in words no engine figure vouches for.
 export function answerPath(input: Pick<AnswerTraceInput, "packet">): AnswerPath {
-  return input.packet?.route === "financial_engine" ? "engine" : "analyst";
+  return input.packet?.route === "financial_engine" && input.packet.claims.length === 0 ? "engine" : "analyst";
 }
 
 export async function composeTraced(

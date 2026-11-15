@@ -2,10 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { FinancialSubjectRef } from "../../financial-core/src/index.ts";
 import type { PlanningModel, RequestedSubject } from "../../financial-engine/src/planner.ts";
-import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
-import { createLlmRouterFromEnv, LlmProviderError, LlmRouterError, type LlmChatClient, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
+import { createLlmRouterFromEnv, LlmClientError, LlmProviderError, LlmRouterError, withLlmAbortSignal, type LlmChatClient, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import type { ControlledRouter, LlmToolCall } from "../../llm/src/router.ts";
-import { runToolLoop, type ToolLoopOutput } from "../../llm/src/tool-loop.ts";
+import { runToolLoop, type ToolLoopOutput, type ToolLoopResult } from "../../llm/src/tool-loop.ts";
 import type { JsonObject, JsonValue } from "../../shared/src/json.ts";
 import { isRecord } from "../../shared/src/http.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
@@ -28,21 +27,39 @@ import {
 } from "./financial-runtime.ts";
 import { ANSWER_DEADLINES, withDeadlines, type DroppedClaims } from "./llm-runtime.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, LATEST, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
+import { turnStopSignal } from "./turn-stop.ts";
 
 const MAX_STEPS = 3;
-const AGENT_CALLS = 5;
+const PLANNER_CALLS = 2;
+// A turn's model calls: its reading's steps and planner calls leave ANSWER_CALLS for the answer and its judge.
+const TURN_CALLS = 8;
+const ANSWER_CALLS = 3;
+const TURN_MS = 120_000;
 const MAX_REQUEST_KEYS = 64;
 
 export type AnalystAgentDeps = Readonly<{
   financial: Pick<ChatFinancialRuntimeDeps, "pool" | "planningModel" | "evidence" | "clock" | "resolveMention" | "priorSubjects" | "researchScope" | "hydrate">;
   router: () => Promise<ControlledRouter | null>;
   read: (name: AnalystToolName, args: Readonly<Record<string, JsonValue>>, turn: { as_of: string; user_id: string | null }) => Promise<AnalystToolResult>;
-  compose: (input: AnswerTraceInput, turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">, onAnswered: (deployment: string) => void) => Promise<AnsweredTurn>;
+  // guard: called before each model call the answer makes; it throws once the turn has made its calls.
+  compose: (input: AnswerTraceInput, turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">, onAnswered: (deployment: string) => void, guard: () => void) => Promise<AnsweredTurn>;
   asOf: () => string;
   conversation?: (threadId: string) => Promise<ReadonlyArray<{ role: string; text: string }>>;
   logToolCalls?: (threadId: string, calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
   registry?: ToolRegistry;
+  turnMs?: number;
 }>;
+
+/** Why a turn's reading stopped before its model said it was done. */
+export class TurnLimit extends Error {
+  readonly limit: "calls" | "time";
+
+  constructor(limit: "calls" | "time") {
+    super(limit === "calls" ? "the turn has made its model calls" : "the turn ran out of time");
+    this.name = "TurnLimit";
+    this.limit = limit;
+  }
+}
 
 export async function analystAgentRouter(
   env: LlmSettingsLoaderEnv,
@@ -56,18 +73,19 @@ export function perStepDeadlines(router: ControlledRouter): ControlledRouter {
   return { complete: (request) => router.complete(request, withDeadlines(ANSWER_DEADLINES)) };
 }
 
-type Certified = Readonly<{ block: FinancialAnswerBlock; packet: EvidencePacket }>;
+type Certified = Readonly<{ block: FinancialAnswerBlock; packet: EvidencePacket; subjects: ReadonlyArray<string> }>;
 
 export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
   let registry = deps.registry;
-  return async (context) => {
+  const agentTurn = async (context: ChatTurnRunContext): Promise<ChatAnalystToolRuntimeResult | null> => {
     if (!context.userId || !isUuid(context.threadId)) return null;
     const question = context.userIntent ?? "";
     const companies = await requestedSubjects(deps.financial, context, question);
     const named = companies.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject] : []);
-    if (companies.clarify || named.length === 0) return null;
-    const router = await deps.router();
-    if (!router) return null;
+    // A company still to be picked is asked about by the next runner.
+    if (companies.clarify || named.length === 0 || named.length < companies.subjects.length) return null;
+    const answering = await deps.router();
+    if (!answering) return null;
     registry ??= loadToolRegistry();
     const policy = createTurnToolPolicy({
       registry,
@@ -82,15 +100,32 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const asOf = deps.asOf();
     const known = new Map(named.map((subject) => [issuerOf(subject), subject] as const));
     const labelOf = (issuer: string) => companies.labels.get(issuer) ?? known.get(issuer)?.mention ?? issuer;
+    const whoOf = (args: JsonObject) => labelList(argIssuers(args).map(labelOf));
+    let made = 0;
+    const spend = (reserved: number) => {
+      if (made >= TURN_CALLS - reserved) return false;
+      made += 1;
+      return true;
+    };
+    const router: ControlledRouter = {
+      complete: async (request, controls) => {
+        if (!spend(ANSWER_CALLS)) throw new TurnLimit("calls");
+        return answering.complete(request, controls);
+      },
+    };
     let planned = 0;
     const planningModel: PlanningModel | null = deps.financial.planningModel && (async (request) => {
-      if (planned >= AGENT_CALLS - MAX_STEPS) throw new Error(`the turn has made its ${AGENT_CALLS} model calls before its answer`);
+      if (planned >= PLANNER_CALLS || !spend(ANSWER_CALLS)) throw new TurnLimit("calls");
       planned += 1;
       return deps.financial.planningModel!(request);
     });
     const certified: Certified[] = [];
+    const askedFor = new Set<string>();
     const analyst: AnalystToolResult[] = [];
     const notes: string[] = leftOutNotes({ notFound: companies.notFound });
+    // That no other filer names a company a competitor is said only when the turn read competition.
+    const competitorNotes: string[] = [];
+    let readCompetition = false;
     const toolCalls: ChatAnalystToolRuntimeToolCall[] = [];
     const asked = new Map<string, Promise<ToolLoopOutput>>();
     const keys = requestKeys(deps.financial.pool, authority, context.threadId, turnId);
@@ -113,6 +148,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       if ("invalid" in ask) return invalid("certified_financials", ask.invalid);
       const prior = asked.get(ask.fingerprint);
       if (prior) return prior;
+      for (const issuer of ask.subjects) askedFor.add(issuer);
       const answer = (async (): Promise<ToolLoopOutput> => {
         const loading = await stillLoading(ask.subjects);
         if (loading.length > 0) notes.push(`Filings for ${labelList(loading.map(labelOf))} are still loading; ask again in a minute.`);
@@ -136,7 +172,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         });
         return certifiedOutput(outcome, who, async (published) => {
           const packet = await published.packet();
-          certified.push({ block: published.block, packet });
+          certified.push({ block: published.block, packet, subjects: ask.subjects });
           return packet;
         }, notes);
       })();
@@ -154,15 +190,21 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
           if (!known.has(issuer)) known.set(issuer, { mention: peer.label, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: issuer }, label: peer.label } });
         }
       }
-      const note = statusNote(result, labelList(argIssuers(args).map(labelOf)), args.role === "competitor");
-      if (note) notes.push(note);
+      const competitor = args.role === "competitor";
+      if (name === "get_peer_set" || (name === "get_claims" && !competitor && Array.isArray(args.predicates) && args.predicates.includes("business.competition"))) readCompetition = true;
+      const note = statusNote(result, whoOf(args), competitor);
+      if (note) (competitor ? competitorNotes : notes).push(note);
       return { content: JSON.stringify(readSummary(result)), ...(isFailure(result) ? { isError: true } : {}) };
     };
 
+    // A call still running when another throws finishes before the turn fails, so no run is left half made.
+    const running = new Set<Promise<ToolLoopOutput>>();
     const execute = async (call: LlmToolCall): Promise<ToolLoopOutput> => {
-      const output = call.name === "certified_financials"
-        ? await certify(call.arguments)
-        : isAnalystToolName(call.name) ? await readStored(call.name, call.arguments) : invalid(call.name, "no such tool");
+      const work = call.name === "certified_financials"
+        ? certify(call.arguments)
+        : isAnalystToolName(call.name) ? readStored(call.name, call.arguments) : Promise.resolve(invalid(call.name, "no such tool"));
+      running.add(work);
+      const output = await work.finally(() => running.delete(work));
       toolCalls.push({
         tool_call_id: randomUUID(),
         tool_name: call.name,
@@ -176,7 +218,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
 
     const template = policy.selection.prompt_template;
     const conversation = await deps.conversation?.(context.threadId) ?? [];
-    await runToolLoop({
+    const loop = await runToolLoop({
       router,
       policy,
       maxSteps: MAX_STEPS,
@@ -191,23 +233,31 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         reasoning: "low",
         maxTokens: 4096,
       },
-    }).catch((reason: unknown) => {
+    }).catch(async (reason: unknown) => {
+      await Promise.allSettled([...running]);
       if (!isModelFailure(reason)) throw reason;
-      console.warn("[chat] the analyst agent's model failed while reading; it answers from what it read", reason);
+      console.warn("[chat] the analyst agent's reading stopped early; it answers from what it read", reason);
+      notes.push(reason instanceof TurnLimit ? UNFINISHED[reason.limit] : UNFINISHED.model_failed);
+      return null;
     });
+    if (loop) notes.push(...stopNotes(loop, whoOf));
     if (!toolCalls.some((entry) => entry.status === "ok")) return null;
 
+    const namedIds = new Set(named.map(issuerOf));
+    // The companies the answer covers: the ones named, then any peer a certified call compared.
+    const covered = [...new Set([...namedIds, ...certified.flatMap((answer) => answer.subjects)])];
     const packet = mergePackets({
       engine: certified.map((answer) => answer.packet),
       analyst,
-      notes: [...new Set(notes)],
+      asked: [...askedFor].map(labelOf),
+      notes: [...new Set([...notes, ...(readCompetition ? competitorNotes : [])])],
       labels: new Map([...known.keys()].map((issuer) => [issuer, labelOf(issuer)])),
       cutoff: asOf,
     });
     await deps.logToolCalls?.(context.threadId, toolCalls);
     const readCalls = toolCalls.filter((entry) => entry.status === "ok").map((entry) => entry.tool_call_id);
     const snapshotId = randomUUID();
-    const subjectRefs = named.map((subject) => ({ kind: "issuer" as const, id: issuerOf(subject) }));
+    const subjectRefs = covered.map((id) => ({ kind: "issuer" as const, id }));
     const cardId = randomUUID();
     const card = {
       id: cardId, kind: "rich_text", snapshot_id: snapshotId, data_ref: { kind: "rich_text", id: cardId },
@@ -224,9 +274,12 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         factBlocks: noted,
         conversation,
         packet,
-        instructions: ANSWER_RULES,
+        // An ask for no figures is answered as its sources describe it, with no takeaway or counterpoint of the agent's.
+        instructions: [...ANSWER_RULES, toolCalls.some((entry) => entry.tool_name === "certified_financials") ? ANALYSIS_RULE : DESCRIPTION_RULE],
       }, { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}), question }, (deployment) => {
         answeredBy = deployment;
+      }, () => {
+        if (!spend(0)) throw new LlmClientError("the turn has made its model calls");
       });
       if (answer.judging) answer = { ...answer, assertions: (await answer.judging.done).assertions };
     } catch (reason) {
@@ -254,7 +307,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       });
       return { blocks: turnBlocks(settled) };
     };
-    const scope = await deps.financial.researchScope?.({ ...context, subjectPreResolutions: companies.resolved, subjectPreResolution: companies.resolved[0] }, Promise.resolve(null))
+    const scope = await deps.financial.researchScope?.({ ...context, subjectPreResolutions: companies.resolved, subjectPreResolution: companies.resolved[0] }, context.reading?.() ?? Promise.resolve(null))
       .catch((reason: unknown) => {
         console.warn("[chat] research scope unavailable; saving the analyst agent's answer without it", reason);
         return undefined;
@@ -267,8 +320,19 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       without: (dropped: DroppedClaims) => turnAnswer(answer.without(dropped)),
       ...(answeredBy ? { answered_by: answeredBy } : {}),
       ...(answer.assertions ? { assertion_report: answer.assertions } : {}),
-      ...(scope ? { research_scope: { ...scope, companies: named.map((subject) => ({ issuer_id: issuerOf(subject), label: labelOf(issuerOf(subject)) })) } } : {}),
+      // A peer a certified call compared keeps no label: it is an auto-selected peer to a follow-up.
+      ...(scope ? { research_scope: { ...scope, companies: covered.map((id) => (namedIds.has(id) ? { issuer_id: id, label: labelOf(id) } : { issuer_id: id })) } } : {}),
     };
+  };
+  return async (context) => {
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(new TurnLimit("time")), deps.turnMs ?? TURN_MS);
+    const stop = turnStopSignal();
+    try {
+      return await withLlmAbortSignal(stop ? AbortSignal.any([stop, deadline.signal]) : deadline.signal, () => agentTurn(context));
+    } finally {
+      clearTimeout(timer);
+    }
   };
 }
 
@@ -290,7 +354,7 @@ const QUIET = (() => undefined) as unknown as ChatTurnRunContext["emit"];
 
 const UNKNOWN_COMPANY = "name each company by a subject_ref the prompt or a peer read gave";
 
-const isModelFailure = (reason: unknown) => reason instanceof LlmRouterError || reason instanceof LlmProviderError;
+const isModelFailure = (reason: unknown) => reason instanceof LlmRouterError || reason instanceof LlmProviderError || reason instanceof TurnLimit;
 
 const NO_ANSWER = "No answer could be written from the stored sources read for this question.";
 
@@ -298,8 +362,45 @@ const ANSWER_RULES = [
   "evidence_packet.claims also hold what a company's 10-K states (its business, products, customers, competition and risk factors),",
   "attributed analyst consensus values, and industry peers: cite each as a management_attribution with its C id, which quotes it as stored.",
   "Say what a company does or faces only as a claim states it, never from your own knowledge, and never write Buy, Hold, Sell or any recommendation.",
-  "Write at most two analyst_inference entries: the takeaway and the counterpoint.",
 ];
+const ANALYSIS_RULE = "Write at most two analyst_inference entries: the takeaway and the counterpoint.";
+const DESCRIPTION_RULE = "This question asks what the stored sources say: list management_attribution entries alone, each citing a claim that answers the question as asked, and write no analyst_inference, neither a takeaway nor a counterpoint.";
+
+const UNFINISHED = {
+  calls: "Reading stopped at the turn's limit of model calls, so part of the question may be unanswered.",
+  time: "Reading stopped at the turn's time limit, so part of the question may be unanswered.",
+  model_failed: "Reading stopped early, as the model failed, so part of the question may be unanswered.",
+  step_cap: "Reading stopped at its step limit, so part of the question may be unanswered.",
+  truncated: "Reading was cut off, so part of the question may be unanswered.",
+} as const;
+
+const TOPIC: Readonly<Record<string, string>> = {
+  certified_financials: "Certified figures",
+  get_company_profile: "The business profile",
+  get_claims: "10-K claims",
+  get_peer_set: "Industry peers",
+  get_analyst_consensus: "Analyst consensus",
+};
+
+/** What a reading that stopped before its model was done leaves unanswered: each call it did not run, else that part may be. */
+export function stopNotes(loop: Pick<ToolLoopResult, "stop" | "steps">, who: (args: JsonObject) => string): string[] {
+  const unread = (calls: ReadonlyArray<LlmToolCall>, why: string) => calls.map((call) => {
+    const whom = who(call.arguments);
+    return `${TOPIC[call.name] ?? "A read"}${whom ? ` for ${whom}` : ""} went unread, as ${why}.`;
+  });
+  switch (loop.stop) {
+    case "final":
+      return [];
+    case "step_cap":
+      return [UNFINISHED.step_cap];
+    case "truncated": {
+      const calls = loop.steps.at(-1)?.reply.toolCalls ?? [];
+      return calls.length === 0 ? [UNFINISHED.truncated] : unread(calls, "the reading was cut off");
+    }
+    case "budget":
+      return unread(loop.steps.flatMap((step) => step.results).filter((result) => result.outcome === "refused" && result.content.startsWith("refused (budget_exceeded)")).map((result) => result.call), "the turn reached its limit of reads");
+  }
+}
 
 const issuerOf = (subject: RequestedSubject) => (subject.resolution as { subject_ref: FinancialSubjectRef }).subject_ref.id.toLowerCase();
 
@@ -330,9 +431,22 @@ export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, Reques
   const keptMetrics = metrics === undefined ? null : [...new Set(metrics as string[])].sort();
   const choice: PlanChoice = keptMetrics ? { kind: "kept_figures", metrics: keptMetrics, period } : { kind: "planner" };
   const fingerprint = createHash("sha256")
-    .update(JSON.stringify({ companies: [...companies].sort(), ...(keptMetrics ? { metrics: keptMetrics, period } : { question: question.toLowerCase().replace(/\s+/g, " ") }) }))
+    .update(JSON.stringify({ companies: [...companies].sort(), period, ...(keptMetrics ? { metrics: keptMetrics } : { question: question.toLowerCase().replace(/\s+/g, " ") }) }))
     .digest("hex").slice(0, 16);
-  return { subjects: companies, choice, question, fingerprint };
+  // The planner reads only the question, so a period given apart from it is said in it.
+  const said = keptMetrics ? null : periodWords(period);
+  return { subjects: companies, choice, question: said ? `${question} (for ${said})` : question, fingerprint };
+}
+
+function periodWords(period: ReadPeriod): string | null {
+  switch (period.kind) {
+    case "latest":
+      return period.period === null ? null : period.period === "quarter" ? "the latest fiscal quarter" : "the latest fiscal year";
+    case "fiscal_year":
+      return `fiscal year ${period.fiscal_year}`;
+    case "fiscal_quarter":
+      return period.fiscal_year === null ? `the latest ${period.fiscal_period}` : `${period.fiscal_period} of fiscal year ${period.fiscal_year}`;
+  }
 }
 
 function readPeriod(value: JsonValue | undefined): ReadPeriod | null {
@@ -352,23 +466,29 @@ export function requestKeys(
   threadId: string,
   turnId: string,
 ): (fingerprint: string) => Promise<{ n: number; origin: string } | null> {
-  const taken = new Map<number, string>();
+  const taken = new Set<number>();
+  const prefix = requestKeyFor(turnId, 0).slice(0, -1);
   let queue: Promise<unknown> = Promise.resolve();
   return (fingerprint) => {
     const origin = `chat:${threadId}:${turnId}:${fingerprint}`;
     const next = queue.then(async () => {
-      for (let n = 1; n <= MAX_REQUEST_KEYS; n++) {
-        const held = taken.get(n);
-        if (held !== undefined) {
-          if (held === fingerprint) return { n, origin };
-          continue;
-        }
-        const stored = await findPlanForRequest(pool, { authority, request_key: requestKeyFor(turnId, n) });
-        if (stored !== null && stored.origin.ref !== origin) continue;
-        taken.set(n, fingerprint);
-        return { n, origin };
-      }
-      return null;
+      const { rows } = await pool.query<{ request_key: string; origin: string | null; completed: boolean }>(
+        `select r.request_key, p.plan->'origin'->>'ref' as origin, r.execution_state = 'completed' as completed
+           from financial_runs r join financial_plans p on p.plan_id = r.plan_id and p.user_id = r.user_id
+          where r.user_id = $1 and r.parent_kind = $2 and r.parent_id = $3 and left(r.request_key, length($4)) = $4`,
+        [authority.owner_user_id, authority.parent.kind, authority.parent.id, prefix],
+      );
+      const stored = new Map(rows.flatMap((row) => {
+        const n = Number(row.request_key.slice(prefix.length));
+        return Number.isInteger(n) && n >= 1 && n <= MAX_REQUEST_KEYS ? [[n, row] as const] : [];
+      }));
+      // An ask resumes the run an earlier attempt left it. One that completed is
+      // computed again under a new key, since its figures left with that attempt.
+      const resumed = [...stored].filter(([n, run]) => !taken.has(n) && run.origin === origin && !run.completed).map(([n]) => n);
+      const n = resumed.length > 0 ? Math.min(...resumed) : Array.from({ length: MAX_REQUEST_KEYS }, (_, i) => i + 1).find((key) => !taken.has(key) && !stored.has(key));
+      if (n === undefined) return null;
+      taken.add(n);
+      return { n, origin };
     });
     queue = next.catch(() => undefined);
     return next;
@@ -398,9 +518,16 @@ async function certifiedOutput(
     case "existing":
       notes.push(`${who}: these figures were computed in an earlier attempt of this turn and cannot be shown again.`);
       return output("existing", { run_id: outcome.run_id });
-    case "clarification":
-      notes.push(`${who}: the figures were not computed, as the request needs a choice first (${outcome.clarification.question}).`);
-      return output("clarification", { question: outcome.clarification.question, choices: outcome.clarification.choices.map((choice) => choice.label) });
+    case "clarification": {
+      // A planner's question is its model's own words, so neither the reader nor the agent's model sees it:
+      // only a figure question's options, which the planner words from its catalog.
+      const { kind, choices } = outcome.clarification;
+      const figures = kind === "metric" ? choices.map((choice) => choice.label) : [];
+      notes.push(figures.length > 0
+        ? `${who}: the figures were not computed, as the request names no one figure; ask again for ${figures.length < 2 ? figures[0] : `${figures.slice(0, -1).join(", ")} or ${figures.at(-1)}`}.`
+        : `${who}: the figures were not computed, as the request could not be planned as asked.`);
+      return output("clarification", { kind, ...(figures.length > 0 ? { choices: figures } : {}) });
+    }
     case "declined":
     case "gap":
       notes.push(`${who}: ${chatGapText(outcome.reason)}`);

@@ -36,6 +36,10 @@ export class TurnStop implements RequestStop {
     return this.#state === "stopped";
   }
 
+  get signal(): AbortSignal {
+    return this.#controller.signal;
+  }
+
   /** Settles once what the stop released is free for the next turn (at most RELEASE_WAIT_MS after it). */
   get released(): Promise<void> {
     return this.#released;
@@ -77,4 +81,9 @@ export class TurnStop implements RequestStop {
  */
 export function claimAnswerSave(): boolean {
   return current.getStore()?.claimSave() ?? true;
+}
+
+/** What aborts the current turn's model calls when it is stopped; undefined outside a turn. */
+export function turnStopSignal(): AbortSignal | undefined {
+  return current.getStore()?.signal;
 }

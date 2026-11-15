@@ -21,7 +21,8 @@ import { STAGED_SNAPSHOT_MANIFEST } from "../../snapshot/src/manifest-staging.ts
 import { sealSnapshotInTransaction, snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { planningModelFromRouter } from "../../financial-engine/src/planner.ts";
-import { createLlmRouterFromEnv } from "../../llm/src/index.ts";
+import { createDefaultPiLlmChatClient, createLlmRouterFromEnv, type LlmChatClient } from "../../llm/src/index.ts";
+import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import {
   createRegistryBackedAnalystToolRuntime,
   type ChatAnalystToolRuntime,
@@ -535,6 +536,16 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
     answerTurn(answer, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered }), input),
 });
 
+// The client createLlmRouterFromEnv picks, each call first passing the turn's guard.
+const guardedClient = (guard: () => void) => async (): Promise<LlmChatClient> => {
+  const replay = process.env.LLM_REPLAY_FILE?.trim();
+  const client = await (replay ? createReplayLlmChatClient(replay) : createDefaultPiLlmChatClient());
+  return (deployment, request, options) => {
+    guard();
+    return client(deployment, request, options);
+  };
+};
+
 export const analystAgent = analystAgentRunner({
   financial: { ...financialDeps, hydrate: hydrateTurn },
   router: () => analystAgentRouter(process.env),
@@ -543,7 +554,7 @@ export const analystAgent = analystAgentRunner({
     console.warn(`[chat] ${name} failed; the analyst agent answers without it`, reason);
     return { tool: name, status: "unavailable" as const, reason: "the read failed" };
   }),
-  compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered }),
+  compose: (input, turn, onAnswered, guard) => answerTurn(input, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered, createClient: guardedClient(guard) }),
   asOf: () => turnNow(process.env),
   conversation: (threadId) => loadRecentConversation(pool(), { threadId, limit: CONVERSATION_MESSAGES }),
   logToolCalls: writeLocalToolCallLogs,
