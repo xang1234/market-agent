@@ -119,8 +119,9 @@ function buildMessages(item: TenKItem, text: string): LlmChatMessage[] {
 // Kept beside verifyStatement, not in it, so earnings-release claims keep
 // their sentence rule: a 10-K list item ends in a semicolon, or opens with a
 // bullet ("*") no sentence starts after. A quote that ends mid-clause
-// ("...compete with AMD,") is the first paragraph of a longer item.
-const RUNS_ON = /(?:[,:-]|\b(?:and|or|but|nor|with|of|to|for|the|a|an))$/i;
+// ("...compete with AMD,") is the first paragraph of a longer item; one that
+// ends "...Tesla, Inc.; and" is an item joined to the next.
+const RUNS_ON = /(?:[,:-]|(?<!;)\s(?:and|or|but|nor|with|of|to|for|the|a|an))$/i;
 const BULLETS = "•▪◦●■*·\uf0b7";
 const LEADING_BULLET = new RegExp(`^[${BULLETS}]\\s*`);
 function wholeListItem(claim: TenKClaim, section: TenKSection): (TenKClaim & { exhibit: string; start: number; end: number }) | null {

@@ -47,7 +47,7 @@ test("a heading reads through a word markup split, and Item 1 may be the Descrip
 
 test("a combined Items 1 and 2 heading opens Item 1", () => {
   const body = "<div>We make things that people use every day in many places.</div>".repeat(30);
-  for (const heading of ["Items 1 and 2. Business and Properties", "ITEMS 1 AND 2. BUSINESS AND PROPERTIES", "Items 1 & 2. Business"]) {
+  for (const heading of ["Items 1 and 2. Business and Properties", "ITEMS 1 AND 2. BUSINESS AND PROPERTIES", "Items 1 & 2. Business", "Items 1 And 2. Business And Properties"]) {
     const sections = tenKSections(`<div>${heading}</div>${body}<div>Item 1A. Risk Factors</div>${body}`);
     assert.equal((sections["1"] as TenKSection).text.slice(0, heading.length), heading, heading);
   }

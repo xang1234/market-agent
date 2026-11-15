@@ -21,6 +21,9 @@ import { bootstrapDatabase, connectedClient, connectedPool, dockerAvailable } fr
 const NVDA_HTML = readFileSync(new URL("./fixtures/sec-10k/nvda.htm", import.meta.url));
 const COMPETITION_LIST_ITEM =
   "suppliers and licensors of hardware and software for discrete and integrated GPUs, custom chips and other accelerated computing solutions, including solutions offered for AI, such as Advanced Micro Devices, Inc., or AMD, Huawei Technologies Co. Ltd., or Huawei, and Intel Corporation, or Intel;";
+// The item before the list's last, joined to it by "and".
+const TESLA_LIST_ITEM =
+  "suppliers of hardware and software for SoC products that are used in servers or embedded into automobiles, autonomous machines, and gaming devices, such as Ambarella, Inc., AMD, Broadcom, Intel, Qualcomm Incorporated, Renesas Electronics Corporation, and Samsung, or companies with internal teams designing SoC products for their own products and services, such as Tesla, Inc.; and";
 const INVENTED = "NVIDIA has no competitors in any market it serves today.";
 const NO_CLAIMS = '{"claims":[]}';
 const NVDA_RISK = "Delaware law and our certificate of incorporation, bylaws and agreement with Microsoft could delay or prevent a change in control.";
@@ -86,6 +89,7 @@ test("a 10-K's quoted claims are stored with their filer and resolved competitor
   const amd = "6d1f3c1e-5b6a-4c2e-9f0a-0a5e2b7c8d91";
   const { llm, calls } = llmAnswering({ "1": JSON.stringify({ claims: [
     { predicate: "business.competition", quote: `• ${COMPETITION_LIST_ITEM}`, competitors: ["Advanced Micro Devices", "Huawei", "Samsung"] },
+    { predicate: "business.competition", quote: TESLA_LIST_ITEM, competitors: ["Tesla, Inc."] },
     { predicate: "business.description", quote: INVENTED, competitors: [] },
   ] }), "1A": RISK_REPLY });
   const deps: Extract10kDeps = { db: client, llm, resolveCompetitor: async (name) => (name === "Advanced Micro Devices" ? amd : null) };
@@ -93,11 +97,12 @@ test("a 10-K's quoted claims are stored with their filer and resolved competitor
 
   assert.deepEqual(
     await extract10kClaims(deps, tenK),
-    { outcome: "extracted", extracted: 2, droppedUnquoted: 1, competitors: { resolved: 1, named: 2 }, missing: [], llmCalls: 3 },
+    { outcome: "extracted", extracted: 3, droppedUnquoted: 1, competitors: { resolved: 1, named: 3 }, missing: [], llmCalls: 3 },
     "Samsung is not in the quote, and a risk factor names no competitor",
   );
   const { rows: [claim] } = await client.query<{ claim_id: string; predicate: string; text_canonical: string; modality: string; attributed_to_id: string }>(
-    `select claim_id::text as claim_id, predicate, text_canonical, modality, attributed_to_id::text as attributed_to_id from claims where predicate = 'business.competition'`,
+    `select claim_id::text as claim_id, predicate, text_canonical, modality, attributed_to_id::text as attributed_to_id from claims where predicate = 'business.competition' and text_canonical = $1`,
+    [COMPETITION_LIST_ITEM],
   );
   assert.deepEqual({ ...claim, claim_id: undefined }, {
     claim_id: undefined, predicate: "business.competition", text_canonical: COMPETITION_LIST_ITEM, modality: "quoted", attributed_to_id: nvda,
@@ -108,14 +113,14 @@ test("a 10-K's quoted claims are stored with their filer and resolved competitor
   );
   assert.deepEqual(argued, [{ role: "competitor", subject_id: amd }, { role: "subject", subject_id: nvda }]);
 
-  assert.deepEqual(await counts(client), { claims: 2, competitors: 1 });
+  assert.deepEqual(await counts(client), { claims: 3, competitors: 1 });
   assert.equal((await extract10kClaims(deps, tenK)).outcome, "already_extracted");
   assert.equal(calls(), 3, "a second run calls no model");
-  assert.deepEqual(await counts(client), { claims: 2, competitors: 1 }, "a second run adds no rows");
+  assert.deepEqual(await counts(client), { claims: 3, competitors: 1 }, "a second run adds no rows");
 
   await client.query(`update documents set parse_status = 'pending' where document_id = $1`, [tenK.documentId]);
   assert.equal((await extract10kClaims(deps, tenK)).extracted, 0, "a re-read stores only claims not yet stored");
-  assert.deepEqual(await counts(client), { claims: 2, competitors: 1 });
+  assert.deepEqual(await counts(client), { claims: 3, competitors: 1 });
 });
 
 test("two runs on one 10-K at once store its claims once", dockerTest, async (t) => {
@@ -198,6 +203,19 @@ test("a 10-K extracted from a file takes its filing's accession and date from th
   );
   const filed = new Date("2026-02-25T00:00:00Z");
   assert.deepEqual(rows, [{ provider_doc_id: "0001045810-26-000021", published_at: filed, effective_time: filed }]);
+});
+
+test("a --file run on a 10-K the backfill stored but could not read dates its claims by the filing", dockerTest, async (t) => {
+  const { client, nvda } = await nvdaDatabase(t, "tenk-file-after-backfill");
+  const objectStore = new MemoryObjectStore();
+  await storeTenK({ db: client, objectStore }, {
+    issuerId: nvda, bytes: NVDA_HTML, url: "https://www.sec.gov/x", accession: "0001045810-26-000021", filedDate: "2026-02-25", retrievedAt: "2026-11-15T00:00:00.000Z",
+  });
+  const tenK = await storedTenK(client, nvda, NVDA_HTML, objectStore);
+  const { llm } = llmAnswering({ "1": JSON.stringify({ claims: [{ predicate: "business.competition", quote: COMPETITION_LIST_ITEM }] }), "1A": RISK_REPLY });
+  assert.equal((await extract10kClaims({ db: client, llm, resolveCompetitor: async () => null }, tenK)).outcome, "extracted");
+  const { rows } = await client.query<{ effective_time: Date }>(`select distinct effective_time from claims`);
+  assert.deepEqual(rows, [{ effective_time: new Date("2026-02-25T00:00:00Z") }]);
 });
 
 test("the backfill reads an issuer's latest 10-K once: a rerun fetches only the feed", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
