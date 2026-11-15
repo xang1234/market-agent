@@ -156,6 +156,13 @@ export const ANALYST_PROMPT_TEMPLATES: ReadonlyArray<AnalystPromptTemplate> =
       policy:
         "Use analyze_template_run tools to keep output aligned with the saved template. Preserve template intent while noting unavailable data or skipped sources.",
     }),
+    makeTemplate({
+      bundle_id: "analyst_agent",
+      system:
+        "Gather the evidence for one research question as the analyst_agent: certified financial figures from the engine, and stored 10-K claims, industry peers and attributed consensus.",
+      policy:
+        "Use analyst_agent tools to read every company the question covers. Never rely on your own knowledge of a company: a later step writes the answer from what the tools returned alone.",
+    }),
   ]);
 
 const TEMPLATES_BY_BUNDLE = new Map(

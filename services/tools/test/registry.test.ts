@@ -44,6 +44,16 @@ test("loadToolRegistry reads the default finance research registry", () => {
   );
 });
 
+test("the analyst_agent bundle holds certified financials and the stored-source company reads", () => {
+  assert.deepEqual(loadToolRegistry().toolsForBundle("analyst_agent").map((tool) => tool.name), [
+    "certified_financials",
+    "get_company_profile",
+    "get_analyst_consensus",
+    "get_claims",
+    "get_peer_set",
+  ]);
+});
+
 test("resolveToolRegistryPath finds a repo-level spec from a dist-like module directory", () => {
   const root = mkdtempSync(join(tmpdir(), "tool-registry-root-"));
   const specDir = join(root, "spec");
