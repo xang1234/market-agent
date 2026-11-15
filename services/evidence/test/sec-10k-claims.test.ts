@@ -521,9 +521,7 @@ test("the backfill reads a 10-K the filings backfill stored from the object stor
   assert.equal((await client.query(`select 1 from documents`)).rowCount, 1, "the claims cite the stored document");
 });
 
-// A model that quotes the first whole sentences of each prompt, under each of
-// the item's predicates in turn.
-const quotingLlm: Extract10kDeps["llm"] = {
+const llmQuotingEachPredicateInTurn: Extract10kDeps["llm"] = {
   complete: async (request) => {
     const item = String(request.messages[0]!.content).includes("Item 1 (Business)") ? "1" : "1A";
     const sentences = String(request.messages[1]!.content).split(/(?<=\.) (?=[A-Z])/).filter((sentence) => sentence.length >= 80 && sentence.length <= 400);
@@ -571,7 +569,7 @@ test("a 10-K's claims enter an evidence read only when the read names their pred
   const doc = await storeTenK({ db: client, objectStore: new MemoryObjectStore() }, {
     issuerId: nvda, bytes: NVDA_HTML, url: null, accession: "0001045810-26-000021", filedDate: "2026-02-25", retrievedAt: "2026-11-15T00:00:00.000Z",
   });
-  await extract10kClaims({ db: client, llm: quotingLlm, resolveCompetitor: async () => null }, { ...doc, issuerId: nvda, html: NVDA_HTML.toString("utf8"), effectiveTime: "2026-02-25T00:00:00Z" });
+  await extract10kClaims({ db: client, llm: llmQuotingEachPredicateInTurn, resolveCompetitor: async () => null }, { ...doc, issuerId: nvda, html: NVDA_HTML.toString("utf8"), effectiveTime: "2026-02-25T00:00:00Z" });
   const { rows: stored } = await client.query<{ predicate: string; n: number }>(
     `select predicate, count(*)::int as n from claims where document_id = $1 group by 1 order by 1`,
     [doc.documentId],

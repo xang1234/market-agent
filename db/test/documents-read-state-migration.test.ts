@@ -35,4 +35,31 @@ test("0084 documents read state", { timeout: 300_000 }, async (t) => {
     await applyMigration(db, "0084", "up");
     assert.deepEqual(await catalogSnapshot(db), canonical);
   });
+
+  await t.test("up records as read each 10-K item whose claims have evidence", async () => {
+    await applyMigration(db, "0084", "down");
+    const { rows: [tenK] } = await db.query(
+      `insert into documents (source_id, kind, title, content_hash, raw_blob_id) values ('${SOURCE}', 'filing', '10-K', 'ten-k', 'blob') returning document_id`,
+    );
+    const { rows: [other] } = await db.query(
+      `insert into documents (source_id, kind, title, content_hash, raw_blob_id) values ('${SOURCE}', 'filing', '8-K', 'eight-k', 'blob') returning document_id`,
+    );
+    for (const [document, locator] of [
+      [tenK.document_id, { item: "1A", start: 0, end: 40, text_basis: "sec_10k_item_canonical_text.v1" }],
+      [tenK.document_id, { item: "1A", start: 50, end: 90, text_basis: "sec_10k_item_canonical_text.v1" }],
+      [other.document_id, { exhibit: "99.1", start: 0, end: 40, text_basis: "sec_8k_exhibit_canonical_text.v1" }],
+    ]) {
+      const { rows: [claim] } = await db.query(
+        `insert into claims (document_id, predicate, text_canonical, polarity, modality, reported_by_source_id, confidence, status)
+         values ($1, 'risk.factor', 'A risk.', 'negative', 'quoted', '${SOURCE}', 0.8, 'extracted') returning claim_id`,
+        [document],
+      );
+      await db.query(`insert into claim_evidence (claim_id, document_id, locator, excerpt_hash, confidence) values ($1, $2, $3, 'hash', 1)`, [claim.claim_id, document, locator]);
+    }
+    await applyMigration(db, "0084", "up");
+    assert.deepEqual(
+      (await db.query(`select title, read_state from documents order by title`)).rows,
+      [{ title: "10-K", read_state: { "1A": { state: "read" } } }, { title: "8-K", read_state: null }],
+    );
+  });
 });

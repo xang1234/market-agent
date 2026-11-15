@@ -51,22 +51,21 @@ export type TenKDocument = {
   effectiveTime: string | null;
 };
 
-// documents.read_state holds each item's state. "read": its claims are stored,
-// if it had any. "cut": read for its first `prompts` of `of` prompts, as far as
-// the run's MAX_LLM_CALLS went. "unread": its reply had the wrong shape, or
-// none of its quotes is in the filing, so none of its claims is stored, or the
-// cap left it no prompt. "not_found": the parser found no such section, as in
-// a 10-K laid out by a cross-reference index (Intel's) or a smaller reporting
-// company's with no Item 1A.
-// parse_status "parsed" means every item is read or cut, and "failed" that one
-// is unread or not found, so a rerun sections the stored bytes again and asks
-// the model only about the items not read.
-// ponytail: a cut item counts as read, since the cap is per run and a rerun
-// would cut it again. Read on from its `prompts` if the rest is ever needed.
-// "unparseable": every item asked is unread, so nothing is stored.
-// "no_sections": no item is found or read.
+// parse_status "parsed" means every item is read or cut. "failed" means one is
+// unread or not found, so a rerun sections the stored bytes again and asks the
+// model only about the items not read. "unparseable" means every item asked is
+// unread, so no claim is stored. "no_sections" means no item is found or read.
 export type Extract10kOutcome = "extracted" | "already_extracted" | "unparseable" | "no_sections";
 export type CutItem = { item: TenKItem; prompts: number; of: number };
+// Each item's state in documents.read_state. "read" means its claims are stored,
+// if it had any. "cut" means its first `prompts` of `of` prompts were read before
+// the run's MAX_LLM_CALLS ran out. "unread" means none of its claims is stored,
+// because its reply had the wrong shape, none of its quotes is in the filing, or
+// the cap left it no prompt. "not_found" means the parser found no such section,
+// as in a 10-K laid out by a cross-reference index (Intel's) or a smaller
+// reporting company's with no Item 1A.
+// ponytail: a cut item counts as read, since the cap is per run and a rerun
+// would cut it again. Read on from its `prompts` if the rest is ever needed.
 export type ItemReadState = { state: "read" | "unread" | "not_found" } | { state: "cut"; prompts: number; of: number };
 export type TenKReadState = Partial<Record<TenKItem, ItemReadState>>;
 export type Extract10kResult = {
@@ -382,10 +381,10 @@ export async function storeTenK(
     if (document.source_id !== source.source_id) await deleteSource(deps.db, source.source_id);
     stored = { documentId: document.document_id, sourceId: document.source_id };
   }
-  // Bytes stored first by --file (before, or by a concurrent run) carry no
-  // filing until the backfill names it: its accession, so the next backfill
-  // finds them without a fetch, its date, for the document and its claims, and
-  // its EDGAR link, for the source.
+  // Bytes stored first by --file, earlier or by a concurrent run, carry no filing.
+  // The first run that names the accession records it, so the next backfill finds
+  // the bytes without a fetch. It also dates the document and its claims, and
+  // gives the source its EDGAR link.
   if (input.accession !== null) {
     await deps.db.query(`update sources set canonical_url = coalesce(canonical_url, $2) where source_id = $1`, [stored.sourceId, input.url]);
     const filedAt = input.filedDate === null ? null : `${input.filedDate}T00:00:00Z`;

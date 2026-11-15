@@ -518,10 +518,8 @@ export async function lockCitableClaims(
   };
 }
 
-// A 10-K's claims enter a read only when its selection names their
-// predicates, or the read pins them by id. A 10-K adds 30 to 40 claims dated by one filing, so in a read
-// with no selection, or in a selected read's leftover slots, they would push
-// out every release and event.
+// One 10-K adds dozens of claims dated by a single filing. Unnamed, they would
+// crowd every release and event out of a read and out of a selection's spare slots.
 const NAMED_ONLY_PREDICATES = ["business.%", "risk.factor"];
 
 // d, the claim's document, is a copy fetched from the issuer's IR site.
