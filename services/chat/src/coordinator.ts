@@ -75,6 +75,8 @@ export type ChatTurnRunContext = ChatTurnInput & {
   unresolvedMentions?: ReadonlyArray<string>;
   // The turn's one reading of its question (scope-proposal.ts), shared by every caller; null when there is none.
   reading?: (beforeModelCall?: () => void) => Promise<ScopeProposal | null>;
+  // Set when the analyst agent hands the financial lane a company to pick, so the lane reads its companies as the agent did.
+  companiesByReading?: true;
   // Analyst prompt-template bundle selected for this turn. Derived from the
   // resolved subject's kind via chooseBundleIdForSubjectKind; falls back to
   // DEFAULT_BUNDLE_ID when no subject was provided. Same routing function
@@ -1111,7 +1113,8 @@ export async function resolveTurnSubjects(
   const change = readingDecides ? (await context.reading?.())?.companies : undefined;
   if (!change) return unreadChange(mentioned, prior);
   if (change.kind === "drop") return dropped(prior, change, preResolve);
-  const names = await resolveNames(change.kind === "compare" ? change.add : change.names, preResolve);
+  const read = await resolveNames(change.kind === "compare" ? change.add : change.names, preResolve);
+  const names = byReading ? withWritten(read, mentioned) : read;
   if (change.kind === "compare" || names.named.length === 0) return listed(prior, names);
   if (change.kind === "unclear" && prior.length >= 2) {
     const added = newNames(names, prior);
@@ -1213,6 +1216,13 @@ async function dropped(
     return { subjects: [], notFound: [], clarify: `Dropping ${compared} leaves no company to compare. Name the company to look at.` };
   }
   return listed(kept, adding);
+}
+
+// The reading's names, and each company the message writes that the reading left out.
+function withWritten(names: Names, written: Names): Names {
+  const keys = new Set(names.resolved.map(companyKey));
+  const more = written.resolved.filter((subject) => !keys.has(companyKey(subject)));
+  return { ...names, resolved: [...names.resolved, ...more], named: [...names.named, ...more] };
 }
 
 async function resolveNames(names: ReadonlyArray<string>, preResolve: ChatSubjectPreResolver): Promise<Names> {
@@ -1434,7 +1444,7 @@ function analystAgentSeat(
       return;
     }
     if (answer === null) return next(context);
-    if (answer === "pick_company") return picking(context);
+    if (answer === "pick_company") return picking({ ...context, companiesByReading: true });
     const result = answer;
     await toolBackedAnalystTurnRunner(turn, { ...options, runtime: () => result });
   };

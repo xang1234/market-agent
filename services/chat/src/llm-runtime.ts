@@ -161,6 +161,8 @@ export async function composeAnalystBlocksWithLlm(input: {
   instructions?: ReadonlyArray<string>;
   // What the answer is made of, in place of the analyst's takeaway, evidence and counterpoint.
   answerShape?: ReadonlyArray<string>;
+  // Set false to reject every analyst_inference the answer lists, with no repair asked for one.
+  inferences?: false;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
   // Receives the deployment (channel/model) that wrote the answer (#183).
   onAnswered?: (deployment: string) => void;
@@ -281,8 +283,9 @@ export async function composeAnalystBlocksWithLlm(input: {
     ...(usage ? { usage } : {}),
   });
   if (usage) input.onUsage?.(usage);
-  const checked = checkAssertions(assertionList(result.text), packet);
-  const report = input.answerShape ? withoutInferences(checked) : checked;
+  const list = assertionList(result.text);
+  const checked = checkAssertions(list, packet);
+  const report = input.inferences === false ? withoutInferences(checked, list ?? []) : checked;
   if (report.status !== "checked" || report.rejected.length > 0) {
     console.info(`[chat] assertions ${report.status}: ${report.accepted.length} accepted, ${report.rejected.length} rejected`);
   }
@@ -298,15 +301,18 @@ export async function composeAnalystBlocksWithLlm(input: {
   return rendering.blocks;
 }
 
-function withoutInferences(report: AssertionReport): AssertionReport {
-  const inferences = report.accepted.filter((entry) => entry.kind === "analyst_inference");
-  if (inferences.length === 0) return report;
+function withoutInferences(report: AssertionReport, list: ReadonlyArray<unknown>): AssertionReport {
+  const inferences = new Set(list.flatMap((item, index) => (isRecord(item) && item.kind === "analyst_inference" ? [index] : [])));
+  if (inferences.size === 0) return report;
   return {
     ...report,
-    accepted: report.accepted.filter((entry) => entry.kind !== "analyst_inference"),
+    accepted: report.accepted.filter((entry) => !inferences.has(entry.index)),
     rejected: [
-      ...report.rejected,
-      ...inferences.map((entry) => ({ index: entry.index, text: entry.text, check: "limit" as const, reason: "this answer holds no analyst inference" })),
+      ...report.rejected.filter((entry) => !inferences.has(entry.index)),
+      ...[...inferences].map((index) => {
+        const item = list[index] as Record<string, unknown>;
+        return { index, ...(typeof item.text === "string" ? { text: item.text } : {}), check: "limit" as const, reason: "this answer holds no analyst inference" };
+      }),
     ].sort((a, b) => a.index - b.index),
   };
 }

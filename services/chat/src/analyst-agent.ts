@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { FinancialSubjectRef } from "../../financial-core/src/index.ts";
 import type { Clarification, PlanningModel, RequestedSubject } from "../../financial-engine/src/planner.ts";
 import { createLlmRouterFromEnv, LlmClientError, LlmProviderError, LlmRouterError, withLlmAbortSignal, type LlmChatClient, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
-import type { ControlledRouter, LlmRouterResult, LlmToolCall } from "../../llm/src/router.ts";
+import type { ControlledRouter, LlmToolCall } from "../../llm/src/router.ts";
 import { runToolLoop, type ToolLoopOutput, type ToolLoopResult } from "../../llm/src/tool-loop.ts";
 import type { JsonObject, JsonValue } from "../../shared/src/json.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -26,7 +26,7 @@ import {
   type ChatFinancialRuntimeDeps,
 } from "./financial-runtime.ts";
 import { ANSWER_DEADLINES, withDeadlines, type DroppedClaims } from "./llm-runtime.ts";
-import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_ITEM_FIGURE, INCOME_LINE_READS, LATEST, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
+import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS, LATEST, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 import { turnStopSignal } from "./turn-stop.ts";
 
 const MAX_STEPS = 3;
@@ -127,9 +127,9 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       return pending.then((loading) => (loading ? [issuer] : []));
     })).then((lists) => lists.flat());
 
-    const lines = (read?.income_items ?? []).map((item) => INCOME_ITEM_FIGURE[item]);
+    const namesLines = (read?.income_items.length ?? 0) > 0;
     const certify = async (args: JsonObject): Promise<ToolLoopOutput> => {
-      const ask = certifiedAsk(args, known, lines.every((line): line is string => line !== null) ? lines : []);
+      const ask = certifiedAsk(args, known, namesLines);
       if ("invalid" in ask) return invalid("certified_financials", ask.invalid);
       const prior = asked.get(ask.fingerprint);
       if (prior) return prior;
@@ -195,16 +195,13 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     };
 
     let stepFoundNoTenK: boolean[] = [];
-    let deployment: LlmRouterResult["deployment"] | undefined;
-    const settled = () => read !== null && read.metrics.length === 0 && read.income_items.length === 0 &&
+    const settled = () => read !== null && read.metrics.length === 0 && read.income_items.length === 0 && read.asks.size === 0 && read.period.kind === "none" &&
       stepFoundNoTenK.length > 0 && stepFoundNoTenK.every(Boolean) && named.every((subject) => withoutTenK.has(issuerOf(subject)));
     const reader: ControlledRouter = {
       complete: async (request, controls) => {
-        if (settled() && deployment) return { text: "", deployment };
+        if (settled()) throw new ReadingSettled();
         stepFoundNoTenK = [];
-        const reply = await router.complete(request, controls);
-        deployment = reply.deployment;
-        return reply;
+        return router.complete(request, controls);
       },
     };
 
@@ -215,7 +212,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         : isAnalystToolName(call.name) ? readStored(call.name, call.arguments) : Promise.resolve(invalid(call.name, "no such tool"));
       inFlight.add(work);
       const output = await work.finally(() => inFlight.delete(work));
-      stepFoundNoTenK.push(call.name !== "certified_financials" && statusOf(output.content) === "no_filing");
+      stepFoundNoTenK.push(readsOnlyTenK(call) && statusOf(output.content) === "no_filing");
       toolCalls.push({
         tool_call_id: randomUUID(),
         tool_name: call.name,
@@ -248,6 +245,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       },
     })).catch(async (reason: unknown) => {
       await Promise.allSettled([...inFlight]);
+      if (reason instanceof ReadingSettled) return null;
       if (!isModelFailure(reason)) throw reason;
       console.warn("[chat] the analyst agent's reading stopped early; it answers from what it read", reason);
       notes.push(loopRefused ? UNFINISHED.calls : reason instanceof TurnDeadline ? UNFINISHED.time : UNFINISHED.model_failed);
@@ -279,7 +277,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     let answeredBy: string | undefined;
     let answer: Pick<AnsweredTurn, "assertions" | "blocks" | "judging" | "without">;
     let failed = false;
-    const askedFigures = askedFor.size > 0;
+    const askedFigures = certified.length > 0;
     try {
       answer = await deps.compose({
         context: { userIntent: question, bundleId: ANALYST_AGENT_BUNDLE_ID },
@@ -289,7 +287,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         conversation,
         packet,
         instructions: askedFigures ? [...ANSWER_RULES, ANALYSIS_RULE] : ANSWER_RULES,
-        ...(askedFigures ? {} : { answerShape: DESCRIPTION_SHAPE }),
+        ...(askedFigures ? {} : { answerShape: DESCRIPTION_SHAPE, inferences: false as const }),
       }, { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}), question }, (deployment) => {
         answeredBy = deployment;
       }, meter(0, () => {
@@ -371,6 +369,12 @@ const QUIET = (() => undefined) as unknown as ChatTurnRunContext["emit"];
 
 const UNKNOWN_COMPANY = "name each company by a subject_ref the prompt or a peer read gave";
 
+class ReadingSettled extends Error {}
+
+// A competition read can still fall back on industry peers, which no 10-K holds.
+const readsOnlyTenK = (call: LlmToolCall) => call.name === "get_company_profile" || (call.name === "get_claims" && call.arguments.role !== "competitor" &&
+  Array.isArray(call.arguments.predicates) && !call.arguments.predicates.includes("business.competition"));
+
 const isModelFailure = (reason: unknown) => reason instanceof LlmRouterError || reason instanceof LlmProviderError || reason instanceof TurnDeadline;
 
 // A turn's model calls: each guard takes one while more than `reserved` are left, and else throws as a client failure.
@@ -450,7 +454,7 @@ const QUARTERS = new Set(["Q1", "Q2", "Q3", "Q4"]);
 
 const ASKABLE_FIGURES: Readonly<Record<string, unknown>> = { ...ENGINE_READS_BY_CATALOG_METRIC, ...INCOME_LINE_READS };
 
-export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, RequestedSubject>, incomeLines: ReadonlyArray<string> = []): CertifiedAsk | { invalid: string } {
+export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, RequestedSubject>, statementByPlanner = false): CertifiedAsk | { invalid: string } {
   const refs = args.subject_refs;
   if (!Array.isArray(refs) || refs.length === 0) return { invalid: "subject_refs names the companies, as the prompt lists them" };
   const subjects = refs.map((ref) => (isRecord(ref) && ref.kind === "issuer" && typeof ref.id === "string" ? ref.id.toLowerCase() : null));
@@ -464,7 +468,7 @@ export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, Reques
   const period = readPeriod(args.period);
   if (period === null) return { invalid: "period is latest, a fiscal_year with its year, or a fiscal_quarter with its quarter" };
   const companies = [...new Set(subjects as string[])];
-  const keptMetrics = metrics === undefined ? null : [...new Set((metrics as string[]).flatMap((metric) => (metric === "income_statement" && incomeLines.length > 0 ? incomeLines : [metric])))].sort();
+  const keptMetrics = metrics === undefined || (statementByPlanner && (metrics as string[]).includes("income_statement")) ? null : [...new Set(metrics as string[])].sort();
   const choice: PlanChoice = keptMetrics ? { kind: "kept_figures", metrics: keptMetrics, period } : { kind: "planner" };
   const fingerprint = createHash("sha256")
     .update(JSON.stringify({ companies: [...companies].sort(), period, ...(keptMetrics ? { metrics: keptMetrics } : { question: question.toLowerCase().replace(/\s+/g, " ") }) }))

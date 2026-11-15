@@ -331,7 +331,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     }
     // A retry of a turn whose run is reserved resumes it, whatever this attempt's reading says.
     const reserved = await findPlanForRequest(deps.pool, { authority, request_key: turnId }) !== null;
-    const requested = await requestedSubjects(deps, context, text);
+    const requested = await requestedSubjects(deps, context, text, context.companiesByReading === true);
     const { clarify } = requested;
     if (clarify && !reserved) return async () => ({ kind: "clarification", clarification: companyQuestion(clarify) });
     const ask = turnScenarioAsk(text, requested.subjects);
