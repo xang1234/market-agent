@@ -60,7 +60,7 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       const model = needsModel ? await (input.getModel ?? configuredModel)() : { llm: null, identity: 'deterministic' };
       const metricResults = await evaluateFinancialThesisConditions(input.financial, { user_id: input.userId, thesis: input.thesis, run_key: input.runId, as_of: deltas.as_of });
       // The reuse key compares definitions, inputs, and outcomes — never run or snapshot identities.
-      const packetHash = hashJsonValue({ metricResults: thesisReuseProjection(metricResults), version: input.thesis.thesis_version_id, packet: evidence, day: deltas.as_of.slice(0, 10), model: model.identity, prompt: THESIS_PROMPT_VERSION });
+      const packetHash = hashJsonValue({ metricResults: thesisReuseProjection(metricResults), version: input.thesis.thesis_version_id, packet: withoutResultIds(evidence), day: deltas.as_of.slice(0, 10), model: model.identity, prompt: THESIS_PROMPT_VERSION });
       const previous = await getLatestThesisAssessment(input.db, input.thesis.thesis_version_id);
       const reused = previous?.input_hash.split('/')[0] === packetHash;
       const evaluation = reused && previous ? previous : await evaluateThesis({
@@ -139,6 +139,11 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
     },
     async alertFindings() { return findings; },
   };
+}
+// The engine numbers each run's results anew, so a cited figure's result id stays out of the reuse key. Its measure, period and value are in the packet.
+function withoutResultIds(packet: ThesisPacket) {
+  const refs = Object.fromEntries(Object.entries(packet.evidence.refs).map(([id, ref]) => [id, { ...ref, figure_refs: ref.figure_refs.map(({ result_id: _resultId, ...figure }) => figure) }]));
+  return { ...packet, evidence: { ...packet.evidence, refs } };
 }
 async function configuredModel(): Promise<Model> {
   const settings = await loadLlmSettingsFromEnv();
