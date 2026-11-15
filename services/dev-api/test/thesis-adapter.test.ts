@@ -46,3 +46,16 @@ test('an unconfigured model is a setup message, not a logged failure', async t =
   });
   assert.equal(logged.mock.callCount(), 0);
 });
+
+test('a drafted condition that states a stance is left out of the suggestions', async () => {
+  const drafted = (statement: string) => ({ statement, falsifier: 'Data center revenue falls for two quarters.', horizon: 'Next year' });
+  const adapter = createThesisAdapter(db, async () => ({ async complete() {
+    return { text: JSON.stringify({ conditions: [
+      drafted('Data center revenue keeps growing.'),
+      drafted('The stock is a buy while data center demand holds.'),
+      drafted('Customers buy accelerators in larger clusters.'),
+    ] }) };
+  } }));
+  const { conditions } = await adapter.draft({ userId: USER, agentId: AGENT, body });
+  assert.deepEqual(conditions.map(condition => condition.statement), ['Data center revenue keeps growing.', 'Customers buy accelerators in larger clusters.']);
+});

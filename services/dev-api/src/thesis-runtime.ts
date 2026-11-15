@@ -52,19 +52,20 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       return { thesis_version_id: input.thesis.thesis_version_id, as_of: asOf };
     },
     async extractEvidence({ deltas }) {
-      return loadThesisPacket(input.db, { thesis: input.thesis, userId: input.userId, asOf: deltas.as_of });
+      return loadThesisPacket(input.db, { thesis: input.thesis, userId: input.userId, asOf: deltas.as_of, runId: input.runId, financial: input.financial });
     },
     async clusterEvidence() { return null; },
     async analyze({ deltas, evidence }) {
-      const needsModel = evidence.claims.length > 0 && input.thesis.conditions.some(c => !c.metric);
+      const needsModel = Object.keys(evidence.evidence.refs).length > 0 && input.thesis.conditions.some(c => !c.metric);
       const model = needsModel ? await (input.getModel ?? configuredModel)() : { llm: null, identity: 'deterministic' };
       const metricResults = await evaluateFinancialThesisConditions(input.financial, { user_id: input.userId, thesis: input.thesis, run_key: input.runId, as_of: deltas.as_of });
       // The reuse key compares definitions, inputs, and outcomes — never run or snapshot identities.
       const packetHash = hashJsonValue({ metricResults: thesisReuseProjection(metricResults), version: input.thesis.thesis_version_id, packet: evidence, day: deltas.as_of.slice(0, 10), model: model.identity, prompt: THESIS_PROMPT_VERSION });
       const previous = await getLatestThesisAssessment(input.db, input.thesis.thesis_version_id);
+      // The same evidence reuses the last results without a model call, and the run still records its own dated assessment.
       const reused = previous?.input_hash.split('/')[0] === packetHash;
       const evaluation = reused && previous ? previous : await evaluateThesis({
-        thesis: input.thesis, claims: evidence.claims, as_of: deltas.as_of, llm: model.llm, metric_results: metricResults,
+        thesis: input.thesis, evidence: evidence.evidence, as_of: deltas.as_of, llm: model.llm, metric_results: metricResults,
       });
       const packetFacts = new Set(evidence.facts.map(fact => fact.fact_id));
       const citedFacts = await loadThesisFactsById(input.db, {
@@ -75,7 +76,7 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
         results: evaluation.results,
         model_version: evaluation.model_version,
         packet_hash: packetHash,
-        input_hash: reused && previous ? previous.input_hash : `${packetHash}/${previous?.assessment_id ?? 'initial'}`,
+        input_hash: `${packetHash}/${previous?.assessment_id ?? 'initial'}`,
         reused,
         cited_facts: citedFacts,
       };
@@ -94,20 +95,30 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       if (latest?.thesis_version_id !== input.thesis.thesis_version_id)
         throw new ThesisConflictError('Thesis changed during assessment; run again to assess the new version.');
       // Recheck under the agent lock: another delivery may have finished while
-      // the model was evaluating. A-to-B-to-A recurrence is still a new event.
+      // the model was evaluating. Compared in the database, at its microsecond
+      // precision: through JS Dates an assessment finished later in the cutoff's
+      // millisecond looked equal.
       const previous = await getLatestThesisAssessment(tx, input.thesis.thesis_version_id);
-      if (previous?.input_hash.split('/')[0] === analysis.packet_hash) {
-        await activity(tx, input, 'dismissed', 'No new thesis changes: this evidence packet was already assessed.');
-        return { findings: 0, assessments: 0, reused: true };
-      }
-      // Compared in the database, at its microsecond precision: through JS Dates
-      // an assessment finished later in the cutoff's millisecond looked equal.
-      const newer = await tx.query(
-        'select 1 from agent_thesis_assessments where thesis_version_id = $1::uuid and assessed_at > $2::timestamptz limit 1',
+      const newer = await tx.query<{ input_hash: string }>(
+        'select input_hash from agent_thesis_assessments where thesis_version_id = $1::uuid and assessed_at > $2::timestamptz order by assessed_at desc limit 1',
         [input.thesis.thesis_version_id, deltas.as_of],
       );
+      if (newer.rows[0]?.input_hash.split('/')[0] === analysis.packet_hash) {
+        await activity(tx, input, 'dismissed', 'No new thesis changes: a run that finished during this one assessed the same evidence.');
+        return { findings: 0, assessments: 0, reused: true };
+      }
       if (newer.rows.length > 0)
         throw new ThesisConflictError('A newer assessment finished during this run; run again.');
+      // The latest assessment's evidence is this run's: the run records its own
+      // dated row with those results, over the snapshot that already seals them.
+      if (previous?.input_hash.split('/')[0] === analysis.packet_hash) {
+        await recordThesisAssessment(tx, {
+          thesis_version_id: input.thesis.thesis_version_id, run_id: input.runId, snapshot_id: previous.snapshot_id,
+          input_hash: analysis.input_hash, results: previous.results, model_version: previous.model_version, prompt_version: THESIS_PROMPT_VERSION,
+        });
+        await activity(tx, input, 'dismissed', 'Recorded the assessment; the evidence is unchanged since the last one.');
+        return { findings: 0, assessments: 1, reused: true };
+      }
       const snapshot = await sealThesisPacket(tx, {
         thesis: input.thesis, packet: evidence, results: analysis.results, asOf: deltas.as_of,
         modelVersion: analysis.model_version, inputHash: analysis.input_hash,
@@ -116,12 +127,12 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
         thesis_version_id: input.thesis.thesis_version_id, run_id: input.runId, snapshot_id: snapshot.snapshot_id,
         input_hash: analysis.input_hash, results: analysis.results, model_version: analysis.model_version, prompt_version: THESIS_PROMPT_VERSION,
       });
-      const sealedFacts = new Set(evidence.facts.map(fact => fact.fact_id));
+      const sealed = new Set([...evidence.facts.map(fact => fact.fact_id), ...evidence.claims.map(claim => claim.claim_id)]);
       for (const result of analysis.results) {
         if (result.status === 'unresolved' || previous?.results.find(r => r.condition_id === result.condition_id)?.status === result.status)
           continue;
-        // A verified condition alerts only with evidence sealed into this snapshot; its certificate stays on the assessment.
-        if (result.financial && !result.fact_refs.some(id => sealedFacts.has(id)))
+        // A condition alerts only with evidence sealed into this snapshot; a verified one's certificate stays on the assessment.
+        if (![...result.fact_refs, ...result.claim_refs].some(id => sealed.has(id)))
           continue;
         findings.push(await generateThesisFinding(tx, {
           thesis: input.thesis, result, packet: evidence, agentName: input.agent.name, snapshot,

@@ -32,7 +32,7 @@ test('a thesis packet holds the as-reported value of a restated year, beside ven
   await insert({ metric: revenue, kind: 'fiscal_y', value: '95', source: restating, method: 'restated', supersedes: reported });
   const quote = await insert({ metric: price, kind: 'point', value: '42', source: vendor, method: 'vendor' });
 
-  const packet = await loadThesisPacket(db, { thesis: thesis(), userId: USER, asOf: new Date().toISOString() });
+  const packet = await loadThesisPacket(db, { thesis: thesis(), userId: USER, asOf: new Date().toISOString(), runId: randomUUID(), financial: {} as never });
   assert.deepEqual(packet.facts.map(fact => [fact.fact_id, fact.metric_key, fact.value_num]).sort(), [
     [quote, 'price', '42'],
     [reported, 'revenue', '100'],

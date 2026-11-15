@@ -87,14 +87,18 @@ test('an unchanged outcome expires once its period end passes the saved maximum 
   await run(at(43_200_000));
   assert.equal((await history()).assessments[0].results[0].status, 'supported');
   await run(at(86_399_999));
-  assert.equal((await history()).assessments.length, 1, 'the maximum age is inclusive');
+  const inclusive = await history();
+  assert.deepEqual(inclusive.assessments.map(assessment => assessment.results[0].status), ['supported', 'supported'], 'the maximum age is inclusive');
+  assert.equal(inclusive.assessments[0].snapshot_id, inclusive.assessments[1].snapshot_id, 'an unchanged outcome reuses the sealed snapshot');
   await run(at(86_400_000));
   const expired = await history();
   assert.deepEqual([expired.assessments[0].results[0].status, expired.assessments[0].results[0].reason],
     ['unresolved', 'The latest eligible value is older than the saved maximum age at the assessment cutoff.']);
-  assert.equal(expired.assessments.length, 2);
+  assert.equal(expired.assessments.length, 3);
   await run(at(86_401_000));
-  assert.equal((await history()).assessments.length, 2, 'unchanged expired results still deduplicate');
+  const unchanged = await history();
+  assert.equal(unchanged.assessments.length, 4, 'each run records its own dated assessment');
+  assert.equal(unchanged.assessments[0].snapshot_id, unchanged.assessments[1].snapshot_id, 'unchanged expired results reuse their sealed snapshot');
   assert.equal(await findings(), 1, 'only the supported transition alerts');
 });
 
@@ -135,7 +139,11 @@ test('thesis snapshots preserve document sources separately from claim reporters
   await db.query("insert into claim_arguments(claim_id,subject_kind,subject_id,role) values($1,'issuer',$2,'subject')", [claimId,ISSUER]);
   const thesis = await saveThesis(db, { agent_id: agent.agent_id, user_id: USER, expected_version: 1, thesis: 'Demand remains strong.', subject_ref: { kind: 'issuer', id: ISSUER }, conditions: [{ condition_id: CONDITION, statement: 'Demand remains strong.', falsifier: 'Customers cancel orders.', horizon: 'Next quarter' }] });
   const fresh = (await getAgent(db, agent.agent_id))!;
-  const stages = createThesisAgentLoopStages({ db: pool, userId: USER, runId: randomUUID(), agent: fresh, thesis, financial: { pool, evidence: createEvidenceFinancialPort }, getModel: async () => ({ identity: 'controlled', llm: { async complete() { return { text: JSON.stringify({ results: [{ condition_id: CONDITION, status: 'supported', reason: 'The cited report describes strong demand.', claim_refs: [claimId] }] }) }; } } }) });
+  const stages = createThesisAgentLoopStages({ db: pool, userId: USER, runId: randomUUID(), agent: fresh, thesis, financial: { pool, evidence: createEvidenceFinancialPort }, getModel: async () => ({ identity: 'controlled', llm: { async complete(request) {
+    const { evidence } = JSON.parse(request.messages[1].content) as { evidence: { claims: Array<{ id: string; text: string }> } };
+    const cited = evidence.claims.find(claim => claim.text === 'Demand remains strong.')!.id;
+    return { text: JSON.stringify({ results: [{ condition_id: CONDITION, status: 'supported', refs: [cited] }] }) };
+  } } }) });
   await runAgentLoop({ pool, agent_id: agent.agent_id, current_watermarks: fresh.watermarks, stages });
   const assessment = (await history()).assessments[0];
   const snapshot = await db.query('select source_ids from snapshots where snapshot_id=$1', [assessment.snapshot_id]);

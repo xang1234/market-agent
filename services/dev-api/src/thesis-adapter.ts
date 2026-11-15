@@ -3,6 +3,7 @@ import { getAgent, type QueryExecutor } from '../../agents/src/agent-repo.ts';
 import { normalizeUniverseToIssuers } from '../../analyst-grids/src/subject-normalization.ts';
 import { getCurrentThesis, loadThesisHistory, saveThesis } from '../../agents/src/thesis-repo.ts';
 import { draftThesisConditions, type ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
+import { statesStance } from '../../chat/src/analyst-agent.ts';
 import { parseThesisConditions, parseThesisText, parseThesisExpectedVersion, type ThesisHistoryResponse, type ThesisMetricOption, ThesisConflictError, ThesisNotFoundError, ThesisValidationError } from '../../agents/src/thesis-types.ts';
 import { LlmRouterError } from '../../llm/src/router.ts';
 import { createLlmRouterFromEnv } from '../../llm/src/settings-loader.ts';
@@ -75,7 +76,11 @@ export function createThesisAdapter(db: QueryExecutor, getModel: () => Promise<T
         const model = await getModel();
         if (!model)
           throw new DevApiHttpError(503, 'Configure a model in Settings to suggest conditions, or write your own.');
-        return { conditions: await draftThesisConditions(model, text) };
+        // Drafted conditions are the model's words saved as the thesis, so none may state a stance (ADR 0005).
+        const conditions = (await draftThesisConditions(model, text)).filter(condition => ![condition.statement, condition.falsifier].some(statesStance));
+        if (conditions.length === 0)
+          throw new Error('every drafted condition stated a stance');
+        return { conditions };
       }
       catch (error) {
         if (error instanceof DevApiHttpError)

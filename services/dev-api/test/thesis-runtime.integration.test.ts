@@ -70,7 +70,9 @@ test('thesis monitoring persists, deduplicates, reassesses changed facts and pro
   assert.deepEqual(inspected.rows.find(row=>row.label==='Value'),{label:'Value',value:'169148000000'});
   await assert.rejects(loadEvidenceInspection(db,{user_id:OTHER,snapshot_id:firstSnapshot,ref:{kind:'fact',id:fact1}}),{status:404});
   await execute();
-  assert.equal((await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments.length,1);
+  const rerun=(await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments;
+  assert.equal(rerun.length,2,'a rerun on the same evidence records its own dated assessment');
+  assert.equal(rerun[0].snapshot_id,firstSnapshot,'and reuses the snapshot that seals that evidence');
   assert.equal((await db.query('select count(*)::int as n from findings where agent_id=$1',[agent.agent_id])).rows[0].n,1);
   await db.query('update facts set invalidated_at=now() where fact_id=$1',[fact1]);
   const fact2=await seedReportedFact(db,{metric_key:'gross_profit',value:'100000000000',fiscal_year:lastFiscalYear});
@@ -88,7 +90,7 @@ test('thesis monitoring persists, deduplicates, reassesses changed facts and pro
   await execute();
   history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
   assert.equal(history.assessments[0].results[0].status,'supported', 'recurring earlier evidence must become current again');
-  assert.equal(history.assessments.length,4);
+  assert.equal(history.assessments.length,5);
   const priorCount=history.assessments.length;
   await assert.rejects(execute(async () => {
     thesis=await saveThesis(db,{agent_id:agent.agent_id,user_id:USER,expected_version:1,thesis:'Cash reserves recover sustainably.',subject_ref:{kind:'issuer',id:ISSUER},conditions});
@@ -157,9 +159,10 @@ test('narrative monitoring includes IR and non-IR claims, rejects fabricated cit
   let calls=0;
   const model:ThesisLlm={async complete(input){
     calls++;
-    const packet=JSON.parse(input.messages[1].content);
-    assert.deepEqual(packet.claims.map((c:{claim_id:string})=>c.claim_id).sort(),[valid.claim.claim_id,ir.claim.claim_id].sort());
-    return {text:JSON.stringify({results:[{condition_id:CONDITION,status:'challenged',reason:'The cited cancellations challenge demand durability.',claim_refs:[valid.claim.claim_id]}]}),deployment:{channel:'test',model:'controlled'}};
+    const {evidence}=JSON.parse(input.messages[1].content) as {evidence:{claims:Array<{id:string;text:string}>}};
+    assert.deepEqual(evidence.claims.map(c=>c.text).sort(),['Current customers canceled their orders.','Issuer IR customers canceled their orders.']);
+    const cited=evidence.claims.find(c=>c.text.startsWith('Current'))!.id;
+    return {text:JSON.stringify({results:[{condition_id:CONDITION,status:'challenged',refs:[cited]}]}),deployment:{channel:'test',model:'controlled'}};
   }};
   async function execute(llm:ThesisLlm|null=model,identity='controlled') {
     const fresh=(await getAgent(db,agent.agent_id))!;
@@ -168,8 +171,10 @@ test('narrative monitoring includes IR and non-IR claims, rejects fabricated cit
   }
   await execute();
   await execute();
-  assert.equal(calls,1);
+  assert.equal(calls,1,'the same evidence reuses the assessment without a model call');
   let history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
+  assert.equal(history.assessments.length,2);
+  assert.deepEqual(history.assessments[0].results[0].claim_refs,[valid.claim.claim_id],'the C id is stored as the claim it stands for');
   assert.equal(history.assessments[0].model_version,'test:controlled');
   assert.equal(history.assessments[0].results[0].status,'challenged');
   assert.equal((await db.query('select severity from findings where agent_id=$1',[agent.agent_id])).rows[0].severity,'critical','direct relevance plus strong sourced impact must use existing severity policy');
@@ -186,9 +191,9 @@ test('narrative monitoring includes IR and non-IR claims, rejects fabricated cit
   await db.query('update documents set source_id=$1 where document_id=$2',[valid.source.source_id,valid.document.document_id]);
   const watermarks=(await getAgent(db,agent.agent_id))!.watermarks;
   await assert.rejects(execute(null,'unavailable'),/unavailable/);
-  await assert.rejects(execute({async complete(){return {text:JSON.stringify({results:[{condition_id:CONDITION,status:'supported',reason:'Fabricated evidence.',claim_refs:[randomUUID()]}]})};}},'invalid'),/unsupplied/);
+  await assert.rejects(execute({async complete(){return {text:JSON.stringify({results:[{condition_id:CONDITION,status:'supported',refs:['C99']}]})};}},'invalid'),/unsupplied/);
   assert.deepEqual((await getAgent(db,agent.agent_id))!.watermarks,watermarks);
-  assert.equal((await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments.length,1);
+  assert.equal((await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments.length,2);
   await db.query('update claims set superseded_at=now() where claim_id=any($1::uuid[])',[[valid.claim.claim_id,ir.claim.claim_id]]);
   assert.equal((await inspectCurrent()).ref.id,valid.claim.claim_id,'accessible superseded claims remain inspectable in their historical snapshot');
   await execute(null);

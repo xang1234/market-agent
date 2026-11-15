@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { draftThesisConditions, evaluateThesis, type ThesisLlm } from "../src/thesis-evaluator.ts";
+import { draftThesisConditions, evaluateThesis, NOT_ENOUGH_EVIDENCE, type ThesisEvidence, type ThesisLlm } from "../src/thesis-evaluator.ts";
 import { ThesisValidationError, type ConditionAssessment, type ThesisCondition, type ThesisVersion } from "../src/thesis-types.ts";
 
 const ISSUER_ID = "11111111-1111-4111-8111-111111111111";
@@ -46,6 +46,20 @@ function llmResponse(value: unknown, deployment?: { channel: string; model: stri
   };
 }
 
+// The evidence as the dev-api gathers it: the model reads F and C ids, and each id stands for stored rows.
+function evidence(refs: Record<string, { claim_refs?: string[]; fact_refs?: string[] }>): ThesisEvidence {
+  return {
+    packet: {
+      figures: Object.keys(refs).filter((id) => id.startsWith("F")).map((id) => ({ id, metric: "Revenue", period: "FY2026", value: "$130.5B" })),
+      claims: Object.keys(refs).filter((id) => id.startsWith("C")).map((id) => ({ id, predicate: "business.products", text: "Our products include data center platforms." })),
+    },
+    refs: Object.fromEntries(Object.entries(refs).map(([id, ref]) => [id, { claim_refs: ref.claim_refs ?? [], fact_refs: ref.fact_refs ?? [] }])),
+  };
+}
+const EVIDENCE = evidence({ F1: { fact_refs: [FACT_ID] }, C1: { claim_refs: [CLAIM_ID] } });
+const NO_EVIDENCE = evidence({});
+const unreachable: ThesisLlm = { async complete() { throw new Error("must not be invoked"); } };
+
 test("evaluateThesis lets evidence support and challenge opposing narrative conditions", async () => {
   const guardedLlm: ThesisLlm = {
     async complete(request) {
@@ -55,12 +69,13 @@ test("evaluateThesis lets evidence support and challenge opposing narrative cond
       assert.match(policy, /horizon/i);
       assert.match(policy, /stale, mixed, or insufficient/i);
       assert.match(policy, /untrusted data/i);
-      assert.match(policy, /numerical claims/i);
+      assert.match(policy, /never use knowledge from outside the evidence/i);
+      assert.deepEqual(JSON.parse(request.messages[1]!.content).evidence, EVIDENCE.packet);
       return {
         text: JSON.stringify({
           results: [
-            { condition_id: BULL_ID, status: "challenged", reason: "Growth slowed.", claim_refs: [CLAIM_ID] },
-            { condition_id: BEAR_ID, status: "supported", reason: "Growth slowed.", claim_refs: [CLAIM_ID] },
+            { condition_id: BULL_ID, status: "challenged", refs: ["C1"] },
+            { condition_id: BEAR_ID, status: "supported", refs: ["C1", "F1"] },
           ],
         }),
         deployment: { channel: "primary", model: "model-42" },
@@ -78,7 +93,7 @@ test("evaluateThesis lets evidence support and challenge opposing narrative cond
         falsifier: "Enterprise demand continues accelerating.",
       }),
     ]),
-    claims: [{ claim_id: CLAIM_ID, text_canonical: "Enterprise growth slowed to 8 percent." }],
+    evidence: EVIDENCE,
     metric_results: [],
     as_of: AS_OF,
     llm: guardedLlm,
@@ -86,32 +101,59 @@ test("evaluateThesis lets evidence support and challenge opposing narrative cond
 
   assert.deepEqual(result, {
     results: [
-      { condition_id: BULL_ID, status: "challenged", reason: "Growth slowed.", claim_refs: [CLAIM_ID], fact_refs: [], method: "model" },
-      { condition_id: BEAR_ID, status: "supported", reason: "Growth slowed.", claim_refs: [CLAIM_ID], fact_refs: [], method: "model" },
+      { condition_id: BULL_ID, status: "challenged", reason: "The cited stored sources challenge this condition.", claim_refs: [CLAIM_ID], fact_refs: [], method: "model" },
+      { condition_id: BEAR_ID, status: "supported", reason: "The cited stored sources support this condition.", claim_refs: [CLAIM_ID], fact_refs: [FACT_ID], method: "model" },
     ],
     model_version: "primary:model-42",
   });
 });
 
-test("evaluateThesis returns unresolved narrative conditions without invoking a model when claims are empty", async () => {
-  const llm: ThesisLlm = {
-    async complete() {
-      throw new Error("must not be invoked");
-    },
-  };
+test("a condition backed by a business claim stores its C id, and one no entry bears on is not enough evidence", async () => {
+  const products = condition(BULL_ID, { statement: "Data center platforms remain the core product line.", falsifier: "The 10-K stops naming data center platforms." });
+  const uncovered = condition(BEAR_ID, { statement: "The company opens a chain of coffee shops.", falsifier: "No coffee shop opens." });
   const result = await evaluateThesis({
-    thesis: thesis([condition(BULL_ID)]),
-    claims: [],
+    thesis: thesis([products, uncovered]),
+    evidence: EVIDENCE,
     metric_results: [],
     as_of: AS_OF,
-    llm,
+    llm: llmResponse({ results: [
+      { condition_id: BULL_ID, status: "supported", refs: ["C1"] },
+      { condition_id: BEAR_ID, status: "unresolved", refs: [], reason: "From what I know, the company never sells coffee." },
+    ] }),
+  });
+  assert.deepEqual(result.results, [
+    { condition_id: BULL_ID, status: "supported", reason: "The cited stored sources support this condition.", claim_refs: [CLAIM_ID], fact_refs: [], method: "model" },
+    { condition_id: BEAR_ID, status: "unresolved", reason: NOT_ENOUGH_EVIDENCE, claim_refs: [], fact_refs: [], method: "no_evidence" },
+  ]);
+});
+
+test("an assessment keeps none of the model's words, a stance included", async () => {
+  const { results } = await evaluateThesis({
+    thesis: thesis([condition(BULL_ID)]),
+    evidence: EVIDENCE,
+    metric_results: [],
+    as_of: AS_OF,
+    llm: llmResponse({ results: [{ condition_id: BULL_ID, status: "supported", refs: ["F1"], reason: "This is a buy with a raised price target of $200." }] }),
+  });
+  assert.deepEqual(results, [
+    { condition_id: BULL_ID, status: "supported", reason: "The cited stored sources support this condition.", claim_refs: [], fact_refs: [FACT_ID], method: "model" },
+  ]);
+});
+
+test("evaluateThesis assesses every narrative condition as not enough evidence without a model when no entry is citable", async () => {
+  const result = await evaluateThesis({
+    thesis: thesis([condition(BULL_ID)]),
+    evidence: NO_EVIDENCE,
+    metric_results: [],
+    as_of: AS_OF,
+    llm: unreachable,
   });
 
   assert.deepEqual(result, {
     results: [{
       condition_id: BULL_ID,
       status: "unresolved",
-      reason: "No eligible narrative evidence was available.",
+      reason: "Not enough evidence: no stored source covers this condition.",
       claim_refs: [],
       fact_refs: [],
       method: "no_evidence",
@@ -120,11 +162,11 @@ test("evaluateThesis returns unresolved narrative conditions without invoking a 
   });
 });
 
-test("evaluateThesis requires a model when narrative claims are available", async () => {
+test("evaluateThesis requires a model when narrative evidence is available", async () => {
   await assert.rejects(
     evaluateThesis({
       thesis: thesis([condition(BULL_ID)]),
-      claims: [{ claim_id: CLAIM_ID, text_canonical: "Demand slowed." }],
+      evidence: EVIDENCE,
       metric_results: [],
       as_of: AS_OF,
       llm: null,
@@ -133,27 +175,29 @@ test("evaluateThesis requires a model when narrative claims are available", asyn
   );
 });
 
-test("evaluateThesis rejects foreign citations, missing rows, duplicate rows, and uncited conclusions", async () => {
-  const cases: Array<[string, unknown]> = [
-    ["foreign citation", { results: [{ condition_id: BULL_ID, status: "supported", reason: "Evidence.", claim_refs: [FACT_ID] }] }],
-    ["missing row", { results: [] }],
+test("evaluateThesis rejects unsupplied refs, missing rows, duplicate rows, and uncited conclusions", async () => {
+  const cases: Array<[string, unknown, RegExp]> = [
+    ["unsupplied ref", { results: [{ condition_id: BULL_ID, status: "supported", refs: ["C9"] }] }, /unsupplied ref/],
+    ["stored id as a ref", { results: [{ condition_id: BULL_ID, status: "supported", refs: [CLAIM_ID] }] }, /unsupplied ref/],
+    ["missing row", { results: [] }, /every narrative condition/],
     ["duplicate row", { results: [
-      { condition_id: BULL_ID, status: "supported", reason: "Evidence.", claim_refs: [CLAIM_ID] },
-      { condition_id: BULL_ID, status: "challenged", reason: "Evidence.", claim_refs: [CLAIM_ID] },
-    ] }],
-    ["uncited conclusion", { results: [{ condition_id: BULL_ID, status: "supported", reason: "Evidence.", claim_refs: [] }] }],
+      { condition_id: BULL_ID, status: "supported", refs: ["C1"] },
+      { condition_id: BULL_ID, status: "challenged", refs: ["C1"] },
+    ] }, /duplicated/],
+    ["uncited conclusion", { results: [{ condition_id: BULL_ID, status: "supported", refs: [] }] }, /requires a citation/],
+    ["refs missing", { results: [{ condition_id: BULL_ID, status: "unresolved" }] }, /refs must be strings/],
   ];
 
-  for (const [name, response] of cases) {
+  for (const [name, response, message] of cases) {
     await assert.rejects(
       evaluateThesis({
         thesis: thesis([condition(BULL_ID)]),
-        claims: [{ claim_id: CLAIM_ID, text_canonical: "Demand slowed." }],
+        evidence: EVIDENCE,
         metric_results: [],
         as_of: AS_OF,
         llm: llmResponse(response),
       }),
-      ThesisValidationError,
+      (error: unknown) => error instanceof ThesisValidationError && message.test(error.message),
       name,
     );
   }
@@ -167,13 +211,13 @@ test("evaluateThesis takes each metric condition's result from the engine verbat
     condition_id: METRIC_ID, status: "supported", reason: "The verified calculation at the assessment cutoff meets the saved threshold.",
     claim_refs: [], fact_refs: [FACT_ID], method: "metric",
   };
-  const result = await evaluateThesis({ thesis: thesis([metric, condition(BULL_ID)]), claims: [], as_of: AS_OF, llm: null, metric_results: [engine] });
+  const result = await evaluateThesis({ thesis: thesis([metric, condition(BULL_ID)]), evidence: NO_EVIDENCE, as_of: AS_OF, llm: null, metric_results: [engine] });
   assert.deepEqual(result.results, [
     engine,
-    { condition_id: BULL_ID, status: "unresolved", reason: "No eligible narrative evidence was available.", claim_refs: [], fact_refs: [], method: "no_evidence" },
+    { condition_id: BULL_ID, status: "unresolved", reason: NOT_ENOUGH_EVIDENCE, claim_refs: [], fact_refs: [], method: "no_evidence" },
   ]);
   await assert.rejects(
-    evaluateThesis({ thesis: thesis([metric]), claims: [], as_of: AS_OF, llm: null, metric_results: [] }),
+    evaluateThesis({ thesis: thesis([metric]), evidence: NO_EVIDENCE, as_of: AS_OF, llm: null, metric_results: [] }),
     new ThesisValidationError(`assessment is missing condition ${METRIC_ID}`),
   );
 });
@@ -189,7 +233,7 @@ test('evaluateThesis rejects an invalid stored thesis before calling a model', a
   const llm: ThesisLlm = { async complete() { throw new Error('invalid stored thesis reached the model'); } };
   await assert.rejects(evaluateThesis({
     thesis: { ...thesis([condition(BULL_ID)]), thesis: 'x'.repeat(4001) },
-    claims: [{ claim_id: CLAIM_ID, text_canonical: 'Demand slowed.' }], metric_results: [], as_of: AS_OF, llm,
+    evidence: EVIDENCE, metric_results: [], as_of: AS_OF, llm,
   }), ThesisValidationError);
 });
 
@@ -267,41 +311,12 @@ test("draftThesisConditions names the model and the cause when a reply is unusab
   );
 });
 
-test("evaluateThesis leaves room for five reasons at the limit plus thinking", async () => {
-  const conditions = Array.from({ length: 5 }, (_, index) => condition(`4000000${index}-0000-4000-8000-000000000001`));
-  const answer = JSON.stringify({ results: conditions.map(({ condition_id }) => ({ condition_id, status: "challenged", reason: "x".repeat(2000), claim_refs: [CLAIM_ID] })) });
-  const llm: ThesisLlm = {
-    async complete({ maxTokens }) {
-      return (maxTokens ?? 0) >= 711 + answer.length / 3 ? { text: answer } : { text: answer.slice(0, 200), truncated: true };
-    },
-  };
-  const { results } = await evaluateThesis({ thesis: thesis(conditions), claims: [{ claim_id: CLAIM_ID, text_canonical: "Demand slowed." }], metric_results: [], as_of: AS_OF, llm });
-  assert.deepEqual(results.map(({ reason }) => reason.length), [2000, 2000, 2000, 2000, 2000]);
-});
-
-test("evaluateThesis tells the model the reason limit it validates against", async () => {
-  let system = "";
-  await evaluateThesis({
-    thesis: thesis([condition(BULL_ID)]),
-    claims: [{ claim_id: CLAIM_ID, text_canonical: "Demand slowed." }],
-    metric_results: [],
-    as_of: AS_OF,
-    llm: {
-      async complete({ messages }) {
-        system = messages[0].content;
-        return { text: JSON.stringify({ results: [{ condition_id: BULL_ID, status: "unresolved", reason: "Mixed evidence.", claim_refs: [] }] }) };
-      },
-    },
-  });
-  assert.match(system, /each reason under 2000 characters/);
-});
-
 test("evaluateThesis names the model and the cause when a reply is unusable", async () => {
   const deployment = { channel: "anthropic", model: "claude-sonnet-5-5" };
-  const input = { thesis: thesis([condition(BULL_ID)]), claims: [{ claim_id: CLAIM_ID, text_canonical: "Demand slowed." }], metric_results: [], as_of: AS_OF };
+  const input = { thesis: thesis([condition(BULL_ID)]), evidence: EVIDENCE, metric_results: [], as_of: AS_OF };
   await assert.rejects(
     evaluateThesis({ ...input, llm: { async complete() { return { text: '{"results":[{"condition_id":"', truncated: true, deployment }; } } }),
-    new ThesisValidationError("assessment response from anthropic/claude-sonnet-5-5 was cut off at the 6000-token limit"),
+    new ThesisValidationError("assessment response from anthropic/claude-sonnet-5-5 was cut off at the 4096-token limit"),
   );
   await assert.rejects(
     evaluateThesis({ ...input, llm: { async complete() { return { text: "Here is my assessment.", deployment }; } } }),
@@ -315,17 +330,9 @@ test('relative narrative horizons retain the saved version date across later ass
     assert.match(request.messages[0].content,/relative horizons.*thesis_created_at/i);
     const packet=JSON.parse(request.messages[1].content);
     assert.equal(packet.thesis_created_at,saved.created_at);
-    return {text:JSON.stringify({results:[{condition_id:BULL_ID,status:'unresolved',reason:'The horizon has not been established by evidence.',claim_refs:[]}]})};
+    return {text:JSON.stringify({results:[{condition_id:BULL_ID,status:'unresolved',refs:['C1']}]})};
   }};
   for (const as_of of ['2026-09-06T00:00:00.000Z',AS_OF]) {
-    await evaluateThesis({thesis:saved,claims:[{claim_id:CLAIM_ID,text_canonical:'Demand slowed.'}],metric_results:[],as_of,llm});
+    await evaluateThesis({thesis:saved,evidence:EVIDENCE,metric_results:[],as_of,llm});
   }
-});
-
-test('narrative reasons normalize whitespace and reject values that cannot be persisted', async () => {
-  const input={thesis:thesis([condition(BULL_ID)]),claims:[{claim_id:CLAIM_ID,text_canonical:'Demand slowed.'}],metric_results:[],as_of:AS_OF};
-  const response=(reason:string)=>llmResponse({results:[{condition_id:BULL_ID,status:'challenged',reason,claim_refs:[CLAIM_ID]}]});
-  const normalized=await evaluateThesis({...input,llm:response('  Demand slowed.  ')});
-  assert.equal(normalized.results[0].reason,'Demand slowed.');
-  await assert.rejects(evaluateThesis({...input,llm:response('x'.repeat(2001))}),ThesisValidationError);
 });

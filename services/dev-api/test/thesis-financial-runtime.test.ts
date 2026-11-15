@@ -1,7 +1,7 @@
 // The thesis agent loop with verified numerical conditions: each run computes
 // its conditions at its own cutoff, records the certified reference with the
-// assessment, and an unchanged outcome is reused without a new assessment or
-// alert even though the engine ran again.
+// assessment, and an unchanged outcome is recorded again over the snapshot
+// that already seals it, with no alert, even though the engine ran again.
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -52,7 +52,9 @@ test("thesis runtime with verified numerical conditions", { skip: !dockerAvailab
 
   await run();
   history = await loadThesisHistory(db, { agent_id: agent.agent_id, user_id: IDS.owner });
-  assert.equal(history.assessments.length, 1, "an unchanged verified outcome reuses the assessment");
+  assert.equal(history.assessments.length, 2, "each run records its own dated assessment");
+  assert.equal(history.assessments[0]!.snapshot_id, history.assessments[1]!.snapshot_id, "an unchanged verified outcome reuses the sealed snapshot");
+  assert.deepEqual(history.assessments[0]!.results, history.assessments[1]!.results);
   const findings = Number((await db.query(`select count(*)::int as n from findings where agent_id = $1`, [agent.agent_id])).rows[0].n);
   assert.equal(findings, 0, "no alert without a meaningful transition");
   const runs = Number((await db.query(`select count(*)::int as n from financial_runs where parent_id = $1`, [thesis.thesis_version_id])).rows[0].n);
