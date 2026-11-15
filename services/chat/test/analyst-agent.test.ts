@@ -258,6 +258,23 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.ok(router.sent[0]!.tools!.map((tool) => tool.name).includes("certified_financials"));
   });
 
+  await t.test("the answer's trace lists the tools the agent called", async () => {
+    const traced: string[] = [];
+    const agent = analystAgentRunner({
+      financial: { pool, planningModel: null, evidence: createEvidenceFinancialPort, resolveMention },
+      router: async () => scripted([{ toolCalls: [call("certified_financials", INCOME_2023), call("get_company_profile", { subject_ref: { kind: "issuer", id: A } })] }, { text: "DONE" }]),
+      read: async (name) => ({ tool: name, status: "no_business_claims", truncated: false, reads: [readOf(A)], no_filing: [] }) as AnalystToolResult,
+      compose: (input, turn, onAnswered) => {
+        traced.push(...input.toolCalls.map((entry) => entry.tool_name));
+        return answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: OBSERVE_F1 }), onAnswered });
+      },
+      asOf: () => new Date().toISOString(),
+      logToolCalls: persist.logToolCalls,
+    });
+    completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: "AAA revenue, and what it sells" }));
+    assert.deepEqual(traced.sort(), ["certified_financials", "get_company_profile"]);
+  });
+
   await t.test("an answer the judge reads is saved as its verdicts leave it, with nothing revealed after its seal", async () => {
     const judged = analystAgentRunner({
       financial: { pool, planningModel: null, evidence: createEvidenceFinancialPort, resolveMention },

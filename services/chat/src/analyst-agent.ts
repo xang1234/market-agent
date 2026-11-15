@@ -251,7 +251,8 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       answer = await deps.compose({
         context: { userIntent: question, bundleId: ANALYST_AGENT_BUNDLE_ID },
         blocks: [card],
-        toolCalls: [],
+        // The packet is built; these reach only the turn's trace.
+        toolCalls,
         factBlocks: noted,
         conversation,
         packet,
