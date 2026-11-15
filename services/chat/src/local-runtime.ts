@@ -535,7 +535,6 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
     answerTurn(answer, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered }), input),
 });
 
-// The analyst agent (CHAT_ANALYST_AGENT=1, runtime.ts): its reads cut off as the analyst path's do.
 export const analystAgent = analystAgentRunner({
   financial: { ...financialDeps, hydrate: hydrateTurn },
   router: () => analystAgentRouter(process.env),
@@ -564,9 +563,6 @@ export const generateThreadTitle: ChatThreadTitleGenerator = async (job) =>
     model: createLlmThreadTitleModel(),
   })(job);
 
-// An engine answer the analyst agent saves beside its card was sealed with
-// its own snapshot and certificate when it was published: it is saved as it
-// is, and only the rest is sealed here.
 const sealedHere = (blocks: ReadonlyArray<Record<string, unknown>>) => blocks.filter((block) => block.kind !== "financial_answer");
 
 async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersistenceInput): Promise<ChatSealResult> {

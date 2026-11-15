@@ -326,7 +326,6 @@ export type ChatCoordinatorOptions = {
   readQuestion?: (question: string) => Promise<ScopeProposal | null>;
   verificationMode?: ChatVerificationMode;
   financialRuntime?: ChatFinancialRuntime;
-  // Present only with CHAT_ANALYST_AGENT=1 (runtime.ts): the agent takes the financial lane's seat.
   analystAgent?: ChatAnalystAgent;
   analystToolRuntime?: ChatAnalystToolRuntime;
   persistAssistantMessage?: ChatAssistantMessagePersistence;
@@ -1414,8 +1413,6 @@ function emitSubjectResolutionToolEvents(
 
 export const ANALYST_AGENT_BUNDLE_ID = "analyst_agent";
 
-// The agent answers the turn as an analyst turn is answered, sealed, saved and
-// streamed; a turn it reads nothing for goes on to `next`.
 function analystAgentSeat(
   next: ChatTurnRunner,
   agent: ChatAnalystAgent,
@@ -1423,7 +1420,16 @@ function analystAgentSeat(
 ): ChatTurnRunner {
   return async (context) => {
     const turn = { ...context, bundleId: ANALYST_AGENT_BUNDLE_ID };
-    const answer = await agent(turn);
+    let answer: ChatAnalystToolRuntimeResult | null;
+    try {
+      answer = await agent(turn);
+    } catch (error) {
+      if (error instanceof ChatTurnStoppedError) throw error;
+      // Nothing about an unfinished turn leaves the server, as in the financial lane's seat.
+      console.error("[chat] the analyst agent failed", error);
+      context.emit("turn.error", { error_code: "analyst_agent_failed", message: "The answer could not be completed." });
+      return;
+    }
     if (answer === null) return next(context);
     await toolBackedAnalystTurnRunner(turn, { ...options, runtime: () => answer });
   };

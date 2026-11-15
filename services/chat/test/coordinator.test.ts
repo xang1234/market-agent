@@ -537,7 +537,6 @@ test("default turn runner calls analyst tool runtime and persists after verifica
   assert.equal(turn.events[1].tool_call_id, "tool-backed-1");
 });
 
-// The chain's seats, as each records its turn: offered choices, then the financial lane or the agent, then the base runner.
 function seats(analystAgent?: (context: ChatTurnRunContext) => Promise<null>) {
   const calls: string[] = [];
   const coordinator = createChatCoordinator({

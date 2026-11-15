@@ -1,12 +1,3 @@
-// The analyst agent (AA5), behind CHAT_ANALYST_AGENT=1. A tool loop reads
-// stored sources through the analyst_agent bundle: certified financials from
-// the engine, and the 10-K claims, peers and consensus AA4 serves. Its own
-// words are never shown. The turn's answer is the assertions list over the one
-// packet those reads made (mergePackets), written, rendered and judged as every
-// analyst answer is (answer-trace.ts answerTurn), so every number is an F id
-// and every business fact a C id. A turn it reads nothing for is the next
-// runner's.
-
 import { createHash, randomUUID } from "node:crypto";
 
 import type { FinancialSubjectRef } from "../../financial-core/src/index.ts";
@@ -29,6 +20,7 @@ import {
   certifiedFinancials,
   chatAuthority,
   chatGapText,
+  leftOutNotes,
   requestedSubjects,
   requestKeyFor,
   type CertifiedFinancials,
@@ -37,35 +29,21 @@ import {
 import { ANSWER_DEADLINES, withDeadlines, type DroppedClaims } from "./llm-runtime.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, LATEST, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 
-// ponytail: the loop's steps and the planner's calls share one count, so a
-// turn makes at most AGENT_CALLS model calls before its answer and judge;
-// tune both from the perf lane's calls per turn.
 const MAX_STEPS = 3;
 const AGENT_CALLS = 5;
-// A turn's certified calls are few (the medium budget allows 4); a run of keys this long is a defect.
 const MAX_REQUEST_KEYS = 64;
 
 export type AnalystAgentDeps = Readonly<{
   financial: Pick<ChatFinancialRuntimeDeps, "pool" | "planningModel" | "evidence" | "clock" | "resolveMention" | "priorSubjects" | "researchScope" | "hydrate">;
-  // The agent's router (analystAgentRouter).
   router: () => Promise<ControlledRouter | null>;
-  // An AA4 read, through the registry's argument checks (analyst-tools.ts runRegisteredAnalystTool).
   read: (name: AnalystToolName, args: Readonly<Record<string, JsonValue>>, turn: { as_of: string; user_id: string | null }) => Promise<AnalystToolResult>;
-  // The answer and its judge (answer-trace.ts answerTurn).
   compose: (input: AnswerTraceInput, turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">, onAnswered: (deployment: string) => void) => Promise<AnsweredTurn>;
-  // The cutoff the analyst tools read at.
   asOf: () => string;
   conversation?: (threadId: string) => Promise<ReadonlyArray<{ role: string; text: string }>>;
-  // Records the calls that read the answer's evidence, which its seal checks (tool_call_logs).
   logToolCalls?: (threadId: string, calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
   registry?: ToolRegistry;
 }>;
 
-/**
- * The router the agent's loop runs on: purpose agent (AGENT_LITELLM_MODEL
- * first), each step with deadlines of its own. runToolLoop passes no
- * controls, and withDeadlines fixes when its total ends as it is made.
- */
 export async function analystAgentRouter(
   env: LlmSettingsLoaderEnv,
   options: { createClient?: () => Promise<LlmChatClient> | LlmChatClient } = {},
@@ -80,9 +58,8 @@ export function perStepDeadlines(router: ControlledRouter): ControlledRouter {
 
 type Certified = Readonly<{ block: FinancialAnswerBlock; packet: EvidencePacket }>;
 
-/** The agent's answer to a turn, or null to leave the turn to the next runner. */
 export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
-  const registry = deps.registry ?? loadToolRegistry();
+  let registry = deps.registry;
   return async (context) => {
     if (!context.userId || !isUuid(context.threadId)) return null;
     const question = context.userIntent ?? "";
@@ -91,6 +68,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     if (companies.clarify || named.length === 0) return null;
     const router = await deps.router();
     if (!router) return null;
+    registry ??= loadToolRegistry();
     const policy = createTurnToolPolicy({
       registry,
       audience: "analyst",
@@ -102,29 +80,20 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const turnId = context.turnId ?? context.runId;
     const authority = chatAuthority(context.userId, context.threadId, turnId);
     const asOf = deps.asOf();
-    // By issuer: each company a tool may name, the turn's and the peers a read returned.
     const known = new Map(named.map((subject) => [issuerOf(subject), subject] as const));
     const labelOf = (issuer: string) => companies.labels.get(issuer) ?? known.get(issuer)?.mention ?? issuer;
-    const calls = { used: 0 };
-    const counted: ControlledRouter = {
-      complete: (request, controls) => {
-        calls.used += 1;
-        return router.complete(request, controls);
-      },
-    };
+    let planned = 0;
     const planningModel: PlanningModel | null = deps.financial.planningModel && (async (request) => {
-      if (calls.used >= AGENT_CALLS) throw new Error(`the turn has made its ${AGENT_CALLS} model calls`);
-      calls.used += 1;
+      if (planned >= AGENT_CALLS - MAX_STEPS) throw new Error(`the turn has made its ${AGENT_CALLS} model calls before its answer`);
+      planned += 1;
       return deps.financial.planningModel!(request);
     });
     const certified: Certified[] = [];
     const analyst: AnalystToolResult[] = [];
-    const notes: string[] = [];
+    const notes: string[] = leftOutNotes({ notFound: companies.notFound });
     const toolCalls: ChatAnalystToolRuntimeToolCall[] = [];
     const asked = new Map<string, Promise<ToolLoopOutput>>();
     const keys = requestKeys(deps.financial.pool, authority, context.threadId, turnId);
-    // Each company's filings are fetched once a turn, before its first certified call plans, as
-    // the financial lane fetches them; the fetch streams nothing, so a turn left to the next runner shows none.
     const fetched = new Map<string, Promise<boolean>>();
     const stillLoading = (issuers: ReadonlyArray<string>) => Promise.all(issuers.map((issuer) => {
       const pending = fetched.get(issuer) ?? (deps.financial.hydrate
@@ -132,7 +101,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
           .then((loading) => loading.has(issuer))
           .catch((reason: unknown) => {
             console.warn("[chat] fetching a company's filings failed; the analyst agent answers from what is on file", reason);
-            return true;
+            return false;
           })
         : Promise.resolve(false));
       fetched.set(issuer, pending);
@@ -142,7 +111,6 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const certify = async (args: JsonObject): Promise<ToolLoopOutput> => {
       const ask = certifiedAsk(args, known);
       if ("invalid" in ask) return invalid("certified_financials", ask.invalid);
-      // The same ask twice in a turn is one run, answered once.
       const prior = asked.get(ask.fingerprint);
       if (prior) return prior;
       const answer = (async (): Promise<ToolLoopOutput> => {
@@ -155,7 +123,6 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
           notes.push(`${who}: ${chatGapText("request_conflict")}`);
           return { content: JSON.stringify({ tool: "certified_financials", status: "gap", reason: "request_conflict" }) };
         }
-        // Each call plans only its own ask: no other question, and no pick the turn's clarification offered.
         const { clarificationAnswer: _picked, ...turn } = context;
         const outcome = await certifiedFinancials({ ...deps.financial, planningModel }, {
           context: { ...turn, userIntent: ask.question },
@@ -164,7 +131,6 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
           labels: new Map(subjects.map((subject) => [issuerOf(subject), labelOf(issuerOf(subject))])),
           authority,
           requestKey: requestKeyFor(turnId, key.n),
-          // The block is kept here and saved once with the turn's answer.
           persistParent: async () => {},
           originRef: key.origin,
         });
@@ -179,6 +145,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     };
 
     const readStored = async (name: AnalystToolName, args: JsonObject): Promise<ToolLoopOutput> => {
+      if (argIssuers(args).some((issuer) => !known.has(issuer))) return invalid(name, UNKNOWN_COMPANY);
       const result = await deps.read(name, lowercasedRefs(args), { as_of: asOf, user_id: context.userId ?? null });
       analyst.push(result);
       if (result.tool === "get_peer_set" && result.status === "ok") {
@@ -209,8 +176,8 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
 
     const template = policy.selection.prompt_template;
     const conversation = await deps.conversation?.(context.threadId) ?? [];
-    const loop = await runToolLoop({
-      router: counted,
+    await runToolLoop({
+      router,
       policy,
       maxSteps: MAX_STEPS,
       execute,
@@ -224,8 +191,11 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         reasoning: "low",
         maxTokens: 4096,
       },
+    }).catch((reason: unknown) => {
+      if (!isModelFailure(reason)) throw reason;
+      console.warn("[chat] the analyst agent's model failed while reading; it answers from what it read", reason);
     });
-    if (loop.steps.every((step) => (step.reply.toolCalls ?? []).length === 0)) return null;
+    if (!toolCalls.some((entry) => entry.status === "ok")) return null;
 
     const packet = mergePackets({
       engine: certified.map((answer) => answer.packet),
@@ -235,7 +205,6 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       cutoff: asOf,
     });
     await deps.logToolCalls?.(context.threadId, toolCalls);
-    // The calls that read the evidence: a seal that binds a source or claim checks each against its log.
     const readCalls = toolCalls.filter((entry) => entry.status === "ok").map((entry) => entry.tool_call_id);
     const snapshotId = randomUUID();
     const subjectRefs = named.map((subject) => ({ kind: "issuer" as const, id: issuerOf(subject) }));
@@ -251,7 +220,6 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       answer = await deps.compose({
         context: { userIntent: question, bundleId: ANALYST_AGENT_BUNDLE_ID },
         blocks: [card],
-        // The packet is built; these reach only the turn's trace.
         toolCalls,
         factBlocks: noted,
         conversation,
@@ -260,31 +228,25 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       }, { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}), question }, (deployment) => {
         answeredBy = deployment;
       });
-      // The save is claimed after the judge, so the turn stays stoppable until then.
       if (answer.judging) answer = { ...answer, assertions: (await answer.judging.done).assertions };
     } catch (reason) {
-      if (!(reason instanceof LlmRouterError || reason instanceof LlmProviderError)) throw reason;
+      if (!isModelFailure(reason) || certified.length === 0) throw reason;
       console.warn("[chat] the analyst agent's answer could not be written; the turn answers with its certified figures alone", reason);
       answer = { assertions: null, blocks: [], without: () => ({ blocks: [] }) };
     }
 
     const claims = analyst.flatMap((result) => (result.status === "ok" && "claims" in result ? result.claims : []));
     const cited = citedSources(answer.assertions, packet);
-    // Every engine block is named for its unit, and a message proves nothing of an id two blocks share.
     const certifiedBlocks = certified.map((answer, i) => ({ ...answer.block, id: `${answer.block.id}-${i + 1}` }) as Record<string, unknown>);
-    // The seal needs one block of the agent's own: with no card and no note, a typed line says why.
     const unwritten = [{
       ...noteBlock({ snapshotId, asOf }, "agent:unwritten", certified.length > 0 ? COMMENTARY_UNAVAILABLE : NO_ANSWER),
       subject_refs: subjectRefs,
       tool_call_ids: readCalls,
     }];
     const turnBlocks = (written: ReadonlyArray<Record<string, unknown>>) => {
-      // An answer that rendered no assertion is not shown: the certified blocks stand alone.
       const own = [...written.filter(rendered).map((block) => ({ ...withRefs(block, claims, cited), tool_call_ids: readCalls })), ...noted];
       return [...certifiedBlocks, ...(own.length > 0 ? own : unwritten)];
     };
-    // The blocks as every verdict left them: judged already, watch hears them at once. The turn
-    // seals and saves these, so it reveals nothing after its seal.
     const turnAnswer = (shown: Pick<AnsweredTurn, "blocks" | "judging">): Pick<ChatAnalystToolRuntimeResult, "blocks"> => {
       let settled = shown.blocks;
       shown.judging?.watch((blocks) => {
@@ -324,8 +286,11 @@ const GATHER_RULES = [
   "Read every company the question is about, in one step when you can.",
 ];
 
-// The fetch's progress events go nowhere: they would start the stream before the agent knows it takes the turn.
 const QUIET = (() => undefined) as unknown as ChatTurnRunContext["emit"];
+
+const UNKNOWN_COMPANY = "name each company by a subject_ref the prompt or a peer read gave";
+
+const isModelFailure = (reason: unknown) => reason instanceof LlmRouterError || reason instanceof LlmProviderError;
 
 const NO_ANSWER = "No answer could be written from the stored sources read for this question.";
 
@@ -348,12 +313,11 @@ type CertifiedAsk = Readonly<{ subjects: ReadonlyArray<string>; choice: PlanChoi
 const PERIOD_KINDS = new Set(["latest", "fiscal_year", "fiscal_quarter"]);
 const QUARTERS = new Set(["Q1", "Q2", "Q3", "Q4"]);
 
-// A certified_financials call's arguments as one engine request, or why they are not one.
 export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, RequestedSubject>): CertifiedAsk | { invalid: string } {
   const refs = args.subject_refs;
   if (!Array.isArray(refs) || refs.length === 0) return { invalid: "subject_refs names the companies, as the prompt lists them" };
   const subjects = refs.map((ref) => (isRecord(ref) && ref.kind === "issuer" && typeof ref.id === "string" ? ref.id.toLowerCase() : null));
-  if (subjects.some((issuer) => issuer === null || !known.has(issuer))) return { invalid: "name each company by a subject_ref the prompt or a peer read gave" };
+  if (subjects.some((issuer) => issuer === null || !known.has(issuer))) return { invalid: UNKNOWN_COMPANY };
   const question = typeof args.question === "string" ? args.question.trim() : "";
   if (question === "") return { invalid: "question says the ask in one sentence" };
   const metrics = args.metrics;
@@ -364,7 +328,6 @@ export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, Reques
   if (period === null) return { invalid: "period is latest, a fiscal_year with its year, or a fiscal_quarter with its quarter" };
   const companies = [...new Set(subjects as string[])];
   const keptMetrics = metrics === undefined ? null : [...new Set(metrics as string[])].sort();
-  // Named metrics plan with no model, so their ask is the figures; any other is the question's.
   const choice: PlanChoice = keptMetrics ? { kind: "kept_figures", metrics: keptMetrics, period } : { kind: "planner" };
   const fingerprint = createHash("sha256")
     .update(JSON.stringify({ companies: [...companies].sort(), ...(keptMetrics ? { metrics: keptMetrics, period } : { question: question.toLowerCase().replace(/\s+/g, " ") }) }))
@@ -383,13 +346,6 @@ function readPeriod(value: JsonValue | undefined): ReadPeriod | null {
     : null;
 }
 
-/**
- * A turn's request keys, turn:<id>:1 on, one per ask. A retry gives an ask the
- * key an earlier attempt gave it, and never a key another ask holds: a key
- * resumes its stored plan, whatever the call asks now. The plan records the
- * ask that made it in its origin ref, which its semantic hash leaves out.
- * Keys are taken one at a time, so two calls in one step never share one.
- */
 export function requestKeys(
   pool: ChatFinancialRuntimeDeps["pool"],
   authority: ReturnType<typeof chatAuthority>,
@@ -440,7 +396,6 @@ async function certifiedOutput(
       });
     }
     case "existing":
-      // Its sealed block lived only in the attempt that published it.
       notes.push(`${who}: these figures were computed in an earlier attempt of this turn and cannot be shown again.`);
       return output("existing", { run_id: outcome.run_id });
     case "clarification":
@@ -459,7 +414,6 @@ function invalid(tool: string, reason: string): ToolLoopOutput {
 
 const isFailure = (result: AnalystToolResult) => result.status === "invalid_arguments" || result.status === "no_subject" || result.status === "unavailable";
 
-// What the model hears of a read: its status, and each entry's words.
 function readSummary(result: AnalystToolResult): JsonObject {
   const base = { tool: result.tool, status: result.status, ...("reason" in result ? { reason: result.reason } : {}) };
   if ("reads" in result) {
@@ -480,10 +434,6 @@ function readSummary(result: AnalystToolResult): JsonObject {
   return base;
 }
 
-// The note a read that found nothing leaves, for the answer's notes: typed
-// text, never the model's. An item not read in full and a company with no
-// 10-K are the packet's own entries (mergePackets); a read the model asked
-// wrongly is its to fix, and leaves none.
 export function statusNote(result: AnalystToolResult, who: string, competitor = false): string | null {
   switch (result.status) {
     case "no_business_claims":
@@ -506,7 +456,6 @@ export function statusNote(result: AnalystToolResult, who: string, competitor = 
   }
 }
 
-// AA4's executors compare issuer ids as text, lowercase as Postgres prints them.
 function lowercasedRefs(args: JsonObject): Readonly<Record<string, JsonValue>> {
   const lower = (ref: JsonValue): JsonValue => (isRecord(ref) && typeof ref.id === "string" ? { ...ref, id: ref.id.toLowerCase() } : ref);
   return {
@@ -530,16 +479,13 @@ function statusOf(content: string): string {
   }
 }
 
-// A card the answer rendered from its assertions has commentary parts; the fallback sentence has none.
 const rendered = (block: Record<string, unknown>) => Array.isArray(block.commentary) && block.commentary.length > 0;
 
-// The sources of the claims no claim row stores (consensus, peers) that the answer cites, which seal as sources.
 function citedSources(report: AnsweredTurn["assertions"], packet: EvidencePacket): ReadonlyArray<string> {
   const cited = new Set((report?.accepted ?? []).flatMap((entry) => entry.evidence));
   return packet.claims.filter((claim) => cited.has(claim.id) && !isUuid(claim.claim_id) && isUuid(claim.source_id)).map((claim) => claim.source_id);
 }
 
-// What the card's seal binds: the 10-K claims its segments quote, their documents and sources, and any other source it cites.
 function withRefs(
   block: Record<string, unknown>,
   claims: ReadonlyArray<{ claim_id: string; document_id: string; source_id: string }>,

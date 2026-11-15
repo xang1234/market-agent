@@ -181,7 +181,6 @@ const GAP_TEXT: Readonly<Record<ChatGap, string>> = {
   parent_authority_required: "This calculation could not be run for this conversation.",
 };
 
-/** How a turn words a gap, the same for every lane that asks the engine. */
 export const chatGapText = (reason: ChatGap): string => GAP_TEXT[reason];
 
 // Whether a request's gap declines the turn, or is a notice about its run:
@@ -434,7 +433,6 @@ type PlannedSubjects = Readonly<{ planned_subjects: ReadonlyArray<RequestedSubje
 
 export type CertifiedFinancials =
   // The packet is built when called, so a caller that never reads it does no work after the commit.
-  // block: the sealed answer whole, for a caller whose parent saves it later.
   | Readonly<{ status: "published"; run_id: string; content: FinancialAnswerContent; block: FinancialAnswerBlock; packet: () => Promise<EvidencePacket> }>
   // An earlier attempt published the run, so only its parent holds the block:
   // a caller that needs the figures on a retry keeps them in its parent.
@@ -546,7 +544,6 @@ export type TurnCompanies = Readonly<{
 
 const label = (resolution: ChatResolvedSubjectPreResolution) => resolution.handoff?.display_labels?.ticker ?? resolution.display_label;
 
-/** The companies a turn is about, as the financial lane picks them: named, compared, or carried from the previous answer. */
 export async function requestedSubjects(deps: Pick<ChatFinancialRuntimeDeps, "pool" | "resolveMention" | "priorSubjects">, context: ChatFinancialTurnContext, text: string): Promise<TurnCompanies> {
   // Each name is resolved once, though the analyst path's rules read the message again.
   const resolutions = new Map<string, Promise<ChatSubjectPreResolution>>();
@@ -684,7 +681,7 @@ export async function issuersWithoutFilings(db: Pick<SqlExecutor, "query">, issu
 const noFilingsLine = (labels: ReadonlyArray<string>): string => `No SEC filings are on file for ${labelList(labels)} yet.`;
 
 /** What a turn says of the companies it left out or answered in part: names that matched none, companies with no filings, and ones whose filings are still loading. */
-const leftOutNotes = ({ notFound, noFilings = [], loadingFilings = [] }: Pick<TurnCompanies, "notFound" | "noFilings" | "loadingFilings">): string[] => [
+export const leftOutNotes = ({ notFound, noFilings = [], loadingFilings = [] }: Pick<TurnCompanies, "notFound" | "noFilings" | "loadingFilings">): string[] => [
   ...(notFound.length === 0 ? [] : [`No company matched ${labelList(notFound)}.`]),
   ...(noFilings.length === 0 ? [] : [noFilingsLine(noFilings)]),
   ...(loadingFilings.length === 0 ? [] : [`Filings for ${labelList(loadingFilings)} are still loading; ask again in a minute.`]),

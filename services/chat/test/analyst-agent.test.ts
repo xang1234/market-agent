@@ -6,7 +6,7 @@ import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
-import type { ControlledRouter, LlmChatRequest, LlmExecutionControls, LlmToolCall } from "../../llm/src/router.ts";
+import { LlmRouterError, type ControlledRouter, type LlmChatRequest, type LlmExecutionControls, type LlmToolCall } from "../../llm/src/router.ts";
 import { analystAgentRouter, analystAgentRunner, certifiedAsk, perStepDeadlines, statusNote, type AnalystAgentDeps } from "../src/analyst-agent.ts";
 import type { AnalystToolResult } from "../src/analyst-tools.ts";
 import { answerTurn } from "../src/answer-trace.ts";
@@ -188,7 +188,6 @@ test("every read that found nothing leaves a typed note, and a read the model as
   assert.equal(noneNaming, "AAA: no other company's 10-K on file names it as a competitor.");
 });
 
-// The turn's completion; a failure names the error the turn ended on.
 function completed(events: ReadonlyArray<{ type: string } & Record<string, unknown>>) {
   const last = events.at(-1)!;
   assert.equal(last.type, "turn.completed", JSON.stringify(last));
@@ -197,7 +196,6 @@ function completed(events: ReadonlyArray<{ type: string } & Record<string, unkno
 
 type Step = { text?: string; toolCalls?: LlmToolCall[] };
 
-// A router that answers each step from its script, and records what each step was sent.
 function scripted(steps: Step[]): ControlledRouter & { sent: LlmChatRequest[] } {
   const sent: LlmChatRequest[] = [];
   return {
@@ -369,7 +367,6 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
 
   await t.test("a retried turn keeps each ask's key, and shows a call an earlier attempt published as a typed gap", async () => {
     const turnId = randomUUID();
-    // The first attempt publishes both runs and is stopped before its save.
     let stop: () => void = () => assert.fail("not started");
     const first = scripted([{ toolCalls: [call("certified_financials", INCOME_2023), call("certified_financials", REVENUE)] }, { text: "DONE" }]);
     const stopping: ControlledRouter = {
@@ -384,7 +381,6 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.equal(events.at(-1)!.type, "turn.stopped");
     const keys = await keysOf(turnId);
     assert.deepEqual(keys, [`turn:${turnId}:1`, `turn:${turnId}:2`]);
-    // The retry asks them in the other order, and asks one more.
     const ANOTHER = { ...REVENUE, question: "AAA top line in fiscal 2023" };
     const retry = scripted([{ toolCalls: [call("certified_financials", REVENUE), call("certified_financials", INCOME_2023), call("certified_financials", ANOTHER)] }, { text: "DONE" }]);
     const planner = revenueModel(["AAA"]);
@@ -430,6 +426,72 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.equal(unlogged.at(-1)!.type, "turn.error", "a source no logged call read does not seal");
   });
 
+  const failing = (step: number, router: ControlledRouter): ControlledRouter => {
+    let made = 0;
+    return {
+      complete: async (request, controls) => {
+        made += 1;
+        if (made === step) throw new LlmRouterError("all_deployments_failed", "every deployment failed", []);
+        return router.complete(request, controls);
+      },
+    };
+  };
+
+  await t.test("a model failure while reading keeps the figures read before it", async () => {
+    const router = failing(2, scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }]));
+    const done = completed(await run(agentOf(router, OBSERVE_F1), { ...base, turnId: randomUUID(), userIntent: "AAA revenue" }));
+    assert.deepEqual((done.message as { blocks: Array<{ kind: string }> }).blocks.map((block) => block.kind), ["financial_answer", "rich_text"]);
+  });
+
+  await t.test("an answer that cannot be written with no figures ends the turn with a fixed error", async () => {
+    const agent = analystAgentRunner({
+      financial: { pool, planningModel: null, evidence: createEvidenceFinancialPort, resolveMention },
+      router: async () => scripted([{ toolCalls: [call("get_company_profile", { subject_ref: { kind: "issuer", id: A } })] }, { text: "DONE" }]),
+      read: async (name) => ({ tool: name, status: "no_business_claims", truncated: false, reads: [readOf(A)], no_filing: [] }) as AnalystToolResult,
+      compose: async () => {
+        throw new LlmRouterError("all_deployments_failed", "relation chat_secret_table: every deployment failed", []);
+      },
+      asOf: () => new Date().toISOString(),
+      logToolCalls: persist.logToolCalls,
+    });
+    const last = (await run(agent, { ...base, turnId: randomUUID(), userIntent: "What does AAA sell?" })).at(-1)!;
+    assert.deepEqual([last.type, last.error_code, last.message], ["turn.error", "analyst_agent_failed", "The answer could not be completed."]);
+  });
+
+  await t.test("a read naming a company the turn does not know is refused unread, and a turn of refusals is the next runner's", async () => {
+    let next = 0;
+    const router = scripted([{ toolCalls: [call("get_peer_set", { subject_ref: { kind: "issuer", id: B } })] }, { text: "DONE" }]);
+    const coordinator = createChatCoordinator({
+      analystAgent: agentOf(router, OBSERVE_F1),
+      persistAssistantMessage: persist,
+      runner: async (context) => {
+        next += 1;
+        context.emit("turn.completed", {});
+      },
+    });
+    const turnId = randomUUID();
+    await coordinator.getOrCreateTurn({ ...base, runId: turnId, turnId, userIntent: "Who are AAA's peers?" }).completed;
+    assert.equal(next, 1);
+    const refused = router.sent[1]!.messages.find((message) => message.role === "toolResult");
+    assert.equal(JSON.parse(refused!.content as string).status, "invalid_arguments");
+  });
+
+  await t.test("a company no listing matched is named in the answer's notes", async () => {
+    const router = scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }, { text: "DONE" }]);
+    const done = completed(await run(agentOf(router, OBSERVE_F1), { ...base, turnId: randomUUID(), userIntent: "Compare AAA and ZZZ revenue" }));
+    assert.ok(JSON.stringify((done.message as { blocks: unknown }).blocks).includes("No company matched ZZZ."));
+  });
+
+  await t.test("the planner gets what the turn's model calls leave after the loop's steps", async () => {
+    const planner = revenueModel(["AAA"]);
+    const asks = ["AAA revenue in fiscal 2023", "AAA sales in fiscal 2023", "AAA turnover in fiscal 2023"].map((question) => call("certified_financials", { ...REVENUE, question }));
+    const router = scripted([{ toolCalls: asks }, { text: "DONE" }]);
+    completed(await run(agentOf(router, OBSERVE_F1, { planningModel: planner }), { ...base, turnId: randomUUID(), userIntent: "AAA revenue" }));
+    assert.equal(planner.calls, 2);
+    const statuses = router.sent[1]!.messages.flatMap((message) => (message.role === "toolResult" ? [JSON.parse(message.content as string).status] : []));
+    assert.deepEqual(statuses.sort(), ["declined", "published", "published"]);
+  });
+
   await t.test("a turn the agent reads nothing for goes on to the next runner", async () => {
     const turnId = randomUUID();
     let next = 0;
@@ -446,7 +508,6 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
   });
 });
 
-// The chat server's own seal and save (local-runtime.ts) on this database.
 async function savingMessages(t: TestContext, url: string): Promise<ChatAssistantMessagePersistence & { logToolCalls: AnalystAgentDeps["logToolCalls"] }> {
   const previous = process.env.CHAT_DATABASE_URL;
   process.env.CHAT_DATABASE_URL = url;

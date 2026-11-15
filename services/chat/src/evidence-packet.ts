@@ -185,16 +185,6 @@ function resultEntries(result: AnalystToolResult): Array<readonly [string, Unnum
   }
 }
 
-/**
- * The analyst agent's one packet: each certified answer's figures, F1 on in
- * the order the answers came, and every claim, C1 on in one pass over the
- * route's claims and then the analyst tools' entries, each stored claim once
- * by claim id. A consensus value or a peer is a claim no claim row stores:
- * its claim id is no UUID, so its quote seals no claim ref (prose-refs.ts).
- * What a read could not show (an item not read in full, a company with no
- * 10-K) joins `notes` as a gap, which the answer's notes say and no
- * assertion cites. A filer's claims take the turn's label for it.
- */
 export function mergePackets(input: {
   engine: ReadonlyArray<EvidencePacket>;
   route?: EvidencePacket;
@@ -207,7 +197,6 @@ export function mergePackets(input: {
   const figures = input.engine.flatMap((packet) => {
     const ids = new Map(packet.figures.map((figure) => [figure.id, `F${++figureCount}`]));
     const renumbered = (id: string) => ids.get(id) ?? id;
-    // A one-company answer leaves its figures' company to the packet's, which a merge loses.
     const company = packet.companies.length === 1 ? packet.companies[0] : undefined;
     return packet.figures.map(({ derived_from, ...figure }) => ({
       ...(company ? { company } : {}),
@@ -251,8 +240,6 @@ export function mergePackets(input: {
   };
 }
 
-// ponytail: a consensus value or peer keeps the label the tool read it under
-// (its ticker), which matches the turn's but for a company listed twice.
 function packetClaim(entry: AnalystPacketEntry): Omit<PacketClaim, "id">[] {
   switch (entry.kind) {
     case "claim": {
@@ -269,7 +256,6 @@ function packetClaim(entry: AnalystPacketEntry): Omit<PacketClaim, "id">[] {
   }
 }
 
-// A 10-K read's filers by the turn's label for each, as its figures name them.
 function relabelled(result: AnalystToolResult, labels: ReadonlyMap<string, string>): AnalystToolResult {
   if (!("reads" in result)) return result;
   const label = (issuer: string, fallback: string) => labels.get(issuer.toLowerCase()) ?? fallback;
