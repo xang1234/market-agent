@@ -43,7 +43,7 @@ const LABEL_ONLY = new RegExp(`^${PART}${LABEL}\\d{1,2}[a-c]?(?:and\\d{1,2}[a-c]
 const PART_PREFIX = /^part[iv]+(?=[il]tems?\d)/;
 
 // A block's first letters and digits in lower case, each with its index in
-// the block. A label and the longest title take under 100.
+// the block. The longest heading, Item 5's with "PART II", takes 104.
 const HEADING_LETTERS = 200;
 function letters(block: string): { key: string; at: number[] } {
   let key = "";

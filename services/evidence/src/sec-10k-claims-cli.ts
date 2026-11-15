@@ -61,8 +61,7 @@ async function issuers(db: QueryExecutor, tickers: string[]): Promise<Issuer[]> 
   return rows.sort((a, b) => a.legal_name.localeCompare(b.legal_name));
 }
 
-// A 10-K's own filer, from its inline XBRL cover page, where markup may wrap
-// the number.
+// A 10-K's own filer, from its inline XBRL cover page.
 export function filerCik(html: string): number | null {
   const cik = /name\s*=\s*["']?dei:EntityCentralIndexKey\b["']?[^>]*>(?:\s|<[^>]*>)*(\d{1,10})\s*</i.exec(html);
   return cik === null ? null : Number(cik[1]);
