@@ -148,10 +148,12 @@ test("a lost database degrades a read to unavailable; a bug in the code or its S
   assert.deepEqual([
     isUnavailableRead(new Error("Connection terminated unexpectedly")),
     isUnavailableRead(coded("connect ECONNREFUSED 127.0.0.1:5432", "ECONNREFUSED")),
-    isUnavailableRead(coded("canceling statement due to statement timeout", "57014")),
+    isUnavailableRead(coded("duplicate key value violates unique constraint", "23505")),
+    isUnavailableRead(coded("the database system is shutting down", "57P03")),
     isUnavailableRead(coded('column "titel" does not exist', "42703")),
+    isUnavailableRead(coded("invalid input syntax for type uuid", "22P02")),
     isUnavailableRead(new TypeError("Cannot read properties of undefined")),
-  ], [true, true, true, false, false]);
+  ], [true, true, false, true, false, false, false]);
 });
 
 test("a registry call refuses a filter no tool reads, and an empty predicate list", async () => {
@@ -162,4 +164,8 @@ test("a registry call refuses a filter no tool reads, and an empty predicate lis
   );
   assert.equal((await runRegisteredAnalystTool(db, "get_claims", { subject_refs: [{ kind: "issuer", id: NVDA }], predicates: [] }, { as_of: AS_OF })).status, "invalid_arguments");
   assert.equal((await runRegisteredAnalystTool(db, "get_company_profile", { query: "what does NVDA do", subject_ref: { kind: "issuer", id: NVDA } }, { as_of: AS_OF })).status, "ok");
+  assert.deepEqual(
+    await runRegisteredAnalystTool(db, "get_company_profile", { subject_ref: { kind: "issuer", id: NVDA }, role: "competitor" }, { as_of: AS_OF }),
+    { tool: "get_company_profile", status: "invalid_arguments", reason: "role not supported" },
+  );
 });

@@ -147,7 +147,7 @@ export async function runRegisteredAnalystTool(
   if (args.criteria !== undefined && args.criteria !== "industry") {
     return { tool: name, status: "invalid_arguments", reason: "peers are chosen by industry only" };
   }
-  const unread = Object.keys(args).filter((key) => !READ_ARGUMENTS.has(key));
+  const unread = Object.keys(args).filter((key) => !READ_ARGUMENTS[name].has(key));
   if (unread.length > 0) return { tool: name, status: "invalid_arguments", reason: `${unread.join(", ")} not supported` };
   const n = args.n;
   if (n !== undefined && !(typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 20)) {
@@ -165,15 +165,25 @@ export async function runRegisteredAnalystTool(
   });
 }
 
-// The coordinator sends query and subject_ref; agent_id names the caller.
-const READ_ARGUMENTS = new Set(["query", "agent_id", "subject_ref", "subject_refs", "predicates", "role", "criteria", "n"]);
+// Each tool's arguments, beside the query the coordinator always sends.
+const READ_ARGUMENTS: Readonly<Record<AnalystToolName, ReadonlySet<string>>> = {
+  get_company_profile: new Set(["query", "subject_ref"]),
+  get_claims: new Set(["query", "subject_ref", "subject_refs", "predicates", "role"]),
+  get_peer_set: new Set(["query", "subject_ref", "criteria", "n"]),
+  get_analyst_consensus: new Set(["query", "subject_ref"]),
+};
 
-// A read that failed for want of the database degrades to unavailable; a bug
-// in the code or its SQL (SQLSTATE class 42) throws.
+// The database out of reach: SQLSTATE connection, resource, operator and
+// system classes, and the socket errors. pg ends a dropped connection with an
+// uncoded Error, so one counts too; any other code is a bug and throws.
+const OUTAGE_SQLSTATE_CLASSES = ["08", "53", "57", "58"];
+const OUTAGE_SOCKET_CODES = new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "EPIPE"]);
+
 export function isUnavailableRead(reason: unknown): boolean {
-  if (reason instanceof TypeError || reason instanceof ReferenceError || reason instanceof RangeError || reason instanceof SyntaxError) return false;
-  const code = reason instanceof Error && "code" in reason ? String(reason.code) : "";
-  return !code.startsWith("42");
+  if (!(reason instanceof Error) || reason instanceof TypeError || reason instanceof ReferenceError || reason instanceof RangeError || reason instanceof SyntaxError) return false;
+  if (!("code" in reason)) return true;
+  const code = String(reason.code);
+  return OUTAGE_SOCKET_CODES.has(code) || (/^[0-9A-Z]{5}$/.test(code) && OUTAGE_SQLSTATE_CLASSES.includes(code.slice(0, 2)));
 }
 
 type SubjectRef = { kind: string; id: string };
