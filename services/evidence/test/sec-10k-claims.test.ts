@@ -214,6 +214,16 @@ test("two stores of one 10-K's bytes at once keep one source", dockerTest, async
   assert.equal(sources!.n, 1);
 });
 
+test("a superseded 10-K is not read again", dockerTest, async (t) => {
+  const { client, nvda } = await nvdaDatabase(t, "tenk-superseded");
+  const tenK = await storedTenK(client, nvda, NVDA_HTML);
+  await client.query(`update documents set parse_status = 'superseded' where document_id = $1`, [tenK.documentId]);
+  const { llm, calls } = llmAnswering({ "1": JSON.stringify({ claims: [{ predicate: "business.competition", quote: COMPETITION_LIST_ITEM }] }), "1A": RISK_REPLY });
+  const result = await extract10kClaims({ db: client, llm, resolveCompetitor: async () => null }, tenK);
+  assert.deepEqual([result.outcome, calls()], ["already_extracted", 0]);
+  assert.deepEqual(await counts(client), { claims: 0, competitors: 0 });
+});
+
 test("a 10-K with neither item is recorded failed, rechecked with no fetch or model call, and read once the parser finds an item", dockerTest, async (t) => {
   const { client, nvda } = await nvdaDatabase(t, "tenk-no-sections");
   const unsectioned = new TextEncoder().encode(`<html><body><div>Our Business</div><div>${DESCRIPTION}</div>${BODY}</body></html>`);

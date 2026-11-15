@@ -135,3 +135,19 @@ test("a title split by markup still heads the next item, so the one before it en
   const html = `<div>Item 1A. Risk Factors</div>${paragraphs("risk", 30)}<div>Item 7A. Quantitative and Qualitat<span>ive</span> Disclosures About Market Risk.</div>${paragraphs("rates", 30)}`;
   assert.ok(!(tenKSections(html)["1A"] as TenKSection).text.includes("rates paragraph"));
 });
+
+test("a paragraph that cites a lettered item by number is no heading", () => {
+  for (const cite of ["Item 1A of this report discusses the risks of our business.", "Item 1A, Risk Factors, of this report describes the risks we face."]) {
+    const html = `<div>Item 1. Business</div>${paragraphs("early", 15)}<p>${cite}</p>${paragraphs("late", 15)}<div>Item 1A. Risk Factors</div>${paragraphs("risk", 20)}`;
+    const sections = tenKSections(html);
+    assert.ok((sections["1"] as TenKSection).text.endsWith("late paragraph 14: we make things that people use every day in many places."), cite);
+    assert.equal((sections["1A"] as TenKSection).text.slice(0, 26), "Item 1A. Risk Factors risk", cite);
+  }
+});
+
+test("a short lower-case title heads the next item, so the one before it ends", () => {
+  for (const next of ["Item 1B. unresolved staff comments", "Item 2. properties"]) {
+    const sections = tenKSections(`<div>Item 1A. Risk Factors</div>${paragraphs("risk", 30)}<div>${next}</div>${paragraphs("after", 5)}`);
+    assert.ok(!(sections["1A"] as TenKSection).text.includes("after paragraph"), next);
+  }
+});
