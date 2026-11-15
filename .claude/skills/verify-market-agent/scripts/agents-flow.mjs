@@ -21,11 +21,10 @@ let failure = null
 const LLM_LOG = join(ROOT, '.dev/logs/dev-api.log')
 const logSize = () => (existsSync(LLM_LOG) ? statSync(LLM_LOG).size : 0)
 const llmCallsSince = (from) => (existsSync(LLM_LOG) ? (readFileSync(LLM_LOG).subarray(from).toString().match(/^\[llm\] /gm) ?? []).length : null)
-// Words of 12 characters or more from a block's text segments, never its refs.
-// A commentary card hands off its verified inferences and figures only; other blocks hand off their text.
 const handedText = (block) => (Array.isArray(block.commentary)
   ? block.commentary.flatMap((part) => (part.kind === 'inference' ? [part.text] : part.kind === 'figures' ? part.segments.filter((segment) => segment.type === 'text').map((segment) => segment.text) : []))
   : block.analyst_commentary ? [] : (block.segments ?? []).filter((segment) => segment.type === 'text').map((segment) => segment.text))
+// Words of 12 characters or more from a block's text segments, never its refs.
 const wordsOf = (blocks) => (blocks ?? []).flatMap(handedText).map((text) => text.trim()).filter((text) => text.length >= 12)
 const unverifiedOf = (blocks) => (blocks ?? []).flatMap((block) => (block.commentary ?? []).flatMap((part) => (part.kind === 'unverified' ? [part.text.trim()] : [])))
 

@@ -18,7 +18,6 @@ export type ThesisHandoff =
 
 export const NO_THESIS_SECTION = 'This memo has no investment thesis section to monitor.'
 
-/** Analyze offers the memo's thesis section to monitor, or a note that it has none. */
 export type AnalyzeThesisOffer =
   | { kind: 'handoff'; handoff: AnalyzeThesisHandoff }
   | { kind: 'no_thesis'; note: typeof NO_THESIS_SECTION }
@@ -31,7 +30,7 @@ export function analyzeThesisHandoff(run: AnalyzeRunDetail): AnalyzeThesisOffer 
   const [subjectRef] = metadata.subject_refs
   if (!isMonitorableSubject(subjectRef)) return null
 
-  const thesis = clip(thesisSectionText(run))
+  const thesis = clipToWholeCodePoints(thesisSectionText(run))
   if (thesis === '') return { kind: 'no_thesis', note: NO_THESIS_SECTION }
   return { kind: 'handoff', handoff: { sourceRunId: run.run_id, subjectRef, thesis, name: `${run.display_title} monitor` } }
 }
@@ -62,28 +61,33 @@ export function readThesisHandoff(state: unknown): ThesisHandoff | null {
   return analyze ? { kind: 'analyze', ...analyze } : null
 }
 
-// A memo's thesis section is a section block of its paragraphs, or, in a v1 memo, the rich text blocks it tags.
 function thesisSectionText(run: AnalyzeRunDetail): string {
   return run.blocks
     .filter((block) => isRecord(block.data_ref) && isRecord(block.data_ref.params) && block.data_ref.params.playbook_section_id === 'investment_thesis')
-    .flatMap((block) => (block.kind === 'section' ? (Array.isArray(block.children) ? block.children : []) : [block]))
+    .flatMap(thesisParagraphBlocks)
     .map(paragraphText)
     .filter(Boolean)
     .join('\n\n')
 }
 
-// Commentary reads as its checked parts, verified inferences and then figures. Unverified and pending inferences stay out.
+function thesisParagraphBlocks(block: Record<string, unknown>): unknown[] {
+  if (block.kind === 'section') return Array.isArray(block.children) ? block.children : []
+  return [block]
+}
+
 function paragraphText(block: unknown): string {
   if (!isRecord(block)) return ''
-  if (Array.isArray(block.commentary)) {
-    const parts = block.commentary.filter(isRecord)
-    return [
-      ...parts.flatMap((part) => (part.kind === 'inference' && typeof part.text === 'string' ? [typeof part.subject === 'string' ? `${part.subject}: ${part.text}` : part.text] : [])),
-      ...parts.flatMap((part) => (part.kind === 'figures' && Array.isArray(part.segments) ? [segmentsText(part.segments)] : [])),
-    ].map((text) => text.trim()).filter(Boolean).join('\n\n')
-  }
+  if (Array.isArray(block.commentary)) return checkedCommentaryText(block.commentary.filter(isRecord))
   if (block.analyst_commentary === true || !Array.isArray(block.segments)) return ''
   return segmentsText(block.segments)
+}
+
+function checkedCommentaryText(parts: ReadonlyArray<Record<string, unknown>>): string {
+  const verifiedInferences = parts.flatMap((part) => (part.kind === 'inference' && typeof part.text === 'string'
+    ? [typeof part.subject === 'string' ? `${part.subject}: ${part.text}` : part.text]
+    : []))
+  const figureStatements = parts.flatMap((part) => (part.kind === 'figures' && Array.isArray(part.segments) ? [segmentsText(part.segments)] : []))
+  return [...verifiedInferences, ...figureStatements].map((text) => text.trim()).filter(Boolean).join('\n\n')
 }
 
 function segmentsText(segments: ReadonlyArray<unknown>): string {
@@ -96,8 +100,7 @@ function segmentsText(segments: ReadonlyArray<unknown>): string {
   }).join('').trim()
 }
 
-// Whole code points, up to the saved limit, which counts UTF-16 units.
-function clip(text: string): string {
+function clipToWholeCodePoints(text: string): string {
   let clipped = ''
   for (const point of text) {
     if (clipped.length + point.length > THESIS_TEXT_MAX) break

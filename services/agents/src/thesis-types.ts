@@ -66,7 +66,7 @@ export type ConditionFinancialRef = {
   result_hash: string | null;
 };
 
-/** A certified figure a narrative condition cites, as the run's evidence showed it; its result opens the verified calculation. */
+/** A certified figure a narrative condition cites, stored as the run's evidence showed it. */
 export type ConditionFigureRef = {
   result_id: string;
   measure: string;

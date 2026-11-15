@@ -185,7 +185,7 @@ function parseNarrativeResults(
       throw new ThesisValidationError(`assessment response condition ${row.condition_id} is duplicated`);
     }
     seenConditionIds.add(row.condition_id);
-    return citedAssessment(row.condition_id, row.status, row.refs, refs);
+    return assessmentOrNotEnoughEvidence(row.condition_id, row.status, row.refs, refs);
   });
 
   if (results.length !== conditions.length) {
@@ -194,8 +194,7 @@ function parseNarrativeResults(
   return results;
 }
 
-// A row names its condition, so a status or citation the evidence cannot back costs that condition alone.
-function citedAssessment(conditionId: string, status: unknown, refIds: unknown, refs: ThesisEvidence["refs"]): ConditionAssessment {
+function assessmentOrNotEnoughEvidence(conditionId: string, status: unknown, refIds: unknown, refs: ThesisEvidence["refs"]): ConditionAssessment {
   if (status !== "supported" && status !== "challenged" && status !== "unresolved") return notEnoughEvidence(conditionId);
   if (!Array.isArray(refIds) || refIds.length === 0) return notEnoughEvidence(conditionId);
   const cited = refIds.map((ref) => (typeof ref === "string" && Object.hasOwn(refs, ref) ? refs[ref] : undefined));

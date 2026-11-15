@@ -100,11 +100,10 @@ export function createThesisAdapter(db: QueryExecutor, getModel: () => Promise<T
     },
   };
 }
-// living-thesis-v1 had the model write each narrative reason. The model's own words never show, so those rows keep their status and refs only.
-const MODEL_WRITTEN_REASONS = 'living-thesis-v1';
+const MODEL_WRITTEN_REASON_PROMPT_VERSION = 'living-thesis-v1';
 const OLDER_MODEL_REASON = 'An older assessment. Its model-written reason is not shown.';
 function withoutModelReasons(assessment: ThesisAssessment): ThesisAssessment {
-  if (assessment.prompt_version !== MODEL_WRITTEN_REASONS)
+  if (assessment.prompt_version !== MODEL_WRITTEN_REASON_PROMPT_VERSION)
     return assessment;
   return { ...assessment, results: assessment.results.map(result => (result.method === 'model' ? { ...result, reason: OLDER_MODEL_REASON } : result)) };
 }
