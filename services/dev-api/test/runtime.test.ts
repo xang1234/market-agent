@@ -24,8 +24,10 @@ async function runtimeDatabase(t: TestContext, prefix: string): Promise<string> 
 }
 
 test("dev-api wires the in-repo durable adapter runtime when only DATABASE_URL is configured and the worker is off", { skip: !dockerAvailable(), timeout: 120_000 }, async (t) => {
-  const { adapters, worker } = await createDevApiRuntimeFromEnv({ DATABASE_URL: await runtimeDatabase(t, "dev-api-runtime"), FINANCIAL_WORKER_ENABLED: "false" });
+  const { adapters, worker, scheduler } = await createDevApiRuntimeFromEnv({ DATABASE_URL: await runtimeDatabase(t, "dev-api-runtime"), FINANCIAL_WORKER_ENABLED: "false" });
+  t.after(() => scheduler?.stop());
   assert.equal(worker, null);
+  assert.equal(typeof scheduler?.tick, "function");
 
   assert.equal(typeof adapters?.analyze.createRun, "function");
   assert.equal(typeof adapters?.agents.run, "function");
@@ -36,7 +38,7 @@ test("even with the worker off, startup checks financial readiness for analyze a
 });
 
 test("dev-api default runtime module resolves when loader cwd is the repo root", { skip: !dockerAvailable(), timeout: 120_000 }, async (t) => {
-  const { adapters } = await createDevApiRuntimeFromEnv({ DATABASE_URL: await runtimeDatabase(t, "dev-api-runtime-root"), FINANCIAL_WORKER_ENABLED: "false" }, repoRoot);
+  const { adapters } = await createDevApiRuntimeFromEnv({ DATABASE_URL: await runtimeDatabase(t, "dev-api-runtime-root"), FINANCIAL_WORKER_ENABLED: "false", AGENT_SCHEDULER_INTERVAL_MS: "0" }, repoRoot);
 
   assert.equal(typeof adapters?.analyze.createRun, "function");
   assert.equal(typeof adapters?.agents.run, "function");

@@ -10,7 +10,6 @@ export type ScheduledAgentRun = {
   due_at: string;
 };
 
-// An agent that never ran is first due one interval after it was created.
 export function scheduledAgentRuns(
   agents: ReadonlyArray<SchedulableAgent>,
   lastRuns: ReadonlyMap<string, string>,
@@ -20,7 +19,7 @@ export function scheduledAgentRuns(
     if (!agent.enabled) continue;
     const dueAt = nextDueAt(compileAgentCadence(agent.cadence), lastRuns.get(agent.agent_id) ?? agent.created_at);
     if (dueAt === null) continue;
-    runs.push({ agent_id: agent.agent_id, run_id: scheduledRunId(agent.agent_id, dueAt), due_at: dueAt });
+    runs.push({ agent_id: agent.agent_id, run_id: deterministicRunId(agent.agent_id, dueAt), due_at: dueAt });
   }
   return runs;
 }
@@ -33,8 +32,7 @@ export function dueAgentRuns(
   return scheduledAgentRuns(agents, lastRuns).filter((run) => Date.parse(run.due_at) <= now.getTime());
 }
 
-// A name-based UUID, so every scheduler that sees one due run claims the same run id.
-function scheduledRunId(agentId: string, dueAt: string): string {
+function deterministicRunId(agentId: string, dueAt: string): string {
   const hex = createHash("sha1").update(`agent-run:${agentId}:${dueAt}`).digest("hex");
   const variant = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;

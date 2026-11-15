@@ -262,8 +262,6 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = async (input) 
     : createLegacyAgentLoopStages(input, await agentUniverseSubjectRefs(pool(), input.userId, input.agent.universe));
 };
 
-// Screen, watchlist, and portfolio universes expand into the companies they hold
-// at run time; a mirror universe borrows one other agent's universe.
 export async function agentUniverseSubjectRefs(
   db: QueryExecutor,
   userId: string,
