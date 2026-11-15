@@ -14,6 +14,7 @@ const OLD_10K = "c5555555-5555-4555-8555-555555555551";
 const NEW_10K = "c5555555-5555-4555-8555-555555555552";
 const MU_10K = "c5555555-5555-4555-8555-555555555553";
 const MU_OLD_10K = "c5555555-5555-4555-8555-555555555554";
+const NVDA_FILE_10K = "c5555555-5555-4555-8555-555555555555";
 
 async function seed(db: QueryExecutor): Promise<void> {
   await db.query(`insert into issuers (issuer_id, legal_name) values ($1, 'NVIDIA Corp'), ($2, 'Advanced Micro Devices Inc'), ($3, 'Micron Technology Inc'), ($4, 'Intel Corp')`, [NVDA, AMD, MU, INTC]);
@@ -23,14 +24,21 @@ async function seed(db: QueryExecutor): Promise<void> {
      select instrument_id, 'XNAS', 'NVDA', 'USD', 'America/New_York' from instruments where issuer_id = $1`,
     [NVDA],
   );
+  await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values (gen_random_uuid(), $1, 'common_stock')`, [MU]);
+  await db.query(
+    `insert into listings (instrument_id, mic, ticker, trading_currency, timezone, active_from)
+     select instrument_id, 'XNAS', 'MU', 'USD', 'America/New_York', '2027-01-01' from instruments where issuer_id = $1`,
+    [MU],
+  );
   await db.query(`insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at) values ($1, 'sec_edgar', 'filing', 'primary', 'public', now())`, [SOURCE]);
   await db.query(
     `insert into documents (document_id, source_id, kind, title, provider_doc_id, published_at, content_hash, raw_blob_id, parse_status, created_at) values
        ($1, $4, 'filing', '10-K', '0001045810-25-000023', '2025-02-26', 'h-old', 'sha256:old', 'parsed', '2025-03-01'),
        ($2, $4, 'filing', '10-K', '0001045810-26-000021', '2026-02-25', 'h-new', 'sha256:new', 'parsed', '2026-03-01'),
        ($3, $4, 'filing', '10-K', null, null, 'h-mu', 'sha256:mu', 'parsed', '2026-03-02'),
-       ($5, $4, 'filing', '10-K', null, null, 'h-mu-old', 'sha256:mu-old', 'parsed', '2025-03-02')`,
-    [OLD_10K, NEW_10K, MU_10K, SOURCE, MU_OLD_10K],
+       ($5, $4, 'filing', '10-K', null, null, 'h-mu-old', 'sha256:mu-old', 'parsed', '2025-03-02'),
+       ($6, $4, 'filing', '10-K', null, null, 'h-nvda-file', 'sha256:nvda-file', 'parsed', '2026-03-05')`,
+    [OLD_10K, NEW_10K, MU_10K, SOURCE, MU_OLD_10K, NVDA_FILE_10K],
   );
   const claims: Array<{ document: string; filer: string; predicate: string; text: string; start: number; competitor?: string }> = [
     { document: OLD_10K, filer: NVDA, predicate: "business.competition", text: "AMD competed with us last year.", start: 10, competitor: AMD },
@@ -39,6 +47,7 @@ async function seed(db: QueryExecutor): Promise<void> {
     { document: NEW_10K, filer: NVDA, predicate: "business.products", text: "GPUs are our first product.", start: 20 },
     { document: NEW_10K, filer: NVDA, predicate: "business.competition", text: "AMD competes with us.", start: 300, competitor: AMD },
     { document: NEW_10K, filer: NVDA, predicate: "risk.factor", text: "Supply may be constrained.", start: 400 },
+    { document: NVDA_FILE_10K, filer: NVDA, predicate: "business.products", text: "An undated copy stored from a file.", start: 5 },
     { document: MU_OLD_10K, filer: MU, predicate: "risk.factor", text: "Memory prices fell last year.", start: 40 },
     { document: MU_10K, filer: MU, predicate: "business.competition", text: "AMD buys our memory and competes in some markets.", start: 50, competitor: AMD },
   ];
@@ -67,14 +76,14 @@ test("filing claims come from each filer's latest 10-K, in document order, and a
     ["NVDA", "0001045810-26-000021", "GPUs are our first product."],
     ["NVDA", "0001045810-26-000021", "Networking is our second product."],
     ["NVDA", "0001045810-26-000021", "AMD competes with us."],
-  ], "the 2025 10-K's claim stays out, and start 20 comes before start 100");
+  ], "the dated 2026 10-K is read, not the 2025 one or a newer undated copy; start 20 comes before start 100");
   assert.equal(own.claims[0]!.published_at, "2026-02-25T00:00:00.000Z");
 
   const named = await read(AMD, "competitor", ["business.competition"]);
   assert.deepEqual(named.claims.map((claim) => [claim.filer_label, claim.text_canonical]), [
     ["Micron Technology Inc", "AMD buys our memory and competes in some markets."],
     ["NVDA", "AMD competes with us."],
-  ], "each filer's latest 10-K; a filer with no listing is named by its legal name");
+  ], "each filer's latest 10-K; MU's listing starts after the cutoff, so it is named by its legal name");
 
   assert.deepEqual((await read(INTC, "competitor", ["business.competition"])).claims, [], "NVDA's latest 10-K no longer names Intel");
   assert.deepEqual((await read(MU, "subject", ["risk.factor"])).claims, [], "MU's latest 10-K has no risk factors, and an older one's do not stand in");

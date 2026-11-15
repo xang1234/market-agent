@@ -137,7 +137,7 @@ export async function runRegisteredAnalystTool(
   const refs = name === "get_claims" && Array.isArray(args.subject_refs) ? args.subject_refs : [args.subject_ref];
   if (!refs.every(isSubjectRef) || refs.length === 0) return { tool: name, status: "invalid_arguments", reason: "a subject_ref needs a kind and an id" };
   const predicates = args.predicates;
-  if (predicates !== undefined && !(Array.isArray(predicates) && predicates.every((p) => typeof p === "string" && (CLAIM_PREDICATES as ReadonlyArray<string>).includes(p)))) {
+  if (predicates !== undefined && !(Array.isArray(predicates) && predicates.length > 0 && predicates.every((p) => typeof p === "string" && (CLAIM_PREDICATES as ReadonlyArray<string>).includes(p)))) {
     return { tool: name, status: "invalid_arguments", reason: `predicates are among ${CLAIM_PREDICATES.join(", ")}` };
   }
   const role = args.role;
@@ -147,8 +147,8 @@ export async function runRegisteredAnalystTool(
   if (args.criteria !== undefined && args.criteria !== "industry") {
     return { tool: name, status: "invalid_arguments", reason: "peers are chosen by industry only" };
   }
-  const ignored = ["range", "trust_min"].filter((key) => args[key] !== undefined);
-  if (ignored.length > 0) return { tool: name, status: "invalid_arguments", reason: `${ignored.join(", ")} not supported` };
+  const unread = Object.keys(args).filter((key) => !READ_ARGUMENTS.has(key));
+  if (unread.length > 0) return { tool: name, status: "invalid_arguments", reason: `${unread.join(", ")} not supported` };
   const n = args.n;
   if (n !== undefined && !(typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 20)) {
     return { tool: name, status: "invalid_arguments", reason: "n is a whole number from 1 to 20" };
@@ -163,6 +163,17 @@ export async function runRegisteredAnalystTool(
     ...(role === undefined ? {} : { role: role as AnalystToolInput["role"] }),
     ...(n === undefined ? {} : { peer_limit: n as number }),
   });
+}
+
+// The coordinator sends query and subject_ref; agent_id names the caller.
+const READ_ARGUMENTS = new Set(["query", "agent_id", "subject_ref", "subject_refs", "predicates", "role", "criteria", "n"]);
+
+// A read that failed for want of the database degrades to unavailable; a bug
+// in the code or its SQL (SQLSTATE class 42) throws.
+export function isUnavailableRead(reason: unknown): boolean {
+  if (reason instanceof TypeError || reason instanceof ReferenceError || reason instanceof RangeError || reason instanceof SyntaxError) return false;
+  const code = reason instanceof Error && "code" in reason ? String(reason.code) : "";
+  return !code.startsWith("42");
 }
 
 type SubjectRef = { kind: string; id: string };

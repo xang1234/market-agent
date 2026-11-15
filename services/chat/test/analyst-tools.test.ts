@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { runAnalystTool, runRegisteredAnalystTool } from "../src/analyst-tools.ts";
+import { isUnavailableRead, runAnalystTool, runRegisteredAnalystTool } from "../src/analyst-tools.ts";
 import { parseCliArgs, entryLine } from "../src/analyst-tools-cli.ts";
 import { analystPacketEntries } from "../src/evidence-packet.ts";
 import { fakeQuery } from "./fake-query.ts";
@@ -141,4 +141,25 @@ test("the CLI reads a date as of its end and refuses a predicate no tool serves"
     input: { as_of: "2000-01-01T23:59:59.999Z", predicates: ["risk.factor"] },
   });
   assert.throws(() => parseCliArgs(["get_claims", "NVDA", "--predicate", "guidance.revenue"]), /--predicate takes/);
+});
+
+test("a lost database degrades a read to unavailable; a bug in the code or its SQL throws", () => {
+  const coded = (message: string, code: string) => Object.assign(new Error(message), { code });
+  assert.deepEqual([
+    isUnavailableRead(new Error("Connection terminated unexpectedly")),
+    isUnavailableRead(coded("connect ECONNREFUSED 127.0.0.1:5432", "ECONNREFUSED")),
+    isUnavailableRead(coded("canceling statement due to statement timeout", "57014")),
+    isUnavailableRead(coded('column "titel" does not exist', "42703")),
+    isUnavailableRead(new TypeError("Cannot read properties of undefined")),
+  ], [true, true, true, false, false]);
+});
+
+test("a registry call refuses a filter no tool reads, and an empty predicate list", async () => {
+  const db = stackDb();
+  assert.deepEqual(
+    await runRegisteredAnalystTool(db, "get_claims", { subject_refs: [{ kind: "issuer", id: NVDA }], since: "2020-01-01" }, { as_of: AS_OF }),
+    { tool: "get_claims", status: "invalid_arguments", reason: "since not supported" },
+  );
+  assert.equal((await runRegisteredAnalystTool(db, "get_claims", { subject_refs: [{ kind: "issuer", id: NVDA }], predicates: [] }, { as_of: AS_OF })).status, "invalid_arguments");
+  assert.equal((await runRegisteredAnalystTool(db, "get_company_profile", { query: "what does NVDA do", subject_ref: { kind: "issuer", id: NVDA } }, { as_of: AS_OF })).status, "ok");
 });
