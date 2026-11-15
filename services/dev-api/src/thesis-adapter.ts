@@ -4,7 +4,7 @@ import { normalizeUniverseToIssuers } from '../../analyst-grids/src/subject-norm
 import { getCurrentThesis, loadThesisHistory, saveThesis } from '../../agents/src/thesis-repo.ts';
 import { draftThesisConditions, type ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
 import { statesStance } from '../../chat/src/analyst-agent.ts';
-import { parseThesisConditions, parseThesisText, parseThesisExpectedVersion, type ThesisHistoryResponse, type ThesisMetricOption, ThesisConflictError, ThesisNotFoundError, ThesisValidationError } from '../../agents/src/thesis-types.ts';
+import { parseThesisConditions, parseThesisText, parseThesisExpectedVersion, type ThesisAssessment, type ThesisHistoryResponse, type ThesisMetricOption, ThesisConflictError, ThesisNotFoundError, ThesisValidationError } from '../../agents/src/thesis-types.ts';
 import { LlmRouterError } from '../../llm/src/router.ts';
 import { createLlmRouterFromEnv } from '../../llm/src/settings-loader.ts';
 import { DevApiHttpError } from './dev-api-shared.ts';
@@ -62,7 +62,7 @@ export function createThesisAdapter(db: QueryExecutor, getModel: () => Promise<T
        union all
        select claim_id::text, predicate || ' · ' || case when length(text_canonical) > 48 then left(text_canonical, 47) || '…' else text_canonical end
          from claims where claim_id = any($2::uuid[])`, [cited('fact_refs'), cited('claim_refs')]);
-      return { ...history, metrics, ref_labels: Object.fromEntries(labels.map(row => [row.id, row.label])) };
+      return { ...history, assessments: history.assessments.map(withoutModelReasons), metrics, ref_labels: Object.fromEntries(labels.map(row => [row.id, row.label])) };
     },
     async save({ userId, agentId, body }) {
       const agent = await ownedAgent(userId, agentId);
@@ -99,6 +99,14 @@ export function createThesisAdapter(db: QueryExecutor, getModel: () => Promise<T
       }
     },
   };
+}
+// living-thesis-v1 had the model write each narrative reason. The model's own words never show, so those rows keep their status and refs only.
+const MODEL_WRITTEN_REASONS = 'living-thesis-v1';
+const OLDER_MODEL_REASON = 'An older assessment. Its model-written reason is not shown.';
+function withoutModelReasons(assessment: ThesisAssessment): ThesisAssessment {
+  if (assessment.prompt_version !== MODEL_WRITTEN_REASONS)
+    return assessment;
+  return { ...assessment, results: assessment.results.map(result => (result.method === 'model' ? { ...result, reason: OLDER_MODEL_REASON } : result)) };
 }
 export async function assertLegacyThesisEditAllowed(db: QueryExecutor, agentId: string, body: Record<string, unknown>) {
   if (body.thesis === undefined && body.universe === undefined)
