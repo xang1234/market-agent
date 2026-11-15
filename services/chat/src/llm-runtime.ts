@@ -159,6 +159,8 @@ export async function composeAnalystBlocksWithLlm(input: {
   packet?: EvidencePacket;
   // Said after the system prompt's own rules (the analyst agent's packet holds claims of its own kinds).
   instructions?: ReadonlyArray<string>;
+  // What the answer is made of, in place of the analyst's takeaway, evidence and counterpoint.
+  answerShape?: ReadonlyArray<string>;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
   // Receives the deployment (channel/model) that wrote the answer (#183).
   onAnswered?: (deployment: string) => void;
@@ -195,10 +197,12 @@ export async function composeAnalystBlocksWithLlm(input: {
           "analyst_inference's text is shown as written. Every entry's text says it in one short sentence.",
           // An analyst's answer, not a list of numbers (#179): the #124 baseline scored
           // conclusions 6/18 and counterarguments 2/18.
-          "Answer as a buy-side analyst would: first your takeaway, answering the question directly, as an analyst_inference;",
-          "then the observations and comparisons that show the trend across every period shown, not just the latest, and what",
-          "is strong or weak against the other periods or companies shown; an unknown_cause for a change the evidence gives no",
-          "cause for; and last one specific counterpoint grounded in the data that cuts against the takeaway, as an analyst_inference.",
+          ...(input.answerShape ?? [
+            "Answer as a buy-side analyst would: first your takeaway, answering the question directly, as an analyst_inference;",
+            "then the observations and comparisons that show the trend across every period shown, not just the latest, and what",
+            "is strong or weak against the other periods or companies shown; an unknown_cause for a change the evidence gives no",
+            "cause for; and last one specific counterpoint grounded in the data that cuts against the takeaway, as an analyst_inference.",
+          ]),
           // A gap's words name a metric or company nothing checks (#302).
           "List nothing for what the data shown cannot tell: the answer's own notes say what is missing, from evidence_packet.gaps.",
           "If the data shown does not answer the question (the metric or period asked for is not there), list nothing about",

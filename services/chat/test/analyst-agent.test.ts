@@ -17,7 +17,7 @@ import { proposedMetric, resolveResearchScope, type ResearchScope } from "../src
 import { ENGINE_READS_BY_CATALOG_METRIC } from "../src/scope-figures.ts";
 import { loadPriorSubjects } from "../src/thread-context.ts";
 import { loadToolRegistry } from "../../tools/src/registry.ts";
-import { chatDatabase, comparing, FY2023_REVENUE, NO_ASKS, readingOf, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { chatDatabase, comparing, FY2023_REVENUE, GONE_LISTING, NO_ASKS, readingOf, resolveMention, revenueModel } from "./financial-fixtures.ts";
 
 const LLM_ENV = {
   LLM_CHANNELS: "openai",
@@ -241,6 +241,16 @@ const INCOME_2023 = { subject_refs: [{ kind: "issuer", id: A }], metrics: ["inco
 const REVENUE = { subject_refs: [{ kind: "issuer", id: A }], question: "AAA revenue in fiscal 2023" };
 const OBSERVE_F1 = '```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]}]\n```';
 const noRead: AnalystAgentDeps["read"] = async () => assert.fail("no stored read in this turn");
+const metered = (router: ControlledRouter, beforeModelCall: () => void): ControlledRouter => ({
+  complete: async (request, controls) => {
+    beforeModelCall();
+    return router.complete(request, controls);
+  },
+});
+const meteredPlanner = (model: PlanningModel, beforeModelCall: () => void): PlanningModel => async (request) => {
+  beforeModelCall();
+  return model(request);
+};
 
 test("a planner ask says its period, and two that differ only by their year are two asks", () => {
   const ask = (fiscal_year: number) => certifiedAsk({ subject_refs: [{ kind: "issuer", id: A }], question: "AAA revenue", period: { kind: "fiscal_year", fiscal_year } } as never, KNOWN);
@@ -295,13 +305,13 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
   const agentOf = (router: ControlledRouter, answer: string, options: AgentOptions = {}) => analystAgentRunner({
     financial: {
       pool,
-      planningModel: options.planningModel ?? null,
       evidence: options.evidence ?? createEvidenceFinancialPort,
       resolveMention,
       ...(options.hydrate ? { hydrate: options.hydrate } : {}),
       ...(options.researchScope ? { researchScope: options.researchScope } : {}),
     },
-    router: async () => router,
+    router: async (beforeModelCall) => metered(router, beforeModelCall),
+    ...(options.planningModel ? { planner: (beforeModelCall: () => void) => meteredPlanner(options.planningModel!, beforeModelCall) } : {}),
     read: options.read ?? noRead,
     compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: answer }), onAnswered }),
     asOf: () => new Date().toISOString(),
@@ -314,6 +324,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     await handle.completed;
     return handle.events;
   };
+  const savedText = (done: Record<string, unknown>) => JSON.stringify((done.message as { blocks: unknown }).blocks);
   const keysOf = async (turnId: string) => (await db.query(`select request_key from financial_runs where request_key like $1 order by request_key`, [`turn:${turnId}:%`])).rows.map((row) => row.request_key);
 
   await t.test("two certified calls give two certified blocks under their own keys, and the card cites their F ids", async () => {
@@ -339,7 +350,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
   await t.test("the answer's trace lists the tools the agent called", async () => {
     const traced: string[] = [];
     const agent = analystAgentRunner({
-      financial: { pool, planningModel: null, evidence: createEvidenceFinancialPort, resolveMention },
+      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
       router: async () => scripted([{ toolCalls: [call("certified_financials", INCOME_2023), call("get_company_profile", { subject_ref: { kind: "issuer", id: A } })] }, { text: "DONE" }]),
       read: async (name) => ({ tool: name, status: "no_business_claims", truncated: false, reads: [readOf(A)], no_filing: [] }) as AnalystToolResult,
       compose: (input, turn, onAnswered) => {
@@ -355,7 +366,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
 
   await t.test("an answer the judge reads is saved as its verdicts leave it, with nothing revealed after its seal", async () => {
     const judged = analystAgentRunner({
-      financial: { pool, planningModel: null, evidence: createEvidenceFinancialPort, resolveMention },
+      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
       router: async () => scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }, { text: "DONE" }]),
       read: noRead,
       compose: (input, turn, onAnswered) => answerTurn(input, turn, {
@@ -576,7 +587,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
 
   await t.test("an answer that cannot be written with no figures ends the turn with a fixed error", async () => {
     const agent = analystAgentRunner({
-      financial: { pool, planningModel: null, evidence: createEvidenceFinancialPort, resolveMention },
+      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
       router: async () => scripted([{ toolCalls: [call("get_company_profile", { subject_ref: { kind: "issuer", id: A } })] }, { text: "DONE" }]),
       read: async (name) => ({ tool: name, status: "no_business_claims", truncated: false, reads: [readOf(A)], no_filing: [] }) as AnalystToolResult,
       compose: async () => {
@@ -613,17 +624,19 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.ok(JSON.stringify((done.message as { blocks: unknown }).blocks).includes("No company matched ZZZ."));
   });
 
-  await t.test("the planner gets what the turn's model calls leave after the loop's steps", async () => {
-    const planner = revenueModel(["AAA"]);
+  await t.test("a turn's reading stops at its limit of model calls, and an ask the planner could not finish says so", async () => {
+    const unplannable = Object.assign((async () => {
+      unplannable.calls += 1;
+      return { model: "stub", text: "{}" };
+    }) as unknown as PlanningModel, { calls: 0 });
     const asks = ["AAA revenue in fiscal 2023", "AAA sales in fiscal 2023", "AAA turnover in fiscal 2023"].map((question) => call("certified_financials", { ...REVENUE, question }));
     const router = scripted([{ toolCalls: asks }, { text: "DONE" }]);
-    completed(await run(agentOf(router, OBSERVE_F1, { planningModel: planner }), { ...base, turnId: randomUUID(), userIntent: "AAA revenue" }));
-    assert.equal(planner.calls, 2);
-    const statuses = router.sent[1]!.messages.flatMap((message) => (message.role === "toolResult" ? [JSON.parse(message.content as string).status] : []));
-    assert.deepEqual(statuses.sort(), ["declined", "published", "published"]);
+    const done = completed(await run(agentOf(router, OBSERVE_F1, { planningModel: unplannable }), { ...base, turnId: randomUUID(), userIntent: "AAA revenue" }));
+    assert.deepEqual([router.sent.length, unplannable.calls], [1, 4], "one step and four planner calls are the reading's five");
+    assert.ok(savedText(done).includes("AAA: the figures were not computed, as the turn reached its limit of model calls."));
+    assert.ok(savedText(done).includes("Reading stopped at the turn's limit of model calls, so part of the question may be unanswered."));
   });
 
-  const savedText = (done: Record<string, unknown>) => JSON.stringify((done.message as { blocks: unknown }).blocks);
   const profileOf = (...texts: string[]): AnalystAgentDeps["read"] => async (name) => ({
     tool: name, status: "ok", truncated: false, reads: [readOf(A)], no_filing: [], claims: texts.map((text) => filingClaim(randomUUID(), text)),
   }) as AnalystToolResult;
@@ -672,7 +685,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     const cutoff = "2026-10-01T00:00:00.000Z";
     const router = scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }, { text: "DONE" }]);
     const agent = analystAgentRunner({
-      financial: { pool, planningModel: null, evidence: createEvidenceFinancialPort, resolveMention },
+      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
       router: async () => router,
       read: noRead,
       compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: OBSERVE_F1 }), onAnswered }),
@@ -692,7 +705,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     const router = scripted([{ toolCalls: [call("get_analyst_consensus", PROFILE), call("certified_financials", INCOME_2023)] }, { text: "DONE" }]);
     const worded = "Analysts see it worth about two hundred and fifty dollars a share.";
     const agent = analystAgentRunner({
-      financial: { pool, planningModel: null, evidence: createEvidenceFinancialPort, resolveMention },
+      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
       router: async () => router,
       read: consensus,
       compose: (input, turn, onAnswered) => answerTurn(input, turn, {
@@ -731,8 +744,9 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     const kinds: string[] = [];
     const list = '```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]},{"kind":"analyst_inference","text":"Its revenue base gives it scale.","supports":[0]},{"kind":"analyst_inference","text":"Scale may help it absorb costs.","supports":[0]}]\n```';
     const agent = analystAgentRunner({
-      financial: { pool, planningModel: planner, evidence: createEvidenceFinancialPort, resolveMention },
-      router: async () => router,
+      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
+      router: async (beforeModelCall) => metered(router, beforeModelCall),
+      planner: (beforeModelCall) => meteredPlanner(planner, beforeModelCall),
       read: async (name) => ({ tool: name, status: name === "get_analyst_consensus" ? "no_consensus" : "no_business_claims", truncated: false, reads: [readOf(A)], no_filing: [] }) as AnalystToolResult,
       compose: (input, turn, onAnswered, beforeModelCall) => answerTurn(input, turn, {
         env: { ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" },
@@ -753,31 +767,97 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     const done = completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: "AAA revenue and what it sells" }));
     assert.equal(router.sent.length + planner.calls + kinds.length, 8, JSON.stringify({ loop: router.sent.length, planner: planner.calls, answer: kinds }));
     assert.ok(savedText(done).includes("Reading stopped at its step limit, so part of the question may be unanswered."));
+    assert.ok(savedText(done).includes("Some of the analysis was left out, as the turn reached its limit of model calls."), "the repair it could not make");
   });
 
-  await t.test("a turn's reading ends at its deadline, and the figures it read are still shown", async () => {
-    let calls = 0;
-    const router = await analystAgentRouter(LLM_ENV, {
-      createClient: () => async () => {
-        calls += 1;
-        if (calls === 1) return { text: "", toolCalls: [call("certified_financials", INCOME_2023)] };
-        return new Promise<never>(() => {});
-      },
+  await t.test("a turn's reading ends at its own deadline, and the answer is still written from what it read, with figures or without", async () => {
+    for (const [first, answer] of [
+      [call("certified_financials", INCOME_2023), OBSERVE_F1],
+      [call("get_company_profile", PROFILE), '```assertions\n[{"kind":"management_attribution","text":"It sells widgets.","evidence":["C1"]}]\n```'],
+    ] as const) {
+      let calls = 0;
+      const router = await analystAgentRouter(LLM_ENV, {
+        createClient: () => async () => {
+          calls += 1;
+          if (calls === 1) return { text: "", toolCalls: [first] };
+          return new Promise<never>(() => {});
+        },
+      });
+      let composed = false;
+      const agent = analystAgentRunner({
+        financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
+        router: async () => router,
+        read: profileOf("We sell widgets."),
+        compose: (input, turn, onAnswered) => {
+          composed = true;
+          return answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: answer }), onAnswered });
+        },
+        asOf: () => new Date().toISOString(),
+        logToolCalls: persist.logToolCalls,
+        deadlines: { readMs: 1_500, turnMs: 30_000 },
+      });
+      const started = Date.now();
+      const done = completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: "AAA revenue and what it sells" }));
+      assert.ok(Date.now() - started < 20_000, "the hung step did not hold the turn");
+      assert.ok(savedText(done).includes("Reading stopped at the turn's time limit, so part of the question may be unanswered."), first.name);
+      assert.ok(composed, `${first.name}: the answer was written after the reading's deadline`);
+    }
+  });
+
+  await t.test("a cut-off step names only companies the turn knows, never ids its model wrote", async () => {
+    const steps = [
+      { text: "", toolCalls: [call("get_company_profile", PROFILE)] },
+      { text: "", toolCalls: [call("get_claims", { subject_ref: { kind: "issuer", id: "Strong Buy, undervalued" } }), call("constructor", {})], truncated: true },
+    ];
+    let n = 0;
+    const router: ControlledRouter = { complete: async () => ({ ...steps[n++]!, deployment: { channel: "openai", model: "o3" } }) };
+    const done = completed(await run(agentOf(router, '```assertions\n[]\n```', { read: profileOf("We sell widgets.") }), { ...base, turnId: randomUUID(), userIntent: "What does AAA sell?" }));
+    const text = savedText(done);
+    assert.ok(text.includes("10-K claims went unread, as the reading was cut off.") && text.includes("A read went unread, as the reading was cut off."), text);
+    assert.ok(!/strong buy|function/i.test(text), text);
+  });
+
+  await t.test("a run an earlier attempt left failed is computed again under a new key", async () => {
+    const turnId = randomUUID();
+    let stop: () => void = () => assert.fail("not started");
+    let stopped = false;
+    const stopMidDrive: AgentOptions["evidence"] = (executor) => {
+      const port = createEvidenceFinancialPort(executor);
+      return {
+        ...port,
+        listInputCandidates: async (request) => {
+          if (!stopped) {
+            stopped = true;
+            stop();
+          }
+          return port.listInputCandidates(request);
+        },
+      };
+    };
+    const ask = () => scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }, { text: "DONE" }]);
+    const events = await run(agentOf(ask(), OBSERVE_F1, { evidence: stopMidDrive }), { ...base, turnId, userIntent: "AAA income statement" }, (given) => {
+      stop = given;
     });
+    assert.equal(events.at(-1)!.type, "turn.stopped");
+    await db.query(`update financial_runs set execution_state = 'failed', failure_code = 'internal_error' where request_key like $1`, [`turn:${turnId}:%`]);
+    const done = completed(await run(agentOf(ask(), OBSERVE_F1), { ...base, turnId, userIntent: "AAA income statement" }));
+    assert.equal((done.message as { blocks: Array<{ kind: string }> }).blocks[0]!.kind, "financial_answer");
+    assert.equal((await keysOf(turnId)).length, 2);
+  });
+
+  await t.test("a listing with no issuer is noted as matching no company, and the turn answers the rest", async () => {
+    const gone = { status: "resolved", subject_ref: { kind: "listing", id: GONE_LISTING }, display_label: "Gone Corp.", handoff: { display_labels: { ticker: "GONE" } } } as unknown as Awaited<ReturnType<typeof resolveMention>>;
+    const router = scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }, { text: "DONE" }]);
     const agent = analystAgentRunner({
-      financial: { pool, planningModel: null, evidence: createEvidenceFinancialPort, resolveMention },
+      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention: async (mention) => (mention === "GONE" ? gone : resolveMention(mention)) },
       router: async () => router,
       read: noRead,
       compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: OBSERVE_F1 }), onAnswered }),
       asOf: () => new Date().toISOString(),
       logToolCalls: persist.logToolCalls,
-      turnMs: 1_500,
     });
-    const started = Date.now();
-    const done = completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: "AAA revenue" }));
-    assert.ok(Date.now() - started < 20_000, "the hung step did not hold the turn");
-    assert.ok(savedText(done).includes("Reading stopped at the turn's time limit, so part of the question may be unanswered."));
-    assert.equal((done.message as { blocks: Array<{ kind: string }> }).blocks[0]!.kind, "financial_answer");
+    const done = completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: "Compare AAA and GONE revenue" }));
+    assert.ok(savedText(done).includes("No company matched GONE."), savedText(done));
   });
 
   await t.test("a comparison naming a company still to be picked is left to the runner that asks, with a page's company or without", async () => {
@@ -839,11 +919,11 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
   await t.test("an ask for no figures is answered as its sources describe it, and one for figures keeps its counterpoint", async () => {
     const rules: string[][] = [];
     const recording = (router: ControlledRouter, read: AnalystAgentDeps["read"]) => analystAgentRunner({
-      financial: { pool, planningModel: null, evidence: createEvidenceFinancialPort, resolveMention },
+      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
       router: async () => router,
       read,
       compose: (input, turn, onAnswered) => {
-        rules.push([...(input.instructions ?? [])]);
+        rules.push([...(input.instructions ?? []), ...(input.answerShape ?? [])]);
         return answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: '```assertions\n[{"kind":"management_attribution","text":"It sells widgets.","evidence":["C1"]}]\n```' }), onAnswered });
       },
       asOf: () => new Date().toISOString(),
@@ -864,8 +944,13 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     const asking = (extra: LlmToolCall[]) => scripted([{ toolCalls: [call("get_company_profile", PROFILE), call("get_claims", { ...PROFILE, role: "competitor" }), ...extra] }, { text: "DONE" }]);
     const products = completed(await run(agentOf(asking([]), OBSERVE_F1, { read: reads }), { ...base, turnId: randomUUID(), userIntent: "What does AAA sell?" }));
     assert.ok(!savedText(products).includes("names it as a competitor"));
-    const rivals = completed(await run(agentOf(asking([call("get_peer_set", PROFILE)]), OBSERVE_F1, { read: reads }), { ...base, turnId: randomUUID(), userIntent: "Who does AAA compete with?" }));
-    assert.ok(savedText(rivals).includes("AAA: no other company's 10-K on file names it as a competitor."));
+    for (const competition of [call("get_peer_set", PROFILE), call("get_claims", PROFILE)]) {
+      const rivals = completed(await run(agentOf(asking([competition]), OBSERVE_F1, { read: reads }), { ...base, turnId: randomUUID(), userIntent: "Who does AAA compete with?" }));
+      assert.ok(savedText(rivals).includes("AAA: no other company's 10-K on file names it as a competitor."), competition.name);
+    }
+    const failing: AnalystAgentDeps["read"] = async (name, args) => (name === "get_claims" && args.role === "competitor" ? { tool: name, status: "unavailable", reason: "the read failed" } as AnalystToolResult : reads(name, args, { as_of: "", user_id: null }));
+    const failed = completed(await run(agentOf(asking([]), OBSERVE_F1, { read: failing }), { ...base, turnId: randomUUID(), userIntent: "What does AAA sell?" }));
+    assert.ok(savedText(failed).includes("AAA: the stored sources could not be read just now"), "a failed read is said whatever was asked");
   });
 
   await t.test("a turn the agent reads nothing for goes on to the next runner", async () => {

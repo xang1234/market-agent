@@ -547,7 +547,12 @@ const guardedClient = (beforeModelCall: () => void) => async (): Promise<LlmChat
 
 export const analystAgent = analystAgentRunner({
   financial: { ...financialDeps, hydrate: hydrateTurn },
-  router: () => analystAgentRouter(process.env),
+  router: (beforeModelCall) => analystAgentRouter(process.env, { createClient: guardedClient(beforeModelCall) }),
+  planner: (beforeModelCall) => async (request) => {
+    const router = await createLlmRouterFromEnv(process.env, { createClient: guardedClient(beforeModelCall) });
+    if (!router) throw new Error("LLM router is not configured");
+    return planningModelFromRouter(router)(request);
+  },
   read: (name, args, turn) => runRegisteredAnalystTool(pool(), name, args, turn).catch((reason: unknown) => {
     if (!isUnavailableRead(reason)) throw reason;
     console.warn(`[chat] ${name} failed; the analyst agent answers without it`, reason);

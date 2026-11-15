@@ -9,7 +9,7 @@ import type { JsonObject, JsonValue } from "../../shared/src/json.ts";
 import { isRecord } from "../../shared/src/http.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import { createTurnToolPolicy, loadToolRegistry, type ToolRegistry } from "../../tools/src/index.ts";
-import { isAnalystToolName, type AnalystToolName, type AnalystToolResult } from "./analyst-tools.ts";
+import { CLAIM_PREDICATES, isAnalystToolName, type AnalystToolName, type AnalystToolResult } from "./analyst-tools.ts";
 import type { AnsweredTurn, AnswerTraceInput, TurnTrace } from "./answer-trace.ts";
 import { isUuid, noteBlock } from "./chat-ids.ts";
 import { COMMENTARY_UNAVAILABLE } from "./engine-commentary.ts";
@@ -30,31 +30,29 @@ import { ENGINE_READS_BY_CATALOG_METRIC, LATEST, type PlanChoice, type ReadPerio
 import { turnStopSignal } from "./turn-stop.ts";
 
 const MAX_STEPS = 3;
-const PLANNER_CALLS = 2;
+const TURN_CALLS = 8;
 const ANSWER_CALLS = 3;
-const TURN_CALLS = MAX_STEPS + PLANNER_CALLS + ANSWER_CALLS;
-const TURN_MS = 120_000;
+const DEADLINES = { readMs: 75_000, turnMs: 120_000 };
 const MAX_REQUEST_KEYS = 64;
 
 export type AnalystAgentDeps = Readonly<{
-  financial: Pick<ChatFinancialRuntimeDeps, "pool" | "planningModel" | "evidence" | "resolveMention" | "priorSubjects" | "researchScope" | "hydrate">;
-  router: () => Promise<ControlledRouter | null>;
+  financial: Pick<ChatFinancialRuntimeDeps, "pool" | "evidence" | "resolveMention" | "priorSubjects" | "researchScope" | "hydrate">;
+  // Each model-facing dep calls beforeModelCall before every model attempt it makes; it throws once the turn has made its calls.
+  router: (beforeModelCall: () => void) => Promise<ControlledRouter | null>;
+  planner?: (beforeModelCall: () => void) => PlanningModel;
   read: (name: AnalystToolName, args: Readonly<Record<string, JsonValue>>, turn: { as_of: string; user_id: string | null }) => Promise<AnalystToolResult>;
   compose: (input: AnswerTraceInput, turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">, onAnswered: (deployment: string) => void, beforeModelCall: () => void) => Promise<AnsweredTurn>;
   asOf: () => string;
   conversation?: (threadId: string) => Promise<ReadonlyArray<{ role: string; text: string }>>;
   logToolCalls?: (threadId: string, calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
   registry?: ToolRegistry;
-  turnMs?: number;
+  deadlines?: Readonly<{ readMs: number; turnMs: number }>;
 }>;
 
-export class TurnLimit extends Error {
-  readonly limit: "calls" | "time";
-
-  constructor(limit: "calls" | "time") {
-    super(limit === "calls" ? "the turn has made its model calls" : "the turn ran out of time");
-    this.name = "TurnLimit";
-    this.limit = limit;
+export class TurnDeadline extends Error {
+  constructor() {
+    super("the turn ran out of time");
+    this.name = "TurnDeadline";
   }
 }
 
@@ -74,15 +72,33 @@ type Certified = Readonly<{ block: FinancialAnswerBlock; packet: EvidencePacket;
 
 export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
   let registry = deps.registry;
-  const agentTurn = async (context: ChatTurnRunContext): Promise<ChatAnalystToolRuntimeResult | null> => {
+  const agentTurn = async (context: ChatTurnRunContext, signal: AbortSignal): Promise<ChatAnalystToolRuntimeResult | null> => {
     if (!context.userId || !isUuid(context.threadId)) return null;
     const question = context.userIntent ?? "";
     const companies = await requestedSubjects(deps.financial, context, question);
     const named = companies.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject] : []);
-    const unpicked = named.length < companies.subjects.length;
+    const unpicked = companies.subjects.some((subject) => subject.resolution.status === "ambiguous");
     if (companies.clarify || named.length === 0 || unpicked) return null;
-    const answering = await deps.router();
-    if (!answering) return null;
+    let made = 0;
+    let readingRefused = false;
+    let answerRefused = false;
+    const spend = (reserved: number) => {
+      if (made >= TURN_CALLS - reserved) return false;
+      made += 1;
+      return true;
+    };
+    const readingCall = () => {
+      if (spend(ANSWER_CALLS)) return;
+      readingRefused = true;
+      throw new LlmClientError(CALLS_SPENT);
+    };
+    const answerCall = () => {
+      if (spend(0)) return;
+      answerRefused = true;
+      throw new LlmClientError(CALLS_SPENT);
+    };
+    const router = await deps.router(readingCall);
+    if (!router) return null;
     registry ??= loadToolRegistry();
     const policy = createTurnToolPolicy({
       registry,
@@ -97,29 +113,13 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const asOf = deps.asOf();
     const known = new Map(named.map((subject) => [issuerOf(subject), subject] as const));
     const labelOf = (issuer: string) => companies.labels.get(issuer) ?? known.get(issuer)?.mention ?? issuer;
-    const whoOf = (args: JsonObject) => labelList(argIssuers(args).map(labelOf));
-    let made = 0;
-    const spend = (reserved: number) => {
-      if (made >= TURN_CALLS - reserved) return false;
-      made += 1;
-      return true;
-    };
-    const router: ControlledRouter = {
-      complete: async (request, controls) => {
-        if (!spend(ANSWER_CALLS)) throw new TurnLimit("calls");
-        return answering.complete(request, controls);
-      },
-    };
-    let planned = 0;
-    const planningModel: PlanningModel | null = deps.financial.planningModel && (async (request) => {
-      if (planned >= PLANNER_CALLS || !spend(ANSWER_CALLS)) throw new TurnLimit("calls");
-      planned += 1;
-      return deps.financial.planningModel!(request);
-    });
+    const whoOf = (args: JsonObject) => labelList(argIssuers(args).filter((issuer) => known.has(issuer)).map(labelOf));
+    const planningModel = deps.planner?.(readingCall) ?? null;
     const certified: Certified[] = [];
     const askedFor = new Set<string>();
     const analyst: AnalystToolResult[] = [];
-    const notes: string[] = leftOutNotes({ notFound: companies.notFound });
+    const unmatched = companies.subjects.flatMap((subject) => (subject.resolution.status === "not_found" ? [subject.mention] : []));
+    const notes: string[] = leftOutNotes({ notFound: [...companies.notFound, ...unmatched] });
     const heldCompetitorNotes: string[] = [];
     let readCompetition = false;
     const toolCalls: ChatAnalystToolRuntimeToolCall[] = [];
@@ -166,6 +166,10 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
           persistParent: async () => {},
           originRef: key.origin,
         });
+        if (outcome.status === "declined" && outcome.reason === "planning_unavailable" && readingRefused) {
+          notes.push(`${who}: the figures were not computed, as the turn reached its limit of model calls.`);
+          return { content: JSON.stringify({ tool: "certified_financials", status: "declined", reason: "turn_call_limit" }) };
+        }
         return certifiedOutput(outcome, who, async (published) => {
           const packet = await published.packet();
           certified.push({ block: published.block, packet, subjects: ask.subjects });
@@ -187,9 +191,10 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         }
       }
       const competitor = args.role === "competitor";
-      if (name === "get_peer_set" || (name === "get_claims" && !competitor && Array.isArray(args.predicates) && args.predicates.includes("business.competition"))) readCompetition = true;
+      const predicates: ReadonlyArray<JsonValue> = Array.isArray(args.predicates) ? args.predicates : CLAIM_PREDICATES;
+      if (name === "get_peer_set" || (name === "get_claims" && !competitor && predicates.includes("business.competition"))) readCompetition = true;
       const note = statusNote(result, whoOf(args), competitor);
-      if (note) (competitor ? heldCompetitorNotes : notes).push(note);
+      if (note) (competitor && result.status === "no_claims" ? heldCompetitorNotes : notes).push(note);
       return { content: JSON.stringify(readSummary(result)), ...(isFailure(result) ? { isError: true } : {}) };
     };
 
@@ -213,7 +218,9 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
 
     const template = policy.selection.prompt_template;
     const conversation = await deps.conversation?.(context.threadId) ?? [];
-    const loop = await runToolLoop({
+    const reading = new AbortController();
+    const readTimer = setTimeout(() => reading.abort(new TurnDeadline()), (deps.deadlines ?? DEADLINES).readMs);
+    const loop = await withLlmAbortSignal(AbortSignal.any([signal, reading.signal]), () => runToolLoop({
       router,
       policy,
       maxSteps: MAX_STEPS,
@@ -228,14 +235,15 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         reasoning: "low",
         maxTokens: 4096,
       },
-    }).catch(async (reason: unknown) => {
+    })).catch(async (reason: unknown) => {
       await Promise.allSettled([...inFlight]);
       if (!isModelFailure(reason)) throw reason;
       console.warn("[chat] the analyst agent's reading stopped early; it answers from what it read", reason);
-      notes.push(reason instanceof TurnLimit ? UNFINISHED[reason.limit] : UNFINISHED.model_failed);
+      if (!readingRefused) notes.push(reason instanceof TurnDeadline ? UNFINISHED.time : UNFINISHED.model_failed);
       return null;
-    });
+    }).finally(() => clearTimeout(readTimer));
     if (loop) notes.push(...stopNotes(loop, whoOf));
+    if (readingRefused) notes.push(UNFINISHED.calls);
     if (!toolCalls.some((entry) => entry.status === "ok")) return null;
 
     const namedIds = new Set(named.map(issuerOf));
@@ -260,7 +268,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const noted = packet.gaps.length === 0 ? [] : [{ ...noteBlock({ snapshotId, asOf }, "agent:not-covered", packet.gaps.join(" ")), subject_refs: subjectRefs, tool_call_ids: readCalls }];
     let answeredBy: string | undefined;
     let answer: Pick<AnsweredTurn, "assertions" | "blocks" | "judging" | "without">;
-    const askedFigures = toolCalls.some((entry) => entry.tool_name === "certified_financials");
+    const askedFigures = askedFor.size > 0;
     try {
       answer = await deps.compose({
         context: { userIntent: question, bundleId: ANALYST_AGENT_BUNDLE_ID },
@@ -269,12 +277,11 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         factBlocks: noted,
         conversation,
         packet,
-        instructions: [...ANSWER_RULES, askedFigures ? ANALYSIS_RULE : DESCRIPTION_RULE],
+        instructions: askedFigures ? [...ANSWER_RULES, ANALYSIS_RULE] : ANSWER_RULES,
+        ...(askedFigures ? {} : { answerShape: DESCRIPTION_SHAPE }),
       }, { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}), question }, (deployment) => {
         answeredBy = deployment;
-      }, () => {
-        if (!spend(0)) throw new LlmClientError("the turn has made its model calls");
-      });
+      }, answerCall);
       if (answer.judging) answer = { ...answer, assertions: (await answer.judging.done).assertions };
     } catch (reason) {
       if (!isModelFailure(reason) || certified.length === 0) throw reason;
@@ -291,7 +298,8 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       tool_call_ids: readCalls,
     }];
     const turnBlocks = (written: ReadonlyArray<Record<string, unknown>>) => {
-      const own = [...written.filter(rendered).map((block) => ({ ...withRefs(block, claims, cited), tool_call_ids: readCalls })), ...noted];
+      const spent = answerRefused ? [{ ...noteBlock({ snapshotId, asOf }, "agent:calls-spent", ANALYSIS_LEFT_OUT), subject_refs: subjectRefs, tool_call_ids: readCalls }] : [];
+      const own = [...written.filter(rendered).map((block) => ({ ...withRefs(block, claims, cited), tool_call_ids: readCalls })), ...noted, ...spent];
       return [...certifiedBlocks, ...(own.length > 0 ? own : unwritten)];
     };
     const turnAnswer = (shown: Pick<AnsweredTurn, "blocks" | "judging">): Pick<ChatAnalystToolRuntimeResult, "blocks"> => {
@@ -319,10 +327,11 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
   };
   return async (context) => {
     const deadline = new AbortController();
-    const timer = setTimeout(() => deadline.abort(new TurnLimit("time")), deps.turnMs ?? TURN_MS);
+    const timer = setTimeout(() => deadline.abort(new TurnDeadline()), (deps.deadlines ?? DEADLINES).turnMs);
     const stop = turnStopSignal();
+    const signal = stop ? AbortSignal.any([stop, deadline.signal]) : deadline.signal;
     try {
-      return await withLlmAbortSignal(stop ? AbortSignal.any([stop, deadline.signal]) : deadline.signal, () => agentTurn(context));
+      return await withLlmAbortSignal(signal, () => agentTurn(context, signal));
     } finally {
       clearTimeout(timer);
     }
@@ -347,7 +356,9 @@ const QUIET = (() => undefined) as unknown as ChatTurnRunContext["emit"];
 
 const UNKNOWN_COMPANY = "name each company by a subject_ref the prompt or a peer read gave";
 
-const isModelFailure = (reason: unknown) => reason instanceof LlmRouterError || reason instanceof LlmProviderError || reason instanceof TurnLimit;
+const isModelFailure = (reason: unknown) => reason instanceof LlmRouterError || reason instanceof LlmProviderError || reason instanceof LlmClientError || reason instanceof TurnDeadline;
+
+const CALLS_SPENT = "the turn has made its model calls";
 
 const NO_ANSWER = "No answer could be written from the stored sources read for this question.";
 
@@ -357,7 +368,11 @@ const ANSWER_RULES = [
   "Say what a company does or faces only as a claim states it, never from your own knowledge, and never write Buy, Hold, Sell or any recommendation.",
 ];
 const ANALYSIS_RULE = "Write at most two analyst_inference entries: the takeaway and the counterpoint.";
-const DESCRIPTION_RULE = "This question asks what the stored sources say: list management_attribution entries alone, each citing a claim that answers the question as asked, and write no analyst_inference, neither a takeaway nor a counterpoint.";
+const DESCRIPTION_SHAPE = [
+  "Answer with what the stored sources say: list management_attribution entries alone, each citing a claim that answers the question as asked,",
+  "and write no analyst_inference, neither a takeaway nor a counterpoint.",
+];
+const ANALYSIS_LEFT_OUT = "Some of the analysis was left out, as the turn reached its limit of model calls.";
 
 const UNFINISHED = {
   calls: "Reading stopped at the turn's limit of model calls, so part of the question may be unanswered.",
@@ -378,7 +393,7 @@ const TOPIC: Readonly<Record<string, string>> = {
 export function stopNotes(loop: Pick<ToolLoopResult, "stop" | "steps">, who: (args: JsonObject) => string): string[] {
   const unread = (calls: ReadonlyArray<LlmToolCall>, why: string) => calls.map((call) => {
     const whom = who(call.arguments);
-    return `${TOPIC[call.name] ?? "A read"}${whom ? ` for ${whom}` : ""} went unread, as ${why}.`;
+    return `${Object.hasOwn(TOPIC, call.name) ? TOPIC[call.name] : "A read"}${whom ? ` for ${whom}` : ""} went unread, as ${why}.`;
   });
   switch (loop.stop) {
     case "final":
@@ -467,8 +482,8 @@ export function requestKeys(
   return (fingerprint) => {
     const origin = `chat:${threadId}:${turnId}:${fingerprint}`;
     const next = queue.then(async () => {
-      const { rows } = await pool.query<{ request_key: string; origin: string | null; completed: boolean }>(
-        `select r.request_key, p.plan->'origin'->>'ref' as origin, r.execution_state = 'completed' as completed
+      const { rows } = await pool.query<{ request_key: string; origin: string | null; unfinished: boolean }>(
+        `select r.request_key, p.plan->'origin'->>'ref' as origin, r.execution_state in ('pending', 'running', 'ready_to_seal') as unfinished
            from financial_runs r join financial_plans p on p.plan_id = r.plan_id and p.user_id = r.user_id
           where r.user_id = $1 and r.parent_kind = $2 and r.parent_id = $3 and left(r.request_key, length($4)) = $4`,
         [authority.owner_user_id, authority.parent.kind, authority.parent.id, prefix],
@@ -477,7 +492,7 @@ export function requestKeys(
         const n = Number(row.request_key.slice(prefix.length));
         return Number.isInteger(n) && n >= 1 && n <= MAX_REQUEST_KEYS ? [[n, row] as const] : [];
       }));
-      const resumable = [...stored].filter(([n, run]) => !taken.has(n) && run.origin === origin && !run.completed).map(([n]) => n);
+      const resumable = [...stored].filter(([n, run]) => !taken.has(n) && run.origin === origin && run.unfinished).map(([n]) => n);
       const n = resumable.length > 0 ? Math.min(...resumable) : Array.from({ length: MAX_REQUEST_KEYS }, (_, i) => i + 1).find((key) => !taken.has(key) && !stored.has(key));
       if (n === undefined) return null;
       taken.add(n);
