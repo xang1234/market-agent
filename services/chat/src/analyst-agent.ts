@@ -30,7 +30,7 @@ import { ANSWER_DEADLINES, withDeadlines, type DroppedClaims } from "./llm-runti
 import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS, LATEST, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 import { turnStopSignal } from "./turn-stop.ts";
 
-const MAX_STEPS = 3;
+const MAX_STEPS = 4;
 const TURN_CALLS = 8;
 const ANSWER_CALLS = 3;
 const DEADLINES = { readMs: 75_000, turnMs: 120_000 };

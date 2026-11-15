@@ -916,7 +916,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     });
     const done = completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: "AAA revenue and what it sells" }));
     assert.equal(router.sent.length + planner.calls + kinds.length, 8, JSON.stringify({ loop: router.sent.length, planner: planner.calls, answer: kinds }));
-    assert.ok(savedText(done).includes("Reading stopped at its step limit, so part of the question may be unanswered."));
+    assert.ok(savedText(done).includes("Reading stopped at the turn's limit of model calls, so part of the question may be unanswered."), savedText(done));
     assert.ok(savedText(done).includes("Some of the analysis was left out, as the turn reached its limit of model calls."), "the repair it could not make");
   });
 
@@ -1365,7 +1365,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.equal(asked.length, 1, "the statement beside another metric is planned with no model, as base plans it");
   });
 
-  await t.test("a question asking no figure reads on after a step that found no 10-K, so each read it asks for runs", async () => {
+  await t.test("a question asking no figure reads on after a step that found no 10-K, one read a step, with steps to say it is done", async () => {
     const ran: string[] = [];
     const reads: AnalystAgentDeps["read"] = async (name) => {
       ran.push(name);
@@ -1373,10 +1373,10 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
         ? { tool: name, status: "no_consensus" }
         : { tool: name, status: "no_filing", truncated: false, reads: [], no_filing: [{ issuer_id: A.toUpperCase(), label: "AAA" }] }) as AnalystToolResult;
     };
-    const router = scripted([{ toolCalls: [call("get_company_profile", PROFILE)] }, { toolCalls: [call("get_analyst_consensus", PROFILE)] }, { text: "DONE" }]);
+    const router = scripted([{ toolCalls: [call("get_company_profile", PROFILE)] }, { toolCalls: [call("get_claims", { ...PROFILE, predicates: ["risk.factor"] })] }, { toolCalls: [call("get_analyst_consensus", PROFILE)] }, { text: "DONE" }]);
     const text = savedText(completed(await run(agentOf(router, "```assertions\n[]\n```", { read: reads }), { ...base, turnId: randomUUID(), userIntent: "What do analysts expect AAA to earn next year, and what does AAA sell?" }, undefined, readingOf(NO_ASKS))));
-    assert.deepEqual(ran, ["get_company_profile", "get_analyst_consensus"]);
-    assert.ok(text.includes("AAA has no 10-K on file") && text.includes("no analyst consensus"), text);
+    assert.deepEqual(ran, ["get_company_profile", "get_claims", "get_analyst_consensus"]);
+    assert.ok(text.includes("AAA has no 10-K on file") && text.includes("no analyst consensus") && !text.includes("step limit"), text);
   });
 
   await t.test("the reading model's own words never reach the saved answer", async () => {
