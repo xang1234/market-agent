@@ -169,6 +169,7 @@ test("every read that found nothing leaves a typed note, and a read the model as
     { tool: "get_claims", status: "no_subject", reason: "a subject_ref names no stored issuer" },
     { tool: "get_claims", status: "no_filing", truncated: false, reads: [], no_filing: [{ issuer_id: A, label: "AAA" }] },
   ] as AnalystToolResult[]).map((result) => statusNote(result, "AAA"));
+  const noneNaming = statusNote({ tool: "get_claims", status: "no_claims", ...reads }, "AAA", true);
   assert.deepEqual(notes, [
     "AAA: its latest 10-K's business section (Item 1) was read in full and states no business claims.",
     "AAA: the 10-K items read in full state no claims of the kind asked for.",
@@ -179,6 +180,7 @@ test("every read that found nothing leaves a typed note, and a read the model as
     null,
     null,
   ]);
+  assert.equal(noneNaming, "AAA: no other company's 10-K on file names it as a competitor.");
 });
 
 // The turn's completion; a failure names the error the turn ended on.

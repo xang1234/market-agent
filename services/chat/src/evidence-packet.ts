@@ -206,10 +206,11 @@ export function mergePackets(input: {
   let figureCount = 0;
   const figures = input.engine.flatMap((packet) => {
     const ids = new Map(packet.figures.map((figure) => [figure.id, `F${++figureCount}`]));
-    return packet.figures.map((figure) => ({
+    const renumbered = (id: string) => ids.get(id) ?? id;
+    return packet.figures.map(({ derived_from, ...figure }) => ({
       ...figure,
-      id: ids.get(figure.id)!,
-      ...(figure.derived_from ? { derived_from: figure.derived_from.map((id) => ids.get(id) ?? id) as unknown as readonly [string, string] } : {}),
+      id: renumbered(figure.id),
+      ...(derived_from ? { derived_from: [renumbered(derived_from[0]), renumbered(derived_from[1])] as const } : {}),
     }));
   });
   const entries = analystPacketEntries(input.analyst.map((result) => relabelled(result, input.labels)));
@@ -238,7 +239,7 @@ export function mergePackets(input: {
     gaps: [...input.notes, ...entries.flatMap((entry) => (entry.kind === "filing_read" || entry.kind === "no_filing" ? [entry.text] : []))],
     query_bounds: {},
     claims,
-    disagreements: (input.route?.disagreements ?? []).map((entry) => ({ ...entry, claims: entry.claims.map((id) => routeIds.get(id) ?? id) as unknown as readonly [string, string] })),
+    disagreements: (input.route?.disagreements ?? []).map(({ claims: [a, b], basis }) => ({ claims: [routeIds.get(a) ?? a, routeIds.get(b) ?? b] as const, basis })),
     claims_status: input.analyst.some((result) => result.status === "unavailable") || input.route?.claims_status === "unavailable"
       ? "unavailable"
       : claims.length > 0 ? "available" : "none",

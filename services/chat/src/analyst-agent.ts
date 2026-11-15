@@ -127,7 +127,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     // the financial lane fetches them; the fetch streams nothing, so a turn left to the next runner shows none.
     const fetched = new Map<string, Promise<boolean>>();
     const stillLoading = (issuers: ReadonlyArray<string>) => Promise.all(issuers.map((issuer) => {
-      const known = fetched.get(issuer) ?? (deps.financial.hydrate
+      const pending = fetched.get(issuer) ?? (deps.financial.hydrate
         ? deps.financial.hydrate([{ issuer_id: issuer, label: labelOf(issuer) }], { emit: QUIET, turnId })
           .then((loading) => loading.has(issuer))
           .catch((reason: unknown) => {
@@ -135,8 +135,8 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
             return true;
           })
         : Promise.resolve(false));
-      fetched.set(issuer, known);
-      return known.then((loading) => (loading ? [issuer] : []));
+      fetched.set(issuer, pending);
+      return pending.then((loading) => (loading ? [issuer] : []));
     })).then((lists) => lists.flat());
 
     const certify = async (args: JsonObject): Promise<ToolLoopOutput> => {
@@ -156,7 +156,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
           return { content: JSON.stringify({ tool: "certified_financials", status: "gap", reason: "request_conflict" }) };
         }
         // Each call plans only its own ask: no other question, and no pick the turn's clarification offered.
-        const { clarificationAnswer: _picked, ...turn } = context as ChatTurnRunContext & { clarificationAnswer?: unknown };
+        const { clarificationAnswer: _picked, ...turn } = context;
         const outcome = await certifiedFinancials({ ...deps.financial, planningModel }, {
           context: { ...turn, userIntent: ask.question },
           subjects,
@@ -187,7 +187,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
           if (!known.has(issuer)) known.set(issuer, { mention: peer.label, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: issuer }, label: peer.label } });
         }
       }
-      const note = statusNote(result, labelList(argIssuers(args).map(labelOf)));
+      const note = statusNote(result, labelList(argIssuers(args).map(labelOf)), args.role === "competitor");
       if (note) notes.push(note);
       return { content: JSON.stringify(readSummary(result)), ...(isFailure(result) ? { isError: true } : {}) };
     };
@@ -314,10 +314,12 @@ const GATHER_RULES = [
   "You do not write the answer: it is written later from what the tools returned, and your words are never shown.",
   "Never rely on your own knowledge of a company, not even to choose what to read.",
   "Name only the companies listed, or peers a get_peer_set result returned, by their subject_ref.",
-  "Ask certified_financials for any figure; never state or compute one yourself.",
+  "Ask certified_financials for the reported figures the question asks for, and never state or compute one yourself;",
+  "when it asks different figures of different companies, ask each company's in its own call.",
   "get_company_profile reads what a company does and sells; get_claims reads risk factors (predicate risk.factor), competition",
   "(business.competition, and role competitor for other filers that name it) and customers; get_peer_set reads industry peers;",
-  "get_analyst_consensus reads attributed analyst consensus.",
+  "get_analyst_consensus reads attributed analyst consensus, which is what analysts expect: no certified figure stands in for it.",
+  "A question about competitors reads the business.competition claims and the company's industry peers.",
   "Read every company the question is about, in one step when you can.",
 ];
 
@@ -330,6 +332,7 @@ const ANSWER_RULES = [
   "evidence_packet.claims also hold what a company's 10-K states (its business, products, customers, competition and risk factors),",
   "attributed analyst consensus values, and industry peers: cite each as a management_attribution with its C id, which quotes it as stored.",
   "Say what a company does or faces only as a claim states it, never from your own knowledge, and never write Buy, Hold, Sell or any recommendation.",
+  "Write at most two analyst_inference entries: the takeaway and the counterpoint.",
 ];
 
 const issuerOf = (subject: RequestedSubject) => (subject.resolution as { subject_ref: FinancialSubjectRef }).subject_ref.id.toLowerCase();
@@ -480,12 +483,14 @@ function readSummary(result: AnalystToolResult): JsonObject {
 // text, never the model's. An item not read in full and a company with no
 // 10-K are the packet's own entries (mergePackets); a read the model asked
 // wrongly is its to fix, and leaves none.
-export function statusNote(result: AnalystToolResult, who: string): string | null {
+export function statusNote(result: AnalystToolResult, who: string, competitor = false): string | null {
   switch (result.status) {
     case "no_business_claims":
       return `${who}: its latest 10-K's business section (Item 1) was read in full and states no business claims.`;
     case "no_claims":
-      return `${who}: the 10-K items read in full state no claims of the kind asked for.`;
+      return competitor
+        ? `${who}: no other company's 10-K on file names it as a competitor.`
+        : `${who}: the 10-K items read in full state no claims of the kind asked for.`;
     case "no_peers":
       return `${who}: no industry peers are on file (${result.reason === "no_industry" ? "no source gives its industry" : "no other company shares its industry"}).`;
     case "no_consensus":
