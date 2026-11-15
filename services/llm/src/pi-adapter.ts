@@ -5,11 +5,13 @@ import {
   LlmClientError,
   type LlmChatClient,
   type LlmClientExecutionOptions,
-  type LlmChatMessage,
+  type LlmMessage,
   type LlmChatRequest,
   type LlmChatResult,
   LlmProviderError,
   type LlmReasoningLevel,
+  type LlmTool,
+  type LlmToolCall,
 } from "./router.ts";
 import { type LlmApi, type LlmDeployment, LLM_PROTOCOLS } from "./channel-config.ts";
 
@@ -17,6 +19,8 @@ type PiTextContent = {
   type: "text";
   text: string;
 };
+
+type PiToolCall = { type: "toolCall" } & LlmToolCall;
 
 type PiContentBlock = PiTextContent | Record<string, unknown>;
 
@@ -35,18 +39,27 @@ type PiContextMessage =
   | { role: "user"; content: string; timestamp: number }
   | {
     role: "assistant";
-    content: ReadonlyArray<PiTextContent>;
+    content: ReadonlyArray<PiTextContent | PiToolCall>;
     api: LlmApi;
     provider: string;
     model: string;
     usage: typeof NO_USAGE;
-    stopReason: "stop";
+    stopReason: "stop" | "toolUse";
+    timestamp: number;
+  }
+  | {
+    role: "toolResult";
+    toolCallId: string;
+    toolName: string;
+    content: ReadonlyArray<PiTextContent>;
+    isError: boolean;
     timestamp: number;
   };
 
 type PiContext = {
   systemPrompt?: string;
   messages: ReadonlyArray<PiContextMessage>;
+  tools?: ReadonlyArray<LlmTool>;
 };
 
 const NO_USAGE = Object.freeze({
@@ -280,30 +293,49 @@ function reasoningFor(
 function contextFromRequest(request: LlmChatRequest, model: PiModel): PiContext {
   const systemPrompt = messagesByRole(request.messages, "system").join("\n\n").trim();
   const timestamp = Date.now();
-  const messages = request.messages
-    .filter(isConversationMessage)
-    .map((message): PiContextMessage => Object.freeze(message.role === "user"
-      ? { role: "user", content: message.content, timestamp }
-      : {
-        role: "assistant",
-        content: Object.freeze([Object.freeze({ type: "text" as const, text: message.content })]),
-        api: model.api,
-        provider: model.provider,
-        model: model.id,
-        usage: NO_USAGE,
-        stopReason: "stop",
-        timestamp,
-      }));
+  const messages = request.messages.flatMap((message): PiContextMessage[] => {
+    switch (message.role) {
+      case "system":
+        return [];
+      case "user":
+        return [Object.freeze({ role: "user", content: message.content, timestamp })];
+      case "toolResult":
+        return [Object.freeze({
+          role: "toolResult",
+          toolCallId: message.toolCallId,
+          toolName: message.toolName,
+          content: Object.freeze([textBlock(message.content)]),
+          isError: message.isError,
+          timestamp,
+        })];
+      case "assistant": {
+        const toolCalls = ("toolCalls" in message ? message.toolCalls : []).map((call) => Object.freeze({ type: "toolCall" as const, ...call }));
+        return [Object.freeze({
+          role: "assistant",
+          content: Object.freeze(toolCalls.length > 0 && message.content === ""
+            ? toolCalls
+            : [textBlock(message.content), ...toolCalls]),
+          api: model.api,
+          provider: model.provider,
+          model: model.id,
+          usage: NO_USAGE,
+          stopReason: toolCalls.length > 0 ? "toolUse" : "stop",
+          timestamp,
+        })];
+      }
+    }
+  });
   return Object.freeze({
     ...(systemPrompt.length === 0 ? {} : { systemPrompt }),
     messages: Object.freeze(messages),
+    ...(request.tools === undefined || request.tools.length === 0
+      ? {}
+      : { tools: Object.freeze(request.tools.map(({ name, description, parameters }) => Object.freeze({ name, description, parameters }))) }),
   });
 }
 
-function isConversationMessage(
-  message: LlmChatMessage,
-): message is LlmChatMessage & { role: "user" | "assistant" } {
-  return message.role === "user" || message.role === "assistant";
+function textBlock(text: string): PiTextContent {
+  return Object.freeze({ type: "text", text });
 }
 
 function optionsFromDeployment(
@@ -337,15 +369,19 @@ function resultFromMessage(message: PiAssistantMessage): LlmChatResult {
     .trim();
   // A reply that hit maxTokens can look complete; callers decide whether to show it.
   const truncated = message.stopReason === "length" ? { truncated: true } : {};
+  const toolCalls = (message.content ?? []).filter(isPiToolCall)
+    .map(({ id, name, arguments: args }) => Object.freeze({ id, name, arguments: args }));
+  const calls = toolCalls.length === 0 ? {} : { toolCalls: Object.freeze(toolCalls) };
   const usage = message.usage;
   if (usage === undefined || typeof usage.input !== "number" || typeof usage.output !== "number") {
-    return Object.freeze({ text, ...truncated });
+    return Object.freeze({ text, ...truncated, ...calls });
   }
   // pi-ai reports cached prompt tokens apart from `input`; they're still input.
   const inputTokens = usage.input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
   return Object.freeze({
     text,
     ...truncated,
+    ...calls,
     usage: Object.freeze({
       inputTokens,
       outputTokens: usage.output,
@@ -401,7 +437,7 @@ function statusFromError(error: unknown): number | null {
   return typeof status === "number" && Number.isInteger(status) ? status : null;
 }
 
-function messagesByRole(messages: ReadonlyArray<LlmChatMessage>, role: LlmChatMessage["role"]): string[] {
+function messagesByRole(messages: ReadonlyArray<LlmMessage>, role: LlmMessage["role"]): string[] {
   return messages
     .filter((message) => message.role === role)
     .map((message) => message.content.trim())
@@ -410,4 +446,10 @@ function messagesByRole(messages: ReadonlyArray<LlmChatMessage>, role: LlmChatMe
 
 function isPiTextContent(block: PiContentBlock): block is PiTextContent {
   return block.type === "text" && typeof (block as { text?: unknown }).text === "string";
+}
+
+function isPiToolCall(block: PiContentBlock): block is PiToolCall {
+  const call = block as Partial<Record<keyof PiToolCall, unknown>>;
+  return block.type === "toolCall" && typeof call.id === "string" && typeof call.name === "string" &&
+    call.arguments !== null && typeof call.arguments === "object" && !Array.isArray(call.arguments);
 }

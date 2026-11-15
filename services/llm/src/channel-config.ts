@@ -39,8 +39,9 @@ export type LlmSettings = {
 
 /** What a call is for. "extraction" leads with EXTRACTION_LITELLM_MODEL (a cheaper model
  * for reading filings and picking from fixed lists) when set, "judge" with
- * JUDGE_LITELLM_MODEL (checking a written answer against its evidence); else the primary model. */
-export type LlmPurpose = "default" | "extraction" | "judge";
+ * JUDGE_LITELLM_MODEL (checking a written answer against its evidence), "agent" with
+ * AGENT_LITELLM_MODEL (the analyst's tool loop); else the primary model. */
+export type LlmPurpose = "default" | "extraction" | "judge" | "agent";
 
 export type LlmDeployment = {
   channel: string;
@@ -98,7 +99,12 @@ export function buildLlmDeploymentOrder(
   purpose: LlmPurpose = "default",
 ): ReadonlyArray<LlmDeployment> {
   const channelsByName = new Map(settings.channels.map((channel) => [channel.name, channel]));
-  const lead = { default: null, extraction: settings.extractionModel, judge: settings.judgeModel }[purpose] ?? settings.primaryModel;
+  const lead = {
+    default: null,
+    extraction: settings.extractionModel,
+    judge: settings.judgeModel,
+    agent: settings.agentModel,
+  }[purpose] ?? settings.primaryModel;
   // A chosen judge has no fallback: verdicts from another model are another
   // measurement, and judging every turn on a fallback was not approved.
   const fallbacks = purpose === "judge" && settings.judgeModel ? [] : settings.fallbackModels;

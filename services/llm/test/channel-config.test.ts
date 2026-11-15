@@ -253,3 +253,18 @@ test("parseLlmEnvFileText reads dotenv-style LLM settings without shell state", 
   assert.deepEqual(settings.channels[0].models, ["gpt-4.1", "o3"]);
   assert.deepEqual(settings.primaryModel, { channel: "openai", model: "gpt-4.1" });
 });
+
+test("agent calls lead with AGENT_LITELLM_MODEL when it is set", () => {
+  const settings = parseLlmEnv({ ...ANTHROPIC_ENV, AGENT_LITELLM_MODEL: "anthropic/claude-haiku-5-5" });
+
+  assert.deepEqual(settings.issues, []);
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(settings, "agent")), ["anthropic/claude-haiku-5-5", "opencode/qwen3.8-max"]);
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(settings)), ["anthropic/claude-sonnet-5-5", "opencode/qwen3.8-max"]);
+});
+
+test("without AGENT_LITELLM_MODEL, agent calls lead with the primary model", () => {
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(parseLlmEnv(ANTHROPIC_ENV), "agent")), [
+    "anthropic/claude-sonnet-5-5",
+    "opencode/qwen3.8-max",
+  ]);
+});

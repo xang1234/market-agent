@@ -593,6 +593,116 @@ test("a fetch that never reached the provider stays a provider failure the route
     error instanceof LlmProviderError && error.code === "provider_failed");
 });
 
+const FINANCIALS_TOOL = {
+  name: "certified_financials",
+  description: "Certified figures for companies at a period.",
+  parameters: { type: "object", properties: { tickers: { type: "array", items: { type: "string" } } }, required: ["tickers"] },
+};
+
+function capturingClient(reply: Awaited<ReturnType<PiComplete>> = { content: [{ type: "text", text: "ok" }] }) {
+  const contexts: unknown[] = [];
+  const client = createPiLlmChatClient({
+    complete: async (_model, context) => {
+      contexts.push(context);
+      return reply;
+    },
+  });
+  return { client, contexts };
+}
+
+const withoutTimestamps = (context: unknown) => {
+  const { messages, ...rest } = context as { messages: Array<{ timestamp: number }> };
+  return { ...rest, messages: messages.map(({ timestamp, ...message }) => (assert.equal(typeof timestamp, "number"), message)) };
+};
+
+test("a request's tools reach pi-ai as Context.tools", async () => {
+  const { client, contexts } = capturingClient();
+
+  await client(deployment(), { messages: [{ role: "user", content: "NVDA revenue?" }], tools: [FINANCIALS_TOOL] });
+
+  assert.deepEqual((contexts[0] as { tools: unknown }).tools, [FINANCIALS_TOOL]);
+});
+
+test("a tool call turn and its toolResult reach pi-ai as ToolCall content and a ToolResultMessage with the call's id", async () => {
+  const { client, contexts } = capturingClient();
+
+  await client(deployment(), {
+    tools: [FINANCIALS_TOOL],
+    messages: [
+      { role: "user", content: "NVDA revenue?" },
+      { role: "assistant", content: "", toolCalls: [{ id: "toolu_1", name: "certified_financials", arguments: { tickers: ["NVDA"] } }] },
+      { role: "toolResult", toolCallId: "toolu_1", toolName: "certified_financials", content: "F1 NVDA revenue $96.2B", isError: false },
+    ],
+  });
+
+  assert.deepEqual(withoutTimestamps(contexts[0]).messages, [
+    { role: "user", content: "NVDA revenue?" },
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "toolu_1", name: "certified_financials", arguments: { tickers: ["NVDA"] } }],
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4.1",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "toolUse",
+    },
+    {
+      role: "toolResult",
+      toolCallId: "toolu_1",
+      toolName: "certified_financials",
+      content: [{ type: "text", text: "F1 NVDA revenue $96.2B" }],
+      isError: false,
+    },
+  ]);
+});
+
+test("a reply's ToolCall blocks come back as toolCalls with their literal name and arguments", async () => {
+  const { client } = capturingClient({
+    stopReason: "toolUse",
+    content: [
+      { type: "text", text: "Fetching." },
+      { type: "toolCall", id: "toolu_9", name: "certified_financials", arguments: { tickers: ["NVDA", "MU"] } },
+    ],
+  });
+
+  const result = await client(deployment(), { messages: [{ role: "user", content: "Compare" }], tools: [FINANCIALS_TOOL] });
+
+  assert.deepEqual(result, {
+    text: "Fetching.",
+    toolCalls: [{ id: "toolu_9", name: "certified_financials", arguments: { tickers: ["NVDA", "MU"] } }],
+  });
+});
+
+test("a request without tools builds the same context as before tool calling", async () => {
+  const { client, contexts } = capturingClient();
+
+  await client(deployment(), {
+    messages: [
+      { role: "system", content: "Be brief." },
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+      { role: "user", content: "again" },
+    ],
+  });
+
+  assert.deepEqual(withoutTimestamps(contexts[0]), {
+    systemPrompt: "Be brief.",
+    messages: [
+      { role: "user", content: "hi" },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "hello" }],
+        api: "openai-completions",
+        provider: "openai",
+        model: "gpt-4.1",
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        stopReason: "stop",
+      },
+      { role: "user", content: "again" },
+    ],
+  });
+});
+
 function deployment(): LlmDeployment {
   return {
     channel: "openai",
