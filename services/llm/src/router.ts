@@ -25,9 +25,16 @@ export type LlmToolCall = {
 export type LlmChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
+  toolCalls?: never;
 };
 
-export type LlmToolCallMessage = { role: "assistant"; content: string; toolCalls: ReadonlyArray<LlmToolCall> };
+export type LlmToolCallMessage = {
+  role: "assistant";
+  content: string;
+  toolCalls: ReadonlyArray<LlmToolCall>;
+  /** Who made the calls: replayed to another model after a fallback, their ids are rewritten to its format. */
+  deployment: Pick<LlmDeployment, "channel" | "model">;
+};
 
 export type LlmToolResultMessage = {
   role: "toolResult";
@@ -37,7 +44,6 @@ export type LlmToolResultMessage = {
   isError: boolean;
 };
 
-/** A turn in a request: text, or a tool loop's call and result turns. */
 export type LlmMessage = LlmChatMessage | LlmToolCallMessage | LlmToolResultMessage;
 
 /** How much a reasoning model should think; each model gets the nearest level it supports. */

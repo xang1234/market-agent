@@ -23,18 +23,21 @@ function scriptedRouter(replies: ReadonlyArray<Partial<LlmRouterResult>> | (() =
   return { router, requests };
 }
 
-type Accepted = { ok: true; id: number };
+type Accepted = { ok: true; used: number };
 
-function highBudgetPolicy(limit: number): ToolLoopPolicy<Accepted> {
-  let reserved = 0;
-  const policy: ToolLoopPolicy<Accepted> = {
+// Like services/tools' TurnToolPolicy: a check reserves budget across the turn, and a decision
+// records only on the policy whose usage it was checked against, in check order.
+function highBudgetPolicy(limit: number, usage = 0, session = { reserved: usage }): ToolLoopPolicy<Accepted> {
+  return {
     ok: true,
-    checkToolCall: () => reserved < limit
-      ? { ok: true, id: reserved++ }
+    checkToolCall: () => session.reserved < limit
+      ? { ok: true, used: session.reserved++ }
       : { ok: false, reason: "budget_exceeded", note: "high-cost budget is exhausted; return a partial answer" },
-    recordAcceptedToolCall: () => policy,
+    recordAcceptedToolCall: (decision) => {
+      assert.equal(decision.used, usage, "recorded in check order on the latest policy");
+      return highBudgetPolicy(limit, usage + 1, session);
+    },
   };
-  return policy;
 }
 
 const ask = { messages: [{ role: "user" as const, content: "Compare NVDA and MU revenue" }], tools: TOOLS };
@@ -51,7 +54,7 @@ test("a final reply at step 2 stops with final, the tool's packet in the second 
   assert.equal(result.stop, "final");
   assert.equal(result.steps.length, 2);
   assert.deepEqual(requests[1].messages.slice(1), [
-    { role: "assistant", content: "", toolCalls: [call("t1", ["NVDA", "MU"])] },
+    { role: "assistant", content: "", toolCalls: [call("t1", ["NVDA", "MU"])], deployment: DEPLOYMENT },
     { role: "toolResult", toolCallId: "t1", toolName: "certified_financials", content: "F1 NVDA revenue $96.2B", isError: false },
   ]);
   assert.deepEqual(requests[1].tools, TOOLS);
@@ -138,6 +141,41 @@ test("a tool's own error goes back to the model and the loop carries on", async 
     { outcome: "error", content: "upstream timeout" },
   ]);
   assert.equal(result.stop, "final");
+});
+
+test("two accepted calls and one refused in one step: both run, the refusal reaches the model, and the answer is partial", async () => {
+  const executed: string[] = [];
+  const { router } = scriptedRouter([
+    { toolCalls: [call("t1", ["NVDA"]), call("t2", ["MU"]), call("t3", ["AMD"])] },
+    { text: "NVDA and MU only." },
+  ]);
+
+  const result = await runToolLoop({
+    router,
+    request: ask,
+    execute: (c) => (executed.push(c.id), { content: c.id }),
+    policy: highBudgetPolicy(2),
+    maxSteps: 5,
+  });
+
+  assert.deepEqual(executed, ["t1", "t2"]);
+  assert.deepEqual(result.steps[0].results.map((r) => r.outcome), ["ok", "ok", "refused"]);
+  assert.equal(result.stop, "budget");
+});
+
+test("a reply cut off at maxTokens runs none of its tool calls and stops as truncated", async () => {
+  const { router } = scriptedRouter([{ truncated: true, text: "Let me", toolCalls: [call("t1", ["NV"])] }]);
+
+  const result = await runToolLoop({
+    router,
+    request: ask,
+    execute: () => assert.fail("a truncated call's arguments may be cut short"),
+    policy: highBudgetPolicy(5),
+    maxSteps: 5,
+  });
+
+  assert.equal(result.stop, "truncated");
+  assert.deepEqual(result.messages.at(-1), { role: "assistant", content: "Let me" });
 });
 
 test("maxSteps must be a positive integer", async () => {

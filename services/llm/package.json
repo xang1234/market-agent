@@ -8,6 +8,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "tool-loop": "node --experimental-strip-types --env-file=../../.env.dev src/tool-loop-cli.ts",
     "test": "node --experimental-strip-types --test \"test/**/*.test.ts\""
   },
   "dependencies": {

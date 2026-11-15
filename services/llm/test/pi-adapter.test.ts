@@ -572,6 +572,62 @@ test("a multi-turn history reaches an OpenAI-compatible API through pi-ai, each 
   ]);
 });
 
+const toolTurns = (id: string, deployment: { channel: string; model: string }) => [
+  { role: "user" as const, content: "NVDA revenue?" },
+  { role: "assistant" as const, content: "", toolCalls: [{ id, name: "certified_financials", arguments: { tickers: ["NVDA"] } }], deployment },
+  { role: "toolResult" as const, toolCallId: id, toolName: "certified_financials", content: "F1 NVDA revenue $96.2B", isError: false },
+];
+
+test("a tool transcript reaches the Messages API as tool_use and tool_result, with another provider's call ids rewritten to Anthropic's format", async (t) => {
+  const stub = await messagesApiStub(t, () => ({ status: 200, events: claudeReply("claude-sonnet-5-5", "NVDA revenue was $96.2B [F1].") }));
+  const client = await createDefaultPiLlmChatClient();
+  const claude: LlmDeployment = { channel: "claude", model: "claude-sonnet-5-5", protocol: "anthropic", baseUrl: stub.baseUrl, apiKeys: ["k"] };
+
+  await client(claude, { tools: [FINANCIALS_TOOL], maxTokens: 256, messages: toolTurns("toolu_1", { channel: "claude", model: "claude-sonnet-5-5" }) });
+  await client(claude, { tools: [FINANCIALS_TOOL], maxTokens: 256, messages: toolTurns("functions.certified_financials:0", { channel: "opencode", model: "kimi-k3" }) });
+
+  const sent = stub.requests.map(({ body }) => {
+    const [, assistant, results] = body.messages as Array<{ content: Array<{ type: string; id?: string; tool_use_id?: string; name?: string; input?: unknown }> }>;
+    const use = assistant!.content.find((block) => block.type === "tool_use")!;
+    const result = results!.content.find((block) => block.type === "tool_result")!;
+    return { use: { id: use.id, name: use.name, input: use.input }, resultFor: result.tool_use_id, tools: (body.tools as Array<{ name: string }>).map((tool) => tool.name) };
+  });
+  assert.deepEqual(sent[0], {
+    use: { id: "toolu_1", name: "certified_financials", input: { tickers: ["NVDA"] } },
+    resultFor: "toolu_1",
+    tools: ["certified_financials"],
+  });
+  assert.match(sent[1]!.use.id!, /^[a-zA-Z0-9_-]+$/u);
+  assert.equal(sent[1]!.resultFor, sent[1]!.use.id, "the result answers the rewritten id");
+});
+
+test("a tool transcript reaches an OpenAI-compatible API as tool_calls and a tool message, and a streamed tool call comes back as toolCalls", async (t) => {
+  const bodies: Array<Record<string, unknown>> = [];
+  const server = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    bodies.push(JSON.parse(raw));
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    const call = { index: 0, id: "call_2", type: "function", function: { name: "certified_financials", arguments: "{\"tickers\":[\"MU\"]}" } };
+    res.write(`data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", created: 0, model: "m", choices: [{ index: 0, delta: { role: "assistant", tool_calls: [call] }, finish_reason: "tool_calls" }] })}\n\n`);
+    res.end("data: [DONE]\n\n");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const client = await createDefaultPiLlmChatClient();
+  const local: LlmDeployment = { channel: "local", model: "m", protocol: "openai-compatible", baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`, apiKeys: ["k"] };
+
+  const result = await client(local, { tools: [FINANCIALS_TOOL], maxTokens: 256, messages: toolTurns("call_1", { channel: "local", model: "m" }) });
+
+  assert.deepEqual(result.toolCalls, [{ id: "call_2", name: "certified_financials", arguments: { tickers: ["MU"] } }]);
+  const [, assistant, tool] = bodies[0]!.messages as Array<Record<string, unknown>>;
+  assert.deepEqual((assistant!.tool_calls as unknown[]), [
+    { id: "call_1", type: "function", function: { name: "certified_financials", arguments: "{\"tickers\":[\"NVDA\"]}" } },
+  ]);
+  assert.deepEqual({ role: tool!.role, tool_call_id: tool!.tool_call_id, content: tool!.content }, { role: "tool", tool_call_id: "call_1", content: "F1 NVDA revenue $96.2B" });
+  assert.deepEqual((bodies[0]!.tools as Array<{ function: { name: string } }>).map((entry) => entry.function.name), ["certified_financials"]);
+});
+
 test("a throw inside pi-ai before any request is a client failure, not a provider failure", async () => {
   const client = createPiLlmChatClient({
     complete: async () => {
@@ -630,7 +686,12 @@ test("a tool call turn and its toolResult reach pi-ai as ToolCall content and a 
     tools: [FINANCIALS_TOOL],
     messages: [
       { role: "user", content: "NVDA revenue?" },
-      { role: "assistant", content: "", toolCalls: [{ id: "toolu_1", name: "certified_financials", arguments: { tickers: ["NVDA"] } }] },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "toolu_1", name: "certified_financials", arguments: { tickers: ["NVDA"] } }],
+        deployment: { channel: "openai", model: "gpt-4.1" },
+      },
       { role: "toolResult", toolCallId: "toolu_1", toolName: "certified_financials", content: "F1 NVDA revenue $96.2B", isError: false },
     ],
   });

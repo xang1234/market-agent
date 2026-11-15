@@ -1,6 +1,3 @@
-// Probe for the tool loop on the configured channel, with a stub certified_financials tool.
-// node --experimental-strip-types --env-file=../../.env.dev src/tool-loop-cli.ts "Compare NVDA and MU revenue"
-//   [--max-steps=N] [--budget-high=N] [--tool-error]
 import { parseArgs } from "node:util";
 
 import { createLlmRouterFromEnv } from "./settings-loader.ts";
@@ -30,13 +27,12 @@ const PACKET: Readonly<Record<string, { id: string; value: string }>> = {
 };
 
 const starts: number[] = [];
-// Each step's [llm] latency, a fallback's failed attempt included.
-const llmMs: number[] = [];
+const llmMsByStep: number[] = [];
 const router = await createLlmRouterFromEnv({ ...process.env, LLM_USAGE_LOG: "true" }, {
   purpose: "agent",
   log: (line) => {
     const ms = /^\[llm\] \S+ (\d+)ms/u.exec(line)?.[1];
-    if (ms !== undefined && llmMs.length > 0) llmMs[llmMs.length - 1] += Number(ms);
+    if (ms !== undefined && llmMsByStep.length > 0) llmMsByStep[llmMsByStep.length - 1] += Number(ms);
     console.log(line);
   },
 });
@@ -48,7 +44,7 @@ if (router === null) {
 const timed: ControlledRouter = {
   complete: (request, controls) => {
     starts.push(performance.now());
-    llmMs.push(0);
+    llmMsByStep.push(0);
     return router.complete(request, controls);
   },
 };
@@ -107,18 +103,19 @@ const endedAt = performance.now();
 
 const oneLine = (text: string) => JSON.stringify(text.replace(/\s+/gu, " ").slice(0, 300));
 let refused = 0;
+const callTurns = result.messages.flatMap((message, at) => ("deployment" in message ? [at] : []));
 result.steps.forEach((step, index) => {
   const wallMs = Math.round((starts[index + 1] ?? endedAt) - starts[index]);
-  const calls = step.results.map(({ call, outcome, content }) => {
+  const calls = step.results.map(({ call, outcome, content }, nth) => {
     if (outcome === "refused") refused += 1;
-    const sent = result.messages.find((m) => m.role === "toolResult" && m.toolCallId === call.id);
+    const sent = result.messages[callTurns[index] + 1 + nth];
     const resultId = sent?.role === "toolResult" ? sent.toolCallId : "none";
     return `tool=${call.name} id=${call.id} args=${JSON.stringify(call.arguments)} -> ${outcome} result_id=${resultId}` +
       (outcome === "ok" ? "" : ` toolResult=${oneLine(content)}`);
   });
   console.log(
-    `step=${index + 1} model=${step.reply.deployment.channel}/${step.reply.deployment.model} ms=${wallMs} llm_ms=${llmMs[index]} ` +
-      `overhead_ms=${wallMs - llmMs[index]} ${calls.length > 0 ? calls.join(" | ") : `final=${oneLine(step.reply.text)}`}`,
+    `step=${index + 1} model=${step.reply.deployment.channel}/${step.reply.deployment.model} ms=${wallMs} llm_ms=${llmMsByStep[index]} ` +
+      `overhead_ms=${wallMs - llmMsByStep[index]} ${calls.length > 0 ? calls.join(" | ") : `final=${oneLine(step.reply.text)}`}`,
   );
 });
 console.log(`stop=${result.stop} steps=${result.steps.length} tool_calls=${result.steps.reduce((n, s) => n + s.results.length, 0)} refused=${refused}`);

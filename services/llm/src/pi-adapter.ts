@@ -231,7 +231,7 @@ export function createPiLlmChatClient(input: CreatePiLlmChatClientInput): LlmCha
       const model = modelFromDeployment(deployment, request, known);
       const message = await input.complete(
         model,
-        contextFromRequest(request, model),
+        contextFromRequest(request, model, deployment),
         optionsFromDeployment(deployment, request, execution, reasoningFor(model, request, input.clampLevel)),
       );
       if (message.stopReason === "error" || message.stopReason === "aborted") {
@@ -290,7 +290,7 @@ function reasoningFor(
   return clamp ? clamp(model, request.reasoning) : request.reasoning;
 }
 
-function contextFromRequest(request: LlmChatRequest, model: PiModel): PiContext {
+function contextFromRequest(request: LlmChatRequest, model: PiModel, deployment: LlmDeployment): PiContext {
   const systemPrompt = messagesByRole(request.messages, "system").join("\n\n").trim();
   const timestamp = Date.now();
   const messages = request.messages.flatMap((message): PiContextMessage[] => {
@@ -309,15 +309,19 @@ function contextFromRequest(request: LlmChatRequest, model: PiModel): PiContext 
           timestamp,
         })];
       case "assistant": {
-        const toolCalls = ("toolCalls" in message ? message.toolCalls : []).map((call) => Object.freeze({ type: "toolCall" as const, ...call }));
+        const calling = "deployment" in message ? message : null;
+        const toolCalls = (calling?.toolCalls ?? []).map((call) => Object.freeze({ type: "toolCall" as const, ...call }));
+        // pi-ai rewrites tool call ids only for a turn it sees as another model's.
+        const origin = calling?.deployment ?? deployment;
+        const sameDeployment = origin.channel === deployment.channel && origin.model === deployment.model;
         return [Object.freeze({
           role: "assistant",
           content: Object.freeze(toolCalls.length > 0 && message.content === ""
             ? toolCalls
             : [textBlock(message.content), ...toolCalls]),
           api: model.api,
-          provider: model.provider,
-          model: model.id,
+          provider: sameDeployment ? model.provider : origin.channel,
+          model: sameDeployment ? model.id : origin.model,
           usage: NO_USAGE,
           stopReason: toolCalls.length > 0 ? "toolUse" : "stop",
           timestamp,

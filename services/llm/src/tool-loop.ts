@@ -8,11 +8,7 @@ import type {
   LlmToolCall,
 } from "./router.ts";
 
-/**
- * The part of services/tools' TurnToolPolicy the loop uses, typed here so services/llm
- * never imports services/tools. checkToolCall reserves budget for an accepted call, so
- * calls in one step are counted against each other before any runs.
- */
+/** checkToolCall reserves budget for an accepted call, so calls in one step are counted against each other before any runs. */
 export type ToolLoopPolicy<Accepted extends { ok: true }> = {
   ok: true;
   checkToolCall(call: { tool_name: string; arguments?: JsonObject }): Accepted | ToolLoopRefusal;
@@ -21,13 +17,15 @@ export type ToolLoopPolicy<Accepted extends { ok: true }> = {
 
 export type ToolLoopRefusal = { ok: false; reason: string; note?: string; message?: string };
 
-/** A tool's answer. A failure the model should hear about is `isError`; a throw ends the loop. */
+/**
+ * A tool's answer. A failure the model should hear about is `isError`. A throw ends the loop,
+ * and the step's other calls may still be running when it does.
+ */
 export type ToolLoopOutput = { content: string; isError?: boolean };
 
 export type ToolLoopCallResult = {
   call: LlmToolCall;
   outcome: "ok" | "error" | "refused";
-  /** What the model received as the call's toolResult. */
   content: string;
 };
 
@@ -36,8 +34,11 @@ export type ToolLoopStep = {
   results: ReadonlyArray<ToolLoopCallResult>;
 };
 
-/** `budget`: the model answered after the policy refused a call for budget, so the answer is partial. */
-export type ToolLoopStopReason = "final" | "step_cap" | "budget";
+/**
+ * `budget`: the model answered after the policy refused a call for budget, so the answer is partial.
+ * `truncated`: the reply hit maxTokens, so its text may be cut off and its tool calls were not run.
+ */
+export type ToolLoopStopReason = "final" | "step_cap" | "budget" | "truncated";
 
 export type ToolLoopResult = {
   stop: ToolLoopStopReason;
@@ -47,12 +48,10 @@ export type ToolLoopResult = {
 };
 
 export type RunToolLoopInput<Accepted extends { ok: true }> = {
-  /** Built for purpose "agent", so AGENT_LITELLM_MODEL leads. */
   router: ControlledRouter;
   request: LlmChatRequest & { tools: ReadonlyArray<LlmTool> };
   execute: (call: LlmToolCall) => Promise<ToolLoopOutput> | ToolLoopOutput;
   policy: ToolLoopPolicy<Accepted>;
-  /** The most model calls the loop makes. */
   maxSteps: number;
 };
 
@@ -73,11 +72,12 @@ export async function runToolLoop<Accepted extends { ok: true }>(
   while (steps.length < input.maxSteps) {
     const reply = await input.router.complete({ ...input.request, messages: [...messages] });
     const calls = reply.toolCalls ?? [];
-    messages.push(Object.freeze({ role: "assistant", content: reply.text, ...(calls.length > 0 ? { toolCalls: calls } : {}) }));
-    if (calls.length === 0) {
+    if (reply.truncated || calls.length === 0) {
+      messages.push(Object.freeze({ role: "assistant", content: reply.text }));
       steps.push(Object.freeze({ reply, results: Object.freeze([]) }));
-      return done(budgetRefused ? "budget" : "final");
+      return done(reply.truncated ? "truncated" : budgetRefused ? "budget" : "final");
     }
+    messages.push(Object.freeze({ role: "assistant", content: reply.text, toolCalls: calls, deployment: reply.deployment }));
 
     const checked = calls.map((call): { call: LlmToolCall; decision: Accepted | ToolLoopRefusal } => ({
       call,
@@ -94,7 +94,6 @@ export async function runToolLoop<Accepted extends { ok: true }>(
       const output = await input.execute(call);
       return Object.freeze({ call, outcome: output.isError ? "error" : "ok", content: output.content });
     }));
-    // In check order: each accepted decision was counted against the usage before it.
     for (const { decision } of checked) {
       if (!decision.ok) continue;
       const next = policy.recordAcceptedToolCall(decision);
