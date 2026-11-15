@@ -410,3 +410,28 @@ test("a watchlist universe resolves the watchlist's mode, not only its stored me
   await assert.rejects(resolve(await watchlist(USER_ID, "agent", { agent_id: watchlistAgent.agent_id })), AgentUniverseUnavailableError);
   await assert.rejects(resolve(await watchlist(OTHER_USER_ID, "manual", null)), DynamicWatchlistNotFoundError);
 });
+
+test("a watchlist universe backed by a theme, directly or through a theme agent, reads the theme's current members", docker, async (t) => {
+  const pool = await seededPool(t, "dev-api-agent-theme-watchlist-universe");
+  const { rows: [{ theme_id }] } = await pool.query<{ theme_id: string }>(
+    `insert into themes (name, membership_mode) values ('AI capex', 'manual') returning theme_id`,
+  );
+  await pool.query(
+    `insert into theme_memberships (theme_id, subject_kind, subject_id, effective_at, expires_at)
+     values ($1::uuid, 'issuer', $2::uuid, now() - interval '1 day', null),
+            ($1::uuid, 'issuer', $3::uuid, now() - interval '2 days', now() - interval '1 day')`,
+    [theme_id, ISSUER_A.id, ISSUER_B.id],
+  );
+  const themeAgent = await createAgent(pool, {
+    user_id: USER_ID, name: "Theme", thesis: "Watch margins.", cadence: "daily", universe: { mode: "theme", theme_id },
+  });
+  const watchlist = async (mode: string, membership_spec: object) =>
+    (await pool.query<{ watchlist_id: string }>(
+      `insert into watchlists (user_id, name, mode, membership_spec) values ($1::uuid, $2, $3::watchlist_mode, $4::jsonb) returning watchlist_id`,
+      [USER_ID, mode, mode, JSON.stringify(membership_spec)],
+    )).rows[0].watchlist_id;
+
+  const resolve = (watchlist_id: string) => agentUniverseSubjectRefs(pool, USER_ID, { mode: "watchlist", watchlist_id });
+  assert.deepEqual(await resolve(await watchlist("theme", { theme_id })), [ISSUER_A]);
+  assert.deepEqual(await resolve(await watchlist("agent", { agent_id: themeAgent.agent_id })), [ISSUER_A]);
+});

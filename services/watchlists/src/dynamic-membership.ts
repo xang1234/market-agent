@@ -135,7 +135,7 @@ async function resolveMembersForSource(
       source,
       await selectSubjectRows(
         deps.db,
-        `select subject_kind, subject_id, subject_ref
+        `select subject_kind, subject_id
            from theme_memberships
           where theme_id = $1
             and effective_at <= $2::timestamptz
@@ -215,7 +215,6 @@ async function selectSubjectRows(
 }
 
 function subjectRefFromRow(row: Record<string, unknown>): SubjectRef {
-  if (isSubjectRef(row.subject_ref)) return row.subject_ref;
   const candidate = { kind: row.subject_kind, id: row.subject_id };
   if (!isSubjectRef(candidate)) {
     throw new Error("dynamic membership row does not contain a valid subject_ref");

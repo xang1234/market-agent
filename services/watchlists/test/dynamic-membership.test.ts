@@ -118,12 +118,14 @@ test("theme and portfolio watchlists mirror source rows with deterministic order
   });
   db.themeMembers.set("theme-ai", [
     {
-      subject_ref: { kind: "instrument", id: MSFT_INSTRUMENT_ID },
+      subject_kind: "instrument",
+      subject_id: MSFT_INSTRUMENT_ID,
       effective_at: "2026-01-01T00:00:00.000Z",
       expires_at: null,
     },
     {
-      subject_ref: { kind: "issuer", id: APPLE_ISSUER_ID },
+      subject_kind: "issuer",
+      subject_id: APPLE_ISSUER_ID,
       effective_at: "2026-01-01T00:00:00.000Z",
       expires_at: null,
     },
@@ -135,8 +137,8 @@ test("theme and portfolio watchlists mirror source rows with deterministic order
     membership_spec: { portfolio_id: "portfolio-main" },
   });
   db.portfolioHoldings.set("portfolio-main", [
-    { subject_ref: { kind: "listing", id: AAPL_LISTING_ID } },
-    { subject_ref: { kind: "instrument", id: AAPL_INSTRUMENT_ID } },
+    { subject_kind: "listing", subject_id: AAPL_LISTING_ID },
+    { subject_kind: "instrument", subject_id: AAPL_INSTRUMENT_ID },
   ]);
 
   const deps: DynamicWatchlistDeps = {
@@ -179,17 +181,20 @@ test("theme watchlists exclude future and expired memberships as of resolver tim
   });
   db.themeMembers.set("theme-windowed", [
     {
-      subject_ref: { kind: "instrument", id: ACTIVE_INSTRUMENT_ID },
+      subject_kind: "instrument",
+      subject_id: ACTIVE_INSTRUMENT_ID,
       effective_at: "2026-01-01T00:00:00.000Z",
       expires_at: null,
     },
     {
-      subject_ref: { kind: "instrument", id: FUTURE_INSTRUMENT_ID },
+      subject_kind: "instrument",
+      subject_id: FUTURE_INSTRUMENT_ID,
       effective_at: "2026-06-01T00:00:00.000Z",
       expires_at: null,
     },
     {
-      subject_ref: { kind: "instrument", id: EXPIRED_INSTRUMENT_ID },
+      subject_kind: "instrument",
+      subject_id: EXPIRED_INSTRUMENT_ID,
       effective_at: "2026-01-01T00:00:00.000Z",
       expires_at: "2026-04-01T00:00:00.000Z",
     },
