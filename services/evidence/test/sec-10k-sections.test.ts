@@ -47,7 +47,7 @@ test("a heading reads through a word markup split, and Item 1 may be the Descrip
 
 test("an item ends at the next heading however its title is cased, and at Item 2 when Item 1B is absent", () => {
   const body = "<div>We make things that people use every day in many places.</div>".repeat(30);
-  for (const next of ["Item 1B. unresolved staff comments", "ITEM 1B: UNRESOLVED STAFF COMMENTS", "Item 1B.unresolved", "Item 2. properties", "ITEM 2 - PROPERTIES"]) {
+  for (const next of ["Item 1B. unresolved staff comments", "ITEM 1B: UNRESOLVED STAFF COMMENTS", "Item 1B.unresolved staff comments", "Item 2. properties", "ITEM 2 - PROPERTIES", "Item 6. [Reserved]"]) {
     const sections = tenKSections(`<div>Item 1. Business</div>${body}<div>Item 1a. risk factors</div>${body}<div>${next}</div>${body}`);
     const item1 = sections["1"] as TenKSection;
     const item1a = sections["1A"] as TenKSection;
@@ -90,14 +90,16 @@ const paragraphs = (tag: string, n: number) =>
   Array.from({ length: n }, (_, i) => `<p>${tag} paragraph ${i}: we make things that people use every day in many places.</p>`).join("");
 
 test("a smaller reporting company's omitted Item 1A is not found, though Item 7 opens by citing it", () => {
-  const html = [
-    `<div>Item 1. Business</div>${paragraphs("business", 30)}`,
-    "<div>Item 1A. Risk Factors</div><p>Not required for smaller reporting companies.</p>",
-    "<div>Item 1B. Unresolved Staff Comments</div><p>None.</p>",
-    `<div>Item 7. Management's Discussion and Analysis</div><p>Item 1A. Risk Factors and forward-looking statements are described above.</p>${paragraphs("liquidity", 30)}`,
-    "<div>Item 8. Financial Statements</div>",
-  ].join("");
-  assert.deepEqual(tenKSections(html)["1A"], { type: "1A", error: "section_not_found" });
+  for (const cite of ["Item 1A. Risk Factors and forward-looking statements are described above.", "Item 1A. Risk Factors, above, describes forward-looking risks."]) {
+    const html = [
+      `<div>Item 1. Business</div>${paragraphs("business", 30)}`,
+      "<div>Item 1A. Risk Factors</div><p>Not required for smaller reporting companies.</p>",
+      "<div>Item 1B. Unresolved Staff Comments</div><p>None.</p>",
+      `<div>Item 7. Management's Discussion and Analysis</div><p>${cite}</p>${paragraphs("liquidity", 30)}`,
+      "<div>Item 8. Financial Statements</div>",
+    ].join("");
+    assert.deepEqual(tenKSections(html)["1A"], { type: "1A", error: "section_not_found" }, cite);
+  }
 });
 
 test("a page header that repeats the item's heading stays inside the item", () => {
@@ -149,5 +151,61 @@ test("a short lower-case title heads the next item, so the one before it ends", 
   for (const next of ["Item 1B. unresolved staff comments", "Item 2. properties"]) {
     const sections = tenKSections(`<div>Item 1A. Risk Factors</div>${paragraphs("risk", 30)}<div>${next}</div>${paragraphs("after", 5)}`);
     assert.ok(!(sections["1A"] as TenKSection).text.includes("after paragraph"), next);
+  }
+});
+
+const tenK = (heading1a: string, heading1b: string, heading1c = "<div>Item 1C. Cybersecurity</div>") =>
+  `<div>Item 1. Business</div>${paragraphs("business", 25)}${heading1a}${paragraphs("risk", 25)}${heading1b}${paragraphs("unresolved", 3)}` +
+  `${heading1c}${paragraphs("cyber", 25)}<div>Item 2. Properties</div>${paragraphs("property", 25)}`;
+
+test("a title in sentence case heads its item", () => {
+  const cybersecurity = "<div>Item 1C. Cybersecurity risk management and strategy</div>";
+  for (const [heading1b, lastParagraph] of [["<div>Item 1B. Unresolved staff comments</div>", "risk paragraph 24"], ["", "unresolved paragraph 2"]]) {
+    const item1a = tenKSections(tenK("<div>Item 1A. Risk factors</div>", heading1b, cybersecurity))["1A"] as TenKSection;
+    assert.ok(item1a.text.startsWith("Item 1A. Risk factors risk paragraph 0"));
+    assert.ok(item1a.text.endsWith(`${lastParagraph}: we make things that people use every day in many places.`), `Item 1A ends at ${heading1b || cybersecurity}`);
+  }
+});
+
+test("a heading whose label and title sit in two table cells heads its item", () => {
+  const sections = tenKSections(tenK("<table><tr><td>Item 1A.</td><td>Risk Factors</td></tr></table>", "<div>Item 1B. Unresolved Staff Comments</div>"));
+  assert.ok(!(sections["1"] as TenKSection).text.includes("risk paragraph"));
+  assert.equal((sections["1A"] as TenKSection).text.slice(0, 26), "Item 1A. Risk Factors risk");
+});
+
+test("a heading that a sentence follows in its own block heads the item", () => {
+  for (const heading1b of ["<p>Item 1B. Unresolved Staff Comments We have no unresolved comments.</p>", "<p>Item 1B. Unresolved Staff Comments None.</p>", "<p>ITEM 1B — UNRESOLVED STAFF COMMENTS</p>"]) {
+    const item1a = tenKSections(tenK("<p>Item 1A. Risk Factors Investing in our stock involves risk.</p>", heading1b))["1A"] as TenKSection;
+    assert.ok(item1a.text.startsWith("Item 1A. Risk Factors Investing in our stock"), heading1b);
+    assert.ok(!item1a.text.includes("unresolved paragraph"), `Item 1A ends at ${heading1b}`);
+  }
+});
+
+test("a sentence that cites an item's title and goes on past it is no heading", () => {
+  for (const cite of [
+    "Item 1A. Risk Factors, of this report, describes the risks we face.",
+    "Item 1A. Risk Factors (below) describes the risks we face.",
+    "Item 1A. Risk Factors; see the risks we face.",
+    "Item 1A. Risk Factors — discusses the risks we face.",
+  ]) {
+    const html = `<div>Item 1. Business</div>${paragraphs("early", 15)}<p>${cite}</p>${paragraphs("late", 15)}<div>Item 1A. Risk Factors</div>${paragraphs("risk", 25)}<div>Item 1B. Unresolved Staff Comments</div>`;
+    const sections = tenKSections(html);
+    assert.ok((sections["1"] as TenKSection).text.endsWith("late paragraph 14: we make things that people use every day in many places."), cite);
+    assert.equal((sections["1A"] as TenKSection).text.slice(0, 26), "Item 1A. Risk Factors risk", cite);
+  }
+});
+
+test("a sentence that names an item but not its title is no heading", () => {
+  for (const cite of ["Item 7 for details", "Item 8 and the notes", "Item 1A of this report"]) {
+    const html = `<div>Item 1. Business</div>${paragraphs("early", 15)}<p>${cite}</p>${paragraphs("late", 15)}<div>Item 1A. Risk Factors</div>${paragraphs("risk", 25)}`;
+    assert.ok((tenKSections(html)["1"] as TenKSection).text.endsWith("late paragraph 14: we make things that people use every day in many places."), cite);
+  }
+});
+
+test("a label split by markup still heads its item", () => {
+  for (const [heading, opening] of [["Item 1<span>A</span>. Risk Factors", "Item 1 A . Risk Factors risk"], ["It<span>em</span> 1A. Risk Factors", "It em 1A. Risk Factors risk"]]) {
+    const sections = tenKSections(tenK(`<div>${heading}</div>`, "<div>Item 1B. Unresolved Staff Comments</div>"));
+    assert.ok(!(sections["1"] as TenKSection).text.includes("risk paragraph"), `Item 1 ends at ${heading}`);
+    assert.equal((sections["1A"] as TenKSection).text.slice(0, opening.length), opening);
   }
 });
