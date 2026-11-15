@@ -12,12 +12,17 @@ const HEADINGS: Readonly<Record<TenKItem, RegExp>> = {
 const ANY_HEADING = /^(?:ITEMS?|Items?)\s*\d{1,2}[A-Ca-c]?(?:\s*(?:and|AND|&)\s*\d{1,2}[A-Ca-c]?)?\s*[.:-]?\s*[A-Z[]/;
 const MIN_ITEM_BODY_CHARS = 1_000;
 
+// An HTML list item is one block, its bullet the browser's: a paragraph
+// inside it is no item of its own. ponytail: a nested list merges into its
+// parent item.
+const LIST_ITEM = /<li\b[^>]*>([\s\S]*?)<\/li>/gi;
+const listItemBlock = (_: string, inner: string) => `<br><li>• ${inner.replace(/<\/?(?:p|div|br)\b[^>]*>/gi, " ")}</li>`;
+
 export type TenKSection = ReleaseExhibit & { type: TenKItem };
 export type SectionNotFound = { type: TenKItem; error: "section_not_found" };
 
 export function tenKSections(html: string): Record<TenKItem, TenKSection | SectionNotFound> {
-  // A list item's bullet may be the browser's, not a glyph in the text.
-  const { text, edges } = blockText(html.replace(/<li\b[^>]*>/gi, "<br>$&• "));
+  const { text, edges } = blockText(html.replace(LIST_ITEM, listItemBlock));
   const starts = [...edges].sort((a, b) => a - b);
   const headings = starts.filter((at) => ANY_HEADING.test(text.slice(at, at + 40)));
   const longestHeadedSpan = (item: TenKItem): TenKSection | SectionNotFound => {

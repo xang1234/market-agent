@@ -118,14 +118,14 @@ function buildMessages(item: TenKItem, text: string): LlmChatMessage[] {
 
 // Kept beside verifyStatement, not in it, so earnings-release claims keep
 // their sentence rule: a 10-K list item ends in a semicolon, or opens with a
-// bullet ("*") no sentence starts after. It must end as an item does, so the
-// first paragraph of a longer item ("...compete with AMD,") is no item.
-const ITEM_END = /[.;!?]["')]?$/;
+// bullet ("*") no sentence starts after. A quote that ends mid-clause
+// ("...compete with AMD,") is the first paragraph of a longer item.
+const RUNS_ON = /(?:[,:-]|\b(?:and|or|but|nor|with|of|to|for|the|a|an))$/i;
 const BULLETS = "•▪◦●■*·\uf0b7";
 const LEADING_BULLET = new RegExp(`^[${BULLETS}]\\s*`);
 function wholeListItem(claim: TenKClaim, section: TenKSection): (TenKClaim & { exhibit: string; start: number; end: number }) | null {
   const quote = canonicalText(claim.quote).replace(LEADING_BULLET, "");
-  if (quote.length < MIN_QUOTE_CHARS || quote.length > MAX_QUOTE_CHARS || !ITEM_END.test(quote)) return null;
+  if (quote.length < MIN_QUOTE_CHARS || quote.length > MAX_QUOTE_CHARS || RUNS_ON.test(quote)) return null;
   for (let start = section.text.indexOf(quote); start >= 0; start = section.text.indexOf(quote, start + 1)) {
     const end = start + quote.length;
     if (start >= 2 && BULLETS.includes(section.text[start - 2]!) && section.text[start - 1] === " " && section.edges.has(start - 2) && section.edges.has(end)) {
@@ -210,10 +210,13 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
   }
 
   return withTransaction(deps.db, async (tx) => {
-    const stamped = await tx.db.query(
-      `update documents set parse_status = 'parsed' where document_id = $1 and parse_status = 'pending'`,
+    // The row lock orders this with storeTenK adopting the filing's date, so
+    // a claim gets the date whichever runs first.
+    const stamped = await tx.db.query<{ published_at: Date | null }>(
+      `update documents set parse_status = 'parsed' where document_id = $1 and parse_status = 'pending' returning published_at`,
       [doc.documentId],
     );
+    const effectiveTime = doc.effectiveTime ?? stamped.rows[0]?.published_at?.toISOString() ?? null;
     if ((stamped.rowCount ?? 0) === 0) return { ...started, outcome: "already_extracted" as const, missing };
     const claimIds: string[] = [];
     let resolved = 0;
@@ -234,7 +237,7 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
         reported_by_source_id: doc.sourceId,
         attributed_to_type: "issuer",
         attributed_to_id: doc.issuerId,
-        effective_time: doc.effectiveTime,
+        effective_time: effectiveTime,
         confidence: TEN_K_CONFIDENCE,
         status: "extracted",
       });

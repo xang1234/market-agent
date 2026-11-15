@@ -254,6 +254,17 @@ test("the first paragraph of a longer list item is no item", dockerTest, async (
   ] }) });
   const result = await extract10kClaims({ db: client, llm, resolveCompetitor: async () => null }, tenK);
   assert.deepEqual([result.outcome, result.extracted, result.droppedUnquoted], ["extracted", 1, 1]);
+
+  const items = await storedTenK(client, nvda, new TextEncoder().encode(
+    `<div>Item 1. Business</div><ul><li><p>suppliers of GPUs, such as AMD;</p><p>but only in the discontinued legacy segment.</p></li><li><p>suppliers of networking products, such as Arista Networks</p></li></ul>${body}<div>Item 2. Properties</div>`,
+  ));
+  const { llm: listed } = llmAnswering({ "1": JSON.stringify({ claims: [
+    { predicate: "business.competition", quote: "suppliers of GPUs, such as AMD;" },
+    { predicate: "business.competition", quote: "suppliers of GPUs, such as AMD; but only in the discontinued legacy segment." },
+    { predicate: "business.competition", quote: "suppliers of networking products, such as Arista Networks" },
+  ] }) });
+  const read = await extract10kClaims({ db: client, llm: listed, resolveCompetitor: async () => null }, items);
+  assert.deepEqual([read.extracted, read.droppedUnquoted], [2, 1], "a whole <li> verifies with or without an end mark; its first paragraph does not");
 });
 
 test("the CLI runs a backfill only when asked for one", () => {
