@@ -137,11 +137,13 @@ function wholeListItem(claim: TenKClaim, section: TenKSection): (TenKClaim & { e
 }
 
 // A risk factor names partners and customers too, so only a competition
-// claim has competitors.
+// claim has competitors. A name counts as a whole word, so "metaverse" names
+// no Meta.
 function competitorsNamedIn(claim: TenKClaim): string[] {
   if (claim.predicate !== "business.competition") return [];
-  const quote = claim.quote.toLowerCase();
-  return claim.competitors.map(canonicalText).filter((name) => name !== "" && quote.includes(name.toLowerCase()));
+  const namedAsWord = (name: string) =>
+    new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(claim.quote);
+  return claim.competitors.map(canonicalText).filter((name) => name !== "" && namedAsWord(name));
 }
 
 type VerifiedClaim = TenKClaim & { item: TenKItem; start: number; end: number; issuerIds: string[] };
