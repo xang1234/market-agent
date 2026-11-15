@@ -120,6 +120,32 @@ test("a 10-K the model answers badly stays unread, with nothing stored", { skip:
   assert.deepEqual(await counts(client), { claims: 0, competitors: 0 });
   const { llm } = scriptedLlm(JSON.stringify({ claims: [{ predicate: "business.competition", quote: COMPETITION }] }));
   assert.equal((await extract10kClaims({ db: client, llm, resolveCompetitor }, tenK)).extracted, 1, "read again by the next run");
+
+  // A 10-K with neither item calls no model, and stays unread.
+  const indexed = new TextEncoder().encode("<html><body><div>Our Business</div><div>We design chips.</div></body></html>");
+  const other = await storeTenK({ db: client, objectStore: new MemoryObjectStore() }, {
+    issuerId: nvda, bytes: indexed, url: null, accession: null, filedDate: null, retrievedAt: "2026-02-25T00:00:00.000Z",
+  });
+  const { llm: unused, calls } = scriptedLlm('{"claims":[]}');
+  const result = await extract10kClaims({ db: client, llm: unused, resolveCompetitor }, { ...other, issuerId: nvda, html: new TextDecoder().decode(indexed), effectiveTime: null });
+  assert.deepEqual([result.outcome, result.missing, calls()], ["no_sections", ["1", "1A"], 0]);
+  const { rows: [status] } = await client.query<{ parse_status: string }>(`select parse_status from documents where document_id = $1`, [other.documentId]);
+  assert.equal(status!.parse_status, "pending");
+
+  // 3M heads each risk factor with an asterisk, a bullet no sentence starts after.
+  const risk = "The Company's results are impacted by the effects of, and changes in, worldwide economic conditions.";
+  const starred = new TextEncoder().encode(
+    `<div>Item 1A. Risk Factors</div><div>* ${risk}</div>${"<div>During 2025, the Company derived revenue abroad.</div>".repeat(25)}<div>Item 1B. Unresolved Staff Comments</div>`,
+  );
+  const starredDoc = await storeTenK({ db: client, objectStore: new MemoryObjectStore() }, {
+    issuerId: nvda, bytes: starred, url: null, accession: null, filedDate: null, retrievedAt: "2026-02-25T00:00:00.000Z",
+  });
+  const { llm: risks } = scriptedLlm('{"claims":[]}');
+  const riskLlm: Extract10kDeps["llm"] = { complete: async (request) => ({ ...(await risks.complete(request)), text: JSON.stringify({ claims: [{ predicate: "risk.factor", quote: `* ${risk}` }] }) }) };
+  const read = await extract10kClaims({ db: client, llm: riskLlm, resolveCompetitor }, { ...starredDoc, issuerId: nvda, html: new TextDecoder().decode(starred), effectiveTime: null });
+  assert.deepEqual([read.outcome, read.extracted, read.missing], ["extracted", 1, ["1"]]);
+  const { rows: [stored] } = await client.query<{ text_canonical: string }>(`select text_canonical from claims where document_id = $1`, [starredDoc.documentId]);
+  assert.equal(stored!.text_canonical, risk);
 });
 
 test("the backfill reads an issuer's latest 10-K once: a rerun fetches only the feed", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {

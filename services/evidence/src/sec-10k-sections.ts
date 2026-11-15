@@ -9,9 +9,12 @@ import { blockText, type ReleaseExhibit } from "./sec-earnings-release-extractio
 export const TEN_K_ITEMS = ["1", "1A"] as const;
 export type TenKItem = (typeof TEN_K_ITEMS)[number];
 
+// A title's letters may be split by a space, where markup broke a word
+// ("Item 1. B usiness").
+const spaced = (title: string) => title.split(" ").map((word) => [...word].join(" ?")).join("\\s+");
 const HEADINGS: Readonly<Record<TenKItem, RegExp>> = {
-  "1": /^item\s*1\s*[.:-]?\s*business\b/i,
-  "1A": /^item\s*1a\s*[.:-]?\s*risk\s+factors\b/i,
+  "1": new RegExp(`^item\\s*1\\s*[.:-]?\\s*(?:description\\s+of\\s+)?${spaced("business")}\\b`, "i"),
+  "1A": new RegExp(`^item\\s*1a\\s*[.:-]?\\s*${spaced("risk factors")}\\b`, "i"),
 };
 // Any item's heading: its number, then a capitalized title ("Item 2 .
 // Properties", "ITEM 6. [RESERVED]", "Item 1C Cybersecurity").
@@ -32,7 +35,7 @@ export function tenKSections(html: string): Record<TenKItem, TenKSection | Secti
   const section = (item: TenKItem): TenKSection | SectionNotFound => {
     let best: { start: number; end: number } | null = null;
     for (const [n, start] of headings.entries()) {
-      if (!HEADINGS[item].test(text.slice(start, start + 40))) continue;
+      if (!HEADINGS[item].test(text.slice(start, start + 60))) continue;
       const end = headings[n + 1] ?? text.length;
       if (best === null || end - start > best.end - best.start) best = { start, end };
     }

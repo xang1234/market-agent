@@ -82,12 +82,21 @@ async function main(): Promise<void> {
       console.log(resultLine(result, Date.now() - started));
       failed = result.outcome === "unparseable";
     } else {
-      const queue = (await issuers(db, tickers)).filter((issuer) => issuer.cik !== null).slice(0, limit);
+      const queue = (await issuers(db, tickers)).slice(0, limit);
       const totals: Record<string, number> = {};
+      for (const ticker of tickers.filter((ticker) => !queue.some((issuer) => issuer.ticker === ticker.toUpperCase()))) {
+        failed = true;
+        console.error(`${ticker}: no stored issuer`);
+      }
       const work = async () => {
         for (let issuer = queue.shift(); issuer !== undefined; issuer = queue.shift()) {
           const label = `${issuer.ticker ?? "-"} ${issuer.legal_name}`;
           const started = Date.now();
+          if (issuer.cik === null) {
+            totals.no_cik = (totals.no_cik ?? 0) + 1;
+            console.log(`${label}: outcome=no_cik`);
+            continue;
+          }
           try {
             const result = await backfillIssuer10k(deps, { issuerId: issuer.issuer_id, cik: Number(issuer.cik) });
             totals[result.outcome] = (totals[result.outcome] ?? 0) + 1;

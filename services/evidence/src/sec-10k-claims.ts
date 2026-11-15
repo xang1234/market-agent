@@ -58,7 +58,9 @@ export type TenKDocument = {
 // "already_extracted": the document was read before, so nothing ran.
 // "unparseable": a reply of the wrong shape, or none of whose quotes is in the
 // filing, so nothing is stored and the document stays unread for the next run.
-// "no_sections": neither item was found, and the document is marked failed.
+// "no_sections": neither item was found (a 10-K laid out by a cross-reference
+// index, as Intel's is). No model call runs, and the document stays unread, so
+// a parser that learns the layout reads it on the next run.
 export type Extract10kOutcome = "extracted" | "already_extracted" | "unparseable" | "no_sections";
 export type Extract10kResult = {
   outcome: Extract10kOutcome;
@@ -129,14 +131,16 @@ function buildMessages(item: TenKItem, text: string): LlmChatMessage[] {
 // One whole bulleted list item, which a 10-K uses where a release writes a
 // sentence ("Our current competitors include: • suppliers ..., such as
 // Advanced Micro Devices, Inc., or AMD, ...; • large cloud services
-// companies..."): an item ending in a semicolon is no sentence, so
-// verifyStatement never finds it. The stored quote leaves out the bullet.
+// companies..."): an item ending in a semicolon is no sentence, and a
+// bullet verifyStatement does not know ("* The Company's results are
+// impacted by...") starts none. The stored quote leaves out the bullet.
+const BULLETS = "•▪◦●■*";
 function wholeListItem(claim: TenKClaim, section: TenKSection): (TenKClaim & { exhibit: string; start: number; end: number }) | null {
-  const quote = canonicalText(claim.quote).replace(/^•\s*/, "");
+  const quote = canonicalText(claim.quote).replace(/^[•▪◦●■*]\s*/, "");
   if (quote.length < MIN_QUOTE_CHARS || quote.length > MAX_QUOTE_CHARS) return null;
   for (let start = section.text.indexOf(quote); start >= 0; start = section.text.indexOf(quote, start + 1)) {
     const end = start + quote.length;
-    if (section.text.slice(start - 2, start) === "• " && section.edges.has(start - 2) && section.edges.has(end)) {
+    if (BULLETS.includes(section.text[start - 2] ?? "") && section.text[start - 1] === " " && section.edges.has(start - 2) && section.edges.has(end)) {
       return { ...claim, quote, exhibit: section.type, start, end };
     }
   }
@@ -157,10 +161,7 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
   const found = TEN_K_ITEMS.flatMap((item) => "error" in sections[item] ? [] : [sections[item] as TenKSection]);
   const missing = TEN_K_ITEMS.filter((item) => "error" in sections[item]);
   if (status?.parse_status !== "pending") return { ...started, outcome: "already_extracted", missing };
-  if (found.length === 0) {
-    await deps.db.query(`update documents set parse_status = 'failed' where document_id = $1 and parse_status = 'pending'`, [doc.documentId]);
-    return { ...started, outcome: "no_sections", missing };
-  }
+  if (found.length === 0) return { ...started, outcome: "no_sections", missing };
 
   // Every prompt runs at once: a 10-K is three or four, and run one by one
   // they take minutes.

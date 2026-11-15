@@ -30,3 +30,17 @@ test("a 10-K with Item 1A removed returns section_not_found for 1A, and Item 1 s
   assert.deepEqual(sections["1A"], { type: "1A", error: "section_not_found" });
   assert.equal((sections["1"] as TenKSection).text.slice(0, 16), "ITEM 1. BUSINESS");
 });
+
+test("a heading reads through a word markup split, and Item 1 may be the Description of Business", () => {
+  const body = "<div>We make things that people use every day in many places.</div>".repeat(30);
+  const html = [
+    "<div>Item 1. Business 1</div><div>Item 1A. Risk Factors 9</div><div>Item 2. Properties 20</div>",
+    `<div>Item 1. <span>Description of B</span><span>usiness</span>.</div>${body}`,
+    `<div>ITEM 1A. R<span>ISK FACTORS</span></div>${body}`,
+    `<div>Item 2. Properties</div>${body}`,
+  ].join("");
+  const sections = tenKSections(html);
+  assert.equal((sections["1"] as TenKSection).text.slice(0, 34), "Item 1. Description of B usiness .");
+  assert.equal((sections["1A"] as TenKSection).text.slice(0, 22), "ITEM 1A. R ISK FACTORS");
+  assert.ok(!(sections["1A"] as TenKSection).text.includes("Properties"));
+});
