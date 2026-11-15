@@ -195,6 +195,8 @@ export async function loadAnalyzeFinancialSections(db: SqlExecutor, input: { use
 export function analyzeFinancialRecovery(db: SqlExecutor): ParentRecovery {
   return {
     async authority(run: RunRecord) {
+      // Only the memo's own sections are keyed by its run id; a resumed analyst agent figure would be saved as one of them.
+      if (run.request_key !== run.parent_id) return null;
       const memo = await loadMemoRun(db, run.parent_id);
       if (!memo || memo.user_id !== run.user_id || !memo.context) return null;
       return analyzeAuthority(memo.user_id, run.parent_id, memo.template_id, memo.template_version);
@@ -205,7 +207,7 @@ export function analyzeFinancialRecovery(db: SqlExecutor): ParentRecovery {
 
 // ---------------------------------------------------------------------------
 
-function analyzeAuthority(userId: string, analyzeRunId: string, templateId: string, templateVersion: number): FinancialRuntimeAuthority {
+export function analyzeAuthority(userId: string, analyzeRunId: string, templateId: string, templateVersion: number): FinancialRuntimeAuthority {
   return createRuntimeAuthority({
     owner_user_id: userId,
     egress_channel: "analyze",

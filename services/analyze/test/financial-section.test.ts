@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { IDS, ORIGINAL_REVENUE, seedCashResilience } from "../../financial-engine/test/db-fixtures.ts";
+import type { RunRecord } from "../../financial-engine/src/run-record.ts";
 import {
+  analyzeFinancialRecovery,
   financialSectionIds,
   latestReadsByIssuer,
   loadAnalyzeFinancialSections,
@@ -31,6 +33,13 @@ test("numerical sections are chosen per playbook; narrative sections stay with t
   assert.deepEqual(financialSectionIds(playbook("peer_comparison")), ["peer_table"]);
   assert.deepEqual(financialSectionIds(playbook("investment_memo")), ["financial_health", "cash_resilience", "revenue_trend"]);
   assert.deepEqual(financialSectionIds(playbook("variant_view")), []);
+});
+
+test("memo recovery leaves an analyst agent's figures under the memo to their own run", async () => {
+  const memo = "22222222-2222-4222-8222-222222222222";
+  const db = { query: async () => assert.fail("an agent's run is not looked up as the memo's sections") };
+  const run = { parent_kind: "analyze_memo_run", parent_id: memo, request_key: "agent:investment_thesis:0123456789abcdef" } as RunRecord;
+  assert.equal(await analyzeFinancialRecovery(db as never).authority(run), null);
 });
 
 test("the financial context freezes cutoff, basis, catalog, and the exact peers requested", () => {
