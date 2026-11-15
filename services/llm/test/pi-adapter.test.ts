@@ -601,6 +601,21 @@ test("a tool transcript reaches the Messages API as tool_use and tool_result, wi
   assert.equal(sent[1]!.resultFor, sent[1]!.use.id, "the result answers the rewritten id");
 });
 
+test("call ids are rewritten after a fallback even when the earlier channel is named like the catalog's provider and serves the same model", async (t) => {
+  const stub = await messagesApiStub(t, () => ({ status: 200, events: claudeReply("claude-opus-5-5", "OK") }));
+  // The target keeps api.anthropic.com as its endpoint, so the catalog names its provider "anthropic".
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (input, init) => realFetch(String(input instanceof Request ? input.url : input).replace("https://api.anthropic.com", stub.baseUrl), init);
+  t.after(() => { globalThis.fetch = realFetch; });
+  const client = await createDefaultPiLlmChatClient();
+  const direct: LlmDeployment = { channel: "claude-direct", model: "claude-opus-5-5", protocol: "anthropic", baseUrl: "https://api.anthropic.com", apiKeys: ["k"] };
+
+  await client(direct, { tools: [FINANCIALS_TOOL], maxTokens: 256, messages: toolTurns("functions.certified_financials:0", { channel: "anthropic", model: "claude-opus-5-5" }) });
+
+  const [, assistant] = stub.requests[0]!.body.messages as Array<{ content: Array<{ type: string; id?: string }> }>;
+  assert.match(assistant!.content.find((block) => block.type === "tool_use")!.id!, /^[a-zA-Z0-9_-]+$/u);
+});
+
 test("a tool transcript reaches an OpenAI-compatible API as tool_calls and a tool message, and a streamed tool call comes back as toolCalls", async (t) => {
   const bodies: Array<Record<string, unknown>> = [];
   const server = createServer(async (req, res) => {

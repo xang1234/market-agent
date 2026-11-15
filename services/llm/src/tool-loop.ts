@@ -37,6 +37,7 @@ export type ToolLoopStep = {
 /**
  * `budget`: the model answered after the policy refused a call for budget, so the answer is partial.
  * `truncated`: the reply hit maxTokens, so its text may be cut off and its tool calls were not run.
+ * It wins over `budget` when both apply.
  */
 export type ToolLoopStopReason = "final" | "step_cap" | "budget" | "truncated";
 

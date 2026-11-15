@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import type { ControlledRouter, LlmChatRequest, LlmRouterResult, LlmToolCall } from "../src/router.ts";
@@ -176,6 +177,12 @@ test("a reply cut off at maxTokens runs none of its tool calls and stops as trun
 
   assert.equal(result.stop, "truncated");
   assert.deepEqual(result.messages.at(-1), { role: "assistant", content: "Let me" });
+});
+
+test("services/llm imports nothing from services/tools, so the loop's policy stays a structural type", () => {
+  const src = new URL("../src/", import.meta.url);
+  const offenders = readdirSync(src).filter((file) => /from "[^"]*\/tools\/src\//u.test(readFileSync(new URL(file, src), "utf8")));
+  assert.deepEqual(offenders, []);
 });
 
 test("maxSteps must be a positive integer", async () => {

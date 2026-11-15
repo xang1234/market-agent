@@ -311,7 +311,8 @@ function contextFromRequest(request: LlmChatRequest, model: PiModel, deployment:
       case "assistant": {
         const calling = "deployment" in message ? message : null;
         const toolCalls = (calling?.toolCalls ?? []).map((call) => Object.freeze({ type: "toolCall" as const, ...call }));
-        // pi-ai rewrites tool call ids only for a turn it sees as another model's.
+        // pi-ai rewrites tool call ids only for a turn it sees as another model's. A prefixed
+        // provider can't equal a catalog provider id, which a channel's own name might.
         const origin = calling?.deployment ?? deployment;
         const sameDeployment = origin.channel === deployment.channel && origin.model === deployment.model;
         return [Object.freeze({
@@ -320,7 +321,7 @@ function contextFromRequest(request: LlmChatRequest, model: PiModel, deployment:
             ? toolCalls
             : [textBlock(message.content), ...toolCalls]),
           api: model.api,
-          provider: sameDeployment ? model.provider : origin.channel,
+          provider: sameDeployment ? model.provider : `channel:${origin.channel}`,
           model: sameDeployment ? model.id : origin.model,
           usage: NO_USAGE,
           stopReason: toolCalls.length > 0 ? "toolUse" : "stop",
