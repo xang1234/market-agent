@@ -28,9 +28,11 @@ import {
   type ChatFinancialRuntimeDeps,
   type ChatFinancialTurnContext,
 } from "./financial-runtime.ts";
-import { ANSWER_DEADLINES, withDeadlines, type DroppedClaims } from "./llm-runtime.ts";
+import { ANSWER_DEADLINES, renderedAnswer, withDeadlines, type AnswerInput, type DroppedClaims } from "./llm-runtime.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS, LATEST, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 import { turnStopSignal } from "./turn-stop.ts";
+import { shownAs } from "./verdicts.ts";
+import type { AssertionReport } from "./assertions.ts";
 
 const MAX_STEPS = 4;
 const TURN_CALLS = 8;
@@ -125,6 +127,8 @@ type AgentAsk = Readonly<{
   meter: Meter;
   snapshotId: string;
   scopedKey: (name: string) => string;
+  // A memo reads as of its cutoff, so a company with no 10-K then is said to have had none as of that day.
+  datedFilings: boolean;
   trace: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id">;
   logToolCalls?: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
 }>;
@@ -179,6 +183,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       meter,
       snapshotId: randomUUID(),
       scopedKey: (name) => name,
+      datedFilings: false,
       trace: { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}) },
       ...(logToolCalls ? { logToolCalls: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => logToolCalls(context.threadId, calls) } : {}),
     };
@@ -244,6 +249,7 @@ export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystS
       meter: callMeter(SECTION_CALLS),
       snapshotId: input.snapshotId,
       scopedKey: (name) => `${input.sectionId}:${name}`,
+      datedFilings: true,
       trace: { thread_id: input.runId, run_id: input.runId, turn_id: input.sectionId },
       ...(deps.logToolCalls ? { logToolCalls: deps.logToolCalls } : {}),
     };
@@ -423,11 +429,12 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
   if (loop) notes.push(...stopNotes(loop, whoOf));
 
   const covered = [...new Set([...job.named.map(issuerOf), ...certified.flatMap((entry) => entry.subjects)])];
+  const read = job.datedFilings ? datedNoFiling(analyst, asOf, labelOf) : { analyst, notes: [] };
   const packet = mergePackets({
     engine: certified.map((entry) => entry.packet),
-    analyst,
+    analyst: read.analyst,
     figuresAskedFor: [...askedFor].map(labelOf),
-    notes: [...new Set([...notes, ...(readCompetition ? heldCompetitorNotes : [])])],
+    notes: [...new Set([...notes, ...(readCompetition ? heldCompetitorNotes : []), ...read.notes])],
     labels: new Map([...known.keys()].map((issuer) => [issuer, labelOf(issuer)])),
     cutoff: asOf,
   });
@@ -451,22 +458,24 @@ async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promis
   let written: Pick<AnsweredTurn, "assertions" | "blocks" | "judging" | "without">;
   let failed = false;
   const askedFigures = certified.length > 0;
+  const input = {
+    context: { userIntent: question, bundleId: ANALYST_AGENT_BUNDLE_ID },
+    blocks: [card],
+    toolCalls,
+    factBlocks: noted,
+    conversation,
+    packet,
+    instructions: askedFigures ? [...ANSWER_RULES, ANALYSIS_RULE] : ANSWER_RULES,
+    ...(askedFigures ? {} : { answerShape: DESCRIPTION_SHAPE, inferences: false as const }),
+  };
   try {
-    written = await deps.compose({
-      context: { userIntent: question, bundleId: ANALYST_AGENT_BUNDLE_ID },
-      blocks: [card],
-      toolCalls,
-      factBlocks: noted,
-      conversation,
-      packet,
-      instructions: askedFigures ? [...ANSWER_RULES, ANALYSIS_RULE] : ANSWER_RULES,
-      ...(askedFigures ? {} : { answerShape: DESCRIPTION_SHAPE, inferences: false as const }),
-    }, { ...job.trace, question }, (deployment) => {
+    written = await deps.compose(input, { ...job.trace, question }, (deployment) => {
       answeredBy = deployment;
     }, job.meter(0, () => {
       answerRefused = true;
     }));
     if (written.judging) written = { ...written, assertions: (await written.judging.done).assertions };
+    if (written.assertions) written = withoutStance(input, packet, written.assertions) ?? written;
   } catch (reason) {
     if (!isModelFailure(reason)) throw reason;
     console.warn("[chat] the analyst agent's answer could not be written; the turn answers with what it read alone", reason);
@@ -519,6 +528,32 @@ const GATHER_RULES = [
 ];
 
 const QUIET = (() => undefined) as unknown as ChatTurnRunContext["emit"];
+
+// ADR 0005: a factual answer never states a stance, so an inference worded as one is left out, whatever the judge found.
+const STANCE_WORDS = /\b(?:buy|sell|hold|overweight|underweight|outperform|underperform|ratings?|conviction|upside|recommend(?:s|ed|ations?)?|price targets?|target prices?|expected returns?)\b/iu;
+
+function withoutStance(input: AnswerInput, packet: EvidencePacket, report: AssertionReport): Pick<AnsweredTurn, "assertions" | "blocks" | "without"> | null {
+  const stance = report.accepted.filter((entry) => entry.kind === "analyst_inference" && STANCE_WORDS.test(entry.text));
+  if (stance.length === 0) return null;
+  const rendering = renderedAnswer(input, packet, {
+    ...report,
+    accepted: report.accepted.filter((entry) => !stance.includes(entry)),
+    rejected: [...report.rejected, ...stance.map((entry) => ({ index: entry.index, text: entry.text, check: "limit" as const, reason: "states a stance" }))].sort((a, b) => a.index - b.index),
+  });
+  const shown = new Map((report.judged ?? []).flatMap((verdict) => {
+    const as = shownAs(verdict, "agent");
+    return as === "hidden" ? [] : [[verdict.index, as] as const];
+  }));
+  return { assertions: rendering.report, blocks: rendering.blocks(shown), without: (dropped) => ({ blocks: rendering.blocks(shown, dropped) }) };
+}
+
+function datedNoFiling(analyst: ReadonlyArray<AnalystToolResult>, asOf: string, labelOf: (issuer: string) => string): { analyst: ReadonlyArray<AnalystToolResult>; notes: ReadonlyArray<string> } {
+  const issuers = new Set(analyst.flatMap((result) => ("reads" in result ? result.no_filing.map((issuer) => issuer.issuer_id.toLowerCase()) : [])));
+  return {
+    analyst: analyst.map((result) => ("reads" in result ? { ...result, no_filing: [] } : result)),
+    notes: [...issuers].map((issuer) => `${labelOf(issuer)} had no 10-K on file as of ${asOf.slice(0, 10)}, so no business or risk factor claims from one.`),
+  };
+}
 
 const UNKNOWN_COMPANY = "name each company by a subject_ref the prompt or a peer read gave";
 

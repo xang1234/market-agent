@@ -4,6 +4,7 @@
 // each section exactly once.
 
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
@@ -110,6 +111,44 @@ test("analyze memo financial publication", { timeout: 300_000 }, async (t) => {
     assert.equal(state!.execution_state, "cancelled");
     assert.equal((await recoverable()).includes(agent!.run_id), false, "it leaves the recovery queue");
     assert.deepEqual(await committed(db, memo.runId), { sections: 3, certificates: 3, plans: 1 }, "nothing is filed as a memo section");
+  });
+
+  await t.test("an agent figure whose Generate may still run is left to it, and one whose Generate ended unsaved is cancelled", async () => {
+    const memo = await createMemoRun(db, pool, { templateId, playbookId: "investment_memo" });
+    await memo.publish();
+    const unsaved = randomUUID();
+    const figure = async (age: string) => (await db.query<{ run_id: string }>(
+      `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode, knowledge_cutoff, policies, created_at)
+       select user_id, parent_kind, $2::uuid, parent_version, 'agent:investment_thesis:' || md5(random()::text), request_hash, plan_id, feature_mode, knowledge_cutoff, policies, now() - $3::interval
+         from financial_runs where parent_id = $1 and request_key = $1::text
+       returning run_id::text`,
+      [memo.runId, unsaved, age],
+    )).rows[0]!.run_id;
+    const recovered = async (runId: string) => {
+      const [run] = (await listRecoverableRuns(db, { parent_kinds: ["analyze_memo_run"], limit: 100 })).filter((candidate) => candidate.run_id === runId);
+      assert.ok(run, "the unleased figure is listed");
+      const client = snapshotTransactionClient(await pool.connect());
+      try {
+        await recoverRun(client, run, { worker_id: "recovery-test", ttl_ms: 60_000, evidence: createEvidenceFinancialPort, parents: { analyze_memo_run: analyzeFinancialRecovery(pool) } });
+      } finally {
+        client.release();
+      }
+      return (await db.query<{ execution_state: string }>(`select execution_state from financial_runs where run_id = $1`, [runId])).rows[0]!.execution_state;
+    };
+    assert.equal(await recovered(await figure("1 second")), "pending", "reserved a moment ago, before its Generate leased it");
+    assert.equal(await recovered(await figure("1 hour")), "cancelled", "older than any Generate lives, with no memo saved");
+  });
+
+  await t.test("a memo saved under investment_memo v1 reads its optional sections from v1", async () => {
+    const memo = await createMemoRun(db, pool, { templateId, playbookId: "investment_memo", playbookVersion: 1 });
+    await failSection("revenue_trend");
+    let failed;
+    try {
+      failed = await memo.publish();
+    } finally {
+      await restore();
+    }
+    assert.equal(failed.coverage, "complete", "revenue_trend is optional in v1");
   });
 
   await t.test("a memo that no longer belongs to the owner receives nothing", async () => {

@@ -8,9 +8,10 @@ import { noteBlock } from "../../chat/src/chat-ids.ts";
 import type { ChatAnalystToolRuntimeToolCall } from "../../chat/src/coordinator.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
-import type { LlmChatClient } from "../../llm/src/index.ts";
+import { buildLlmDeploymentOrder, loadLlmSettingsFromEnv, type LlmChatClient } from "../../llm/src/index.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import type { DevApiAnalyzeWorkflowInput, DevApiAnalyzeWorkflowResult } from "./analyze-adapter.ts";
+import { DevApiHttpError } from "./dev-api-shared.ts";
 
 const GOALS: Readonly<Record<string, (company: string) => string>> = {
   investment_thesis: (company) =>
@@ -54,6 +55,7 @@ export function analyzeAgentWorkflow(deps: AnalyzeAgentDeps): (input: DevApiAnal
       const note = noteBlock({ snapshotId: input.snapshotId, asOf }, "analyze:unwritten", sections.length === 0 ? NO_AGENT_SECTION : NO_COMPANY);
       return { blocks: [{ ...note, subject_refs: input.subjectRefs }] };
     }
+    if (buildLlmDeploymentOrder(await loadLlmSettingsFromEnv(deps.env), "agent").length === 0) throw new DevApiHttpError(503, "the analyst agent's model is not configured");
     const authority = analyzeAuthority(input.userId, input.runId, input.template.template_id, input.template.version);
     const settled = await Promise.allSettled(sections.map((entry) => section({
       subject: company,

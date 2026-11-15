@@ -5,17 +5,13 @@
 import { createRequire } from 'node:module'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { claimIdsOf, memoVerdict } from './memo-verdict.ts'
 
 const { ROOT, WEB_URL, LISTING_ID, OUT, DATABASE_URL } = process.env
 const { chromium } = createRequire(join(ROOT, 'web/package.json'))('@playwright/test')
 const { Client } = createRequire(join(ROOT, 'services/dev-api/package.json'))('pg')
 mkdirSync(OUT, { recursive: true })
 
-const SECTIONS = ['investment_thesis', 'growth_drivers', 'competitive_position', 'downside_risks']
-const EMPTY = /^No stored source covers this section/
-const UNWRITTEN = /^This section was not written|^The answer could not be written|^Commentary is unavailable/
-// Case matters for Buy, Hold and Sell: a 10-K's "we sell" is not a Sell.
-const stanceIn = (text) => [...text.matchAll(/\b(?:Buy|Hold|Sell)\b/g), ...text.matchAll(/\b(?:rating|conviction)\b/gi)].map((match) => match[0])
 const LLM_LOG = join(ROOT, '.dev/logs/dev-api.log')
 const logSize = () => (existsSync(LLM_LOG) ? statSync(LLM_LOG).size : 0)
 
@@ -60,10 +56,7 @@ try {
   await browser.close()
 }
 
-const blocks = run?.blocks ?? []
-const sections = blocks.filter((block) => block.kind === 'section' && SECTIONS.includes(block.data_ref?.params?.playbook_section_id))
-const segmentsOf = (block) => [...(block.segments ?? []), ...(block.commentary ?? []).flatMap((part) => part.segments ?? []), ...(block.children ?? []).flatMap(segmentsOf)]
-const claimIds = [...new Set(sections.flatMap((section) => section.claim_refs ?? []))]
+const claimIds = claimIdsOf(run)
 const predicates = new Map()
 if (claimIds.length > 0) {
   const db = new Client({ connectionString: DATABASE_URL })
@@ -75,49 +68,20 @@ if (claimIds.length > 0) {
     await db.end()
   }
 }
-const report = {
+const { report, passed } = memoVerdict({
+  run,
+  canvas,
+  text,
   url,
-  subject_matches: new URL(url).searchParams.get('subject') === `listing:${LISTING_ID}`,
-  generated: text.includes('Memo generated'),
-  memo_ms: memoMs,
-  llm_calls: existsSync(LLM_LOG) ? (readFileSync(LLM_LOG).subarray(logFrom).toString().match(/^\[llm\] /gm) ?? []).length : null,
-  sections: SECTIONS.map((id) => {
-    const section = sections.find((entry) => entry.data_ref.params.playbook_section_id === id)
-    if (!section) return { id, shown: false }
-    const segments = segmentsOf(section)
-    const notes = segments.filter((segment) => segment.type === 'text').map((segment) => segment.text)
-    return {
-      id,
-      title: section.title,
-      shown: canvas.includes(section.title),
-      claims: (section.claim_refs ?? []).map((claim) => predicates.get(claim) ?? 'unknown'),
-      figures: segments.filter((segment) => segment.type === 'ref' && segment.ref_kind === 'result').length,
-      // Industry peers and analyst consensus cite their stored source, not a claim row.
-      sources: (section.source_refs ?? []).length,
-      empty: notes.some((note) => EMPTY.test(note)),
-      unwritten: notes.some((note) => UNWRITTEN.test(note)),
-    }
-  }),
-  certified_blocks: blocks.filter((block) => block.kind === 'financial_answer').length,
-  stance_words: stanceIn(canvas),
-  page_stance_words: stanceIn(text),
+  listingId: LISTING_ID,
+  predicates,
   failure,
+  memoMs,
+  llmCalls: existsSync(LLM_LOG) ? (readFileSync(LLM_LOG).subarray(logFrom).toString().match(/^\[llm\] /gm) ?? []).length : null,
   evidence: OUT,
-}
-const competitive = report.sections.find((section) => section.id === 'competitive_position')
-const risks = report.sections.find((section) => section.id === 'downside_risks')
-report.competitive_cites_competition = competitive?.claims?.includes('business.competition') ?? false
-report.risks_cite_only_risk_factors = (risks?.claims ?? []).every((predicate) => predicate === 'risk.factor')
+})
 writeFileSync(join(OUT, 'page.txt'), text)
 writeFileSync(join(OUT, 'run.json'), JSON.stringify(run, null, 2))
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
 console.log(JSON.stringify(report, null, 2))
-const sectionPasses = (section) => section.shown && !section.unwritten && (section.empty || section.claims.length > 0 || section.figures > 0 || section.sources > 0)
-const passed =
-  failure === null && report.subject_matches && report.generated &&
-  report.sections.every(sectionPasses) &&
-  // A company with a 10-K on file has its competition read; one with none shows its peers at most.
-  (claimIds.length === 0 || report.competitive_cites_competition) &&
-  report.risks_cite_only_risk_factors &&
-  report.stance_words.length === 0
 process.exit(passed ? 0 : 1)

@@ -87,7 +87,7 @@ export const ANALYZE_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = Object.freeze([
   }),
   Object.freeze({
     playbook_id: "investment_memo",
-    version: 1,
+    version: 2,
     name: "Investment memo",
     description: "Full investment memo from stored sources: thesis, financial health, growth, competitive position, risks, and ownership.",
     default_instructions:
@@ -107,6 +107,37 @@ export const ANALYZE_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = Object.freeze([
     ]),
   }),
 ]);
+
+// Versions no Generate runs any more, kept so a memo saved under one is read by the sections it was saved with.
+const RETIRED_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = Object.freeze([
+  Object.freeze({
+    playbook_id: "investment_memo",
+    version: 1,
+    name: "Investment memo",
+    description:
+      "Full investment memo: thesis, financial health, growth, risks, ownership, and a final verdict with rating and conviction.",
+    default_instructions:
+      "Write a complete investment memo. Lead with the investment thesis. Cover financial health and profitability, growth drivers, downside risks, and ownership signals (institutional holders, insider activity). Close with a final verdict: rating (Buy/Hold/Sell), conviction (low/medium/high), and the investor profile the position suits.",
+    default_source_categories: Object.freeze(["filings", "transcripts", "news"]),
+    sections: Object.freeze([
+      section("investment_thesis", "Investment thesis", true, "rich_text"),
+      section("financial_health", "Financial health & profitability", true, "metric_row"),
+      section("cash_resilience", "Cash resilience", false, "metric_row"),
+      section("revenue_trend", "Revenue trend", false, "line_chart"),
+      section("growth_drivers", "Growth drivers", true, "rich_text"),
+      section("downside_risks", "Downside risks", true, "table"),
+      section("ownership_signals", "Ownership & insider signals", true, "rich_text"),
+      section("analyst_overview", "Analyst overview", false, "section"),
+      section("price_targets", "Price targets", false, "section"),
+      section("final_verdict", "Final verdict", true, "metric_row"),
+    ]),
+  }),
+]);
+
+/** The playbook as the given version defined it, current or retired. */
+export function playbookAt(playbookId: string | null, version: number | null): AnalyzePlaybook | undefined {
+  return [...ANALYZE_PLAYBOOKS, ...RETIRED_PLAYBOOKS].find((playbook) => playbook.playbook_id === playbookId && playbook.version === version);
+}
 
 export function resolveAnalyzePlaybookRequest(
   input: AnalyzePlaybookRunRequest,

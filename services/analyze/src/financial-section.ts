@@ -26,7 +26,7 @@ import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
 import { issuerLabels, publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import type { RunRecord } from "../../financial-engine/src/run-record.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
-import { ANALYZE_PLAYBOOKS, type AnalyzePlaybook } from "./playbook.ts";
+import { playbookAt, type AnalyzePlaybook } from "./playbook.ts";
 import { AnalyzeRunMetadataError, parseAnalyzeRunMetadata, type AnalyzeRunFinancialMetadata, type AnalyzeRunMetadataV1 } from "./runMetadata.ts";
 
 /** Why a declared section has no committed row: the engine's reason, or what committed state shows. */
@@ -197,8 +197,10 @@ export function analyzeFinancialRecovery(db: FinancialPool): ParentRecovery {
   return {
     async authority(run: RunRecord) {
       // Only the memo's own sections are keyed by its run id. Any other run under it is an analyst agent figure,
-      // made before the memo is saved, so one left unfinished is one no saved memo shows. It is cancelled, not resumed.
+      // made before the memo is saved, so one left unfinished is one no saved memo shows. It is cancelled, not
+      // resumed, once its Generate is over: one reserved moment ago may not hold its lease yet.
       if (run.request_key !== run.parent_id) {
+        if (await generateMayRun(db, run)) return null;
         const client = await db.connect();
         try {
           await requestCancellation(client, run.user_id, run.run_id);
@@ -213,6 +215,29 @@ export function analyzeFinancialRecovery(db: FinancialPool): ParentRecovery {
     },
     persistParent: persistMemoSection,
   };
+}
+
+// ponytail: a Generate's sections stop at their 120 s deadline (analyst-agent.ts), so an unsaved memo's figure
+// this old was made by a Generate that has ended; a figure that outlives it waits this long to be cancelled.
+const GENERATE_ENDED = "15 minutes";
+
+async function generateMayRun(db: SqlExecutor, run: RunRecord): Promise<boolean> {
+  const { rows } = await db.query<{ running: boolean }>(
+    `select not exists (select 1 from analyze_template_runs where run_id = $1::uuid) and created_at > now() - $3::interval as running
+       from financial_runs where run_id = $2::uuid`,
+    [run.parent_id, run.run_id, GENERATE_ENDED],
+  );
+  return rows[0]?.running === true;
+}
+
+/** Erases what a Generate's analyst agent certified for a memo that was never saved, as deleting a saved memo would. */
+export async function eraseUnsavedMemoFigures(db: SqlExecutor, analyzeRunId: string): Promise<void> {
+  await db.query(
+    `delete from financial_runs
+      where parent_kind = 'analyze_memo_run' and parent_id = $1::uuid
+        and not exists (select 1 from analyze_template_runs where run_id = $1::uuid)`,
+    [analyzeRunId],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -329,7 +354,7 @@ function savedMetadata(metadata: unknown): AnalyzeRunMetadataV1 | null {
 
 /** Sections the memo's saved playbook version marks optional; an unknown playbook or version marks none, so every section counts. */
 function optionalSections(playbookId: string | null, playbookVersion: number | null): ReadonlySet<string> {
-  const playbook = ANALYZE_PLAYBOOKS.find((candidate) => candidate.playbook_id === playbookId && candidate.version === playbookVersion);
+  const playbook = playbookAt(playbookId, playbookVersion);
   return new Set(playbook?.sections.filter((section) => !section.required).map((section) => section.section_id) ?? []);
 }
 

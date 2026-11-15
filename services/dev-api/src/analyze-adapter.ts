@@ -28,6 +28,7 @@ import {
   type AnalyzeTemplateRunClientPool,
 } from "../../analyze/src/index.ts";
 import {
+  eraseUnsavedMemoFigures,
   financialSectionIds,
   latestReadsByIssuer,
   loadAnalyzeFinancialSections,
@@ -51,6 +52,7 @@ import {
   type ChatThread,
   type ChatThreadsDb,
 } from "../../chat/src/threads-repo.ts";
+import { TurnStop } from "../../chat/src/turn-stop.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
 import { isSubjectRef, type SubjectRef } from "../../shared/src/subject-ref.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
@@ -109,11 +111,13 @@ export type DevApiAnalyzeAdapter = {
     next_cursor: string | null;
   }>;
   getRun(input: { userId: string; runId: string }): Promise<DevAnalyzeRun>;
+  // signal: aborts when the client leaves, which stops the Generate before it saves.
   createRun(input: {
     userId: string;
     body: Record<string, unknown>;
+    signal?: AbortSignal;
   }): Promise<DevAnalyzeRun>;
-  rerun(input: { userId: string; runId: string }): Promise<DevAnalyzeRun>;
+  rerun(input: { userId: string; runId: string; signal?: AbortSignal }): Promise<DevAnalyzeRun>;
   shareRunToChat(input: {
     userId: string;
     runId: string;
@@ -352,7 +356,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
       if (run === null) throw new DevApiHttpError(404, "analyze run not found");
       return toDevAnalyzeRun(deps.db, run, run.template_name, userId);
     },
-    async createRun({ userId, body }) {
+    async createRun({ userId, body, signal }) {
       const templateId = requireNonEmpty(body.template_id, "template_id");
       const template = await getAnalyzeTemplate(deps.db, templateId);
       if (template === null || template.user_id !== userId) {
@@ -390,7 +394,8 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         ...(financial ? { financial } : {}),
       });
       const runId = randomUUID();
-      const rendered = await deps.runAnalyzeWorkflow({
+      const workflow = deps.runAnalyzeWorkflow;
+      return generateMemo(deps, runId, signal, () => workflow({
         userId,
         template,
         body,
@@ -402,8 +407,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         sourceCategories,
         bundleIds,
         subjectRefs,
-      });
-      return persistAnalyzeRun(deps, {
+      }), (rendered) => persistAnalyzeRun(deps, {
         template,
         runId,
         snapshotId,
@@ -414,9 +418,9 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         playbookId: resolvedPlaybook.playbook.playbook_id,
         subjectRefs,
         runMetadata,
-      });
+      }));
     },
-    async rerun({ userId, runId }) {
+    async rerun({ userId, runId, signal }) {
       const original = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
       if (original === null) throw new DevApiHttpError(404, "analyze run not found");
       const metadata = parseStoredAnalyzeRunMetadata(original.run_metadata);
@@ -441,7 +445,8 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         template_id: template.template_id,
         template_version: template.version,
         playbook_id: metadata.playbook_id,
-        playbook_version: metadata.playbook_version,
+        // The playbook as it is now, which the rerun writes, and not the one the original was saved under.
+        playbook_version: playbook?.version ?? metadata.playbook_version,
         instructions: metadata.instructions,
         source_categories: sourceCategories,
         subject_refs: subjectRefs,
@@ -457,7 +462,8 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         source_categories: sourceCategories,
         ...(subjectRefs[0] ? { subject_ref: subjectRefs[0] } : {}),
       };
-      const rendered = await deps.runAnalyzeWorkflow({
+      const workflow = deps.runAnalyzeWorkflow;
+      return generateMemo(deps, rerunId, signal, () => workflow({
         userId,
         template,
         body,
@@ -469,8 +475,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         sourceCategories,
         bundleIds,
         subjectRefs,
-      });
-      return persistAnalyzeRun(deps, {
+      }), (rendered) => persistAnalyzeRun(deps, {
         template,
         runId: rerunId,
         snapshotId,
@@ -481,7 +486,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         playbookId: metadata.playbook_id,
         subjectRefs,
         runMetadata: rerunMetadata,
-      });
+      }));
     },
     async shareRunToChat({ userId, runId, body }) {
       const run = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
@@ -556,6 +561,35 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
       });
     },
   };
+}
+
+const STOPPED = "the memo was stopped before it was saved";
+
+// A Generate whose client leaves stops its model calls and calculations and saves nothing. One that stops or
+// fails before its memo is saved keeps none of what its analyst agent certified for it.
+async function generateMemo(
+  deps: AnalyzeServiceDeps,
+  runId: string,
+  signal: AbortSignal | undefined,
+  write: () => Promise<DevApiAnalyzeWorkflowResult> | DevApiAnalyzeWorkflowResult,
+  save: (rendered: DevApiAnalyzeWorkflowResult) => Promise<DevAnalyzeRun>,
+): Promise<DevAnalyzeRun> {
+  const stop = new TurnStop();
+  const leave = () => stop.stop();
+  signal?.addEventListener("abort", leave, { once: true });
+  if (signal?.aborted) leave();
+  try {
+    const rendered = await stop.run(write);
+    if (!stop.claimSave()) throw new DevApiHttpError(409, STOPPED);
+    return await save(rendered);
+  } catch (error) {
+    await eraseUnsavedMemoFigures(deps.db, runId).catch((reason: unknown) => {
+      console.warn(`analyze run ${runId}: the unsaved memo's figures were not erased; recovery cancels any left unfinished`, reason);
+    });
+    throw stop.stopped && !(error instanceof DevApiHttpError) ? new DevApiHttpError(409, STOPPED) : error;
+  } finally {
+    signal?.removeEventListener("abort", leave);
+  }
 }
 
 const isCertifiedBlock = (block: unknown): block is Record<string, unknown> => isRecord(block) && block.kind === "financial_answer";

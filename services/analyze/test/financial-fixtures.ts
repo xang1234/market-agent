@@ -41,7 +41,7 @@ export async function memoDatabase(t: TestContext, prefix: string): Promise<{ db
 export async function createMemoRun(
   db: Client,
   pool: Pool,
-  input: { templateId: string; playbookId: string; peers?: string[]; cutoff?: string; context?: AnalyzeRunFinancialMetadata },
+  input: { templateId: string; playbookId: string; playbookVersion?: number; peers?: string[]; cutoff?: string; context?: AnalyzeRunFinancialMetadata },
 ) {
   const book = playbook(input.playbookId);
   const context = input.context ?? prepareAnalyzeFinancialContext({
@@ -68,7 +68,7 @@ export async function createMemoRun(
       template_id: input.templateId,
       template_version: 1,
       playbook_id: book.playbook_id,
-      playbook_version: book.version,
+      playbook_version: input.playbookVersion ?? book.version,
       instructions: book.default_instructions,
       source_categories: book.default_source_categories,
       subject_refs: [{ kind: "issuer", id: IDS.issuerA }],

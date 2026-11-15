@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   ANALYZE_PLAYBOOKS,
+  playbookAt,
   resolveAnalyzePlaybookRequest,
 } from "../src/playbook.ts";
 
@@ -41,7 +42,8 @@ test("resolveAnalyzePlaybookRequest overlays user instructions without dropping 
 test("investment_memo asks for a competitive position and no stance", () => {
   const resolved = resolveAnalyzePlaybookRequest({ playbook_id: "investment_memo" });
   assert.equal(resolved.playbook.name, "Investment memo");
-  assert.equal(resolved.playbook.version, 1, "a stored memo's optional sections are looked up by its version");
+  // v2 dropped v1's final verdict and added the competitive position; a memo saved under v1 is still read by v1's sections.
+  assert.equal(resolved.playbook.version, 2);
   assert.deepEqual(resolved.playbook.default_source_categories, ["filings", "transcripts", "news"]);
   assert.deepEqual(resolved.playbook.sections.map((section) => section.section_id), [
     "investment_thesis",
@@ -58,6 +60,11 @@ test("investment_memo asks for a competitive position and no stance", () => {
   for (const text of [resolved.prompt, resolved.instructions, resolved.playbook.description]) {
     assert.doesNotMatch(text, /\b(buy|hold|sell|rating|conviction|verdict)\b/iu);
   }
+  assert.equal(playbookAt("investment_memo", 2), resolved.playbook);
+  const v1 = playbookAt("investment_memo", 1)!.sections.map((section) => section.section_id);
+  assert.equal(v1.at(-1), "final_verdict", "a v1 memo keeps the sections it was saved with");
+  assert.equal(v1.includes("competitive_position"), false);
+  assert.equal(ANALYZE_PLAYBOOKS.filter((playbook) => playbook.playbook_id === "investment_memo").length, 1, "only the current version is offered");
 });
 
 test("the prompt lists required and optional sections apart", () => {

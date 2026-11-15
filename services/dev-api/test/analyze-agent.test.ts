@@ -3,11 +3,12 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 
 import { dockerAvailable, registerLifoCleanup } from "../../../db/test/docker-pg.ts";
-import { memoDatabase, playbook } from "../../analyze/test/financial-fixtures.ts";
+import { createMemoRun, memoDatabase, playbook } from "../../analyze/test/financial-fixtures.ts";
 import { meteredModels } from "../../chat/src/analyst-agent.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { LlmClientError, type LlmChatClient, type LlmChatRequest, type LlmToolCall } from "../../llm/src/router.ts";
 import { analyzeAgentWorkflow } from "../src/analyze-agent.ts";
+import type { DevApiAnalyzeWorkflowInput, DevApiAnalyzeWorkflowResult } from "../src/analyze-adapter.ts";
 import { createServiceDevApiAdapters } from "../src/http.ts";
 import { analyzeAgentDeps, buildAnalyzeRunSeals, closeLocalRuntimePoolForTests, sealAnalyzeSnapshot } from "../src/local-runtime.ts";
 
@@ -26,13 +27,28 @@ const FILING = "4f000000-0000-4000-8000-0000000000e3";
 
 type Section = { kind: string; title?: string; data_ref: { params?: { playbook_section_id?: string } }; claim_refs: string[]; children: Array<Record<string, unknown>> };
 
+type Script = Readonly<{
+  // Written after the answer's figures and claims, each resting on its first entry.
+  inferences?: ReadonlyArray<string>;
+  verdict?: "entailed" | "unsupported";
+  // Hears each model call before it answers, with whether it writes an answer over certified figures.
+  onCall?: (kind: "read" | "answer" | "judge", certified: boolean) => void;
+}>;
+
 // What the scripted model reads for each section's goal, and what it answers with: every id the packet offers.
-function scriptedModel(calls: string[]): () => LlmChatClient {
+function scriptedModel(calls: string[], script: Script = {}): () => LlmChatClient {
   const issuerRef = (request: LlmChatRequest) => (JSON.parse(String(request.messages[1]!.content)) as { companies: Array<{ subject_ref: unknown }> }).companies[0]!.subject_ref;
   const goalOf = (request: LlmChatRequest) => String((JSON.parse(String(request.messages[1]!.content)) as { question: string }).question);
   const call = (name: string, args: Record<string, unknown>): LlmToolCall => ({ id: `call-${randomUUID()}`, name, arguments: args as never });
   return () => async (_deployment, request) => {
+    if (String(request.messages[0]?.content).startsWith("You check the analyst inferences")) {
+      calls.push("judge");
+      script.onCall?.("judge", false);
+      const { inferences } = JSON.parse(String(request.messages[1]!.content)) as { inferences: Array<{ id: number }> };
+      return { text: JSON.stringify({ verdicts: inferences.map((inference) => ({ id: inference.id, verdict: script.verdict ?? "entailed", worded_amount: false, reason: "scripted" })) }) };
+    }
     if (request.tools?.length) {
+      script.onCall?.("read", false);
       const goal = goalOf(request);
       calls.push(`read:${goal.slice(0, 20)}`);
       if (request.messages.some((message) => (message.role as string) === "toolResult")) return { text: "DONE" };
@@ -51,9 +67,11 @@ function scriptedModel(calls: string[]): () => LlmChatClient {
     const answer = request.messages.find((message) => message.role === "user" && message.content.startsWith("{"))!.content;
     const { evidence_packet: packet } = JSON.parse(answer) as { evidence_packet: { figures: Array<{ id: string; gap?: string }>; claims: Array<{ id: string }> } };
     const figures = packet.figures.filter((figure) => figure.gap === undefined).map((figure) => figure.id);
+    script.onCall?.("answer", figures.length > 0);
     const assertions = [
       ...(figures.length > 0 ? [{ kind: "observation", text: "Revenue was reported.", evidence: figures }] : []),
       ...packet.claims.map((claim) => ({ kind: "management_attribution", text: "The 10-K says so.", evidence: [claim.id] })),
+      ...(script.inferences ?? []).map((text) => ({ kind: "analyst_inference", text, supports: [0] })),
     ];
     return { text: `\`\`\`assertions\n${JSON.stringify(assertions)}\n\`\`\`` };
   };
@@ -234,9 +252,89 @@ test("the analyst agent writes an investment memo's sections from stored sources
     assert.deepEqual(sections.map((section) => section.data_ref.params?.playbook_section_id), AGENT_SECTIONS);
     for (const section of sections) {
       const [note] = section.children as Array<{ segments: Array<{ text: string }> }>;
-      assert.match(note!.segments[0]!.text, /^No stored source covers this section\. Beta Holdings Corp\. has no 10-K on file/, JSON.stringify(section.children));
+      assert.match(note!.segments[0]!.text, /^No stored source covers this section\. Beta Holdings Corp\. had no 10-K on file as of \d{4}-\d{2}-\d{2},/, JSON.stringify(section.children));
     }
     assert.equal(calls.includes("answer"), false, "no answer is written from nothing");
     assert.equal(run.blocks.some((block) => block.kind === "financial_answer"), false);
+  });
+
+  const memoBody = { template_id: templateId, playbook_id: "investment_memo", subject_ref: { kind: "listing", id: LISTING } };
+  const count = async (sql: string, value: string) => Number((await db.query(sql, [value])).rows[0].n);
+  const savedMemos = () => count(`select count(*)::int as n from analyze_template_runs where template_id = $1`, templateId);
+  const figureRuns = (runId: string) => count(`select count(*)::int as n from financial_runs where parent_id = $1`, runId);
+  const adaptersOn = (workflow: (input: DevApiAnalyzeWorkflowInput) => Promise<DevApiAnalyzeWorkflowResult>, runIds: string[] = []) => createServiceDevApiAdapters({
+    db: pool,
+    runAnalyzeWorkflow: (input) => {
+      runIds.push(input.runId);
+      return workflow(input);
+    },
+    sealAnalyzeSnapshot,
+    buildAnalyzeRunSeals,
+  });
+
+  await t.test("an inference shows only beside certified figures, only when the judge entails it, and never in stance words", async () => {
+    const NEUTRAL = "Industrial demand carries the revenue.";
+    const STANCE = "This business is a Buy on this record, held with high conviction.";
+    const shownWhen = async (verdict: "entailed" | "unsupported") => {
+      const judged = adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps({ ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" }, scriptedModel([], { inferences: [NEUTRAL, STANCE], verdict }))));
+      const run = await judged.analyze.createRun({ userId: IDS.owner, body: memoBody });
+      const saved = (await db.query(`select blocks from analyze_template_runs where run_id = $1`, [run.run_id])).rows[0].blocks;
+      return sectionsOf(saved).map((section) => [NEUTRAL, STANCE].filter((text) => JSON.stringify(section.children).includes(text)));
+    };
+    assert.deepEqual(await shownWhen("entailed"), [[NEUTRAL], [], [], []], "only the thesis certified a figure, and its stance inference is left out");
+    assert.deepEqual(await shownWhen("unsupported"), [[], [], [], []]);
+  });
+
+  await t.test("a rerun reads at the original memo's cutoff, says what was on file then, and runs the current playbook", async () => {
+    const original = await createMemoRun(db, pool, { templateId, playbookId: "investment_memo", playbookVersion: 1 });
+    const rerun = await adapters.analyze.rerun({ userId: IDS.owner, runId: original.runId });
+    assert.equal((rerun.run_metadata as { playbook_version: number }).playbook_version, 2, "the rerun records the playbook version it ran");
+    const sections = sectionsOf(rerun.blocks);
+    assert.deepEqual(sections.map((section) => section.data_ref.params?.playbook_section_id), AGENT_SECTIONS);
+    for (const section of sections) {
+      assert.match(JSON.stringify(section.children), /AAA had no 10-K on file as of 2024-03-01, so no business or risk factor claims from one/, section.title);
+    }
+    assert.doesNotMatch(JSON.stringify(rerun.blocks), /has no 10-K on file/, "its 10-K, filed since, is on file now");
+  });
+
+  await t.test("a Generate the client leaves makes no model call after it and saves nothing, its figure erased", async () => {
+    const left = new AbortController();
+    const calls: string[] = [];
+    let callsAtStop = -1;
+    const runIds: string[] = [];
+    const stopped = adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps(LLM_ENV, scriptedModel(calls, {
+      onCall: (kind, certified) => {
+        if (kind !== "answer" || !certified || callsAtStop >= 0) return;
+        callsAtStop = calls.length;
+        left.abort();
+      },
+    }))), runIds);
+    const memos = await savedMemos();
+    await assert.rejects(stopped.analyze.createRun({ userId: IDS.owner, body: memoBody, signal: left.signal }), { status: 409 });
+    assert.ok(callsAtStop > 0, "the thesis certified its figure before the stop");
+    assert.equal(calls.length, callsAtStop, "no model call after the stop");
+    assert.equal(await savedMemos(), memos, "no memo is saved");
+    assert.equal(await figureRuns(runIds[0]!), 0, "the thesis's figure goes with the memo that was never saved");
+  });
+
+  await t.test("a Generate whose memo fails to seal keeps none of its agent's figures", async () => {
+    const runIds: string[] = [];
+    const workflow = analyzeAgentWorkflow(analyzeAgentDeps(LLM_ENV, scriptedModel([])));
+    const failing = adaptersOn(async (input) => {
+      const { blocks } = await workflow(input);
+      assert.ok(await figureRuns(input.runId) > 0, "the thesis certified its figure");
+      return { blocks: blocks.map((block) => (block.kind === "section" ? { ...block, claim_refs: [...(block.claim_refs as string[]), randomUUID()] } : block)) };
+    }, runIds);
+    const memos = await savedMemos();
+    await assert.rejects(failing.analyze.createRun({ userId: IDS.owner, body: memoBody }), { status: 422 });
+    assert.equal(await savedMemos(), memos);
+    assert.equal(await figureRuns(runIds[0]!), 0);
+  });
+
+  await t.test("with no analyst model configured, a Generate is refused and nothing is saved", async () => {
+    const memos = await savedMemos();
+    const unconfigured = adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps({}, () => async () => assert.fail("no model call"))));
+    await assert.rejects(unconfigured.analyze.createRun({ userId: IDS.owner, body: memoBody }), { status: 503, message: "the analyst agent's model is not configured" });
+    assert.equal(await savedMemos(), memos);
   });
 });
