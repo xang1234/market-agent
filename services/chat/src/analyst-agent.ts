@@ -79,25 +79,12 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const named = companies.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject] : []);
     const unpicked = companies.subjects.some((subject) => subject.resolution.status === "ambiguous");
     if (companies.clarify || named.length === 0 || unpicked) return null;
-    let made = 0;
-    let readingRefused = false;
+    const meter = callMeter(TURN_CALLS);
+    let loopRefused = false;
     let answerRefused = false;
-    const spend = (reserved: number) => {
-      if (made >= TURN_CALLS - reserved) return false;
-      made += 1;
-      return true;
-    };
-    const readingCall = () => {
-      if (spend(ANSWER_CALLS)) return;
-      readingRefused = true;
-      throw new LlmClientError(CALLS_SPENT);
-    };
-    const answerCall = () => {
-      if (spend(0)) return;
-      answerRefused = true;
-      throw new LlmClientError(CALLS_SPENT);
-    };
-    const router = await deps.router(readingCall);
+    const router = await deps.router(meter(ANSWER_CALLS, () => {
+      loopRefused = true;
+    }));
     if (!router) return null;
     registry ??= loadToolRegistry();
     const policy = createTurnToolPolicy({
@@ -114,7 +101,6 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const known = new Map(named.map((subject) => [issuerOf(subject), subject] as const));
     const labelOf = (issuer: string) => companies.labels.get(issuer) ?? known.get(issuer)?.mention ?? issuer;
     const whoOf = (args: JsonObject) => labelList(argIssuers(args).filter((issuer) => known.has(issuer)).map(labelOf));
-    const planningModel = deps.planner?.(readingCall) ?? null;
     const certified: Certified[] = [];
     const askedFor = new Set<string>();
     const analyst: AnalystToolResult[] = [];
@@ -156,6 +142,11 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
           return { content: JSON.stringify({ tool: "certified_financials", status: "gap", reason: "request_conflict" }) };
         }
         const { clarificationAnswer: _picked, ...turn } = context;
+        let plannerRefused = false;
+        // A planner call leaves one for the loop's next step, beside the answer's.
+        const planningModel = deps.planner?.(meter(ANSWER_CALLS + 1, () => {
+          plannerRefused = true;
+        })) ?? null;
         const outcome = await certifiedFinancials({ ...deps.financial, planningModel, clock: () => new Date(deps.asOf()) }, {
           context: { ...turn, userIntent: ask.question },
           subjects,
@@ -166,7 +157,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
           persistParent: async () => {},
           originRef: key.origin,
         });
-        if (outcome.status === "declined" && outcome.reason === "planning_unavailable" && readingRefused) {
+        if (outcome.status === "declined" && outcome.reason === "planning_unavailable" && plannerRefused) {
           notes.push(`${who}: the figures were not computed, as the turn reached its limit of model calls.`);
           return { content: JSON.stringify({ tool: "certified_financials", status: "declined", reason: "turn_call_limit" }) };
         }
@@ -192,7 +183,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       }
       const competitor = args.role === "competitor";
       const predicates: ReadonlyArray<JsonValue> = Array.isArray(args.predicates) ? args.predicates : CLAIM_PREDICATES;
-      if (name === "get_peer_set" || (name === "get_claims" && !competitor && predicates.includes("business.competition"))) readCompetition = true;
+      if (!isFailure(result) && (name === "get_peer_set" || (name === "get_claims" && !competitor && predicates.includes("business.competition")))) readCompetition = true;
       const note = statusNote(result, whoOf(args), competitor);
       if (note) (competitor && result.status === "no_claims" ? heldCompetitorNotes : notes).push(note);
       return { content: JSON.stringify(readSummary(result)), ...(isFailure(result) ? { isError: true } : {}) };
@@ -239,11 +230,10 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       await Promise.allSettled([...inFlight]);
       if (!isModelFailure(reason)) throw reason;
       console.warn("[chat] the analyst agent's reading stopped early; it answers from what it read", reason);
-      if (!readingRefused) notes.push(reason instanceof TurnDeadline ? UNFINISHED.time : UNFINISHED.model_failed);
+      notes.push(loopRefused ? UNFINISHED.calls : reason instanceof TurnDeadline ? UNFINISHED.time : UNFINISHED.model_failed);
       return null;
     }).finally(() => clearTimeout(readTimer));
     if (loop) notes.push(...stopNotes(loop, whoOf));
-    if (readingRefused) notes.push(UNFINISHED.calls);
     if (!toolCalls.some((entry) => entry.status === "ok")) return null;
 
     const namedIds = new Set(named.map(issuerOf));
@@ -281,7 +271,9 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         ...(askedFigures ? {} : { answerShape: DESCRIPTION_SHAPE }),
       }, { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}), question }, (deployment) => {
         answeredBy = deployment;
-      }, answerCall);
+      }, meter(0, () => {
+        answerRefused = true;
+      }));
       if (answer.judging) answer = { ...answer, assertions: (await answer.judging.done).assertions };
     } catch (reason) {
       if (!isModelFailure(reason) || certified.length === 0) throw reason;
@@ -298,8 +290,9 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       tool_call_ids: readCalls,
     }];
     const turnBlocks = (written: ReadonlyArray<Record<string, unknown>>) => {
-      const spent = answerRefused ? [{ ...noteBlock({ snapshotId, asOf }, "agent:calls-spent", ANALYSIS_LEFT_OUT), subject_refs: subjectRefs, tool_call_ids: readCalls }] : [];
-      const own = [...written.filter(rendered).map((block) => ({ ...withRefs(block, claims, cited), tool_call_ids: readCalls })), ...noted, ...spent];
+      const shown = written.filter(rendered).map((block) => ({ ...withRefs(block, claims, cited), tool_call_ids: readCalls }));
+      const spent = answerRefused && shown.length > 0 ? [{ ...noteBlock({ snapshotId, asOf }, "agent:calls-spent", ANALYSIS_LEFT_OUT), subject_refs: subjectRefs, tool_call_ids: readCalls }] : [];
+      const own = [...shown, ...noted, ...spent];
       return [...certifiedBlocks, ...(own.length > 0 ? own : unwritten)];
     };
     const turnAnswer = (shown: Pick<AnsweredTurn, "blocks" | "judging">): Pick<ChatAnalystToolRuntimeResult, "blocks"> => {
@@ -356,9 +349,20 @@ const QUIET = (() => undefined) as unknown as ChatTurnRunContext["emit"];
 
 const UNKNOWN_COMPANY = "name each company by a subject_ref the prompt or a peer read gave";
 
-const isModelFailure = (reason: unknown) => reason instanceof LlmRouterError || reason instanceof LlmProviderError || reason instanceof LlmClientError || reason instanceof TurnDeadline;
+const isModelFailure = (reason: unknown) => reason instanceof LlmRouterError || reason instanceof LlmProviderError || reason instanceof TurnDeadline;
 
-const CALLS_SPENT = "the turn has made its model calls";
+// A turn's model calls: each guard takes one while more than `reserved` are left, and else throws as a client failure.
+function callMeter(total: number) {
+  let made = 0;
+  return (reserved: number, refused: () => void) => () => {
+    if (made < total - reserved) {
+      made += 1;
+      return;
+    }
+    refused();
+    throw new LlmClientError("the turn has made its model calls");
+  };
+}
 
 const NO_ANSWER = "No answer could be written from the stored sources read for this question.";
 

@@ -6,7 +6,7 @@ import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
-import { LlmRouterError, type ControlledRouter, type LlmChatRequest, type LlmToolCall } from "../../llm/src/router.ts";
+import { LlmClientError, LlmProviderError, LlmRouterError, type ControlledRouter, type LlmChatRequest, type LlmToolCall } from "../../llm/src/router.ts";
 import { analystAgentRouter, analystAgentRunner, certifiedAsk, statusNote, stopNotes, type AnalystAgentDeps } from "../src/analyst-agent.ts";
 import type { AnalystToolResult } from "../src/analyst-tools.ts";
 import { answerPath, answerTurn } from "../src/answer-trace.ts";
@@ -241,14 +241,22 @@ const INCOME_2023 = { subject_refs: [{ kind: "issuer", id: A }], metrics: ["inco
 const REVENUE = { subject_refs: [{ kind: "issuer", id: A }], question: "AAA revenue in fiscal 2023" };
 const OBSERVE_F1 = '```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]}]\n```';
 const noRead: AnalystAgentDeps["read"] = async () => assert.fail("no stored read in this turn");
+// As a real router fails a call its client's guard refuses: a terminal client failure.
+const guarded = (beforeModelCall: () => void) => {
+  try {
+    beforeModelCall();
+  } catch (error) {
+    throw new LlmRouterError("client_failed", (error as Error).message, []);
+  }
+};
 const metered = (router: ControlledRouter, beforeModelCall: () => void): ControlledRouter => ({
   complete: async (request, controls) => {
-    beforeModelCall();
+    guarded(beforeModelCall);
     return router.complete(request, controls);
   },
 });
 const meteredPlanner = (model: PlanningModel, beforeModelCall: () => void): PlanningModel => async (request) => {
-  beforeModelCall();
+  guarded(beforeModelCall);
   return model(request);
 };
 
@@ -624,7 +632,29 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.ok(JSON.stringify((done.message as { blocks: unknown }).blocks).includes("No company matched ZZZ."));
   });
 
-  await t.test("a turn's reading stops at its limit of model calls, and an ask the planner could not finish says so", async () => {
+  await t.test("every attempt a turn's router makes passes its meter, a fallback included, and a refused one ends the call", async () => {
+    const { guardedClient } = await import("../src/local-runtime.ts");
+    let made = 0;
+    const meter = () => {
+      if (made >= 3) throw new LlmClientError("spent");
+      made += 1;
+    };
+    let attempts = 0;
+    const base = () => async () => {
+      attempts += 1;
+      if (attempts === 1) throw new LlmProviderError("provider_failed", "the first deployment is down");
+      return { text: "DONE" };
+    };
+    const router = await analystAgentRouter({ ...LLM_ENV, LITELLM_FALLBACK_MODELS: "openai/gpt-4.1" }, { createClient: guardedClient(meter, base) });
+    assert.ok(router);
+    await router.complete({ messages: [] });
+    assert.deepEqual([made, attempts], [2, 2], "the failed attempt and its fallback");
+    await router.complete({ messages: [] });
+    await assert.rejects(router.complete({ messages: [] }), (error: unknown) => error instanceof LlmRouterError && error.code === "client_failed");
+    assert.equal(attempts, 3, "no attempt past the meter reached a deployment");
+  });
+
+  await t.test("a turn's planner calls stop at their share of the model calls, and an ask the planner could not finish says so", async () => {
     const unplannable = Object.assign((async () => {
       unplannable.calls += 1;
       return { model: "stub", text: "{}" };
@@ -632,9 +662,9 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     const asks = ["AAA revenue in fiscal 2023", "AAA sales in fiscal 2023", "AAA turnover in fiscal 2023"].map((question) => call("certified_financials", { ...REVENUE, question }));
     const router = scripted([{ toolCalls: asks }, { text: "DONE" }]);
     const done = completed(await run(agentOf(router, OBSERVE_F1, { planningModel: unplannable }), { ...base, turnId: randomUUID(), userIntent: "AAA revenue" }));
-    assert.deepEqual([router.sent.length, unplannable.calls], [1, 4], "one step and four planner calls are the reading's five");
+    assert.deepEqual([router.sent.length, unplannable.calls], [2, 3], "the planner leaves the loop its next step");
     assert.ok(savedText(done).includes("AAA: the figures were not computed, as the turn reached its limit of model calls."));
-    assert.ok(savedText(done).includes("Reading stopped at the turn's limit of model calls, so part of the question may be unanswered."));
+    assert.ok(!savedText(done).includes("Reading stopped"), "the reading itself was not cut short");
   });
 
   const profileOf = (...texts: string[]): AnalystAgentDeps["read"] => async (name) => ({

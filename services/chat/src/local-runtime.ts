@@ -516,13 +516,15 @@ export async function financialResearchScope(
   return (await turnScope(context.threadId, context.userIntent ?? "", covered, true, reading))(turnNow(process.env));
 }
 
+const planningModelWith = (options?: Parameters<typeof createLlmRouterFromEnv>[1]) => async (request: Parameters<ReturnType<typeof planningModelFromRouter>>[0]) => {
+  const router = await createLlmRouterFromEnv(process.env, options);
+  if (!router) throw new Error("LLM router is not configured");
+  return planningModelFromRouter(router)(request);
+};
+
 const financialDeps = {
   pool: { query: (text: string, values?: unknown[]) => pool().query(text, values), connect: () => pool().connect() },
-  planningModel: async (request: Parameters<ReturnType<typeof planningModelFromRouter>>[0]) => {
-    const router = await createLlmRouterFromEnv(process.env);
-    if (!router) throw new Error("LLM router is not configured");
-    return planningModelFromRouter(router)(request);
-  },
+  planningModel: planningModelWith(),
   resolveMention: (mention: string) => preResolveSubject({ text: mention }),
   priorSubjects: (threadId: string) => loadPriorSubjects({ threadId }),
   evidence: createEvidenceFinancialPort,
@@ -536,23 +538,25 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
     answerTurn(answer, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered }), input),
 });
 
-const guardedClient = (beforeModelCall: () => void) => async (): Promise<LlmChatClient> => {
+const defaultClient = (): Promise<LlmChatClient> => {
   const replay = process.env.LLM_REPLAY_FILE?.trim();
-  const client = await (replay ? createReplayLlmChatClient(replay) : createDefaultPiLlmChatClient());
+  return replay ? createReplayLlmChatClient(replay) : createDefaultPiLlmChatClient();
+};
+
+export const guardedClient = (beforeModelCall: () => void, base: () => Promise<LlmChatClient> | LlmChatClient = defaultClient) => async (): Promise<LlmChatClient> => {
+  const client = await base();
   return (deployment, request, options) => {
     beforeModelCall();
     return client(deployment, request, options);
   };
 };
 
+const { planningModel: _unmetered, ...agentFinancialDeps } = financialDeps;
+
 export const analystAgent = analystAgentRunner({
-  financial: { ...financialDeps, hydrate: hydrateTurn },
+  financial: { ...agentFinancialDeps, hydrate: hydrateTurn },
   router: (beforeModelCall) => analystAgentRouter(process.env, { createClient: guardedClient(beforeModelCall) }),
-  planner: (beforeModelCall) => async (request) => {
-    const router = await createLlmRouterFromEnv(process.env, { createClient: guardedClient(beforeModelCall) });
-    if (!router) throw new Error("LLM router is not configured");
-    return planningModelFromRouter(router)(request);
-  },
+  planner: (beforeModelCall) => planningModelWith({ createClient: guardedClient(beforeModelCall) }),
   read: (name, args, turn) => runRegisteredAnalystTool(pool(), name, args, turn).catch((reason: unknown) => {
     if (!isUnavailableRead(reason)) throw reason;
     console.warn(`[chat] ${name} failed; the analyst agent answers without it`, reason);
