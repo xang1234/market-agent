@@ -417,21 +417,23 @@ export type CertifiedFinancialsRequest = Readonly<{
   // By issuer, the name the packet gives each company.
   labels: ReadonlyMap<string, string>;
   authority: FinancialRuntimeAuthority;
+  // One run per thread: a later call under it resumes that run's plan, whatever it asks now.
   requestKey: string;
   persistParent: PersistParentArtifact;
 }>;
 
 // ponytail: a call that resumes a reserved run does not plan, so its planned
 // subjects are the ones requested, without a clarification pick or peers.
-type Planned = Readonly<{ planned_subjects: ReadonlyArray<RequestedSubject> }>;
+type PlannedSubjects = Readonly<{ planned_subjects: ReadonlyArray<RequestedSubject> }>;
 
 export type CertifiedFinancials =
   // The packet is built when called, so a caller that never reads it does no work after the commit.
   | Readonly<{ status: "published"; run_id: string; content: FinancialAnswerContent; packet: () => Promise<EvidencePacket> }>
-  // An earlier attempt published the run, so only its parent holds the block.
+  // An earlier attempt published the run, so only its parent holds the block:
+  // a caller that needs the figures on a retry keeps them in its parent.
   | Readonly<{ status: "existing"; run_id: string }>
-  | Readonly<{ status: "clarification"; clarification: Clarification } & Planned>
-  | Readonly<{ status: "declined"; reason: ChatGap; planned: PlanningResult | undefined } & Planned>
+  | Readonly<{ status: "clarification"; clarification: Clarification } & PlannedSubjects>
+  | Readonly<{ status: "declined"; reason: ChatGap; planned: PlanningResult | undefined } & PlannedSubjects>
   // A notice about the run: running, answered otherwise, cancelled, or not this parent's.
   | Readonly<{ status: "gap"; reason: ChatGap }>;
 
@@ -473,7 +475,7 @@ export async function certifiedFinancials(
       if (unit?.result.status === "published") {
         const content = unit.result.publication.block.financial;
         const packet = async () => {
-          const plan = planned?.outcome === "ready" ? planned.plan : await findPlanForRequest(deps.pool, { authority, request_key });
+          const plan = await findPlanForRequest(deps.pool, { authority, request_key });
           const labels = new Map([...request.labels].map(([issuer, label]) => [issuer.toLowerCase(), label]));
           const tickers = new Map((plan?.subjects.members ?? []).flatMap((member) => {
             const label = labels.get(member.subject_ref.id.toLowerCase());

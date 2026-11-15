@@ -1174,6 +1174,38 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(rows.map((row) => row.request_key), [`turn:${turnId}:1`, `turn:${turnId}:2`]);
   });
 
+  await t.test("a certified call about two companies names each figure's company by the label given for its issuer", async () => {
+    const turnId = randomUUID();
+    const BBB: RequestedSubject = { mention: "BBB", resolution: { status: "resolved", subject_ref: { kind: "issuer", id: IDS.issuerB }, label: "Beta Holdings Corp." } };
+    const result = await certifiedFinancials(
+      { pool, planningModel: null, evidence: createEvidenceFinancialPort },
+      {
+        context: { ...base, runId: turnId, turnId, userIntent: "Compare AAA and BBB", bundleId: "financial_answer", emit: () => assert.fail("a certified call streams nothing") },
+        subjects: [NVDA_AS_AAA, BBB],
+        choice: { kind: "kept_figures", metrics: ["income_statement"], period: { kind: "fiscal_year", fiscal_year: 2023 } },
+        labels: new Map([[IDS.issuerA.toUpperCase(), "NVDA"], [IDS.issuerB, "BBB"]]),
+        authority: authorityFor(),
+        requestKey: requestKeyFor(turnId, 1),
+        persistParent: async () => {},
+      },
+    );
+    assert(result.status === "published");
+    const packet = await result.packet();
+    assert.deepEqual(
+      [packet.companies, packet.figures.filter((figure) => figure.metric === "Gross profit").map((figure) => `${figure.company}: ${figure.value}`)],
+      [["NVDA", "BBB"], ["NVDA: $169.1B", "BBB: No eligible input was public before the knowledge cutoff."]],
+    );
+  });
+
+  await t.test("a later call under a published key resumes its run without planning, and leaves the block to its parent", async () => {
+    const turnId = randomUUID();
+    const first = await certify(turnId, 1, PLANNER, revenueModel(["NVDA"]));
+    assert(first.status === "published");
+    const model = revenueModel(["NVDA"], 2022);
+    const again = await certify(turnId, 1, PLANNER, model);
+    assert.deepEqual([again, model.calls], [{ status: "existing", run_id: first.run_id }, 0]);
+  });
+
   await t.test("two calls that plan different figures under one key: one publishes, the other is request_conflict", async () => {
     let release!: () => void;
     const bothPlanning = new Promise<void>((resolve) => release = resolve);
