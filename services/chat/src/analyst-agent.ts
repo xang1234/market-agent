@@ -243,7 +243,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         answeredBy = deployment;
       });
       // The save is claimed after the judge, so the turn stays stoppable until then.
-      if (answer.judging) await answer.judging.done;
+      if (answer.judging) answer = { ...answer, assertions: (await answer.judging.done).assertions };
     } catch (reason) {
       if (!(reason instanceof LlmRouterError || reason instanceof LlmProviderError)) throw reason;
       console.warn("[chat] the analyst agent's answer could not be written; the turn answers with its certified figures alone", reason);
@@ -265,17 +265,15 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       const own = [...written.filter(rendered).map((block) => ({ ...withRefs(block, claims, cited), tool_call_ids: readCalls })), ...noted];
       return [...certifiedBlocks, ...(own.length > 0 ? own : unwritten)];
     };
-    const turnAnswer = (shown: Pick<AnsweredTurn, "blocks" | "judging">): Pick<ChatAnalystToolRuntimeResult, "blocks" | "judging"> => ({
-      blocks: turnBlocks(shown.blocks),
-      ...(shown.judging
-        ? {
-          judging: {
-            watch: (listener: (blocks: ReadonlyArray<Record<string, unknown>>) => void) => shown.judging!.watch((blocks) => listener(turnBlocks(blocks))),
-            done: shown.judging.done.then(({ blocks, assertions }) => ({ blocks: turnBlocks(blocks), ...(assertions ? { assertion_report: assertions } : {}) })),
-          },
-        }
-        : {}),
-    });
+    // The blocks as every verdict left them: judged already, watch hears them at once. The turn
+    // seals and saves these, so it reveals nothing after its seal.
+    const turnAnswer = (shown: Pick<AnsweredTurn, "blocks" | "judging">): Pick<ChatAnalystToolRuntimeResult, "blocks"> => {
+      let settled = shown.blocks;
+      shown.judging?.watch((blocks) => {
+        settled = blocks;
+      });
+      return { blocks: turnBlocks(settled) };
+    };
     const scope = await deps.financial.researchScope?.({ ...context, subjectPreResolutions: companies.resolved, subjectPreResolution: companies.resolved[0] }, Promise.resolve(null))
       .catch((reason: unknown) => {
         console.warn("[chat] research scope unavailable; saving the analyst agent's answer without it", reason);

@@ -256,6 +256,28 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.ok(router.sent[0]!.tools!.map((tool) => tool.name).includes("certified_financials"));
   });
 
+  await t.test("an answer the judge reads is saved as its verdicts leave it, with nothing revealed after its seal", async () => {
+    const judged = analystAgentRunner({
+      financial: { pool, planningModel: null, evidence: createEvidenceFinancialPort, resolveMention },
+      router: async () => scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }, { text: "DONE" }]),
+      read: noRead,
+      compose: (input, turn, onAnswered) => answerTurn(input, turn, {
+        env: { ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" },
+        createClient: () => async (_deployment, request) => {
+          const transcript = request.messages.map((message) => message.content).join("\n");
+          if (transcript.startsWith("You check the analyst inferences")) return { text: '{"verdicts":[{"id":1,"verdict":"entailed","worded_amount":false}]}' };
+          return { text: '```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]},{"kind":"analyst_inference","text":"Its revenue base gives it scale.","supports":[0]}]\n```' };
+        },
+        onAnswered,
+      }),
+      asOf: () => new Date().toISOString(),
+      logToolCalls: persist.logToolCalls,
+    });
+    const done = completed(await run(judged, { ...base, turnId: randomUUID(), userIntent: "AAA revenue" }));
+    const card = (done.message as { blocks: Array<Record<string, unknown>> }).blocks.find((block) => block.analyst_commentary === true);
+    assert.deepEqual((card?.commentary as Array<{ kind: string }>).map((part) => part.kind), ["figures", "inference"]);
+  });
+
   await t.test("each certified call plans its own ask, with no pick the turn's clarification offered", async () => {
     const turnId = randomUUID();
     const asked: string[] = [];
