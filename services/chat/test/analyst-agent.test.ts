@@ -278,12 +278,14 @@ test("a turn's companies by its reading keep each company a fresh question write
   const aaa = await resolveMention("AAA") as Extract<Awaited<ReturnType<typeof resolveMention>>, { status: "resolved" }>;
   const companies = async (userIntent: string, change: ScopeProposal["companies"], prior: typeof aaa[]) => (await resolveTurnSubjects(
     { threadId: randomUUID(), runId: randomUUID(), userIntent, emit: () => {}, reading: async () => ({ ...NO_ASKS, companies: change }) } as never,
-    (request) => resolveMention(request.text),
+    async (request) => (request.text === "Beta Holdings" ? { ...(await resolveMention("BBB")), input_text: request.text } : resolveMention(request.text)),
     async () => prior,
     true,
   )).subjects.map((subject) => subject.subject_ref.id);
   assert.deepEqual(await companies("Compare AAA and BBB revenue", { kind: "as_named", names: ["AAA"] }, []), [A, B], "a written ticker the reading left out");
   assert.deepEqual(await companies("How does AAA's revenue compare with BBB's?", { kind: "compare", add: ["BBB"] }, []), [A, B], "the companies in the order the question writes them");
+  assert.deepEqual(await companies("Compare Beta Holdings and AAA revenue", { kind: "as_named", names: ["Beta Holdings", "AAA"] }, []), [B, A], "a company written by name keeps its place before a ticker");
+  assert.deepEqual(await companies("AAA/BBB revenue", { kind: "as_named", names: ["BBB"] }, []), [A, B], "tickers joined by a slash are each written");
   assert.deepEqual(await companies("Switch from AAA to BBB", { kind: "only", names: ["BBB"] }, [aaa]), [B], "a company switched away from");
   assert.deepEqual(await companies("Compare BBB with AAA", { kind: "compare", add: ["BBB"] }, [aaa]), [A, B], "the earlier company stays first");
 });

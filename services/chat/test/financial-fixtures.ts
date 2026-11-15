@@ -42,7 +42,7 @@ export const SEC_ISSUER_D = "4f000000-0000-4000-8000-0000000000d4";
  */
 export function resolveMention(mention: string): Promise<ChatSubjectPreResolution> {
   const resolved = (id: string, label: string) =>
-    ({ status: "resolved", subject_ref: { kind: "issuer", id }, display_label: label, handoff: { display_labels: { ticker: mention } } }) as unknown as ChatSubjectPreResolution;
+    ({ status: "resolved", input_text: mention, subject_ref: { kind: "issuer", id }, display_label: label, handoff: { display_labels: { ticker: mention } } }) as unknown as ChatSubjectPreResolution;
   const table: Record<string, ChatSubjectPreResolution> = {
     AAA: resolved(IDS.issuerA, "Alpha Industries Inc."),
     // Another name for the same company as AAA.
