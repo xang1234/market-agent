@@ -188,15 +188,21 @@ export async function getLastCheckedResults(
   versionId: string,
 ): Promise<Map<string, LastCheckedResult>> {
   assertUuid(versionId, "thesis_version_id");
-  // ponytail: scans one row per condition per run of the version, about 44k a year for an hourly five-condition agent. Keep a per-condition baseline table if run time shows it; a cutoff on assessed_at would drop baselines.
   const { rows } = await db.query<Omit<LastCheckedResult, "result"> & { result: unknown }>(
-    `select distinct on (entry.result->>'condition_id')
-            entry.result, a.input_hash, a.snapshot_id::text as snapshot_id, a.model_version
-       from agent_thesis_assessments a
-      cross join lateral jsonb_array_elements(a.results) as entry(result)
-      where a.thesis_version_id = $1::uuid
-        and entry.result->>'method' <> 'unchecked_reply'
-      order by entry.result->>'condition_id', a.assessed_at desc, a.assessment_id desc`,
+    `select last.result, last.input_hash, last.snapshot_id, last.model_version
+       from agent_thesis_versions v
+      cross join lateral jsonb_array_elements(v.conditions) as saved(condition)
+      cross join lateral (
+        select entry.result, a.input_hash, a.snapshot_id::text as snapshot_id, a.model_version
+          from agent_thesis_assessments a
+         cross join lateral jsonb_array_elements(a.results) as entry(result)
+         where a.thesis_version_id = v.thesis_version_id
+           and entry.result->>'condition_id' = saved.condition->>'condition_id'
+           and entry.result->>'method' <> 'unchecked_reply'
+         order by a.assessed_at desc, a.assessment_id desc
+         limit 1
+      ) as last
+      where v.thesis_version_id = $1::uuid`,
     [versionId],
   );
   return new Map(rows.map((row) => {

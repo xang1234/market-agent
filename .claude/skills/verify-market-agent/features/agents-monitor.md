@@ -6,7 +6,7 @@ A memo's investment thesis becomes a thesis agent. Each run assesses every condi
 
 - `$V doctor` passes on the commit under test.
 - The subject has certified figures on file and its 10-K claims loaded (the boot recipe's three fixtures, with `$V import` first).
-- A model answers, for Generate memo, Suggest conditions and each run. With none, `--stored` opens the subject's newest stored memo and `--conditions=FILE` types the conditions (a JSON list of `statement`, `falsifier`, `horizon`). A run still asks a model about each narrative condition whose last checked assessment was on other evidence.
+- A model answers, for Generate memo, Suggest conditions and each run. With none, `--stored` opens the subject's newest stored memo and `--conditions=FILE` types the conditions (a JSON list of `statement`, `falsifier`, `horizon`). A run still asks a model about each narrative condition whose last checked assessment, if any, was on other evidence, and a model must stay configured.
 
 ## Journey
 
