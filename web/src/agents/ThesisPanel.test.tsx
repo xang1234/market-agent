@@ -474,6 +474,25 @@ test('a condition whose reply could not be checked reads as not enough evidence 
   }
 })
 
+test('an older model assessment with no refs does not claim it was assessed against cited sources', async () => {
+  const history = currentHistory()
+  const narrative = { condition_id: CONDITION_B, statement: 'Data center platforms stay the core product.', falsifier: 'The 10-K stops naming data center platforms.', horizon: 'Next 10-K' }
+  history.thesis = { ...history.thesis!, conditions: [...history.thesis!.conditions, narrative] }
+  history.versions = [history.thesis]
+  const result = (claimRefs: string[]) => ({ condition_id: CONDITION_B, status: 'unresolved' as const, reason: 'An older assessment. Its model-written reason is not shown.', claim_refs: claimRefs, fact_refs: [], method: 'model' as const })
+  history.assessments = [
+    { ...history.assessments[0]!, assessment_id: 'a0000000-0000-4000-8000-000000000002', assessed_at: '2026-09-09T01:00:00.000Z', prompt_version: 'living-thesis-v1', results: [result([CLAIM_B])] },
+    { ...history.assessments[0]!, prompt_version: 'living-thesis-v1', results: [result([])] },
+  ]
+  const harness = await mountPanel({ fetchImpl: async () => json(history) })
+  try {
+    const entries = [...harness.document.querySelectorAll(`[data-condition-id="${CONDITION_B}"] li[data-assessment-id]`)]
+    assert.deepEqual(entries.map((entry) => /cited certified figures/.test(entry.textContent ?? '')), [true, false])
+  } finally {
+    await harness.unmount()
+  }
+})
+
 function currentHistory(): ThesisHistoryResponse {
   const thesis = {
     thesis_version_id: VERSION_A,

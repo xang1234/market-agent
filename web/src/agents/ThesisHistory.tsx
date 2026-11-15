@@ -73,9 +73,9 @@ function ConditionTimeline({ timeline, currentVersion, refLabels }: { timeline: 
           <span className="min-w-0 break-words text-sm font-medium text-fg">
             {timeline.condition?.statement ?? 'Condition details are outside recent history'}
           </span>
-          <span className="flex items-center gap-2 text-xs text-muted">
+          <span className="flex flex-wrap items-center gap-2 text-xs text-muted">
             <StatusBadge entry={latest} />
-            {timeline.entries.length === 1 ? '1 assessment' : `${timeline.entries.length} assessments`}
+            <span className="whitespace-nowrap">{timeline.entries.length === 1 ? '1 assessment' : `${timeline.entries.length} assessments`}</span>
           </span>
         </summary>
         <ol className="flex flex-col gap-2 border-t border-line p-3">
@@ -93,6 +93,7 @@ function AssessmentEntry({ entry, shown, currentVersion, refLabels }: { entry: E
   const older = version !== undefined && currentVersion !== null && version.version !== currentVersion
   const verification = verificationOf(result)
   const figures = result.figure_refs ?? []
+  const cites = figures.length > 0 || result.fact_refs.length > 0 || result.claim_refs.length > 0
   const factRefs = (prefix: string) => result.fact_refs.map((id, index) => (
     <InspectableRef key={id} snapshotId={assessment.snapshot_id} inspectionRef={{ kind: 'fact', id }} className={REF_CLASS}>
       <span className="sr-only">Inspect fact evidence </span>{prefix}{refLabels[id] ?? `fact ${index + 1}`}
@@ -120,8 +121,8 @@ function AssessmentEntry({ entry, shown, currentVersion, refLabels }: { entry: E
         <p className="mt-2 text-xs text-muted">
           Verified against the saved threshold at the assessment cutoff · certificate {result.financial.certificate_digest?.slice(0, 12) ?? 'unavailable'}
         </p>
-      ) : METHOD_LABELS[result.method] ? <p className="mt-2 text-xs text-muted">{METHOD_LABELS[result.method]}</p> : null}
-      {(figures.length > 0 || result.fact_refs.length > 0 || result.claim_refs.length > 0) ? (
+      ) : METHOD_LABELS[result.method] && (result.method !== 'model' || cites) ? <p className="mt-2 text-xs text-muted">{METHOD_LABELS[result.method]}</p> : null}
+      {cites ? (
         <div className="mt-2 flex flex-wrap gap-2" aria-label="Cited refs">
           {figures.map((figure) => {
             const text = `F · ${figure.measure}${figure.period ? ` ${figure.period}` : ''} · ${figure.value}`
