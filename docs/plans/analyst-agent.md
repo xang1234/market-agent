@@ -124,8 +124,8 @@ Each live lane runs in its own worktree at the PR head. Drive through the contro
 - [ ] Lane 3. Run the CLI with `--max-steps=1` on the same question. Save `aa1-step-cap.txt`. Pass when the last line reads `stop=step_cap steps=1`.
 - [ ] Lane 4. Run the CLI with `--budget-high=1` on "Get revenue for NVDA, then separately for MU". Save `aa1-budget.txt`. Pass when the last line shows `refused=1` and a step shows the error `toolResult` the model received.
 - [ ] Lane 5. Run the CLI with `--tool-error`. Save `aa1-tool-error.txt`. Pass when the transcript shows an error `toolResult` and the loop still ends with `stop=final`.
-- [ ] Lane 6. Set `AGENT_LITELLM_MODEL` in `.env.dev` to the Anthropic model the channel serves, then run lane 2's command. Save `aa1-agent-model.txt`. Pass when the `[llm]` line names that model.
-- [ ] Lane 7. Unset `AGENT_LITELLM_MODEL` and run lane 2's command. Save `aa1-agent-fallback.txt`. Pass when the `[llm]` line names the primary model from `.env.dev`.
+- [ ] Lane 6. With `LLM_SETTINGS_ENV_FILE` blanked so the shell's model keys count (`settings-loader.ts` drops them otherwise), set `AGENT_LITELLM_MODEL` to an Anthropic model that differs from both the primary and the settings file's agent model, then run lane 2's command. Save `aa1-agent-model.txt`. Pass when the `[llm]` line names that model.
+- [ ] Lane 7. The same, with `AGENT_LITELLM_MODEL` unset. Save `aa1-agent-fallback.txt`. Pass when the `[llm]` line names the primary model.
 - [ ] Lane 8. Run `$V chat "What was CSCO's net income last quarter?"` at head. Save `aa1-text-path.png`. Pass when the turn saves within 240s and the `[llm]` call count equals the same run at trunk.
 - [ ] Lane 9. Run `$V scorecard --cases=nvda-amd-ytd` at head. Save `aa1-judge.png`. Pass when `report.json` has non-null judge verdicts for each turn, as at trunk.
 - [ ] Lane 10. Run the CLI on "Get revenue for NVDA, MU, and AMD". Save `aa1-parallel.txt`. Pass when every `toolResult` id matches a `ToolCall` id and the last line reads `stop=final`.
@@ -349,6 +349,9 @@ Each live lane runs in its own worktree at the PR head. Drive through the contro
 - [ ] Save once. Call `claimAnswerSave` from `services/chat/src/turn-stop.ts` once, after the judge, so the turn stays stoppable through every tool step.
 - [ ] The saved message holds one `financial_answer` block per certified call plus the Analysis card from #655.
 - [ ] In `coordinator.ts`, put `analystAgentRunner` in the seat of `financialAwareRunner` in the runner chain at line 399 when `CHAT_ANALYST_AGENT=1`. With the flag off, the chain is unchanged.
+- [ ] Build the agent's router with `purpose: "agent"`. A unit test asserts the purpose, because a router built with the default purpose silently runs the agent on the primary model (AA1 swarm audit A, issue 3).
+- [ ] Wrap the agent's router so every step calls `withDeadlines(ANSWER_DEADLINES)` afresh, as `llm-runtime.ts` does for answers. `runToolLoop` passes no controls, and `withDeadlines` fixes `endsAt` when it is created (AA1 swarm audit A, issue 4).
+- [ ] If a lane or golden needs replayed tool calls, `services/llm/src/replay-client.ts` returns only text today. Extending it is the one allowed edit outside AA5's boundary, and the PR body must name it (AA1 swarm audit A, issue 5).
 - [ ] Add agent cases to `chat-cases.json` for the asks in lanes 2 to 10, with expectations observed at the head and `budget_ms.saved` of 60000.
 
 **You see.**
