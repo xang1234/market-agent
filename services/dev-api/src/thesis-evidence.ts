@@ -119,8 +119,12 @@ async function analystEvidence(
     cutoff: input.asOf,
   });
   const refs: Record<string, ThesisRef> = Object.fromEntries([
-    ...packet.figures.map(figure => [figure.id, { claim_refs: [], fact_refs: factsOf.get(figure.result_id!)! }] as const),
-    ...packet.claims.map(claim => [claim.id, { claim_refs: [claim.claim_id], fact_refs: [] }] as const),
+    ...packet.figures.map(figure => [figure.id, {
+      claim_refs: [],
+      fact_refs: factsOf.get(figure.result_id!)!,
+      figure_refs: [{ result_id: figure.result_id!, measure: figure.metric, period: figure.period || null, value: figure.value }],
+    }] as const),
+    ...packet.claims.map(claim => [claim.id, { claim_refs: [claim.claim_id], fact_refs: [], figure_refs: [] }] as const),
   ]);
   const { cutoff: _cutoff, ...sameEveryRun } = packetForModel(packet);
   return { packet: sameEveryRun as JsonObject, refs };

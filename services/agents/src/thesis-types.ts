@@ -66,6 +66,14 @@ export type ConditionFinancialRef = {
   result_hash: string | null;
 };
 
+/** A certified figure a narrative condition cites, as the run's evidence showed it; its result opens the verified calculation. */
+export type ConditionFigureRef = {
+  result_id: string;
+  measure: string;
+  period: string | null;
+  value: string;
+};
+
 export type ConditionAssessment = {
   condition_id: string;
   status: "supported" | "challenged" | "unresolved";
@@ -74,6 +82,8 @@ export type ConditionAssessment = {
   fact_refs: string[];
   method: "metric" | "model" | "no_evidence";
   financial?: ConditionFinancialRef;
+  /** Absent on rows assessed before figures were stored. */
+  figure_refs?: ConditionFigureRef[];
 };
 
 export type ThesisAssessment = {
@@ -268,6 +278,20 @@ export function parseConditionAssessments(value: unknown): ConditionAssessment[]
       fact_refs: factRefs,
       method: row.method,
       ...(row.financial === undefined ? {} : { financial: parseFinancialRef(row.financial, `${label}.financial`) }),
+      ...(row.figure_refs === undefined ? {} : { figure_refs: parseFigureRefs(row.figure_refs, `${label}.figure_refs`) }),
+    };
+  });
+}
+
+function parseFigureRefs(value: unknown, label: string): ConditionFigureRef[] {
+  if (!Array.isArray(value)) throw new ThesisValidationError(`${label} must be an array`);
+  return value.map((item, index) => {
+    const row = requireRecord(item, `${label}[${index}]`);
+    return {
+      result_id: requireUuid(row.result_id, `${label}[${index}].result_id`),
+      measure: requireTrimmedString(row.measure, `${label}[${index}].measure`, 1, 200),
+      period: row.period === null ? null : requireTrimmedString(row.period, `${label}[${index}].period`, 1, 120),
+      value: requireTrimmedString(row.value, `${label}[${index}].value`, 1, 200),
     };
   });
 }

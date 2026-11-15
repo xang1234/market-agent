@@ -120,7 +120,7 @@ test('thesis monitoring persists, deduplicates, reassesses changed facts and pro
 });
 
 
-test('narrative monitoring includes IR and non-IR claims, rejects fabricated citations and handles removed evidence', {skip:!dockerAvailable(),timeout:120000}, async t => {
+test('narrative monitoring includes IR and non-IR claims, never stores a fabricated citation, and handles removed evidence', {skip:!dockerAvailable(),timeout:120000}, async t => {
   const {databaseUrl}=await bootstrapDatabase(t,'living-thesis-narrative');
   const db=await connectedClient(t,databaseUrl);
   const pool=await connectedPool(t,databaseUrl);
@@ -193,9 +193,11 @@ test('narrative monitoring includes IR and non-IR claims, rejects fabricated cit
   await db.query('update documents set source_id=$1 where document_id=$2',[valid.source.source_id,valid.document.document_id]);
   const watermarks=(await getAgent(db,agent.agent_id))!.watermarks;
   await assert.rejects(execute(null,'unavailable'),/unavailable/);
-  await assert.rejects(execute({async complete(){return {text:JSON.stringify({results:[{condition_id:CONDITION,status:'supported',refs:['C99']}]})};}},'invalid'),/unsupplied/);
   assert.deepEqual((await getAgent(db,agent.agent_id))!.watermarks,watermarks);
   assert.equal((await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments.length,2);
+  await execute({async complete(){return {text:JSON.stringify({results:[{condition_id:CONDITION,status:'supported',refs:['C99']}]})};}},'invalid');
+  history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
+  assert.deepEqual(history.assessments[0].results,[{condition_id:CONDITION,status:'unresolved',reason:'Not enough evidence: no stored source covers this condition.',claim_refs:[],fact_refs:[],method:'no_evidence'}],'a fabricated citation is never stored; its condition reads as not enough evidence');
   await db.query('update claims set superseded_at=now() where claim_id=any($1::uuid[])',[[valid.claim.claim_id,ir.claim.claim_id]]);
   assert.equal((await inspectCurrent()).ref.id,valid.claim.claim_id,'accessible superseded claims remain inspectable in their historical snapshot');
   await execute(null);

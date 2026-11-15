@@ -1,4 +1,5 @@
 import { InspectableRef } from '../evidence/InspectableRef.tsx'
+import { InspectableResult } from '../evidence/InspectableResult.tsx'
 import { VerificationLabel } from '../blocks/VerificationLabel.tsx'
 import type { VerificationKind } from '../blocks/verification.ts'
 import type { ThesisHistoryView } from './thesisClient.ts'
@@ -90,6 +91,12 @@ function AssessmentEntry({ entry, shown, currentVersion, refLabels }: { entry: E
   const { assessment, result, version, condition } = entry
   const older = version !== undefined && currentVersion !== null && version.version !== currentVersion
   const verification = verificationOf(result)
+  const figures = result.figure_refs ?? []
+  const factRefs = (prefix: string) => result.fact_refs.map((id, index) => (
+    <InspectableRef key={id} snapshotId={assessment.snapshot_id} inspectionRef={{ kind: 'fact', id }} className={REF_CLASS}>
+      <span className="sr-only">Inspect fact evidence </span>{prefix}{refLabels[id] ?? `fact ${index + 1}`}
+    </InspectableRef>
+  ))
   return (
     <li className="min-w-0 rounded bg-surface-2 p-3" data-assessment-id={assessment.assessment_id}>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
@@ -113,18 +120,31 @@ function AssessmentEntry({ entry, shown, currentVersion, refLabels }: { entry: E
           Verified against the saved threshold at the assessment cutoff · certificate {result.financial.certificate_digest?.slice(0, 12) ?? 'unavailable'}
         </p>
       ) : METHOD_LABELS[result.method] ? <p className="mt-2 text-xs text-muted">{METHOD_LABELS[result.method]}</p> : null}
-      {(result.fact_refs.length > 0 || result.claim_refs.length > 0) ? (
+      {(figures.length > 0 || result.fact_refs.length > 0 || result.claim_refs.length > 0) ? (
         <div className="mt-2 flex flex-wrap gap-2" aria-label="Cited refs">
-          {result.fact_refs.map((id, index) => (
-            <InspectableRef key={id} snapshotId={assessment.snapshot_id} inspectionRef={{ kind: 'fact', id }} className={REF_CLASS}>
-              <span className="sr-only">Inspect fact evidence </span>F · {refLabels[id] ?? `fact ${index + 1}`}
-            </InspectableRef>
+          {figures.map((figure) => (
+            <InspectableResult
+              key={figure.result_id}
+              resultId={figure.result_id}
+              label={figure.period ? `${figure.value}, ${figure.period}` : figure.value}
+              shown={{ subject: null, measure: figure.measure, period: figure.period, value: figure.value }}
+              className={REF_CLASS}
+            >
+              F · {figure.measure}{figure.period ? ` ${figure.period}` : ''} · {figure.value}
+            </InspectableResult>
           ))}
+          {figures.length === 0 ? factRefs('F · ') : null}
           {result.claim_refs.map((id, index) => (
             <InspectableRef key={id} snapshotId={assessment.snapshot_id} inspectionRef={{ kind: 'claim', id }} className={REF_CLASS}>
               <span className="sr-only">Inspect claim evidence </span>C · {refLabels[id] ?? `claim ${index + 1}`}
             </InspectableRef>
           ))}
+        </div>
+      ) : null}
+      {figures.length > 0 && result.fact_refs.length > 0 ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted" aria-label="Inputs">
+          <span>Inputs</span>
+          {factRefs('')}
         </div>
       ) : null}
     </li>

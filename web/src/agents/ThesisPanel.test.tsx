@@ -417,6 +417,44 @@ test('ThesisPanel shows each condition with its two assessments newest first, ea
   }
 })
 
+test('a cited figure shows as its certified result with its value and formula, and the facts it read stay inspectable under it', async () => {
+  const RESULT = 'c0000000-0000-4000-8000-000000000001'
+  const REVENUE_FACT = 'c0000000-0000-4000-8000-000000000002'
+  const history = currentHistory()
+  const margin = { condition_id: CONDITION_B, statement: 'Gross margin stays high.', falsifier: 'Gross margin falls below its peers.', horizon: 'Next 10-K' }
+  history.thesis = { ...history.thesis!, conditions: [...history.thesis!.conditions, margin] }
+  history.versions = [history.thesis]
+  history.assessments = [{ ...history.assessments[0]!, results: [history.assessments[0]!.results[0]!, {
+    condition_id: CONDITION_B, status: 'supported', reason: 'The cited stored sources support this condition.', claim_refs: [], fact_refs: [FACT_A, REVENUE_FACT], method: 'model',
+    figure_refs: [{ result_id: RESULT, measure: 'Gross margin (gross profit / revenue)', period: 'FY2025 (ended 2025-12-31)', value: '74.99%' }],
+  }] }]
+  const labelled = { ...history, ref_labels: { [FACT_A]: 'Gross profit FY2025', [REVENUE_FACT]: 'Revenue FY2025' } }
+  const calculations: unknown[] = []
+  const facts: unknown[] = []
+  const harness = await mountPanel({
+    fetchImpl: async () => json(labelled),
+    inspector: { openInspection(input) { facts.push(input.ref) }, openBlockInspection() {}, openFinancialResult(id, shown) { calculations.push([id, shown]) }, closeInspection() {} },
+  })
+  try {
+    const condition = harness.document.querySelector(`[data-condition-id="${CONDITION_B}"]`)!
+    assert.deepEqual([...condition.querySelectorAll('[aria-label="Cited refs"] button')].map((ref) => ref.textContent), [
+      'F · Gross margin (gross profit / revenue) FY2025 (ended 2025-12-31) · 74.99%',
+    ])
+    const chip = condition.querySelector<HTMLButtonElement>(`[data-inspect-result="${RESULT}"]`)!
+    assert.equal(chip.getAttribute('aria-label'), 'Inspect the verified calculation for 74.99%, FY2025 (ended 2025-12-31)')
+    await act(async () => chip.click())
+    assert.deepEqual(calculations, [[RESULT, { subject: null, measure: 'Gross margin (gross profit / revenue)', period: 'FY2025 (ended 2025-12-31)', value: '74.99%' }]])
+    assert.deepEqual([...condition.querySelectorAll('[aria-label="Inputs"] button')].map((ref) => ref.textContent), [
+      'Inspect fact evidence Gross profit FY2025',
+      'Inspect fact evidence Revenue FY2025',
+    ])
+    await clickButton(harness.document, 'Inspect fact evidence Revenue FY2025')
+    assert.deepEqual(facts, [{ kind: 'fact', id: REVENUE_FACT }])
+  } finally {
+    await harness.unmount()
+  }
+})
+
 function currentHistory(): ThesisHistoryResponse {
   const thesis = {
     thesis_version_id: VERSION_A,

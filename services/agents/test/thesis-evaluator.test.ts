@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { draftThesisConditions, evaluateThesis, NOT_ENOUGH_EVIDENCE, type ThesisEvidence, type ThesisLlm } from "../src/thesis-evaluator.ts";
-import { ThesisValidationError, type ConditionAssessment, type ThesisCondition, type ThesisVersion } from "../src/thesis-types.ts";
+import { ThesisValidationError, type ConditionAssessment, type ConditionFigureRef, type ThesisCondition, type ThesisVersion } from "../src/thesis-types.ts";
 
 const ISSUER_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-4222-8222-222222222222";
@@ -46,13 +46,13 @@ function llmResponse(value: unknown, deployment?: { channel: string; model: stri
   };
 }
 
-function evidence(refs: Record<string, { claim_refs?: string[]; fact_refs?: string[] }>): ThesisEvidence {
+function evidence(refs: Record<string, { claim_refs?: string[]; fact_refs?: string[]; figure_refs?: ConditionFigureRef[] }>): ThesisEvidence {
   return {
     packet: {
       figures: Object.keys(refs).filter((id) => id.startsWith("F")).map((id) => ({ id, metric: "Revenue", period: "FY2026", value: "$130.5B" })),
       claims: Object.keys(refs).filter((id) => id.startsWith("C")).map((id) => ({ id, predicate: "business.products", text: "Our products include data center platforms." })),
     },
-    refs: Object.fromEntries(Object.entries(refs).map(([id, ref]) => [id, { claim_refs: ref.claim_refs ?? [], fact_refs: ref.fact_refs ?? [] }])),
+    refs: Object.fromEntries(Object.entries(refs).map(([id, ref]) => [id, { claim_refs: ref.claim_refs ?? [], fact_refs: ref.fact_refs ?? [], figure_refs: ref.figure_refs ?? [] }])),
   };
 }
 const EVIDENCE = evidence({ F1: { fact_refs: [FACT_ID] }, C1: { claim_refs: [CLAIM_ID] } });
@@ -174,17 +174,14 @@ test("evaluateThesis requires a model when narrative evidence is available", asy
   );
 });
 
-test("evaluateThesis rejects unsupplied refs, missing rows, duplicate rows, and uncited conclusions", async () => {
+test("evaluateThesis rejects a reply that drops or repeats a condition", async () => {
   const cases: Array<[string, unknown, RegExp]> = [
-    ["unsupplied ref", { results: [{ condition_id: BULL_ID, status: "supported", refs: ["C9"] }] }, /unsupplied ref/],
-    ["stored id as a ref", { results: [{ condition_id: BULL_ID, status: "supported", refs: [CLAIM_ID] }] }, /unsupplied ref/],
     ["missing row", { results: [] }, /every narrative condition/],
     ["duplicate row", { results: [
       { condition_id: BULL_ID, status: "supported", refs: ["C1"] },
       { condition_id: BULL_ID, status: "challenged", refs: ["C1"] },
     ] }, /duplicated/],
-    ["uncited conclusion", { results: [{ condition_id: BULL_ID, status: "supported", refs: [] }] }, /requires a citation/],
-    ["refs missing", { results: [{ condition_id: BULL_ID, status: "unresolved" }] }, /refs must be strings/],
+    ["unknown condition", { results: [{ condition_id: BEAR_ID, status: "supported", refs: ["C1"] }] }, /not supplied/],
   ];
 
   for (const [name, response, message] of cases) {
@@ -200,6 +197,57 @@ test("evaluateThesis rejects unsupplied refs, missing rows, duplicate rows, and 
       name,
     );
   }
+});
+
+test("a condition whose status the reply cannot back is not enough evidence, and the other conditions keep theirs", async () => {
+  const rows: Array<[string, Record<string, unknown>]> = [
+    ["uncited conclusion", { status: "supported", refs: [] }],
+    ["uncited challenge", { status: "challenged", refs: [] }],
+    ["unsupplied ref", { status: "supported", refs: ["C1", "C9"] }],
+    ["stored id as a ref", { status: "supported", refs: [CLAIM_ID] }],
+    ["refs missing", { status: "unresolved" }],
+    ["unknown status", { status: "likely", refs: ["C1"] }],
+  ];
+  for (const [name, row] of rows) {
+    const { results } = await evaluateThesis({
+      thesis: thesis([condition(BULL_ID), condition(BEAR_ID)]),
+      evidence: EVIDENCE,
+      metric_results: [],
+      as_of: AS_OF,
+      llm: llmResponse({ results: [{ condition_id: BULL_ID, ...row }, { condition_id: BEAR_ID, status: "challenged", refs: ["C1"] }] }),
+    });
+    assert.deepEqual(results, [
+      { condition_id: BULL_ID, status: "unresolved", reason: NOT_ENOUGH_EVIDENCE, claim_refs: [], fact_refs: [], method: "no_evidence" },
+      { condition_id: BEAR_ID, status: "challenged", reason: "The cited stored sources challenge this condition.", claim_refs: [CLAIM_ID], fact_refs: [], method: "model" },
+    ], name);
+  }
+});
+
+test("a cited figure stores its certified result beside the facts it was computed from", async () => {
+  const REVENUE_FACT = "88888888-8888-4888-8888-888888888888";
+  const MARGIN_RESULT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const REVENUE_RESULT = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const margin = { result_id: MARGIN_RESULT, measure: "Gross margin (gross profit / revenue)", period: "FY2025 (ended 2025-12-31)", value: "74.99%" };
+  const revenue = { result_id: REVENUE_RESULT, measure: "Revenue", period: "FY2025 (ended 2025-12-31)", value: "$130.5B" };
+  const { results } = await evaluateThesis({
+    thesis: thesis([condition(BULL_ID)]),
+    evidence: evidence({
+      F1: { fact_refs: [REVENUE_FACT], figure_refs: [revenue] },
+      F3: { fact_refs: [FACT_ID, REVENUE_FACT], figure_refs: [margin] },
+    }),
+    metric_results: [],
+    as_of: AS_OF,
+    llm: llmResponse({ results: [{ condition_id: BULL_ID, status: "supported", refs: ["F3", "F1"] }] }),
+  });
+  assert.deepEqual(results, [{
+    condition_id: BULL_ID,
+    status: "supported",
+    reason: "The cited stored sources support this condition.",
+    claim_refs: [],
+    fact_refs: [FACT_ID, REVENUE_FACT],
+    method: "model",
+    figure_refs: [margin, revenue],
+  }]);
 });
 
 test("evaluateThesis takes each metric condition's result from the engine verbatim and requires one", async () => {

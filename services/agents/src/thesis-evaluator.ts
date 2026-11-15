@@ -7,6 +7,7 @@ import {
   parseThesisText,
   ThesisValidationError,
   type ConditionAssessment,
+  type ConditionFigureRef,
   type ThesisCondition,
   type ThesisVersion,
 } from "./thesis-types.ts";
@@ -28,8 +29,12 @@ export type ThesisLlm = {
 
 type ThesisLlmReply = Awaited<ReturnType<ThesisLlm["complete"]>>;
 
-/** What a cited F or C id stands for: the claim, or the facts a certified figure was computed from. */
-export type ThesisRef = Readonly<{ claim_refs: ReadonlyArray<string>; fact_refs: ReadonlyArray<string> }>;
+/** What a cited F or C id stands for: the claim, or the certified figure and the facts it was computed from. */
+export type ThesisRef = Readonly<{
+  claim_refs: ReadonlyArray<string>;
+  fact_refs: ReadonlyArray<string>;
+  figure_refs: ReadonlyArray<ConditionFigureRef>;
+}>;
 
 /** One run's evidence: the packet the model reads, which names entries by F and C id only, and what each id stands for. */
 export type ThesisEvidence = Readonly<{
@@ -180,34 +185,31 @@ function parseNarrativeResults(
       throw new ThesisValidationError(`assessment response condition ${row.condition_id} is duplicated`);
     }
     seenConditionIds.add(row.condition_id);
-    if (row.status !== "supported" && row.status !== "challenged" && row.status !== "unresolved") {
-      throw new ThesisValidationError(`assessment response results[${index}].status is invalid`);
-    }
-    if (!Array.isArray(row.refs) || !row.refs.every((ref) => typeof ref === "string")) {
-      throw new ThesisValidationError(`assessment response results[${index}].refs must be strings`);
-    }
-    const cited = row.refs.map((ref) => (Object.hasOwn(refs, ref) ? refs[ref] : undefined));
-    if (!cited.every((ref) => ref !== undefined)) {
-      throw new ThesisValidationError(`assessment response results[${index}] cites an unsupplied ref`);
-    }
-    if ((row.status === "supported" || row.status === "challenged") && cited.length === 0) {
-      throw new ThesisValidationError(`assessment response results[${index}] requires a citation`);
-    }
-    if (cited.length === 0) return notEnoughEvidence(row.condition_id);
-    return {
-      condition_id: row.condition_id,
-      status: row.status,
-      reason: FIXED_REASON_BY_STATUS[row.status],
-      claim_refs: [...new Set(cited.flatMap((ref) => ref.claim_refs))],
-      fact_refs: [...new Set(cited.flatMap((ref) => ref.fact_refs))],
-      method: "model",
-    };
+    return citedAssessment(row.condition_id, row.status, row.refs, refs);
   });
 
   if (results.length !== conditions.length) {
     throw new ThesisValidationError("assessment response must contain every narrative condition exactly once");
   }
   return results;
+}
+
+// A row names its condition, so a status or citation the evidence cannot back costs that condition alone.
+function citedAssessment(conditionId: string, status: unknown, refIds: unknown, refs: ThesisEvidence["refs"]): ConditionAssessment {
+  if (status !== "supported" && status !== "challenged" && status !== "unresolved") return notEnoughEvidence(conditionId);
+  if (!Array.isArray(refIds) || refIds.length === 0) return notEnoughEvidence(conditionId);
+  const cited = refIds.map((ref) => (typeof ref === "string" && Object.hasOwn(refs, ref) ? refs[ref] : undefined));
+  if (!cited.every((ref) => ref !== undefined)) return notEnoughEvidence(conditionId);
+  const figures = [...new Map(cited.flatMap((ref) => ref.figure_refs).map((figure) => [figure.result_id, figure])).values()];
+  return {
+    condition_id: conditionId,
+    status,
+    reason: FIXED_REASON_BY_STATUS[status],
+    claim_refs: [...new Set(cited.flatMap((ref) => ref.claim_refs))],
+    fact_refs: [...new Set(cited.flatMap((ref) => ref.fact_refs))],
+    method: "model",
+    ...(figures.length > 0 ? { figure_refs: figures } : {}),
+  };
 }
 
 function notEnoughEvidence(conditionId: string): ConditionAssessment {

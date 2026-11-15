@@ -6,6 +6,7 @@ import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
 import type { ThesisVersion } from "../../agents/src/thesis-types.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
+import { inspectCommittedResult } from "../../financial-engine/src/inspection.ts";
 import { databaseUrl, engineDatabase, IDS, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
 import { loadThesisPacket } from "../src/thesis-evidence.ts";
 
@@ -144,13 +145,25 @@ test("a run's evidence holds certified F ids and 10-K claim C ids, each standing
   const { packet: shown, refs } = packet.evidence;
   const figures = shown.figures as ReadonlyArray<{ id: string; metric: string; value: string }>;
   const claims = shown.claims as ReadonlyArray<{ id: string; predicate: string; text: string }>;
-  const facts = (metric: string) => refs[figures.find((figure) => figure.metric.startsWith(metric))!.id];
-  assert.deepEqual(facts("Revenue"), { claim_refs: [], fact_refs: [revenue] }, "a reported figure stands for its fact");
-  assert.deepEqual(facts("Gross margin"), { claim_refs: [], fact_refs: [grossProfit, revenue].sort() }, "a computed figure stands for the facts it read");
+  const ref = (metric: string) => refs[figures.find((figure) => figure.metric.startsWith(metric))!.id]!;
+  const shownAs = (metric: string) => ref(metric).figure_refs.map(({ result_id: _resultId, ...figure }) => figure);
+  const period = `FY${year} (ended ${year}-12-31)`;
+  assert.deepEqual(ref("Revenue").fact_refs, [revenue], "a reported figure stands for its fact");
+  assert.deepEqual(shownAs("Revenue"), [{ measure: "Revenue", period, value: "$130.5B" }]);
+  const margin = ref("Gross margin");
+  assert.deepEqual(margin.fact_refs, [grossProfit, revenue].sort(), "a computed figure stands for the facts it read");
+  assert.deepEqual(shownAs("Gross margin"), [{ measure: "Gross margin (gross profit / revenue)", period, value: "74.99%" }], "a computed figure keeps its value and formula");
+  const calculation = await inspectCommittedResult(pool, IDS.owner, margin.figure_refs[0]!.result_id);
+  assert.ok(calculation?.availability === "available", "the cited figure opens its verified calculation");
+  assert.deepEqual(
+    calculation.inputs.map((input) => ("fact_id" in input ? input.fact_id : input.status)).sort(),
+    [grossProfit, revenue].sort(),
+    "the calculation shows the facts the figure read",
+  );
   assert.ok(figures.every((figure) => /^F\d+$/.test(figure.id) && refs[figure.id]!.fact_refs.length > 0), "only figures with stored facts are shown");
   const products = claims.find((entry) => entry.predicate === "business.products")!;
   assert.match(products.id, /^C\d+$/);
-  assert.deepEqual(refs[products.id], { claim_refs: [claim!.claim_id], fact_refs: [] });
+  assert.deepEqual(refs[products.id], { claim_refs: [claim!.claim_id], fact_refs: [], figure_refs: [] });
   assert.equal(products.text, "Our products include data center accelerators.");
   assert.ok(packet.claims.some((entry) => entry.claim_id === claim!.claim_id), "the 10-K claim is sealed with the packet");
   const modelView = JSON.stringify(shown);
