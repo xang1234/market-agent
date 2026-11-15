@@ -177,7 +177,7 @@ export function VersionHistory({ versions, currentVersion }: { versions: Readonl
   )
 }
 
-// Not enough evidence is a narrative condition no stored source covers; a metric's gap keeps its status and the engine's reason.
+// Not enough evidence is a narrative condition no stored source covers or whose reply could not be checked; a metric's gap keeps its status and the engine's reason.
 function StatusBadge({ entry: { result, condition } }: { entry: Pick<Entry, 'result' | 'condition'> }) {
   const classes = result.status === 'supported'
     ? 'border-positive/40 bg-positive-soft text-positive'
