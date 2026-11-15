@@ -281,7 +281,8 @@ export async function composeAnalystBlocksWithLlm(input: {
     ...(usage ? { usage } : {}),
   });
   if (usage) input.onUsage?.(usage);
-  const report = checkAssertions(assertionList(result.text), packet);
+  const checked = checkAssertions(assertionList(result.text), packet);
+  const report = input.answerShape ? withoutInferences(checked) : checked;
   if (report.status !== "checked" || report.rejected.length > 0) {
     console.info(`[chat] assertions ${report.status}: ${report.accepted.length} accepted, ${report.rejected.length} rejected`);
   }
@@ -295,6 +296,19 @@ export async function composeAnalystBlocksWithLlm(input: {
   else if (report.status === "checked" && report.accepted.length === 0 && report.rejected.length === 0 && packet.gaps.length > 0) console.info("[chat] the assertion list was empty; showing the fallback sentence");
   else console.warn(`[chat] no assertion rendered (list ${report.status}${result.truncated ? ", answer cut off at the token limit" : ""}); showing the fallback sentence`);
   return rendering.blocks;
+}
+
+function withoutInferences(report: AssertionReport): AssertionReport {
+  const inferences = report.accepted.filter((entry) => entry.kind === "analyst_inference");
+  if (inferences.length === 0) return report;
+  return {
+    ...report,
+    accepted: report.accepted.filter((entry) => entry.kind !== "analyst_inference"),
+    rejected: [
+      ...report.rejected,
+      ...inferences.map((entry) => ({ index: entry.index, text: entry.text, check: "limit" as const, reason: "this answer holds no analyst inference" })),
+    ].sort((a, b) => a.index - b.index),
+  };
 }
 
 export type AnswerInput = Pick<Parameters<typeof composeAnalystBlocksWithLlm>[0], "blocks" | "toolCalls" | "factBlocks" | "scope">;

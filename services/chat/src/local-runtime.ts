@@ -48,7 +48,7 @@ import { createLlmThreadTitleModel, type DroppedClaims } from "./llm-runtime.ts"
 import { structuredRefsFromHandoff } from "./local-runtime-structured.ts";
 import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
 import { saveCommentary } from "./engine-commentary.ts";
-import { analystAgentRouter, analystAgentRunner } from "./analyst-agent.ts";
+import { analystAgentRouter, analystAgentRunner, type AnalystAgentDeps } from "./analyst-agent.ts";
 import { ChatSnapshotSealError, createChatMessagePersistence, saveChatMessageWorkSummary, type ChatSealResult } from "./messages.ts";
 import type { ChatWorkSummarySave } from "./work-summary.ts";
 import {
@@ -390,8 +390,6 @@ export function analystTurnScope(
   return turnScope(threadId, question, covered, false, reading);
 }
 
-export const readQuestion = (question: string) => proposeScope({ question });
-
 // The turn's research scope at a cutoff (research-scope.ts): what it asks for,
 // keeping the previous answer's scope where it continues it. The companies are
 // the ones the answer compares, auto-selected peers included, so the price
@@ -516,8 +514,8 @@ export async function financialResearchScope(
   return (await turnScope(context.threadId, context.userIntent ?? "", covered, true, reading))(turnNow(process.env));
 }
 
-const planningModelWith = (options?: Parameters<typeof createLlmRouterFromEnv>[1]) => async (request: Parameters<ReturnType<typeof planningModelFromRouter>>[0]) => {
-  const router = await createLlmRouterFromEnv(process.env, options);
+const planningModelWith = (options?: Parameters<typeof createLlmRouterFromEnv>[1], env: NodeJS.ProcessEnv = process.env) => async (request: Parameters<ReturnType<typeof planningModelFromRouter>>[0]) => {
+  const router = await createLlmRouterFromEnv(env, options);
   if (!router) throw new Error("LLM router is not configured");
   return planningModelFromRouter(router)(request);
 };
@@ -551,18 +549,28 @@ export const guardedClient = (beforeModelCall: () => void, base: () => Promise<L
   };
 };
 
+export const meteredAgentDeps = (env: NodeJS.ProcessEnv, base: () => Promise<LlmChatClient> | LlmChatClient = defaultClient) => ({
+  readQuestion: (question: string, beforeModelCall?: () => void) =>
+    proposeScope({ question, env, ...(beforeModelCall ? { createClient: guardedClient(beforeModelCall, base) } : {}) }),
+  router: (beforeModelCall: () => void) => analystAgentRouter(env, { createClient: guardedClient(beforeModelCall, base) }),
+  planner: (beforeModelCall: () => void) => planningModelWith({ createClient: guardedClient(beforeModelCall, base) }, env),
+  compose: ((input, turn, onAnswered, beforeModelCall) =>
+    answerTurn(input, turn, { env, traceDir: env.CHAT_TRACE_DIR?.trim(), onAnswered, createClient: guardedClient(beforeModelCall, base) })) satisfies AnalystAgentDeps["compose"],
+});
+
 const { planningModel: _unmetered, ...agentFinancialDeps } = financialDeps;
+const { readQuestion: reading, ...agentModels } = meteredAgentDeps(process.env);
+
+export const readQuestion = reading;
 
 export const analystAgent = analystAgentRunner({
   financial: { ...agentFinancialDeps, hydrate: hydrateTurn },
-  router: (beforeModelCall) => analystAgentRouter(process.env, { createClient: guardedClient(beforeModelCall) }),
-  planner: (beforeModelCall) => planningModelWith({ createClient: guardedClient(beforeModelCall) }),
+  ...agentModels,
   read: (name, args, turn) => runRegisteredAnalystTool(pool(), name, args, turn).catch((reason: unknown) => {
     if (!isUnavailableRead(reason)) throw reason;
     console.warn(`[chat] ${name} failed; the analyst agent answers without it`, reason);
     return { tool: name, status: "unavailable" as const, reason: "the read failed" };
   }),
-  compose: (input, turn, onAnswered, beforeModelCall) => answerTurn(input, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered, createClient: guardedClient(beforeModelCall) }),
   asOf: () => turnNow(process.env),
   conversation: (threadId) => loadRecentConversation(pool(), { threadId, limit: CONVERSATION_MESSAGES }),
   logToolCalls: writeLocalToolCallLogs,

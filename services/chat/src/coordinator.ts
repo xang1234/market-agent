@@ -74,7 +74,7 @@ export type ChatTurnRunContext = ChatTurnInput & {
   // Companies a comparison named that could not be found; the answer says so.
   unresolvedMentions?: ReadonlyArray<string>;
   // The turn's one reading of its question (scope-proposal.ts), shared by every caller; null when there is none.
-  reading?: () => Promise<ScopeProposal | null>;
+  reading?: (beforeModelCall?: () => void) => Promise<ScopeProposal | null>;
   // Analyst prompt-template bundle selected for this turn. Derived from the
   // resolved subject's kind via chooseBundleIdForSubjectKind; falls back to
   // DEFAULT_BUNDLE_ID when no subject was provided. Same routing function
@@ -139,8 +139,9 @@ export type ChatAnalystToolRuntime = (
   input: ChatAnalystToolRuntimeInput,
 ) => Promise<ChatAnalystToolRuntimeResult> | ChatAnalystToolRuntimeResult;
 
-// The analyst agent's answer to a turn (analyst-agent.ts), or null for a turn it reads nothing for.
-export type ChatAnalystAgent = (context: ChatTurnRunContext) => Promise<ChatAnalystToolRuntimeResult | null>;
+// The analyst agent's answer to a turn (analyst-agent.ts); "pick_company" when a company the turn
+// names is still to be picked, which the financial lane asks; null for a turn it reads nothing for.
+export type ChatAnalystAgent = (context: ChatTurnRunContext) => Promise<ChatAnalystToolRuntimeResult | "pick_company" | null>;
 
 export type ChatAnalystToolExecutor = (input: {
   tool: ToolDefinition;
@@ -323,7 +324,7 @@ export type ChatCoordinatorOptions = {
   runner?: ChatTurnRunner;
   loadPriorSubjects?: ChatPriorSubjectsLoader;
   // What a model reads the question to ask for (scope-proposal.ts proposeScope); absent, no turn has a reading.
-  readQuestion?: (question: string) => Promise<ScopeProposal | null>;
+  readQuestion?: (question: string, beforeModelCall?: () => void) => Promise<ScopeProposal | null>;
   verificationMode?: ChatVerificationMode;
   financialRuntime?: ChatFinancialRuntime;
   analystAgent?: ChatAnalystAgent;
@@ -406,9 +407,10 @@ export function createChatCoordinator(
     loadPriorSubjects: options.loadPriorSubjects,
     renderSubjectClarification: options.renderSubjectClarification,
   });
+  const financialLane = financialAwareRunner(subjectAware, { financialRuntime: options.financialRuntime, persistAssistantMessage });
   const seat = options.analystAgent
-    ? analystAgentSeat(subjectAware, options.analystAgent, { persistAssistantMessage, verificationMode: options.verificationMode ?? "strict" })
-    : financialAwareRunner(subjectAware, { financialRuntime: options.financialRuntime, persistAssistantMessage });
+    ? analystAgentSeat({ next: subjectAware, picking: financialLane }, options.analystAgent, { persistAssistantMessage, verificationMode: options.verificationMode ?? "strict" })
+    : financialLane;
   const runner = workSummaryRunner(threadTitleGenerationRunner(runActivityReportingRunner(offeredChoicesRunner(readingRunner(seat, options.readQuestion), options.financialRuntime), options.runActivity), {
     generateThreadTitle: options.generateThreadTitle,
     onThreadTitleGenerationError: options.onThreadTitleGenerationError,
@@ -1074,8 +1076,8 @@ type Names = {
 function readingRunner(runner: ChatTurnRunner, readQuestion: ChatCoordinatorOptions["readQuestion"]): ChatTurnRunner {
   return (context) => {
     let reading: Promise<ScopeProposal | null> | undefined;
-    const read = () => reading ??= readQuestion
-      ? Promise.resolve().then(() => readQuestion(context.userIntent ?? "")).catch((reason) => {
+    const read = (beforeModelCall?: () => void) => reading ??= readQuestion
+      ? Promise.resolve().then(() => readQuestion(context.userIntent ?? "", beforeModelCall)).catch((reason) => {
         console.warn("[chat] no reading of the question; the turn takes it as unread", reason);
         return null;
       })
@@ -1095,6 +1097,7 @@ export async function resolveTurnSubjects(
   context: ChatTurnRunContext,
   preResolve: ChatSubjectPreResolver,
   loadPriorSubjects: ChatPriorSubjectsLoader | undefined,
+  byReading = false,
 ): Promise<TurnSubjects> {
   const text = nonEmptySubjectText(context.userIntent);
   const loadingPrior = loadPriorSubjects
@@ -1104,7 +1107,7 @@ export async function resolveTurnSubjects(
     text ? resolveNamedSubjects(text, preResolve, loadingPrior) : namesOf([]),
     loadingPrior,
   ]);
-  const readingDecides = prior.length > 0 || mentioned.ambiguous.length > 0 || mentioned.notFound.length > 0;
+  const readingDecides = byReading || prior.length > 0 || mentioned.ambiguous.length > 0 || mentioned.notFound.length > 0;
   const change = readingDecides ? (await context.reading?.())?.companies : undefined;
   if (!change) return unreadChange(mentioned, prior);
   if (change.kind === "drop") return dropped(prior, change, preResolve);
@@ -1414,13 +1417,13 @@ function emitSubjectResolutionToolEvents(
 export const ANALYST_AGENT_BUNDLE_ID = "analyst_agent";
 
 function analystAgentSeat(
-  next: ChatTurnRunner,
+  { next, picking }: { next: ChatTurnRunner; picking: ChatTurnRunner },
   agent: ChatAnalystAgent,
   options: { persistAssistantMessage?: ChatAssistantMessageCommit; verificationMode: ChatVerificationMode },
 ): ChatTurnRunner {
   return async (context) => {
     const turn = { ...context, bundleId: ANALYST_AGENT_BUNDLE_ID };
-    let answer: ChatAnalystToolRuntimeResult | null;
+    let answer: Awaited<ReturnType<ChatAnalystAgent>>;
     try {
       answer = await agent(turn);
     } catch (error) {
@@ -1431,7 +1434,9 @@ function analystAgentSeat(
       return;
     }
     if (answer === null) return next(context);
-    await toolBackedAnalystTurnRunner(turn, { ...options, runtime: () => answer });
+    if (answer === "pick_company") return picking(context);
+    const result = answer;
+    await toolBackedAnalystTurnRunner(turn, { ...options, runtime: () => result });
   };
 }
 

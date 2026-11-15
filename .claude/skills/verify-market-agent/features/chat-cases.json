@@ -154,8 +154,8 @@
   },
   {
     "id": "agent-consensus",
-    "note": "AA5 lane 10, flag on, with no consensus captured on the stack",
+    "note": "AA5 lane 10, flag on: an attributed consensus when one is captured, else its typed note; both say consensus",
     "budget_ms": { "saved": 60000 },
-    "turns": [{ "ask": "What do analysts expect for AAPL?", "expect": { "subjects": ["AAPL"], "tools": ["get_analyst_consensus"], "text": ["analyst consensus"], "not_text": ["Buy", "Hold", "Sell"] } }]
+    "turns": [{ "ask": "What do analysts expect for AAPL?", "expect": { "subjects": ["AAPL"], "tools": ["get_analyst_consensus"], "text": ["consensus"], "not_text": ["Buy", "Hold", "Sell"] } }]
   }
 ]

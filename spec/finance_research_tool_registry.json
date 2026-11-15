@@ -823,7 +823,7 @@
       "bundles": [
         "analyst_agent"
       ],
-      "description": "Certified financial figures from SEC filings, planned and verified by the financial engine: every number shown is a checked result. Name the companies, the catalog metrics and the period when the question gives them (income_statement holds revenue, gross profit, operating income, net income and their margins), and the ask in your own words. Statuses: published gives the figures; existing means an earlier attempt of this turn computed them and they cannot be shown again; clarification asks a question; declined and gap give the engine's reason; invalid_arguments, no_subject and unavailable as for the other tools.",
+      "description": "Certified financial figures from SEC filings, planned and verified by the financial engine: every number shown is a checked result. Name the companies, the catalog metrics and the period when the question gives them, and the ask in your own words. income_statement is the whole statement (revenue, gross profit, operating income and net income, each with its margin); a line the question names alone, such as revenue or gross_margin, is that line's own metric. Statuses: published gives the figures; existing means an earlier attempt of this turn computed them and they cannot be shown again; clarification asks a question; declined and gap give the engine's reason; invalid_arguments, no_subject and unavailable as for the other tools.",
       "read_only": true,
       "approval_required": false,
       "cost_class": "medium",
@@ -881,7 +881,14 @@
                 "marketable_securities",
                 "remaining_performance_obligations",
                 "net_cash",
-                "total_debt"
+                "total_debt",
+                "revenue",
+                "gross_profit",
+                "gross_margin",
+                "operating_income",
+                "operating_margin",
+                "net_income",
+                "net_margin"
               ]
             }
           },
@@ -980,7 +987,7 @@
               "additionalProperties": false
             }
           },
-          "question": {
+          "kind": {
             "type": "string"
           },
           "choices": {

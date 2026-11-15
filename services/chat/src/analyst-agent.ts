@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { FinancialSubjectRef } from "../../financial-core/src/index.ts";
 import type { Clarification, PlanningModel, RequestedSubject } from "../../financial-engine/src/planner.ts";
 import { createLlmRouterFromEnv, LlmClientError, LlmProviderError, LlmRouterError, withLlmAbortSignal, type LlmChatClient, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
-import type { ControlledRouter, LlmToolCall } from "../../llm/src/router.ts";
+import type { ControlledRouter, LlmRouterResult, LlmToolCall } from "../../llm/src/router.ts";
 import { runToolLoop, type ToolLoopOutput, type ToolLoopResult } from "../../llm/src/tool-loop.ts";
 import type { JsonObject, JsonValue } from "../../shared/src/json.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -26,7 +26,7 @@ import {
   type ChatFinancialRuntimeDeps,
 } from "./financial-runtime.ts";
 import { ANSWER_DEADLINES, withDeadlines, type DroppedClaims } from "./llm-runtime.ts";
-import { ENGINE_READS_BY_CATALOG_METRIC, LATEST, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
+import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_ITEM_FIGURE, INCOME_LINE_READS, LATEST, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 import { turnStopSignal } from "./turn-stop.ts";
 
 const MAX_STEPS = 3;
@@ -72,14 +72,16 @@ type Certified = Readonly<{ block: FinancialAnswerBlock; packet: EvidencePacket;
 
 export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
   let registry = deps.registry;
-  const agentTurn = async (context: ChatTurnRunContext, signal: AbortSignal): Promise<ChatAnalystToolRuntimeResult | null> => {
+  const agentTurn = async (context: ChatTurnRunContext, signal: AbortSignal): ReturnType<ChatAnalystAgent> => {
     if (!context.userId || !isUuid(context.threadId)) return null;
     const question = context.userIntent ?? "";
-    const companies = await requestedSubjects(deps.financial, context, question);
-    const named = companies.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject] : []);
-    const unpicked = companies.subjects.some((subject) => subject.resolution.status === "ambiguous");
-    if (companies.clarify || named.length === 0 || unpicked) return null;
     const meter = callMeter(TURN_CALLS);
+    const reading = context.reading?.(meter(ANSWER_CALLS)) ?? Promise.resolve(null);
+    const companies = await requestedSubjects(deps.financial, context, question, true);
+    const named = companies.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject] : []);
+    if (companies.clarify || companies.subjects.some((subject) => subject.resolution.status === "ambiguous")) return "pick_company";
+    if (named.length === 0) return null;
+    const read = await reading;
     let loopRefused = false;
     let answerRefused = false;
     const router = await deps.router(meter(ANSWER_CALLS, () => {
@@ -125,8 +127,9 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       return pending.then((loading) => (loading ? [issuer] : []));
     })).then((lists) => lists.flat());
 
+    const lines = (read?.income_items ?? []).map((item) => INCOME_ITEM_FIGURE[item]);
     const certify = async (args: JsonObject): Promise<ToolLoopOutput> => {
-      const ask = certifiedAsk(args, known);
+      const ask = certifiedAsk(args, known, lines.every((line): line is string => line !== null) ? lines : []);
       if ("invalid" in ask) return invalid("certified_financials", ask.invalid);
       const prior = asked.get(ask.fingerprint);
       if (prior) return prior;
@@ -171,10 +174,12 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       return answer;
     };
 
+    const withoutTenK = new Set<string>();
     const readStored = async (name: AnalystToolName, args: JsonObject): Promise<ToolLoopOutput> => {
       if (argIssuers(args).some((issuer) => !known.has(issuer))) return invalid(name, UNKNOWN_COMPANY);
       const result = await deps.read(name, lowercasedRefs(args), { as_of: asOf, user_id: context.userId ?? null });
       analyst.push(result);
+      if ("no_filing" in result) for (const issuer of result.no_filing) withoutTenK.add(issuer.issuer_id.toLowerCase());
       if (result.tool === "get_peer_set" && result.status === "ok") {
         for (const peer of result.peers) {
           const issuer = peer.issuer_id.toLowerCase();
@@ -189,6 +194,20 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       return { content: JSON.stringify(readSummary(result)), ...(isFailure(result) ? { isError: true } : {}) };
     };
 
+    let stepFoundNoTenK: boolean[] = [];
+    let deployment: LlmRouterResult["deployment"] | undefined;
+    const settled = () => read !== null && read.metrics.length === 0 && read.income_items.length === 0 &&
+      stepFoundNoTenK.length > 0 && stepFoundNoTenK.every(Boolean) && named.every((subject) => withoutTenK.has(issuerOf(subject)));
+    const reader: ControlledRouter = {
+      complete: async (request, controls) => {
+        if (settled() && deployment) return { text: "", deployment };
+        stepFoundNoTenK = [];
+        const reply = await router.complete(request, controls);
+        deployment = reply.deployment;
+        return reply;
+      },
+    };
+
     const inFlight = new Set<Promise<ToolLoopOutput>>();
     const execute = async (call: LlmToolCall): Promise<ToolLoopOutput> => {
       const work = call.name === "certified_financials"
@@ -196,6 +215,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
         : isAnalystToolName(call.name) ? readStored(call.name, call.arguments) : Promise.resolve(invalid(call.name, "no such tool"));
       inFlight.add(work);
       const output = await work.finally(() => inFlight.delete(work));
+      stepFoundNoTenK.push(call.name !== "certified_financials" && statusOf(output.content) === "no_filing");
       toolCalls.push({
         tool_call_id: randomUUID(),
         tool_name: call.name,
@@ -209,10 +229,10 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
 
     const template = policy.selection.prompt_template;
     const conversation = await deps.conversation?.(context.threadId) ?? [];
-    const reading = new AbortController();
-    const readTimer = setTimeout(() => reading.abort(new TurnDeadline()), (deps.deadlines ?? DEADLINES).readMs);
-    const loop = await withLlmAbortSignal(AbortSignal.any([signal, reading.signal]), () => runToolLoop({
-      router,
+    const readingDeadline = new AbortController();
+    const readTimer = setTimeout(() => readingDeadline.abort(new TurnDeadline()), (deps.deadlines ?? DEADLINES).readMs);
+    const loop = await withLlmAbortSignal(AbortSignal.any([signal, readingDeadline.signal]), () => runToolLoop({
+      router: reader,
       policy,
       maxSteps: MAX_STEPS,
       execute,
@@ -258,6 +278,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const noted = packet.gaps.length === 0 ? [] : [{ ...noteBlock({ snapshotId, asOf }, "agent:not-covered", packet.gaps.join(" ")), subject_refs: subjectRefs, tool_call_ids: readCalls }];
     let answeredBy: string | undefined;
     let answer: Pick<AnsweredTurn, "assertions" | "blocks" | "judging" | "without">;
+    let failed = false;
     const askedFigures = askedFor.size > 0;
     try {
       answer = await deps.compose({
@@ -276,8 +297,9 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       }));
       if (answer.judging) answer = { ...answer, assertions: (await answer.judging.done).assertions };
     } catch (reason) {
-      if (!isModelFailure(reason) || certified.length === 0) throw reason;
-      console.warn("[chat] the analyst agent's answer could not be written; the turn answers with its certified figures alone", reason);
+      if (!isModelFailure(reason)) throw reason;
+      console.warn("[chat] the analyst agent's answer could not be written; the turn answers with what it read alone", reason);
+      failed = true;
       answer = { assertions: null, blocks: [], without: () => ({ blocks: [] }) };
     }
 
@@ -285,14 +307,14 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const cited = citedSources(answer.assertions, packet);
     const certifiedBlocks = certified.map((answer, i) => ({ ...answer.block, id: `${answer.block.id}-${i + 1}` }) as Record<string, unknown>);
     const unwritten = [{
-      ...noteBlock({ snapshotId, asOf }, "agent:unwritten", certified.length > 0 ? COMMENTARY_UNAVAILABLE : NO_ANSWER),
+      ...noteBlock({ snapshotId, asOf }, "agent:unwritten", certified.length > 0 ? COMMENTARY_UNAVAILABLE : failed ? ANSWER_FAILED : NO_ANSWER),
       subject_refs: subjectRefs,
       tool_call_ids: readCalls,
     }];
     const turnBlocks = (written: ReadonlyArray<Record<string, unknown>>) => {
       const shown = written.filter(rendered).map((block) => ({ ...withRefs(block, claims, cited), tool_call_ids: readCalls }));
       const spent = answerRefused && shown.length > 0 ? [{ ...noteBlock({ snapshotId, asOf }, "agent:calls-spent", ANALYSIS_LEFT_OUT), subject_refs: subjectRefs, tool_call_ids: readCalls }] : [];
-      const own = [...shown, ...noted, ...spent];
+      const own = [...shown, ...(failed ? unwritten : []), ...noted, ...spent];
       return [...certifiedBlocks, ...(own.length > 0 ? own : unwritten)];
     };
     const turnAnswer = (shown: Pick<AnsweredTurn, "blocks" | "judging">): Pick<ChatAnalystToolRuntimeResult, "blocks"> => {
@@ -302,7 +324,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       });
       return { blocks: turnBlocks(settled) };
     };
-    const scope = await deps.financial.researchScope?.({ ...context, subjectPreResolutions: companies.resolved, subjectPreResolution: companies.resolved[0] }, context.reading?.() ?? Promise.resolve(null))
+    const scope = await deps.financial.researchScope?.({ ...context, subjectPreResolutions: companies.resolved, subjectPreResolution: companies.resolved[0] }, reading)
       .catch((reason: unknown) => {
         console.warn("[chat] research scope unavailable; saving the analyst agent's answer without it", reason);
         return undefined;
@@ -354,17 +376,18 @@ const isModelFailure = (reason: unknown) => reason instanceof LlmRouterError || 
 // A turn's model calls: each guard takes one while more than `reserved` are left, and else throws as a client failure.
 function callMeter(total: number) {
   let made = 0;
-  return (reserved: number, refused: () => void) => () => {
+  return (reserved: number, refused?: () => void) => () => {
     if (made < total - reserved) {
       made += 1;
       return;
     }
-    refused();
+    refused?.();
     throw new LlmClientError("the turn has made its model calls");
   };
 }
 
 const NO_ANSWER = "No answer could be written from the stored sources read for this question.";
+const ANSWER_FAILED = "The answer could not be written, as the model failed or ran out of time; ask again in a minute.";
 
 const ANSWER_RULES = [
   "evidence_packet.claims also hold what a company's 10-K states (its business, products, customers, competition and risk factors),",
@@ -425,7 +448,9 @@ type CertifiedAsk = Readonly<{ subjects: ReadonlyArray<string>; choice: PlanChoi
 const PERIOD_KINDS = new Set(["latest", "fiscal_year", "fiscal_quarter"]);
 const QUARTERS = new Set(["Q1", "Q2", "Q3", "Q4"]);
 
-export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, RequestedSubject>): CertifiedAsk | { invalid: string } {
+const ASKABLE_FIGURES: Readonly<Record<string, unknown>> = { ...ENGINE_READS_BY_CATALOG_METRIC, ...INCOME_LINE_READS };
+
+export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, RequestedSubject>, incomeLines: ReadonlyArray<string> = []): CertifiedAsk | { invalid: string } {
   const refs = args.subject_refs;
   if (!Array.isArray(refs) || refs.length === 0) return { invalid: "subject_refs names the companies, as the prompt lists them" };
   const subjects = refs.map((ref) => (isRecord(ref) && ref.kind === "issuer" && typeof ref.id === "string" ? ref.id.toLowerCase() : null));
@@ -433,13 +458,13 @@ export function certifiedAsk(args: JsonObject, known: ReadonlyMap<string, Reques
   const question = typeof args.question === "string" ? args.question.trim() : "";
   if (question === "") return { invalid: "question says the ask in one sentence" };
   const metrics = args.metrics;
-  if (metrics !== undefined && !(Array.isArray(metrics) && metrics.length > 0 && metrics.every((metric) => typeof metric === "string" && Object.hasOwn(ENGINE_READS_BY_CATALOG_METRIC, metric)))) {
-    return { invalid: `metrics are among ${Object.keys(ENGINE_READS_BY_CATALOG_METRIC).join(", ")}` };
+  if (metrics !== undefined && !(Array.isArray(metrics) && metrics.length > 0 && metrics.every((metric) => typeof metric === "string" && Object.hasOwn(ASKABLE_FIGURES, metric)))) {
+    return { invalid: `metrics are among ${Object.keys(ASKABLE_FIGURES).join(", ")}` };
   }
   const period = readPeriod(args.period);
   if (period === null) return { invalid: "period is latest, a fiscal_year with its year, or a fiscal_quarter with its quarter" };
   const companies = [...new Set(subjects as string[])];
-  const keptMetrics = metrics === undefined ? null : [...new Set(metrics as string[])].sort();
+  const keptMetrics = metrics === undefined ? null : [...new Set((metrics as string[]).flatMap((metric) => (metric === "income_statement" && incomeLines.length > 0 ? incomeLines : [metric])))].sort();
   const choice: PlanChoice = keptMetrics ? { kind: "kept_figures", metrics: keptMetrics, period } : { kind: "planner" };
   const fingerprint = createHash("sha256")
     .update(JSON.stringify({ companies: [...companies].sort(), period, ...(keptMetrics ? { metrics: keptMetrics } : { question: question.toLowerCase().replace(/\s+/g, " ") }) }))

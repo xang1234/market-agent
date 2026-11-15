@@ -544,7 +544,12 @@ export type TurnCompanies = Readonly<{
 
 const label = (resolution: ChatResolvedSubjectPreResolution) => resolution.handoff?.display_labels?.ticker ?? resolution.display_label;
 
-export async function requestedSubjects(deps: Pick<ChatFinancialRuntimeDeps, "pool" | "resolveMention" | "priorSubjects">, context: ChatFinancialTurnContext, text: string): Promise<TurnCompanies> {
+export async function requestedSubjects(
+  deps: Pick<ChatFinancialRuntimeDeps, "pool" | "resolveMention" | "priorSubjects">,
+  context: ChatFinancialTurnContext,
+  text: string,
+  byReading = false,
+): Promise<TurnCompanies> {
   // Each name is resolved once, though the analyst path's rules read the message again.
   const resolutions = new Map<string, Promise<ChatSubjectPreResolution>>();
   const resolve = (mention: string) => resolutions.get(mention) ?? resolutions.set(mention, deps.resolveMention(mention)).get(mention)!;
@@ -568,6 +573,7 @@ export async function requestedSubjects(deps: Pick<ChatFinancialRuntimeDeps, "po
       context,
       (request) => resolve(request.text),
       deps.priorSubjects && ((input) => deps.priorSubjects!(input.threadId)),
+      byReading,
     );
     const clarify = turn.clarify ?? (turn.ambiguous && !turn.named ? turn.ambiguous.message : undefined);
     if (clarify) return { subjects: [], resolved: [], carried: [], notFound: [], labels: new Map(), clarify };
