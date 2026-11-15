@@ -509,7 +509,8 @@ test('Agents roster shows only what the server sent, and says when it could not 
     })
     await act(async () => undefined)
     assert.equal(rosterText(), 'AgentsActivity · IdleLoad failed: HTTP 503')
-    assert.deepEqual(requested, ['/v1/agents'])
+    // The roster and the names its universes are shown by.
+    assert.deepEqual(requested.sort(), ['/v1/agents', '/v1/portfolios', '/v1/screener/screens', '/v1/watchlists'])
     await act(async () => root.unmount())
   } finally {
     globalThis.fetch = originalFetch
@@ -1025,6 +1026,9 @@ test('Agents surface loads selected agent findings and activity routes', async (
       '/v1/agents/11111111-1111-4111-8111-111111111111/activity',
       '/v1/agents/11111111-1111-4111-8111-111111111111/thesis',
       '/v1/subjects/hydrate',
+      '/v1/watchlists',
+      '/v1/portfolios',
+      '/v1/screener/screens',
     ].sort())
     assert.match(dom.window.document.body.innerHTML, /Operating margin quality improved/)
     assert.match(dom.window.document.body.innerHTML, /Created 1 source-backed finding/)
