@@ -36,5 +36,7 @@ test("the memo flow fails a memo no model wrote, and passes one whose every sect
   const empty = "No stored source covers this section. AAA had no 10-K on file as of 2026-11-16, so no business or risk factor claims from one.";
   assert.equal(memoVerdict(seen(empty)).passed, true);
   assert.equal(memoVerdict(seen(empty, "AAA is a Buy.")).passed, false, "a stance word in the agent's words fails it");
+  assert.equal(memoVerdict(seen(empty, "This is a buy.")).passed, false, "buy as a rating fails it");
+  assert.equal(memoVerdict(seen(empty, "Customers buy in bulk.")).passed, true, "buy as a verb does not");
   assert.equal(memoVerdict(seen("Commentary is unavailable for this answer.", "", true)).passed, false, "a figure with no answer written beside it is not a written section");
 });

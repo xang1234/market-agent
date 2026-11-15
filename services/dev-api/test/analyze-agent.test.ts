@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { dockerAvailable, registerLifoCleanup } from "../../../db/test/docker-pg.ts";
 import { createMemoRun, memoDatabase, playbook } from "../../analyze/test/financial-fixtures.ts";
-import { meteredModels } from "../../chat/src/analyst-agent.ts";
+import { meteredModels, statesStance } from "../../chat/src/analyst-agent.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { LlmClientError, type LlmChatClient, type LlmChatRequest, type LlmToolCall } from "../../llm/src/router.ts";
 import { analyzeAgentWorkflow } from "../src/analyze-agent.ts";
@@ -110,6 +110,20 @@ test("the agent's models for a memo meter every attempt where the client is buil
     assert.equal(attempts, 1, `${name}: a refused attempt reaches no model`);
     [metered, attempts, refuse] = [0, 0, false];
   }
+});
+
+test("an inference states a stance in an always-stance word, a price target action, or buy, sell or hold as a rating", () => {
+  const stance = [
+    "This is a buy.", "It is a strong sell.", "The shares carry a buy rating.", "Analysts rated hold the stock.", "The stock is rated by its brokers as a hold.",
+    "We recommend buying the shares.", "The recommendation of sell stands.", "Our view is overweight.", "It should outperform.", "High conviction.",
+    "An upgrade is due.", "A downgrade is due.", "Analysts raised their price target.", "A price target cut followed.",
+  ];
+  const fact = [
+    "Customers buy in bulk.", "Customers buy the devices in bulk.", "Wholesale partners sell through to retailers.", "Institutional investors hold most of the shares.",
+    "The buy-side holds the shares.", "Strong sell-through lifted revenue.", "Analyst price targets are on file.", "Its credit rating is investment grade.",
+  ];
+  assert.deepEqual(stance.filter((text) => !statesStance(text)), []);
+  assert.deepEqual(fact.filter(statesStance), []);
 });
 
 test("a playbook with no agent section, or a memo about no company, gets one typed note and no model call", async () => {
@@ -271,8 +285,8 @@ test("the analyst agent writes an investment memo's sections from stored sources
   });
 
   await t.test("an inference shows only beside certified figures, only when the judge entails it, and never in stance words", async () => {
-    const NEUTRAL = "Industrial demand carries the revenue.";
-    const STANCE = "This business is a Buy on this record, held with high conviction.";
+    const NEUTRAL = "Customers buy the devices in bulk.";
+    const STANCE = "This is a buy.";
     const shownWhen = async (verdict: "entailed" | "unsupported") => {
       const judged = adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps({ ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" }, scriptedModel([], { inferences: [NEUTRAL, STANCE], verdict }))));
       const run = await judged.analyze.createRun({ userId: IDS.owner, body: memoBody });

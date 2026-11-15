@@ -15,7 +15,10 @@ export const SECTIONS = ["investment_thesis", "growth_drivers", "competitive_pos
 const EMPTY = /^No stored source covers this section/;
 const UNWRITTEN = /^This section was not written|^The answer could not be written|^Commentary is unavailable/;
 const CAPITALIZED_RATINGS = /\b(?:Buy|Hold|Sell)\b/g;
-const stanceIn = (text: string) => [...text.matchAll(CAPITALIZED_RATINGS), ...text.matchAll(/\b(?:ratings?|conviction|upside|overweight|underweight|outperform|underperform|recommend(?:s|ed|ations?)?|expected returns?)\b/gi)].map((match) => match[0]);
+const STANCE_WORDS = /\b(?:ratings?|conviction|upside|overweight|underweight|outperform|underperform|upgrade|downgrade|recommend(?:s|ed|ations?)?|expected returns?)\b/gi;
+// The guard's rating forms and price target actions (analyst-agent.ts statesStance), so this check is never the laxer.
+const RATED = /\b(?:a|an|the|our|my|strong|rated?s?)\s+(?:strong\s+)?(?:buy|sell|hold)\b|\b(?:buy|sell|hold)\s+(?:rating|recommendation)s?\b|\brate[ds]?\s+(?:\S+\s+){0,3}?as\s+(?:a\s+|an\s+)?(?:strong\s+)?(?:buy|sell|hold)\b|\brecommend\w*\s+(?:buy|sell|hold)\w*|\b(?:rais|lift|lower|cut|set|reiterat|maintain|boost|trim|increas|reduc)\w*\s+(?:\S+\s+){0,3}?price targets?\b|\bprice targets?\s+(?:raise|cut|increase|hike|reduction)s?\b/gi;
+const stanceIn = (text: string) => [CAPITALIZED_RATINGS, STANCE_WORDS, RATED].flatMap((pattern) => [...text.matchAll(pattern)].map((match) => match[0]));
 
 const sectionsOf = (run: MemoRun) => (run?.blocks ?? []).filter((block) => block.kind === "section" && SECTIONS.includes(block.data_ref?.params?.playbook_section_id ?? ""));
 const segmentsOf = (block: Block): Segment[] => [...(block.segments ?? []), ...(block.commentary ?? []).flatMap((part) => part.segments ?? []), ...(block.children ?? []).flatMap(segmentsOf)];
