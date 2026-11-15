@@ -926,7 +926,7 @@ test("service Agent adapter reloads watermarks after claiming the run", async ()
 
   assert.equal(run?.status, "completed");
   assert.deepEqual(observedWatermarks, { cursor: "fresh" });
-  assert.equal(db.queries.filter((query) => query.text.includes("from agents") && query.text.includes("where agent_id")).length, 2);
+  assert.equal(db.queries.filter((query) => query.text.includes("from agents") && query.text.includes("where agent_id")).length, 3);
 });
 
 test("service Agent adapter lets durable loop stages create findings and evaluate alerts", async () => {

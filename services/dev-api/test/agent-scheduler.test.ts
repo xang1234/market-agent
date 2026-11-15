@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 
-import type { Pool } from "pg";
+import type { Pool, QueryResult } from "pg";
 
 import { createAgent, type AgentUniverse } from "../../agents/src/agent-repo.ts";
 import type { AgentLoopStages } from "../../agents/src/agent-loop.ts";
 import type { UniverseResolverDeps } from "../../analyst-grids/src/universe.ts";
 import { bootstrapDatabase, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { startAgentScheduler, startAgentSchedulerFromEnv } from "../src/agent-scheduler.ts";
+import { createServiceDevApiAdapters } from "../src/http.ts";
 import { AgentUniverseUnavailableError, agentUniverseResolvers, agentUniverseSubjectRefs } from "../src/local-runtime.ts";
 import { DynamicWatchlistNotFoundError } from "../../watchlists/src/dynamic-membership.ts";
 
@@ -64,26 +65,45 @@ async function hourlyAgentLastRunTwoHoursAgo(pool: Pool, name: string): Promise<
   return agent.agent_id;
 }
 
-// A pool whose first query matching `pauseAfter` holds its result until resume().
+// A pool whose first schedule read matching `pauseAfter`, on the pool or on a
+// client it lends, holds its result until resume().
 function pausingPool(pool: Pool, pauseAfter: (values: unknown[]) => boolean) {
   let reached!: () => void;
   let resume!: () => void;
   const paused = new Promise<void>((resolve) => { reached = resolve; });
   const resumed = new Promise<void>((resolve) => { resume = resolve; });
   let held = false;
-  const db = {
-    query: (async (text: string, values?: unknown[]) => {
-      const result = await pool.query(text, values);
+  const pausing = (run: (text: string, values?: unknown[]) => Promise<QueryResult>) =>
+    (async (text: string, values?: unknown[]) => {
+      const result = await run(text, values);
       if (!held && text.includes("left join lateral") && pauseAfter(values ?? [])) {
         held = true;
         reached();
         await resumed;
       }
       return result;
-    }) as Pool["query"],
-    connect: () => pool.connect(),
+    }) as Pool["query"];
+  const db = {
+    query: pausing((text, values) => pool.query(text, values)),
+    connect: async () => {
+      const client = await pool.connect();
+      return { query: pausing((text, values) => client.query(text, values)), release: (error?: Error) => client.release(error) };
+    },
   };
   return { db, paused, resume };
+}
+
+async function landsWithoutWaiting(pool: Pool, change: Promise<unknown>): Promise<boolean> {
+  let landed = false;
+  change.then(() => { landed = true; }, () => {});
+  while (!landed) {
+    const { rows: [{ waiting }] } = await pool.query<{ waiting: number }>(
+      `select count(*)::int as waiting from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`,
+    );
+    if (waiting > 0) return false;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return true;
 }
 
 function recordingStages() {
@@ -97,11 +117,11 @@ function recordingStages() {
   };
 }
 
-test("two schedulers that both pass the claim-time check claim one run id once", docker, async (t) => {
+test("two schedulers that read one due run claim its run id once", docker, async (t) => {
   const pool = await seededPool(t, "dev-api-agent-scheduler-dedupe");
   const agentId = await hourlyAgentLastRunTwoHoursAgo(pool, "Hourly");
   const stages = recordingStages();
-  const late = pausingPool(pool, (values) => values[1] === agentId);
+  const late = pausingPool(pool, (values) => values[1] === null);
   const first = startAgentScheduler({ db: pool, ...stages, log: () => {} }, 3_600_000);
   const second = startAgentScheduler({ db: late.db, ...stages, log: () => {} }, 3_600_000);
   t.after(() => Promise.all([first.stop(), second.stop()]));
@@ -146,6 +166,96 @@ for (const [change, sql] of [
     assert.equal(lines.filter((line) => line.endsWith("skipped: no longer due")).length, 1);
   });
 }
+
+test("a disable that commits during the claim-time check waits for the claim", docker, async (t) => {
+  const pool = await seededPool(t, "dev-api-agent-scheduler-disable-race");
+  const agentId = await hourlyAgentLastRunTwoHoursAgo(pool, "Hourly");
+  const stages = recordingStages();
+  const late = pausingPool(pool, (values) => values[1] === agentId);
+  const scheduler = startAgentScheduler({ db: late.db, ...stages, log: () => {} }, 3_600_000);
+  t.after(() => scheduler.stop());
+
+  const tick = scheduler.tick();
+  await late.paused;
+  const disable = pool.query(`update agents set enabled = false where agent_id = $1::uuid`, [agentId]);
+  const landedFirst = await landsWithoutWaiting(pool, disable);
+  late.resume();
+  await disable;
+
+  assert.deepEqual({ landedFirst, scheduled: (await tick).map((r) => r.status) }, { landedFirst: false, scheduled: ["completed"] });
+  assert.equal(stages.runIds.length, 1);
+});
+
+test("a run-now during the claim-time check waits for the scheduled claim", docker, async (t) => {
+  const pool = await seededPool(t, "dev-api-agent-scheduler-manual-race");
+  const agentId = await hourlyAgentLastRunTwoHoursAgo(pool, "Hourly");
+  const stages = recordingStages();
+  const late = pausingPool(pool, (values) => values[1] === agentId);
+  const scheduler = startAgentScheduler({ db: late.db, ...stages, log: () => {} }, 3_600_000);
+  t.after(() => scheduler.stop());
+  const adapters = createServiceDevApiAdapters({ db: pool, createAgentLoopStages: () => noopStages } as never);
+
+  const tick = scheduler.tick();
+  await late.paused;
+  const manual = adapters.agents.run({ userId: USER_ID, agentId });
+  const landedFirst = await landsWithoutWaiting(pool, manual);
+  late.resume();
+  const scheduled = await tick;
+  await manual;
+
+  assert.deepEqual({ landedFirst, scheduled: scheduled.map((r) => r.status) }, { landedFirst: false, scheduled: ["completed"] });
+  const { rows } = await pool.query<{ id: string }>(
+    `select agent_run_log_id::text as id from agent_run_logs where agent_id = $1::uuid and started_at > now() - interval '1 hour' order by started_at limit 1`,
+    [agentId],
+  );
+  assert.deepEqual(rows, [{ id: scheduled[0].run_id }]);
+});
+
+test("a run-now for another user's agent claims nothing", docker, async (t) => {
+  const pool = await seededPool(t, "dev-api-agent-run-now-owner");
+  const agentId = await hourlyAgentLastRunTwoHoursAgo(pool, "Hourly");
+  const adapters = createServiceDevApiAdapters({ db: pool, createAgentLoopStages: () => noopStages } as never);
+
+  assert.equal(await adapters.agents.run({ userId: OTHER_USER_ID, agentId }), null);
+  const { rows } = await pool.query(`select 1 from agent_run_logs where agent_id = $1::uuid and started_at > now() - interval '1 hour'`, [agentId]);
+  assert.deepEqual(rows, []);
+});
+
+test("a failed scheduled run records its trigger", docker, async (t) => {
+  const pool = await seededPool(t, "dev-api-agent-scheduler-failed");
+  const agentId = await hourlyAgentLastRunTwoHoursAgo(pool, "Hourly");
+  const scheduler = startAgentScheduler({
+    db: pool,
+    log: () => {},
+    createAgentLoopStages: async () => { throw new Error("stages unavailable"); },
+  }, 3_600_000);
+  t.after(() => scheduler.stop());
+
+  assert.deepEqual((await scheduler.tick()).map((r) => r.status), ["failed"]);
+  const { rows } = await pool.query(
+    `select status, error, outputs_summary from agent_run_logs where agent_id = $1::uuid and started_at > now() - interval '1 hour'`,
+    [agentId],
+  );
+  assert.deepEqual(rows, [{ status: "failed", error: "stages unavailable", outputs_summary: { trigger: "scheduled", status: "failed" } }]);
+});
+
+test("stop returns at its 10 s bound while a timer-driven tick hangs", { timeout: 5_000 }, async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let reads = 0;
+  const db = { query: () => { reads += 1; return new Promise(() => {}); }, connect: () => assert.fail("a hung read claims nothing") };
+  const scheduler = startAgentScheduler({ db, createAgentLoopStages: () => noopStages, log: () => {} } as never, 1_000);
+  t.mock.timers.tick(1_000);
+  assert.equal(reads, 1, "the interval timer started a tick");
+
+  let returned = false;
+  const stopping = scheduler.stop().then(() => { returned = true; });
+  t.mock.timers.tick(9_999);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(returned, false, "stop waits for the tick until the bound");
+  t.mock.timers.tick(1);
+  await stopping;
+  assert.equal(returned, true);
+});
 
 test("stop ends a tick before its next due agent", docker, async (t) => {
   const pool = await seededPool(t, "dev-api-agent-scheduler-stop");
@@ -217,6 +327,46 @@ test("a screen universe refuses a candidate source the screener would refuse", a
     agentUniverseSubjectRefs(db, USER_ID, { mode: "screen", screen_id: SCREEN_ID }, agentUniverseResolvers(db, { SCREENER_CANDIDATE_SOURCE: "vendr" })),
     { name: "AgentUniverseUnavailableError", message: "SCREENER_CANDIDATE_SOURCE must be 'reported' or 'vendor' (got 'vendr')" },
   );
+});
+
+const VENDOR_LISTING_ID = "22222222-2222-4222-8222-222222222222";
+
+// Only the vendor candidate read returns a row, so a reported replay finds nothing.
+function screenerDb() {
+  const definition = {
+    universe: [{ field: "asset_type", values: ["common_stock"] }],
+    market: [],
+    fundamentals: [],
+    sort: [{ field: "market_cap", direction: "desc" }],
+    page: { limit: 50 },
+  };
+  const rows = (text: string): unknown[] => {
+    if (text.includes("from watchlists")) {
+      return [{ watchlist_id: WATCHLIST_ID, user_id: USER_ID, mode: "screen", membership_spec: { screen_id: SCREEN_ID } }];
+    }
+    if (text.includes("from screener_screens")) {
+      return [{ screen_id: SCREEN_ID, user_id: USER_ID, name: "Commons", definition, created_at: "2026-11-01T00:00:00.000Z", updated_at: "2026-11-01T00:00:00.000Z" }];
+    }
+    if (!text.includes("issuer_profile_enrichments")) return [];
+    return [{
+      listing_id: VENDOR_LISTING_ID, legal_name: "Vendor Co", share_class: null, asset_type: "common_stock", mic: "XNAS", ticker: "VEND",
+      trading_currency: "USD", domicile: "US", sector: "Technology", industry: "Software", price: 10, prev_close: 9, delay_class: "delayed_15m",
+      currency: "USD", as_of: "2026-11-01T00:00:00.000Z", market_cap: null, pe_ratio: null, gross_margin: null, operating_margin: null,
+      net_margin: null, revenue_growth_yoy: null, forward_pe: null, roic: null, perf_quarter: null, perf_year: null, rsi_14: null,
+      week_52_high_distance: null,
+    }];
+  };
+  return { query: async (text: string) => ({ rows: rows(text), rowCount: null }) } as never;
+}
+
+test("a screen universe and a screen-mode watchlist replay over the vendor candidates when the screener reads vendor", async () => {
+  const vendorRefs = [{ kind: "listing", id: VENDOR_LISTING_ID }];
+  for (const [source, expected] of [["vendor", vendorRefs], ["reported", []]] as const) {
+    const db = screenerDb();
+    const resolvers = agentUniverseResolvers(db, { SCREENER_CANDIDATE_SOURCE: source });
+    assert.deepEqual(await agentUniverseSubjectRefs(db, USER_ID, { mode: "screen", screen_id: SCREEN_ID }, resolvers), expected, `${source} screen`);
+    assert.deepEqual(await agentUniverseSubjectRefs(db, USER_ID, { mode: "watchlist", watchlist_id: WATCHLIST_ID }, resolvers), expected, `${source} watchlist`);
+  }
 });
 
 test("a mirror universe borrows one of the user's own agents, never a mirror or another user's agent", docker, async (t) => {

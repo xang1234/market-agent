@@ -335,3 +335,21 @@ test("completeAgentRun rejects terminal or missing rows with a domain error", as
       error instanceof AgentRunStateError && /cannot be completed/.test(error.message),
   );
 });
+
+test("handleAgentRunMessage claims and executes nothing when the admission check refuses the run", async () => {
+  let executions = 0;
+  const { db, queries } = fakeDb(() => []);
+
+  const result = await handleAgentRunMessage(db, {
+    message: { run_id: RUN_ID, agent_id: AGENT_ID },
+    admit: async () => false,
+    execute: async () => {
+      executions += 1;
+      return {};
+    },
+  });
+
+  assert.deepEqual(result, { status: "not_admitted", run_id: RUN_ID });
+  assert.equal(executions, 0);
+  assert.equal(queries.some((query) => /insert into agent_run_logs/.test(query.text)), false);
+});

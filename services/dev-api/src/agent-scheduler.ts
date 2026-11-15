@@ -70,16 +70,19 @@ export function startAgentScheduler(deps: AgentSchedulerDeps, intervalMs: number
 
   async function claimAndRunIsolated(run: ScheduledAgentRun): Promise<AgentRunMessageResult | null> {
     try {
-      const fresh = await readSchedule(deps.db, run.agent_id);
-      if (stopped) return null;
-      if (dueAgentRuns(fresh.agents, fresh.lastRuns, now())[0]?.run_id !== run.run_id) {
-        log(`agent-scheduler: agent ${run.agent_id} run ${run.run_id} skipped: no longer due`);
-        return null;
-      }
       const result = await handleAgentRunMessage(deps.db, {
         message: { run_id: run.run_id, agent_id: run.agent_id, enqueued_at: run.due_at },
+        admit: async (tx) => {
+          const fresh = await readSchedule(tx, run.agent_id);
+          return !stopped && dueAgentRuns(fresh.agents, fresh.lastRuns, now())[0]?.run_id === run.run_id;
+        },
         execute: () => executeScheduledRun(deps, run.agent_id, run.run_id),
+        failed_outputs_summary: { trigger: "scheduled", status: "failed" },
       });
+      if (result.status === "not_admitted") {
+        log(`agent-scheduler: agent ${run.agent_id} run ${run.run_id} skipped: ${stopped ? "scheduler stopped" : "no longer due"}`);
+        return null;
+      }
       log(`agent-scheduler: agent ${run.agent_id} run ${run.run_id} ${result.status}`);
       return result;
     } catch (error) {
