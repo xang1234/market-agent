@@ -245,7 +245,7 @@ Each live lane runs in its own worktree at the PR head. Drive through the contro
 - [ ] Lane 6. After lane 2, read the `competitor` rows on NVDA's `business.competition` claims. Save `aa3-competitors.txt`. Pass when every row resolves to an issuer whose name appears in its claim's quote.
 - [ ] Lane 7. Run lane 2 twice. Save `aa3-idempotent.txt`. Pass when the NVDA claim count is equal after both runs.
 - [ ] Lane 8. Run the CLI on a temporary copy of `mu.htm` with Item 1A removed. Save `aa3-missing-1a.txt`. Pass when it exits 0, prints `missing=1A`, and stores only `business.*` claims.
-- [ ] Lane 9. After lanes 2 to 4, run `$V scorecard --cases=aapl-gross-margin,nvda-amd-ytd`. Save `aa3-chat.png`. Pass when both cases pass, as at trunk.
+- [ ] Lane 9. After lanes 2 to 4, run `$V scorecard --cases=aapl-gross-margin,nvda-amd-ytd`. Save `aa3-chat.png`. Pass when both cases pass, as at trunk. Run it on a `$V up data` stack, because the analyst stack's frozen chat clock (2026-09-01) hides every claim created today. Also pass `$V memo AAPL` and a no-selection evidence read, each showing the same 8-K claims as trunk and no `business.*` or `risk.factor` claim.
 - [ ] Lane 10. After lane 3, compare the CLI's `competitors=<resolved>/<named>` with the `competitor` rows in `$V sql`. Save `aa3-unresolved.txt`. Pass when the row count equals the resolved count.
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
