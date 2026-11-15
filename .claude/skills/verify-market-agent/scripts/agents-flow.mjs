@@ -22,7 +22,12 @@ const LLM_LOG = join(ROOT, '.dev/logs/dev-api.log')
 const logSize = () => (existsSync(LLM_LOG) ? statSync(LLM_LOG).size : 0)
 const llmCallsSince = (from) => (existsSync(LLM_LOG) ? (readFileSync(LLM_LOG).subarray(from).toString().match(/^\[llm\] /gm) ?? []).length : null)
 // Words of 12 characters or more from a block's text segments, never its refs.
-const wordsOf = (blocks) => (blocks ?? []).flatMap((block) => (block.segments ?? []).flatMap((segment) => (segment.type === 'text' && segment.text.trim().length >= 12 ? [segment.text.trim()] : [])))
+// A commentary card hands off its verified inferences and figures only; other blocks hand off their text.
+const handedText = (block) => (Array.isArray(block.commentary)
+  ? block.commentary.flatMap((part) => (part.kind === 'inference' ? [part.text] : part.kind === 'figures' ? part.segments.filter((segment) => segment.type === 'text').map((segment) => segment.text) : []))
+  : block.analyst_commentary ? [] : (block.segments ?? []).filter((segment) => segment.type === 'text').map((segment) => segment.text))
+const wordsOf = (blocks) => (blocks ?? []).flatMap(handedText).map((text) => text.trim()).filter((text) => text.length >= 12)
+const unverifiedOf = (blocks) => (blocks ?? []).flatMap((block) => (block.commentary ?? []).flatMap((part) => (part.kind === 'unverified' ? [part.text.trim()] : [])))
 
 const readHistory = (page) => page.locator('[data-condition-id]').evaluateAll((conditions) => conditions.map((condition) => ({
   condition_id: condition.getAttribute('data-condition-id'),
@@ -30,7 +35,7 @@ const readHistory = (page) => page.locator('[data-condition-id]').evaluateAll((c
   entries: [...condition.querySelectorAll('li[data-assessment-id]')].map((entry) => ({
     assessed_at: entry.querySelector('time')?.getAttribute('datetime') ?? '',
     badges: [...entry.querySelectorAll('span.rounded.border')].map((badge) => badge.textContent ?? ''),
-    refs: [...entry.querySelectorAll('[data-inspection-kind]')].map((ref) => ref.textContent ?? ''),
+    refs: [...entry.querySelectorAll('[data-inspection-kind], [data-inspect-result]')].map((ref) => ref.textContent ?? ''),
   })),
 })))
 
@@ -75,7 +80,9 @@ try {
     const section = memo.blocks?.find((block) => block.data_ref?.params?.playbook_section_id === 'investment_thesis')
     check('memo has an investment thesis section', section !== undefined)
     const own = wordsOf(section?.children)
-    check('handoff carries every passage of the thesis section', own.length > 0 && own.every((words) => handedOff.includes(words)), own.filter((words) => !handedOff.includes(words)))
+    check('handoff carries every checked passage of the thesis section', own.length > 0 && own.every((words) => handedOff.includes(words)), own.filter((words) => !handedOff.includes(words)))
+    const unverified = unverifiedOf(section?.children)
+    check('handoff carries no unverified inference', unverified.every((words) => !handedOff.includes(words)), unverified.filter((words) => handedOff.includes(words)))
     const others = (memo.blocks ?? []).filter((block) => block.kind === 'section' && block !== section).flatMap((block) => wordsOf(block.children)).filter((words) => !own.includes(words))
     check('handoff carries no other section', others.every((words) => !handedOff.includes(words)), others.filter((words) => handedOff.includes(words)))
 
@@ -103,7 +110,7 @@ try {
     check('thesis saved', (await saved).ok())
 
     const first = await runOnce(page, 'assessed')
-    const cites = (entry) => entry.refs.some((ref) => /\b[FC]\d+$/.test(ref)) || entry.badges.includes('Not enough evidence')
+    const cites = (entry) => entry.refs.some((ref) => /^(Inspect \w+ evidence )?[FC] · /.test(ref)) || entry.badges.includes('Not enough evidence')
     check('every condition is assessed once with F or C refs or not enough evidence',
       first.length === drafted.length && first.every((condition) => condition.entries.length === 1 && cites(condition.entries[0])), first)
     const second = await runOnce(page, 'history')

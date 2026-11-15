@@ -19,14 +19,15 @@ Symbol page, Analyze, Investment memo, Generate memo (or Open), Monitor this the
 
 ## Pass
 
-- The thesis field on the Agents page holds every text passage of the memo's investment thesis section and none of another section's.
-- After the first run, each condition shows one assessment citing F or C refs, or reading "Not enough evidence".
+- The thesis field on the Agents page holds every checked passage of the memo's investment thesis section, its verified inferences and figures, and no unverified inference or text of another section.
+- After the first run, each condition shows one assessment citing F or C refs, or reading "Not enough evidence". A cited F ref reads as its certified figure, with its value and formula, and opens the verified calculation; the facts it read sit under it as inputs.
 - After the second, each shows two dated assessments, newest first.
 - `report.json` passes, and `assessed.png` and `history.png` show every condition open.
 
 ## Also check by hand
 
 - A condition no stored source covers reads "Not enough evidence" with the fixed note and no words of the model's.
+- A memo with no investment thesis section offers no Monitor this thesis button and says "This memo has no investment thesis section to monitor."
 - A watchlist universe reads `watchlist: <name>` in the roster, and the cadence menu offers hourly and daily only.
 - Scheduled runs: with `AGENT_SCHEDULER_INTERVAL_MS=10000` and an hourly agent's last run two hours back, a new dated assessment appears with no click.
 - At 390 px wide the history reads with no horizontal scroll, and Tab reaches each condition's summary, where Enter opens it.
