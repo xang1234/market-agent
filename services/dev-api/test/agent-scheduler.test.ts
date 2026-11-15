@@ -165,14 +165,35 @@ test("stop ends a tick before its next due agent", docker, async (t) => {
   assert.equal(runIds.length, 1);
 });
 
-test("AGENT_SCHEDULER_INTERVAL_MS turns the scheduler off only when it is 0", async () => {
-  const deps = { db: { query: async () => assert.fail("no tick runs"), connect: async () => assert.fail("no tick runs") }, createAgentLoopStages: () => noopStages, log: () => {} } as never;
+test("stop during the claim-time check starts no run", docker, async (t) => {
+  const pool = await seededPool(t, "dev-api-agent-scheduler-stop-recheck");
+  const agentId = await hourlyAgentLastRunTwoHoursAgo(pool, "Hourly");
+  const stages = recordingStages();
+  const late = pausingPool(pool, (values) => values[1] === agentId);
+  const scheduler = startAgentScheduler({ db: late.db, ...stages, log: () => {} }, 3_600_000);
+
+  const tick = scheduler.tick();
+  await late.paused;
+  await scheduler.stop();
+  late.resume();
+
+  assert.deepEqual(await tick, []);
+  assert.deepEqual(stages.runIds, []);
+});
+
+test("AGENT_SCHEDULER_INTERVAL_MS turns the scheduler off at 0 and warns once for an invalid value", async () => {
+  const lines: string[] = [];
+  const deps = { db: {}, createAgentLoopStages: () => noopStages, log: (line: string) => lines.push(line) } as never;
   assert.equal(startAgentSchedulerFromEnv(deps, { AGENT_SCHEDULER_INTERVAL_MS: "0" }), null);
+  assert.equal(startAgentSchedulerFromEnv(deps, { AGENT_SCHEDULER_INTERVAL_MS: "00" }), null);
   for (const value of ["", " ", "10000", "abc", undefined]) {
     const scheduler = startAgentSchedulerFromEnv(deps, { AGENT_SCHEDULER_INTERVAL_MS: value });
     assert.notEqual(scheduler, null, `interval ${JSON.stringify(value)}`);
     await scheduler?.stop();
   }
+  assert.deepEqual(lines, [
+    "agent-scheduler: AGENT_SCHEDULER_INTERVAL_MS=abc is not 0 or an integer of at least 1000, so it ticks every 60000 ms",
+  ]);
 });
 
 test("screen, watchlist, portfolio, static, and theme universes resolve to their subject refs", async () => {

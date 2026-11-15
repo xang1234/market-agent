@@ -36,8 +36,8 @@ export function startAgentSchedulerFromEnv(
   env: { AGENT_SCHEDULER_INTERVAL_MS?: string },
 ): AgentScheduler | null {
   const raw = env.AGENT_SCHEDULER_INTERVAL_MS?.trim() || String(DEFAULT_INTERVAL_MS);
-  if (raw === "0") return null;
   const interval = Number(raw);
+  if (interval === 0) return null;
   if (Number.isSafeInteger(interval) && interval >= 1_000) return startAgentScheduler(deps, interval);
   (deps.log ?? console.warn)(`agent-scheduler: AGENT_SCHEDULER_INTERVAL_MS=${raw} is not 0 or an integer of at least 1000, so it ticks every ${DEFAULT_INTERVAL_MS} ms`);
   return startAgentScheduler(deps, DEFAULT_INTERVAL_MS);
@@ -71,6 +71,7 @@ export function startAgentScheduler(deps: AgentSchedulerDeps, intervalMs: number
   async function claimAndRunIsolated(run: ScheduledAgentRun): Promise<AgentRunMessageResult | null> {
     try {
       const fresh = await readSchedule(deps.db, run.agent_id);
+      if (stopped) return null;
       if (dueAgentRuns(fresh.agents, fresh.lastRuns, now())[0]?.run_id !== run.run_id) {
         log(`agent-scheduler: agent ${run.agent_id} run ${run.run_id} skipped: no longer due`);
         return null;
