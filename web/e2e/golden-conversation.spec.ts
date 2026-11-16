@@ -11,7 +11,8 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 const NVDA_NARRATIVE = "NVDA's revenue rose in every period from Q1 FY2025"
 const NVDA_REVENUE = 'NVIDIA Corporation: Revenue'
 const COMPARE_NARRATIVE = "Of NVDA and AMD, NVDA's price return was highest"
-const EXPLAIN_NARRATIVE = 'According to a source dated Aug 2025'
+// The cause AMD filed, quoted with a numbered citation chip.
+const EXPLAIN_NARRATIVE = 'export control on our AMD Instinct MI308'
 const AMD_RELEASE = 'AMD Reports Second Quarter 2025 Financial Results (Form 8-K, Exhibit 99.1)'
 const QUESTIONS = ['Analyze NVDA', 'Compare it with AMD YTD', 'Explain the differences and show the evidence']
 const YTD_TITLE = 'Price return YTD 2026 (split-adjusted, excluding dividends)'
@@ -159,7 +160,8 @@ test('golden conversation renders the verified answer, the year-to-date chart an
   await ask(page, QUESTIONS[2])
   await expect(answer(page, EXPLAIN_NARRATIVE)).toBeVisible()
   await expectYtdChart(answer(page, EXPLAIN_NARRATIVE))
-  await expect(answer(page, EXPLAIN_NARRATIVE).locator('button[data-inspection-kind="claim"]')).toContainText('$800 million')
+  await expect(answer(page, EXPLAIN_NARRATIVE).locator('[data-claim-quote]')).toContainText('$800 million')
+  await expect(answer(page, EXPLAIN_NARRATIVE).locator('button[data-inspection-kind="claim"]')).toHaveText('[1]Source 1')
   if (CAPTURE) await openEveryEvidencePage(page, answer(page, EXPLAIN_NARRATIVE))
 
   await inspectCitedClaim(page, answer(page, EXPLAIN_NARRATIVE))
