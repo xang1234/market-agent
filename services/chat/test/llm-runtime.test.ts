@@ -1195,6 +1195,22 @@ test("a rendered comparison covers every company it shows figures for, and names
   assert.match(text, /\n\nPeriods: NVDA FY2026 \(ended Jan 2026\), AMD FY2026 \(ended Dec 2025\)\.$/);
 });
 
+test("a quote stays in the commentary while another inference resting on it is unverified or still being judged", () => {
+  const commentary = (inferences: Map<number, "shown" | "unverified" | "pending">) => renderedAnswer(
+    { blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [SEALED_TOOL_CALL], factBlocks: A_BLOCKS },
+    SEALED_PACKET,
+    checkAssertions([
+      { kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] },
+      { kind: "analyst_inference", text: "It expects a better year.", supports: [0] },
+      { kind: "analyst_inference", text: "The outlook may not hold.", supports: [0] },
+    ], SEALED_PACKET),
+  ).blocks(inferences)[0]!.commentary as Array<{ kind: string }>;
+  assert.deepEqual(commentary(new Map([[1, "shown"], [2, "unverified"]])).map((part) => part.kind), ["figures", "inference", "unverified"]);
+  assert.deepEqual(commentary(new Map([[1, "shown"], [2, "pending"]])).map((part) => part.kind), ["figures", "inference", "pending"]);
+  assert.deepEqual(commentary(new Map([[1, "shown"], [2, "shown"]])).map((part) => part.kind), ["inference", "inference"]);
+  assert.deepEqual(commentary(new Map([[1, "shown"]])).map((part) => part.kind), ["inference"], "a hidden one leaves the quote behind the shown one");
+});
+
 test("a quote in a stored disagreement stays in the commentary beside its other side, even when an inference shown cites it", () => {
   const claim = (n: number, text: string, polarity: string) => ({
     claim_id: `c2080000-0000-4000-8000-00000000001${n}`, source_id: `s${n}`, text_canonical: text, predicate: "kpi.commentary", polarity, published_at: "2026-02-25T00:00:00.000Z",

@@ -635,7 +635,11 @@ function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answ
       ...paragraphs.flatMap((entry, i) => [...(i === 0 ? [] : [{ type: "text", text: "\n\n" }]), ...entry.segments]),
       ...(notes.length > 0 ? [{ type: "text", text: `\n\n${notes.join(" ")}` }] : []),
     ];
-    const citedByShown = (entry: Pick<Paragraph, "quotedBy">) => entry.quotedBy?.some((index) => inferences.get(index) === "shown") === true;
+    // A quote stays while an inference resting on it is unverified or still being judged, since only a shown one cites it.
+    const citedByShown = (entry: Pick<Paragraph, "quotedBy">) => {
+      const states = (entry.quotedBy ?? []).map((index) => inferences.get(index));
+      return states.includes("shown") && !states.some((state) => state === "unverified" || state === "pending");
+    };
     const commentary = block.analyst_commentary !== true ? [] : [
       ...paragraphs.filter((entry) => !citedByShown(entry)).flatMap(({ part }) => (part.kind === "figures" ? statements(part.segments) : [part])),
       ...answer.commentaryNotes.map((text): CommentaryPart => ({ kind: "note", text })),

@@ -613,6 +613,7 @@ const THEME_SHAPE = [
   "Its supports are the indexes of that management_attribution and those observations, and it says nothing they do not state or clearly imply.",
   "It names the rivals, peers, customers or markets its claims name, and calls a filing \"the filing\", never by its form, since an inference writes no digit.",
   "Industry peers on file share its industry and nothing more is known of them: a theme of peers names them and says only that.",
+  "Its words never include rating, upgrade, downgrade, upside, conviction, buy, sell or hold, even where a claim does (\"its credit standing\", not \"its credit rating\").",
   "Leave out a claim that fits no theme.",
 ];
 
