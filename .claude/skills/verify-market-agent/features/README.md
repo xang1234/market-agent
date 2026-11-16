@@ -16,6 +16,7 @@ The maintained source for proving user-facing behavior on the dev stack (`DEV_MO
 | Weekly reference import | [reference-import.md](reference-import.md) |
 | Analyze memo with SEC evidence | [analyze-memo.md](analyze-memo.md) |
 | Chat conversations: subjects, tools, timing, lag, usage | [chat-scorecard.md](chat-scorecard.md) |
+| Agents page: thesis handoff, assessment history | [agents-monitor.md](agents-monitor.md) |
 
 ## Reporting
 

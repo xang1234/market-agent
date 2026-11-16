@@ -66,14 +66,24 @@ export type ConditionFinancialRef = {
   result_hash: string | null;
 };
 
+/** A certified figure a narrative condition cites, stored as the run's evidence showed it. */
+export type ConditionFigureRef = {
+  result_id: string;
+  measure: string;
+  period: string | null;
+  value: string;
+};
+
 export type ConditionAssessment = {
   condition_id: string;
   status: "supported" | "challenged" | "unresolved";
   reason: string;
   claim_refs: string[];
   fact_refs: string[];
-  method: "metric" | "model" | "no_evidence";
+  method: "metric" | "model" | "no_evidence" | "unchecked_reply";
   financial?: ConditionFinancialRef;
+  /** Absent on rows assessed before figures were stored. */
+  figure_refs?: ConditionFigureRef[];
 };
 
 export type ThesisAssessment = {
@@ -257,7 +267,7 @@ export function parseConditionAssessments(value: unknown): ConditionAssessment[]
     const reason = requireTrimmedString(row.reason, `${label}.reason`, 1, THESIS_REASON_MAX);
     const claimRefs = parseUuidArray(row.claim_refs, `${label}.claim_refs`);
     const factRefs = parseUuidArray(row.fact_refs, `${label}.fact_refs`);
-    if (row.method !== "metric" && row.method !== "model" && row.method !== "no_evidence") {
+    if (row.method !== "metric" && row.method !== "model" && row.method !== "no_evidence" && row.method !== "unchecked_reply") {
       throw new ThesisValidationError(`${label}.method is invalid`);
     }
     return {
@@ -268,6 +278,20 @@ export function parseConditionAssessments(value: unknown): ConditionAssessment[]
       fact_refs: factRefs,
       method: row.method,
       ...(row.financial === undefined ? {} : { financial: parseFinancialRef(row.financial, `${label}.financial`) }),
+      ...(row.figure_refs === undefined ? {} : { figure_refs: parseFigureRefs(row.figure_refs, `${label}.figure_refs`) }),
+    };
+  });
+}
+
+function parseFigureRefs(value: unknown, label: string): ConditionFigureRef[] {
+  if (!Array.isArray(value)) throw new ThesisValidationError(`${label} must be an array`);
+  return value.map((item, index) => {
+    const row = requireRecord(item, `${label}[${index}]`);
+    return {
+      result_id: requireUuid(row.result_id, `${label}[${index}].result_id`),
+      measure: requireTrimmedString(row.measure, `${label}[${index}].measure`, 1, THESIS_REASON_MAX),
+      period: row.period === null ? null : requireTrimmedString(row.period, `${label}[${index}].period`, 1, THESIS_REASON_MAX),
+      value: requireTrimmedString(row.value, `${label}[${index}].value`, 1, THESIS_REASON_MAX),
     };
   });
 }

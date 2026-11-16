@@ -1,13 +1,16 @@
 import { authenticatedJson, type FetchImpl } from '../http/authFetch.ts'
 import type { SaveThesisInput, ThesisCondition, ThesisHistoryResponse, ThesisVersion } from '../../../services/agents/src/thesis-types.ts'
 
+/** The history with what each cited fact or claim is, by id: a metric and its period, or a claim's predicate. */
+export type ThesisHistoryView = ThesisHistoryResponse & { ref_labels?: Readonly<Record<string, string>> }
+
 export function fetchThesisHistory(input: {
   userId: string
   agentId: string
   signal?: AbortSignal
   fetchImpl?: FetchImpl
-}): Promise<ThesisHistoryResponse> {
-  return authenticatedJson<ThesisHistoryResponse>(thesisPath(input.agentId), {
+}): Promise<ThesisHistoryView> {
+  return authenticatedJson<ThesisHistoryView>(thesisPath(input.agentId), {
     userId: input.userId,
     signal: input.signal,
     fetchImpl: input.fetchImpl,

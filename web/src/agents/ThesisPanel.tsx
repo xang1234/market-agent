@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FetchImpl } from '../http/authFetch.ts'
-import { fetchThesisHistory } from './thesisClient.ts'
+import { fetchThesisHistory, type ThesisHistoryView } from './thesisClient.ts'
 import { ThesisEditor } from './ThesisEditor.tsx'
 import { AssessmentHistory, VersionHistory } from './ThesisHistory.tsx'
 import { FailureNotice } from '../ui/FailureNotice.tsx'
 import { Skeleton } from '../ui/Skeleton.tsx'
-import type { ThesisAssessment, ThesisHistoryResponse, ThesisVersion } from '../../../services/agents/src/thesis-types.ts'
+import type { ThesisAssessment, ThesisVersion } from '../../../services/agents/src/thesis-types.ts'
 import { PAGE_PANEL_CLASS, PANEL_TITLE_CLASS } from '../ui/pageStyles.ts'
 
 type ThesisPanelProps = {
@@ -24,7 +24,7 @@ export function ThesisPanel(props: ThesisPanelProps) {
 }
 
 function ThesisPanelContent({ userId, agentId, initialThesis, refreshKey, fetchImpl, onSaved, onStructuredChange, onAssessments }: ThesisPanelProps) {
-  const [history, setHistory] = useState<ThesisHistoryResponse | null>(null)
+  const [history, setHistory] = useState<ThesisHistoryView | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   const request = useRef<AbortController | null>(null)

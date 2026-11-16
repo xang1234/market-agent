@@ -16,6 +16,7 @@ type AgentRosterProps = {
   activity: string
   loading: boolean
   loadError: string | null
+  universeNames: ReadonlyMap<string, string>
   onSelect: (agentId: string) => void
   onEdit: (agent: AgentRow) => void
   onRun: (agentId: string) => void
@@ -33,6 +34,7 @@ export function AgentRoster({
   activity,
   loading,
   loadError,
+  universeNames,
   onSelect,
   onEdit,
   onRun,
@@ -71,7 +73,7 @@ export function AgentRoster({
                 <p className="mt-2 text-xs text-muted">
                   {agent.enabled ? 'enabled' : 'disabled'} · {agent.cadence}
                 </p>
-                <p className="mt-2 text-xs text-muted">Universe: <UniverseName universe={agent.universe} /></p>
+                <p className="mt-2 text-xs text-muted">Universe: <UniverseName universe={agent.universe} names={universeNames} /></p>
                 <p className="mt-1 text-xs text-muted">Alert rule: {alertRuleLabel(agent.alert_rules)}</p>
                 <RunTimeline ticks={agentRunTicks(runs, agent.agent_id)} />
               </div>
@@ -107,8 +109,8 @@ export function AgentRoster({
 // Each named subject costs one hydrate request, on every roster row.
 const UNIVERSE_SUBJECTS_SHOWN = 5
 
-function UniverseName({ universe }: { universe: AgentRow['universe'] }) {
-  if (universe?.mode !== 'static' || universe.subject_refs.length === 0) return universeLabel(universe)
+function UniverseName({ universe, names }: { universe: AgentRow['universe']; names: ReadonlyMap<string, string> }) {
+  if (universe?.mode !== 'static' || universe.subject_refs.length === 0) return universeLabel(universe, names)
   const hidden = universe.subject_refs.length - UNIVERSE_SUBJECTS_SHOWN
   return (
     <>

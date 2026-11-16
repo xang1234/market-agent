@@ -238,6 +238,25 @@ cmd_memo() {
     node "$HERE/memo-flow.mjs"
 }
 
+# agents [TICKER] [--stored] [--conditions=FILE]: --stored opens the subject's newest
+# stored memo instead of generating one; --conditions types the conditions instead
+# of drafting them. Both stand in for a model when none answers.
+cmd_agents() {
+  local ticker="NVDA" stored="" conditions="" arg listing
+  for arg in "$@"; do
+    case "$arg" in
+      --stored) stored=1 ;;
+      --conditions=*) conditions="$(cd "$(dirname "${arg#--conditions=}")" && pwd)/$(basename "${arg#--conditions=}")" ;;
+      -*) echo "usage: agents [TICKER] [--stored] [--conditions=FILE]" >&2; return 2 ;;
+      *) ticker="$(normalize_ticker "$arg")" || return 2 ;;
+    esac
+  done
+  listing="$(resolved_listing "$ticker")" || return 1
+  mkdir -p "$EVIDENCE"
+  PATH="$NODE_APP:$PATH" ROOT="$ROOT" WEB_URL="$WEB_URL" LISTING_ID="$listing" TICKER="$ticker" STORED="$stored" CONDITIONS="$conditions" \
+    OUT="$EVIDENCE/agents-$ticker-$(stamp)" node "$HERE/agents-flow.mjs"
+}
+
 # run_scorecard OUT CASES_FILE ONLY RUNS. Traces and [llm] usage lines exist only
 # in DEV_MODE=analyst; dev-shell.sh resolves CHAT_TRACE_DIR the same way.
 run_scorecard() {
@@ -325,9 +344,10 @@ case "${1:-}" in
   backfill-8k) cmd_backfill_8k "${2:-}" ;;
   restatements) shift; cmd_restatements "$@" ;;
   memo) shift; cmd_memo "$@" ;;
+  agents) shift; cmd_agents "$@" ;;
   chat) shift; cmd_chat "$@" ;;
   scroll) shift; cmd_scroll "$@" ;;
   scorecard) shift; cmd_scorecard "$@" ;;
   suite) shift; cmd_suite "$@" ;;
-  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|fill-ciks|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
+  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|fill-ciks|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|agents [TICKER] [--stored] [--conditions=FILE]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
 esac

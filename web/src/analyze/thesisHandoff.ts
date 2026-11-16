@@ -1,6 +1,9 @@
 import type { AnalyzeRunDetail } from './runHistory.ts'
 import { readResearchHandoff, type DiscoveryResearchHandoff } from '../discovery/handoff.ts'
 import { isSubjectRef, type SubjectRef } from '../subject/subjectRef.ts'
+import { refSegmentText } from '../blocks/richText.ts'
+import type { RefSegment } from '../blocks/types.ts'
+import { THESIS_TEXT_MAX, THESIS_TEXT_MIN } from '../../../services/agents/src/thesis-types.ts'
 
 export type AnalyzeThesisHandoff = {
   sourceRunId: string
@@ -13,7 +16,14 @@ export type ThesisHandoff =
   | ({ kind: 'analyze' } & AnalyzeThesisHandoff)
   | DiscoveryResearchHandoff
 
-export function analyzeThesisHandoff(run: AnalyzeRunDetail): AnalyzeThesisHandoff | null {
+export const NO_THESIS_SECTION = 'This memo has no investment thesis section to monitor.'
+export const NO_CHECKED_THESIS = "This memo's investment thesis section has too little checked text to monitor."
+
+export type AnalyzeThesisOffer =
+  | { kind: 'handoff'; handoff: AnalyzeThesisHandoff }
+  | { kind: 'no_thesis'; note: typeof NO_THESIS_SECTION | typeof NO_CHECKED_THESIS }
+
+export function analyzeThesisHandoff(run: AnalyzeRunDetail): AnalyzeThesisOffer | null {
   const metadata = run.run_metadata
   if (!isRecord(metadata) || !Array.isArray(metadata.subject_refs) || metadata.subject_refs.length !== 1) {
     return null
@@ -21,12 +31,11 @@ export function analyzeThesisHandoff(run: AnalyzeRunDetail): AnalyzeThesisHandof
   const [subjectRef] = metadata.subject_refs
   if (!isMonitorableSubject(subjectRef)) return null
 
-  return {
-    sourceRunId: run.run_id,
-    subjectRef,
-    thesis: memoText(run),
-    name: `${run.display_title} monitor`,
-  }
+  const section = thesisSectionText(run)
+  if (section === null) return { kind: 'no_thesis', note: NO_THESIS_SECTION }
+  const thesis = clipToWholeCodePoints(section)
+  if (thesis.length < THESIS_TEXT_MIN) return { kind: 'no_thesis', note: NO_CHECKED_THESIS }
+  return { kind: 'handoff', handoff: { sourceRunId: run.run_id, subjectRef, thesis, name: `${run.display_title} monitor` } }
 }
 
 export function readAnalyzeThesisHandoff(state: unknown): AnalyzeThesisHandoff | null {
@@ -55,26 +64,53 @@ export function readThesisHandoff(state: unknown): ThesisHandoff | null {
   return analyze ? { kind: 'analyze', ...analyze } : null
 }
 
-function memoText(run: AnalyzeRunDetail): string {
-  const parts = run.blocks.flatMap(blockText).map((part) => part.trim()).filter(Boolean)
-  if (parts.length > 0) return parts.join('\n\n').slice(0, 4000)
-  const instructions = isRecord(run.run_metadata) ? run.run_metadata.instructions : null
-  return typeof instructions === 'string' ? instructions.trim().slice(0, 4000) : ''
+function thesisSectionText(run: AnalyzeRunDetail): string | null {
+  const tagged = run.blocks.filter((block) => isRecord(block.data_ref) && isRecord(block.data_ref.params) && block.data_ref.params.playbook_section_id === 'investment_thesis')
+  if (tagged.length === 0) return null
+  return tagged
+    .flatMap(thesisParagraphBlocks)
+    .map(paragraphText)
+    .filter(Boolean)
+    .join('\n\n')
 }
 
-function blockText(value: unknown): string[] {
-  if (!isRecord(value)) return []
-  const parts: string[] = []
-  if (Array.isArray(value.segments)) {
-    parts.push(...value.segments.flatMap((segment) => {
-      if (isRecord(segment) && segment.type === 'text' && typeof segment.text === 'string') {
-        return [segment.text]
-      }
-      return []
-    }))
+function thesisParagraphBlocks(block: Record<string, unknown>): unknown[] {
+  if (block.kind === 'section') return Array.isArray(block.children) ? block.children : []
+  return [block]
+}
+
+function paragraphText(block: unknown): string {
+  if (!isRecord(block)) return ''
+  if (Array.isArray(block.commentary)) return checkedCommentaryText(block.commentary.filter(isRecord))
+  if (block.analyst_commentary === true || !Array.isArray(block.segments)) return ''
+  return segmentsText(block.segments)
+}
+
+function checkedCommentaryText(parts: ReadonlyArray<Record<string, unknown>>): string {
+  const verifiedInferences = parts.flatMap((part) => (part.kind === 'inference' && typeof part.text === 'string'
+    ? [typeof part.subject === 'string' ? `${part.subject}: ${part.text}` : part.text]
+    : []))
+  const figureStatements = parts.flatMap((part) => (part.kind === 'figures' && Array.isArray(part.segments) ? [segmentsText(part.segments)] : []))
+  return [...verifiedInferences, ...figureStatements].map((text) => text.trim()).filter(Boolean).join('\n\n')
+}
+
+function segmentsText(segments: ReadonlyArray<unknown>): string {
+  return segments.map((segment) => {
+    if (!isRecord(segment)) return ''
+    if (segment.type === 'text') return typeof segment.text === 'string' ? segment.text : ''
+    return segment.type === 'ref' && typeof segment.ref_kind === 'string' && typeof segment.ref_id === 'string'
+      ? refSegmentText(segment as RefSegment)
+      : ''
+  }).join('').trim()
+}
+
+function clipToWholeCodePoints(text: string): string {
+  let clipped = ''
+  for (const point of text) {
+    if (clipped.length + point.length > THESIS_TEXT_MAX) break
+    clipped += point
   }
-  if (Array.isArray(value.children)) parts.push(...value.children.flatMap(blockText))
-  return parts
+  return clipped.trimEnd()
 }
 
 function isMonitorableSubject(value: unknown): value is AnalyzeThesisHandoff['subjectRef'] {

@@ -195,7 +195,7 @@ function ConditionEditor({
           Remove
         </button>
       </div>
-      <div className="mt-3 grid gap-3">
+      <div className="mt-3 grid grid-cols-1 gap-3">
         <label className="flex flex-col gap-1 text-xs font-medium text-fg">
           What must remain true
           <textarea

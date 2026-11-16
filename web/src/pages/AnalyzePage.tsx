@@ -166,7 +166,7 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
   const [isGenerating, setIsGenerating] = useState(false)
   const availableSourceCategories = sourceCategoriesFor(selectedTemplate, selectedPlaybook)
   const compareRunDetail = compareRunId ? openedRunDetails[compareRunId] : null
-  const thesisHandoff = memoRun ? analyzeThesisHandoff(memoRun) : null
+  const thesisOffer = memoRun ? analyzeThesisHandoff(memoRun) : null
   const runDiff = memoRun && compareRunDetail ? diffAnalyzeRuns(compareRunDetail, memoRun) : null
   const runDiffDriftLabels = runDiff ? [
     runDiff.summary.evidence_snapshot_changed ? 'Evidence snapshot changed' : null,
@@ -434,15 +434,16 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
             <button type="button" onClick={() => void addToChat()} className={SECONDARY_BUTTON_CLASS}>
               Add to chat
             </button>
-            {thesisHandoff ? (
+            {thesisOffer?.kind === 'handoff' ? (
               <button
                 type="button"
-                onClick={() => navigate('/agents', { state: { thesisHandoff } })}
+                onClick={() => navigate('/agents', { state: { thesisHandoff: thesisOffer.handoff } })}
                 className={SECONDARY_BUTTON_CLASS}
               >
                 Monitor this thesis
               </button>
             ) : null}
+            {thesisOffer?.kind === 'no_thesis' ? <p className="self-center text-xs text-muted">{thesisOffer.note}</p> : null}
             <button type="button" onClick={() => void generateMemo()} className={PRIMARY_BUTTON_CLASS}>
               Generate memo
             </button>

@@ -51,6 +51,29 @@ test('Analyze Monitor this thesis carries the opened historical run subject to A
   }
 })
 
+test('Analyze says a memo with no thesis section has nothing to monitor, and offers no handoff', async () => {
+  const memo = runDetail()
+  const untagged = { ...memo, blocks: memo.blocks.map((block) => ({ ...block, data_ref: { kind: 'analyze_run', id: block.id } })) }
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input)
+    if (url === '/v1/analyze/templates') return json({ templates: [] })
+    if (url === '/v1/analyze/playbooks') return json({ playbooks: [] })
+    if (url.startsWith('/v1/analyze/runs?')) return json({ runs: [runSummary()], next_cursor: null })
+    if (url === '/v1/analyze/runs/run-history') return json(untagged)
+    return json({ error: `unexpected ${url}` }, 404)
+  }
+  const harness = installHarness(fetchImpl)
+  const router = createMemoryRouter([{ path: '/analyze', element: <AnalyzePage /> }], { initialEntries: [`/analyze?subject=issuer:${CURRENT_SUBJECT_ID}`] })
+  try {
+    await harness.render(<RouterProvider router={router} />)
+    await harness.click('Open')
+    assert.match(harness.document.body.textContent ?? '', /This memo has no investment thesis section to monitor\./)
+    assert.equal([...harness.document.querySelectorAll('button')].some((button) => button.textContent === 'Monitor this thesis'), false)
+  } finally {
+    await harness.unmount()
+  }
+})
+
 test('Agents prefill from Analyze remains editable and does not create an agent automatically', async () => {
   const calls: Array<{ url: string; method: string }> = []
   const fetchImpl: typeof fetch = async (input, init) => {
@@ -229,7 +252,7 @@ function runDetail() {
       id: 'memo-summary',
       kind: 'rich_text',
       snapshot_id: '44444444-4444-4444-8444-444444444444',
-      data_ref: { kind: 'analyze_run', id: 'memo-summary' },
+      data_ref: { kind: 'analyze_run', id: 'memo-summary', params: { playbook_section_id: 'investment_thesis' } },
       source_refs: [],
       as_of: '2026-09-08T00:00:00.000Z',
       segments: [{ type: 'text', text: 'Historical memo says demand remains resilient.' }],

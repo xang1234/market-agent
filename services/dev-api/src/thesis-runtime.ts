@@ -1,8 +1,8 @@
 import type { AgentRow, QueryExecutor } from '../../agents/src/agent-repo.ts';
 import type { AgentLoopStages } from '../../agents/src/agent-loop.ts';
-import { getCurrentThesis, getLatestThesisAssessment, recordThesisAssessment } from '../../agents/src/thesis-repo.ts';
+import { getCurrentThesis, getLastCheckedResults, recordThesisAssessment, type LastCheckedResult } from '../../agents/src/thesis-repo.ts';
 import { evaluateThesis, THESIS_PROMPT_VERSION, type ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
-import { ThesisConflictError, type ThesisVersion, type ConditionAssessment } from '../../agents/src/thesis-types.ts';
+import { ThesisConflictError, type ThesisAssessment, type ThesisVersion, type ConditionAssessment } from '../../agents/src/thesis-types.ts';
 import { generateThesisFinding } from './thesis-finding.ts';
 import type { FindingRow } from '../../agents/src/finding-generator.ts';
 import { writeRunActivity } from '../../observability/src/run-activity.ts';
@@ -32,7 +32,7 @@ type PreparedAssessment = {
   model_version: string | null;
   packet_hash: string;
   input_hash: string;
-  reused: boolean;
+  reused_snapshot_id: string | null;
   /** Facts the verified conditions cited beyond the packet's own; sealed and cited with it. */
   cited_facts: ThesisPacket['facts'];
 };
@@ -52,31 +52,33 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       return { thesis_version_id: input.thesis.thesis_version_id, as_of: asOf };
     },
     async extractEvidence({ deltas }) {
-      return loadThesisPacket(input.db, { thesis: input.thesis, userId: input.userId, asOf: deltas.as_of });
+      return loadThesisPacket(input.db, { thesis: input.thesis, userId: input.userId, asOf: deltas.as_of, runId: input.runId, financial: input.financial });
     },
     async clusterEvidence() { return null; },
     async analyze({ deltas, evidence }) {
-      const needsModel = evidence.claims.length > 0 && input.thesis.conditions.some(c => !c.metric);
+      const needsModel = Object.keys(evidence.evidence.refs).length > 0 && input.thesis.conditions.some(c => !c.metric);
       const model = needsModel ? await (input.getModel ?? configuredModel)() : { llm: null, identity: 'deterministic' };
       const metricResults = await evaluateFinancialThesisConditions(input.financial, { user_id: input.userId, thesis: input.thesis, run_key: input.runId, as_of: deltas.as_of });
       // The reuse key compares definitions, inputs, and outcomes — never run or snapshot identities.
-      const packetHash = hashJsonValue({ metricResults: thesisReuseProjection(metricResults), version: input.thesis.thesis_version_id, packet: evidence, day: deltas.as_of.slice(0, 10), model: model.identity, prompt: THESIS_PROMPT_VERSION });
-      const previous = await getLatestThesisAssessment(input.db, input.thesis.thesis_version_id);
-      const reused = previous?.input_hash.split('/')[0] === packetHash;
-      const evaluation = reused && previous ? previous : await evaluateThesis({
-        thesis: input.thesis, claims: evidence.claims, as_of: deltas.as_of, llm: model.llm, metric_results: metricResults,
+      const packetHash = hashJsonValue({ metricResults: thesisReuseProjection(metricResults), version: input.thesis.thesis_version_id, packet: withoutResultIds(evidence), day: deltas.as_of.slice(0, 10), model: model.identity, prompt: THESIS_PROMPT_VERSION });
+      const kept = keptOn(await getLastCheckedResults(input.db, input.thesis.thesis_version_id), packetHash);
+      const keptIds = new Set(kept.map(last => last.result.condition_id));
+      const evaluation = await evaluateThesis({
+        thesis: input.thesis, evidence: evidence.evidence, as_of: deltas.as_of, llm: model.llm,
+        known_results: [...metricResults.filter(result => !keptIds.has(result.condition_id)), ...kept.map(last => last.result)],
       });
       const packetFacts = new Set(evidence.facts.map(fact => fact.fact_id));
       const citedFacts = await loadThesisFactsById(input.db, {
         factIds: [...new Set(evaluation.results.flatMap(result => result.fact_refs))].filter(id => !packetFacts.has(id)),
         userId: input.userId,
       });
+      const keptSnapshots = new Set(kept.map(last => last.snapshot_id));
       return {
         results: evaluation.results,
-        model_version: evaluation.model_version,
+        model_version: evaluation.model_version ?? kept.find(last => last.model_version !== null)?.model_version ?? null,
         packet_hash: packetHash,
-        input_hash: reused && previous ? previous.input_hash : `${packetHash}/${previous?.assessment_id ?? 'initial'}`,
-        reused,
+        input_hash: `${packetHash}/${input.runId}`,
+        reused_snapshot_id: kept.length === evaluation.results.length && keptSnapshots.size === 1 ? kept[0].snapshot_id : null,
         cited_facts: citedFacts,
       };
     },
@@ -93,21 +95,28 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       const latest = await getCurrentThesis(tx, input.agent.agent_id);
       if (latest?.thesis_version_id !== input.thesis.thesis_version_id)
         throw new ThesisConflictError('Thesis changed during assessment; run again to assess the new version.');
-      // Recheck under the agent lock: another delivery may have finished while
-      // the model was evaluating. A-to-B-to-A recurrence is still a new event.
-      const previous = await getLatestThesisAssessment(tx, input.thesis.thesis_version_id);
-      if (previous?.input_hash.split('/')[0] === analysis.packet_hash) {
-        await activity(tx, input, 'dismissed', 'No new thesis changes: this evidence packet was already assessed.');
-        return { findings: 0, assessments: 0, reused: true };
-      }
+      const lastChecked = await getLastCheckedResults(tx, input.thesis.thesis_version_id);
       // Compared in the database, at its microsecond precision: through JS Dates
       // an assessment finished later in the cutoff's millisecond looked equal.
-      const newer = await tx.query(
-        'select 1 from agent_thesis_assessments where thesis_version_id = $1::uuid and assessed_at > $2::timestamptz limit 1',
+      const finishedDuringThisRun = await tx.query<Pick<ThesisAssessment, 'input_hash'>>(
+        'select input_hash from agent_thesis_assessments where thesis_version_id = $1::uuid and assessed_at > $2::timestamptz order by assessed_at desc limit 1',
         [input.thesis.thesis_version_id, deltas.as_of],
       );
-      if (newer.rows.length > 0)
+      const finished = finishedDuringThisRun.rows[0];
+      if (finished !== undefined && packetHashOf(finished.input_hash) !== analysis.packet_hash)
         throw new ThesisConflictError('A newer assessment finished during this run; run again.');
+      if (finished !== undefined && keptOn(lastChecked, analysis.packet_hash).length === analysis.results.length) {
+        await activity(tx, input, 'dismissed', 'No new thesis changes: a run that finished during this one assessed the same evidence.');
+        return { findings: 0, assessments: 0, reused: true };
+      }
+      if (analysis.reused_snapshot_id !== null) {
+        await recordThesisAssessment(tx, {
+          thesis_version_id: input.thesis.thesis_version_id, run_id: input.runId, snapshot_id: analysis.reused_snapshot_id,
+          input_hash: analysis.input_hash, results: analysis.results, model_version: analysis.model_version, prompt_version: THESIS_PROMPT_VERSION,
+        });
+        await activity(tx, input, 'dismissed', 'Recorded the assessment; the evidence is unchanged since the last one.');
+        return { findings: 0, assessments: 1, reused: true };
+      }
       const snapshot = await sealThesisPacket(tx, {
         thesis: input.thesis, packet: evidence, results: analysis.results, asOf: deltas.as_of,
         modelVersion: analysis.model_version, inputHash: analysis.input_hash,
@@ -116,12 +125,11 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
         thesis_version_id: input.thesis.thesis_version_id, run_id: input.runId, snapshot_id: snapshot.snapshot_id,
         input_hash: analysis.input_hash, results: analysis.results, model_version: analysis.model_version, prompt_version: THESIS_PROMPT_VERSION,
       });
-      const sealedFacts = new Set(evidence.facts.map(fact => fact.fact_id));
+      const sealed = new Set([...evidence.facts.map(fact => fact.fact_id), ...evidence.claims.map(claim => claim.claim_id)]);
       for (const result of analysis.results) {
-        if (result.status === 'unresolved' || previous?.results.find(r => r.condition_id === result.condition_id)?.status === result.status)
+        if (result.status === 'unresolved' || lastChecked.get(result.condition_id)?.result.status === result.status)
           continue;
-        // A verified condition alerts only with evidence sealed into this snapshot; its certificate stays on the assessment.
-        if (result.financial && !result.fact_refs.some(id => sealedFacts.has(id)))
+        if (![...result.fact_refs, ...result.claim_refs].some(id => sealed.has(id)))
           continue;
         findings.push(await generateThesisFinding(tx, {
           thesis: input.thesis, result, packet: evidence, agentName: input.agent.name, snapshot,
@@ -129,11 +137,26 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       }
       await activity(tx, input, 'reading', `Considered ${evidence.claims.length} current claims and sealed ${evidence.facts.length} stored facts for the configured metrics.`);
       await activity(tx, input, 'investigating', `Assessed ${analysis.results.length} saved conditions using ${analysis.model_version ?? 'the financial engine and missing-evidence handling'}.`);
+      const unchecked = analysis.results.filter(result => result.method === 'unchecked_reply').length;
+      const narrative = input.thesis.conditions.filter(condition => !condition.metric).length;
+      if (unchecked > 0)
+        await activity(tx, input, 'investigating', `Could not check the model's reply against the stored sources for ${unchecked} of ${narrative} narrative ${narrative === 1 ? 'condition' : 'conditions'}. Each reads as not enough evidence, and the next run asks again.`);
       await activity(tx, input, findings.length ? 'found' : 'dismissed', findings.length ? `Recorded ${findings.length} thesis condition changes.` : 'Recorded the assessment; no new supported or challenged states.');
       return { findings: findings.length, assessments: 1, reused: false };
     },
     async alertFindings() { return findings; },
   };
+}
+function packetHashOf(inputHash: string): string {
+  return inputHash.split('/')[0];
+}
+function keptOn(lastChecked: ReadonlyMap<string, LastCheckedResult>, packetHash: string): LastCheckedResult[] {
+  return [...lastChecked.values()].filter(last => packetHashOf(last.input_hash) === packetHash);
+}
+// The engine numbers each run's results anew, so a cited figure's result id stays out of the reuse key. Its measure, period and value are in the packet.
+function withoutResultIds(packet: ThesisPacket) {
+  const refs = Object.fromEntries(Object.entries(packet.evidence.refs).map(([id, ref]) => [id, { ...ref, figure_refs: ref.figure_refs.map(({ result_id: _resultId, ...figure }) => figure) }]));
+  return { ...packet, evidence: { ...packet.evidence, refs } };
 }
 async function configuredModel(): Promise<Model> {
   const settings = await loadLlmSettingsFromEnv();

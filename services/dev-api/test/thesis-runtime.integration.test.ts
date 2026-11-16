@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { randomUUID, createHash } from 'node:crypto';
 import { createClaim } from '../../evidence/src/claim-repo.ts';
 import { createClaimArgument } from '../../evidence/src/claim-argument-repo.ts';
@@ -25,6 +25,7 @@ const USER = IDS.owner;
 const OTHER = IDS.other;
 const ISSUER = IDS.issuerA;
 const CONDITION = '30000000-0000-4000-8000-000000000001';
+const OTHER_CONDITION = '30000000-0000-4000-8000-000000000002';
 
 test('thesis monitoring persists, deduplicates, reassesses changed facts and protects history', { skip: !dockerAvailable(), timeout: 120000 }, async t => {
   const db = await engineDatabase(t, 'living-thesis-runtime');
@@ -64,13 +65,16 @@ test('thesis monitoring persists, deduplicates, reassesses changed facts and pro
   assert.equal(history.assessments[0].results[0].status,'supported');
   assert.deepEqual(history.assessments[0].results[0].fact_refs,[fact1]);
   const firstSnapshot = history.assessments[0].snapshot_id;
+  assert.equal((await adapter.get({userId:USER,agentId:agent.agent_id})).ref_labels[fact1],`Gross profit FY${lastFiscalYear}`,'the history names each cited fact by its metric and period');
   const inspected = await loadEvidenceInspection(db,{user_id:USER,snapshot_id:firstSnapshot,ref:{kind:'fact',id:fact1}});
   assert.equal(inspected.ref.id,fact1);
   assert.equal(inspected.title,'$169.1B');
   assert.deepEqual(inspected.rows.find(row=>row.label==='Value'),{label:'Value',value:'169148000000'});
   await assert.rejects(loadEvidenceInspection(db,{user_id:OTHER,snapshot_id:firstSnapshot,ref:{kind:'fact',id:fact1}}),{status:404});
   await execute();
-  assert.equal((await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments.length,1);
+  const rerun=(await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments;
+  assert.equal(rerun.length,2,'a rerun on the same evidence records its own dated assessment');
+  assert.equal(rerun[0].snapshot_id,firstSnapshot,'and reuses the snapshot that seals that evidence');
   assert.equal((await db.query('select count(*)::int as n from findings where agent_id=$1',[agent.agent_id])).rows[0].n,1);
   await db.query('update facts set invalidated_at=now() where fact_id=$1',[fact1]);
   const fact2=await seedReportedFact(db,{metric_key:'gross_profit',value:'100000000000',fiscal_year:lastFiscalYear});
@@ -88,7 +92,7 @@ test('thesis monitoring persists, deduplicates, reassesses changed facts and pro
   await execute();
   history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
   assert.equal(history.assessments[0].results[0].status,'supported', 'recurring earlier evidence must become current again');
-  assert.equal(history.assessments.length,4);
+  assert.equal(history.assessments.length,5);
   const priorCount=history.assessments.length;
   await assert.rejects(execute(async () => {
     thesis=await saveThesis(db,{agent_id:agent.agent_id,user_id:USER,expected_version:1,thesis:'Cash reserves recover sustainably.',subject_ref:{kind:'issuer',id:ISSUER},conditions});
@@ -117,7 +121,7 @@ test('thesis monitoring persists, deduplicates, reassesses changed facts and pro
 });
 
 
-test('narrative monitoring includes IR and non-IR claims, rejects fabricated citations and handles removed evidence', {skip:!dockerAvailable(),timeout:120000}, async t => {
+test('narrative monitoring includes IR and non-IR claims, never stores a fabricated citation, and handles removed evidence', {skip:!dockerAvailable(),timeout:120000}, async t => {
   const {databaseUrl}=await bootstrapDatabase(t,'living-thesis-narrative');
   const db=await connectedClient(t,databaseUrl);
   const pool=await connectedPool(t,databaseUrl);
@@ -157,9 +161,10 @@ test('narrative monitoring includes IR and non-IR claims, rejects fabricated cit
   let calls=0;
   const model:ThesisLlm={async complete(input){
     calls++;
-    const packet=JSON.parse(input.messages[1].content);
-    assert.deepEqual(packet.claims.map((c:{claim_id:string})=>c.claim_id).sort(),[valid.claim.claim_id,ir.claim.claim_id].sort());
-    return {text:JSON.stringify({results:[{condition_id:CONDITION,status:'challenged',reason:'The cited cancellations challenge demand durability.',claim_refs:[valid.claim.claim_id]}]}),deployment:{channel:'test',model:'controlled'}};
+    const {evidence}=JSON.parse(input.messages[1].content) as {evidence:{claims:Array<{id:string;text:string}>}};
+    assert.deepEqual(evidence.claims.map(c=>c.text).sort(),['Current customers canceled their orders.','Issuer IR customers canceled their orders.']);
+    const cited=evidence.claims.find(c=>c.text.startsWith('Current'))!.id;
+    return {text:JSON.stringify({results:[{condition_id:CONDITION,status:'challenged',refs:[cited]}]}),deployment:{channel:'test',model:'controlled'}};
   }};
   async function execute(llm:ThesisLlm|null=model,identity='controlled') {
     const fresh=(await getAgent(db,agent.agent_id))!;
@@ -168,8 +173,11 @@ test('narrative monitoring includes IR and non-IR claims, rejects fabricated cit
   }
   await execute();
   await execute();
-  assert.equal(calls,1);
+  assert.equal(calls,1,'the same evidence reuses the assessment without a model call');
   let history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
+  assert.equal(history.assessments.length,2);
+  assert.deepEqual(history.assessments[0].results[0].claim_refs,[valid.claim.claim_id],'the C id is stored as the claim it stands for');
+  assert.equal((await createThesisAdapter(db).get({userId:USER,agentId:agent.agent_id})).ref_labels[valid.claim.claim_id],'demand.change · Current customers canceled their orders.','the history names each cited claim by its predicate and words');
   assert.equal(history.assessments[0].model_version,'test:controlled');
   assert.equal(history.assessments[0].results[0].status,'challenged');
   assert.equal((await db.query('select severity from findings where agent_id=$1',[agent.agent_id])).rows[0].severity,'critical','direct relevance plus strong sourced impact must use existing severity policy');
@@ -186,13 +194,103 @@ test('narrative monitoring includes IR and non-IR claims, rejects fabricated cit
   await db.query('update documents set source_id=$1 where document_id=$2',[valid.source.source_id,valid.document.document_id]);
   const watermarks=(await getAgent(db,agent.agent_id))!.watermarks;
   await assert.rejects(execute(null,'unavailable'),/unavailable/);
-  await assert.rejects(execute({async complete(){return {text:JSON.stringify({results:[{condition_id:CONDITION,status:'supported',reason:'Fabricated evidence.',claim_refs:[randomUUID()]}]})};}},'invalid'),/unsupplied/);
   assert.deepEqual((await getAgent(db,agent.agent_id))!.watermarks,watermarks);
-  assert.equal((await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments.length,1);
+  assert.equal((await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments.length,2);
+  let fabricated=0;
+  const fabricating:ThesisLlm={async complete(){fabricated++;return {text:JSON.stringify({results:[{condition_id:CONDITION,status:'supported',refs:['C99']}]})};}};
+  await execute(fabricating,'invalid');
+  await execute(fabricating,'invalid');
+  history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
+  assert.deepEqual(history.assessments[0].results,[{condition_id:CONDITION,status:'unresolved',reason:"Not enough evidence: the model's reply for this condition could not be checked against the stored sources.",claim_refs:[],fact_refs:[],method:'unchecked_reply'}],'a fabricated citation is never stored; its condition reads as not enough evidence and says why');
+  assert.equal(fabricated,2,'an assessment the reply could not back is asked again, not reused for the day');
+  const told=await db.query<{summary:string}>(`select summary from run_activities where agent_id=$1 and summary like 'Could not check%'`,[agent.agent_id]);
+  assert.deepEqual(told.rows.map(row=>row.summary),Array(2).fill("Could not check the model's reply against the stored sources for 1 of 1 narrative condition. Each reads as not enough evidence, and the next run asks again."));
   await db.query('update claims set superseded_at=now() where claim_id=any($1::uuid[])',[[valid.claim.claim_id,ir.claim.claim_id]]);
   assert.equal((await inspectCurrent()).ref.id,valid.claim.claim_id,'accessible superseded claims remain inspectable in their historical snapshot');
   await execute(null);
   history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
   assert.equal(history.assessments[0].results[0].status,'unresolved');
   assert.equal((await db.query('select count(*)::int as n from findings where agent_id=$1',[agent.agent_id])).rows[0].n,1);
+});
+
+function scripted({citeUnknownRefFor=[],askedLog=[]}:{citeUnknownRefFor?:string[];askedLog?:string[][]}={}): ThesisLlm {
+  return {async complete(input) {
+    const {conditions,evidence}=JSON.parse(input.messages[1].content) as {conditions:Array<{condition_id:string}>;evidence:{claims:Array<{id:string}>}};
+    askedLog.push(conditions.map(c=>c.condition_id));
+    return {text:JSON.stringify({results:conditions.map(c=>({condition_id:c.condition_id,status:'supported',refs:[citeUnknownRefFor.includes(c.condition_id)?'C99':evidence.claims[0].id]}))}),deployment:{channel:'test',model:'scripted'}};
+  }};
+}
+
+async function narrativeMonitor(t:TestContext,name:string,conditionIds:string[]) {
+  const {databaseUrl}=await bootstrapDatabase(t,name);
+  const db=await connectedClient(t,databaseUrl);
+  const pool=await connectedPool(t,databaseUrl);
+  await db.query('insert into users(user_id,email) values($1,$2)',[USER,`${name}@example.test`]);
+  await db.query("insert into issuers(issuer_id,legal_name) values($1,'Narrative issuer')",[ISSUER]);
+  const agent=await createAgent(db,{user_id:USER,name,thesis:'Demand remains durable throughout the year.',cadence:'daily',universe:{mode:'static',subject_refs:[{kind:'issuer',id:ISSUER}]}});
+  const thesis=await saveThesis(db,{agent_id:agent.agent_id,user_id:USER,expected_version:0,thesis:agent.thesis,subject_ref:{kind:'issuer',id:ISSUER},
+    conditions:conditionIds.map((condition_id,index)=>({condition_id,statement:`Demand holds in segment ${index+1}.`,falsifier:`Segment ${index+1} customers cancel orders.`,horizon:'This year'}))});
+  const published=new Date(Date.now()-86400000).toISOString();
+  const source=await createSource(db,{provider:name,kind:'filing',trust_tier:'primary',license_class:'public',retrieved_at:published,user_id:USER});
+  const document=(await createDocument(db,{source_id:source.source_id,kind:'filing',title:name,published_at:published,content_hash:'sha256:'+createHash('sha256').update(name).digest('hex'),raw_blob_id:ephemeralRawBlobIdForSource(source.source_id),parse_status:'parsed'})).document;
+  const claim=await createClaim(db,{document_id:document.document_id,predicate:'demand.change',text_canonical:'Customers kept their orders.',polarity:'positive',modality:'asserted',reported_by_source_id:source.source_id,effective_time:published,confidence:0.9,status:'extracted'});
+  await createClaimArgument(db,{claim_id:claim.claim_id,subject_kind:'issuer',subject_id:ISSUER,role:'subject'});
+  await createClaimEvidence(db,{claim_id:claim.claim_id,document_id:document.document_id,locator:{kind:'paragraph',index:1},confidence:0.9});
+  async function run(llm:ThesisLlm,identity:string,beforePersist?:()=>Promise<unknown>) {
+    const fresh=(await getAgent(db,agent.agent_id))!;
+    const stages=createThesisAgentLoopStages({db:pool,userId:USER,runId:randomUUID(),agent:fresh,thesis,financial:{pool,evidence:createEvidenceFinancialPort},getModel:async()=>({llm,identity})});
+    if (beforePersist) {
+      const analyze=stages.analyze;
+      stages.analyze=async input=>{const result=await analyze(input); await beforePersist(); return result;};
+    }
+    return runAgentLoop({pool,agent_id:agent.agent_id,current_watermarks:fresh.watermarks,stages});
+  }
+  const assessments=async()=>(await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments;
+  return {
+    run, assessments,
+    statuses:async()=>(await assessments()).map(a=>a.results.map(r=>r.method==='unchecked_reply'?'unchecked':r.status)),
+    findings:async()=>(await db.query<{n:number}>('select count(*)::int as n from findings where agent_id=$1',[agent.agent_id])).rows[0].n,
+  };
+}
+
+test('a condition supported, then left unchecked, then supported again raises one finding', {skip:!dockerAvailable(),timeout:120000}, async t => {
+  const monitor=await narrativeMonitor(t,'thesis-last-checked-findings',[CONDITION]);
+  await monitor.run(scripted(),'first');
+  await monitor.run(scripted({citeUnknownRefFor:[CONDITION]}),'second');
+  await monitor.run(scripted(),'third');
+  assert.deepEqual(await monitor.statuses(),[['supported'],['unchecked'],['supported']]);
+  assert.equal(await monitor.findings(),1,'an unchecked reply is no baseline, so supported again is no transition');
+});
+
+test('a rerun on the same evidence asks the model again only for the condition whose reply was unchecked', {skip:!dockerAvailable(),timeout:120000}, async t => {
+  const monitor=await narrativeMonitor(t,'thesis-last-checked-reuse',[CONDITION,OTHER_CONDITION]);
+  const asked:string[][]=[];
+  await monitor.run(scripted({citeUnknownRefFor:[OTHER_CONDITION],askedLog:asked}),'same');
+  await monitor.run(scripted({askedLog:asked}),'same');
+  await monitor.run(scripted({askedLog:asked}),'same');
+  assert.deepEqual(asked,[[CONDITION,OTHER_CONDITION],[OTHER_CONDITION]]);
+  assert.deepEqual(await monitor.statuses(),[['supported','supported'],['supported','supported'],['supported','unchecked']]);
+  const [third,second,first]=await monitor.assessments();
+  assert.deepEqual(second.results[0],first.results[0],'the checked result stands as it was');
+  assert.notEqual(second.snapshot_id,first.snapshot_id);
+  assert.equal(third.snapshot_id,second.snapshot_id,'once every condition is checked, the next run reuses that snapshot');
+  assert.equal(await monitor.findings(),2);
+});
+
+test('a run overlapped by one that left the condition unchecked records its own checked reply', {skip:!dockerAvailable(),timeout:120000}, async t => {
+  const monitor=await narrativeMonitor(t,'thesis-overlap-unchecked',[CONDITION]);
+  const overlapped=await monitor.run(scripted(),'same',()=>monitor.run(scripted({citeUnknownRefFor:[CONDITION]}),'same'));
+  assert.deepEqual(overlapped.outputs_summary,{findings:1,assessments:1,reused:false});
+  assert.deepEqual(await monitor.statuses(),[['supported'],['unchecked']]);
+  assert.equal(await monitor.findings(),1);
+});
+
+test('a run overlapped by one that checked every condition on the same evidence records nothing, and on other evidence fails', {skip:!dockerAvailable(),timeout:120000}, async t => {
+  const monitor=await narrativeMonitor(t,'thesis-overlap-checked',[CONDITION]);
+  const overlapped=await monitor.run(scripted(),'same',()=>monitor.run(scripted(),'same'));
+  assert.deepEqual(overlapped.outputs_summary,{findings:0,assessments:0,reused:true});
+  assert.deepEqual(await monitor.statuses(),[['supported']]);
+  await assert.rejects(monitor.run(scripted(),'older',()=>monitor.run(scripted(),'newer')),/newer assessment finished during this run/);
+  assert.equal((await monitor.assessments()).length,2);
+  assert.equal(await monitor.findings(),1);
 });

@@ -3,7 +3,8 @@ import { getAgent, type QueryExecutor } from '../../agents/src/agent-repo.ts';
 import { normalizeUniverseToIssuers } from '../../analyst-grids/src/subject-normalization.ts';
 import { getCurrentThesis, loadThesisHistory, saveThesis } from '../../agents/src/thesis-repo.ts';
 import { draftThesisConditions, type ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
-import { parseThesisConditions, parseThesisText, parseThesisExpectedVersion, type ThesisHistoryResponse, type ThesisMetricOption, ThesisConflictError, ThesisNotFoundError, ThesisValidationError } from '../../agents/src/thesis-types.ts';
+import { statesStance } from '../../chat/src/analyst-agent.ts';
+import { parseThesisConditions, parseThesisText, parseThesisExpectedVersion, type ThesisAssessment, type ThesisHistoryResponse, type ThesisMetricOption, ThesisConflictError, ThesisNotFoundError, ThesisValidationError } from '../../agents/src/thesis-types.ts';
 import { LlmRouterError } from '../../llm/src/router.ts';
 import { createLlmRouterFromEnv } from '../../llm/src/settings-loader.ts';
 import { DevApiHttpError } from './dev-api-shared.ts';
@@ -11,7 +12,7 @@ export type ThesisAdapter = {
   get(input: {
     userId: string;
     agentId: string;
-  }): Promise<ThesisHistoryResponse>;
+  }): Promise<ThesisHistoryResponse & { ref_labels: Record<string, string> }>;
   save(input: {
     userId: string;
     agentId: string;
@@ -52,7 +53,16 @@ export function createThesisAdapter(db: QueryExecutor, getModel: () => Promise<T
           metrics = result.rows;
         }
       }
-      return { ...history, metrics };
+      const cited = (key: 'fact_refs' | 'claim_refs') => [...new Set(history.assessments.flatMap(assessment => assessment.results.flatMap(result => result[key])))];
+      const { rows: labels } = await db.query<{ id: string; label: string }>(`select f.fact_id::text as id,
+          concat_ws(' ', m.display_name, case when f.fiscal_year is null then coalesce(f.period_end, f.as_of::date)::text
+            when f.fiscal_period = 'FY' then 'FY' || f.fiscal_year
+            else concat_ws(' ', f.fiscal_period, 'FY' || f.fiscal_year) end) as label
+        from facts f join metrics m on m.metric_id = f.metric_id where f.fact_id = any($1::uuid[])
+       union all
+       select claim_id::text, predicate || ' · ' || case when length(text_canonical) > 48 then left(text_canonical, 47) || '…' else text_canonical end
+         from claims where claim_id = any($2::uuid[])`, [cited('fact_refs'), cited('claim_refs')]);
+      return { ...history, assessments: history.assessments.map(withoutModelReasons), metrics, ref_labels: Object.fromEntries(labels.map(row => [row.id, row.label])) };
     },
     async save({ userId, agentId, body }) {
       const agent = await ownedAgent(userId, agentId);
@@ -75,7 +85,11 @@ export function createThesisAdapter(db: QueryExecutor, getModel: () => Promise<T
         const model = await getModel();
         if (!model)
           throw new DevApiHttpError(503, 'Configure a model in Settings to suggest conditions, or write your own.');
-        return { conditions: await draftThesisConditions(model, text) };
+        // Drafted conditions are the model's words saved as the thesis, so none may state a stance (ADR 0005).
+        const conditions = (await draftThesisConditions(model, text)).filter(condition => ![condition.statement, condition.falsifier, condition.horizon].some(statesStance));
+        if (conditions.length === 0)
+          throw new DevApiHttpError(503, 'Every suggested condition stated a rating or recommendation, so none is shown. Try again or write your own conditions.');
+        return { conditions };
       }
       catch (error) {
         if (error instanceof DevApiHttpError)
@@ -85,6 +99,13 @@ export function createThesisAdapter(db: QueryExecutor, getModel: () => Promise<T
       }
     },
   };
+}
+const MODEL_WRITTEN_REASON_PROMPT_VERSION = 'living-thesis-v1';
+const OLDER_MODEL_REASON = 'An older assessment. Its model-written reason is not shown.';
+function withoutModelReasons(assessment: ThesisAssessment): ThesisAssessment {
+  if (assessment.prompt_version !== MODEL_WRITTEN_REASON_PROMPT_VERSION)
+    return assessment;
+  return { ...assessment, results: assessment.results.map(result => (result.method === 'model' ? { ...result, reason: OLDER_MODEL_REASON } : result)) };
 }
 export async function assertLegacyThesisEditAllowed(db: QueryExecutor, agentId: string, body: Record<string, unknown>) {
   if (body.thesis === undefined && body.universe === undefined)

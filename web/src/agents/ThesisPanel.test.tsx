@@ -23,6 +23,8 @@ const ASSESSMENT_A = '55555555-5555-4555-8555-555555555555'
 const RUN_A = '66666666-6666-4666-8666-666666666666'
 const SNAPSHOT_A = '77777777-7777-4777-8777-777777777777'
 const FACT_A = '88888888-8888-4888-8888-888888888888'
+const CONDITION_B = '44444444-4444-4444-8444-444444444445'
+const CLAIM_B = '99999999-9999-4999-8999-999999999990'
 
 test('ThesisPanel preserves an existing metric option and saves the exact versioned payload', async () => {
   const calls: Array<{ input: string; init?: RequestInit }> = []
@@ -269,7 +271,7 @@ test('ThesisPanel opens condition evidence with its assessment snapshot and expl
   try {
     assert.match(harness.document.body.textContent ?? '', /Checked an authoritative numeric fact/i)
     assert.match(harness.document.body.textContent ?? '', /Prompt thesis-assessment-v1/i)
-    await clickButton(harness.document, 'Inspect fact evidence')
+    await clickButton(harness.document, 'Inspect fact evidence F · fact 1')
     assert.deepEqual(opened, [{ snapshotId: SNAPSHOT_A, ref: { kind: 'fact', id: FACT_A } }])
   } finally {
     await harness.unmount()
@@ -367,6 +369,125 @@ test('ThesisPanel labels assessments whose thesis version fell outside the recen
     assert.match(harness.document.body.textContent ?? '', /Older thesis version · details outside recent history/i)
     assert.match(harness.document.body.textContent ?? '', /Condition details are outside recent history/i)
     assert.doesNotMatch(harness.document.body.textContent ?? '', /Thesis v\?/i)
+  } finally {
+    await harness.unmount()
+  }
+})
+
+test('ThesisPanel shows each condition with its two assessments newest first, each with its cited refs', async () => {
+  const history = currentHistory()
+  const products = { condition_id: CONDITION_B, statement: 'Data center platforms stay the core product.', falsifier: 'The 10-K stops naming data center platforms.', horizon: 'Next 10-K' }
+  history.thesis = { ...history.thesis!, conditions: [...history.thesis!.conditions, products] }
+  history.versions = [history.thesis]
+  const metric = history.assessments[0]!.results[0]!
+  const stale = { ...metric, status: 'unresolved' as const, method: 'no_evidence' as const, fact_refs: [], reason: 'The latest eligible value is older than the saved maximum age at the assessment cutoff.' }
+  const assessment = (id: string, at: string, cited: ThesisHistoryResponse['assessments'][number]['results'][number], gauged = metric) => ({
+    ...history.assessments[0]!, assessment_id: id, snapshot_id: id.replace('a', 'b'), assessed_at: at, results: [gauged, cited],
+  })
+  history.assessments = [
+    assessment('a0000000-0000-4000-8000-000000000001', '2026-09-08T01:00:00.000Z', {
+      condition_id: CONDITION_B, status: 'supported', reason: 'The cited stored sources support this condition.', claim_refs: [CLAIM_B], fact_refs: [FACT_A], method: 'model',
+    }),
+    assessment('a0000000-0000-4000-8000-000000000002', '2026-09-09T01:00:00.000Z', {
+      condition_id: CONDITION_B, status: 'unresolved', reason: 'Not enough evidence: no stored source covers this condition.', claim_refs: [], fact_refs: [], method: 'no_evidence',
+    }, stale),
+  ]
+  const labelled = { ...history, ref_labels: { [FACT_A]: 'Revenue FY2026', [CLAIM_B]: 'business.products' } }
+  const opened: Array<{ snapshotId: string; ref: { kind: string; id: string } }> = []
+  const harness = await mountPanel({ fetchImpl: async () => json(labelled), inspector: { openInspection(input) { opened.push(input) }, openBlockInspection() {}, closeInspection() {} } })
+  try {
+    const timelines = [...harness.document.querySelectorAll('[data-condition-id]')]
+    assert.deepEqual(timelines.map((timeline) => timeline.getAttribute('data-condition-id')), [CONDITION_A, CONDITION_B])
+    assert.equal(timelines[0]!.querySelector('summary')?.textContent, 'Gross margin remains above the long-term floor.unresolved2 assessments', "a metric's gap keeps its status and the engine's reason")
+    const condition = timelines[1]!
+    assert.equal(condition.querySelector('summary')?.textContent, 'Data center platforms stay the core product.Not enough evidence2 assessments')
+    const entries = [...condition.querySelectorAll('li[data-assessment-id]')].map((entry) => [
+      entry.querySelector('time')?.getAttribute('datetime'),
+      [...entry.querySelectorAll('span.rounded.border')].map((badge) => badge.textContent),
+      [...entry.querySelectorAll('button')].map((ref) => ref.textContent),
+    ])
+    assert.deepEqual(entries, [
+      ['2026-09-09T01:00:00.000Z', ['Not enough evidence'], []],
+      ['2026-09-08T01:00:00.000Z', ['Source-linked narrative', 'supported'], ['Inspect fact evidence F · Revenue FY2026', 'Inspect claim evidence C · business.products']],
+    ])
+    await clickButton(harness.document, 'Inspect claim evidence C · business.products')
+    assert.deepEqual(opened, [{ snapshotId: 'b0000000-0000-4000-8000-000000000001', ref: { kind: 'claim', id: CLAIM_B } }])
+  } finally {
+    await harness.unmount()
+  }
+})
+
+test('a cited figure shows as its certified result with its value and formula, and the facts it read stay inspectable under it', async () => {
+  const RESULT = 'c0000000-0000-4000-8000-000000000001'
+  const REVENUE_FACT = 'c0000000-0000-4000-8000-000000000002'
+  const history = currentHistory()
+  const margin = { condition_id: CONDITION_B, statement: 'Gross margin stays high.', falsifier: 'Gross margin falls below its peers.', horizon: 'Next 10-K' }
+  history.thesis = { ...history.thesis!, conditions: [...history.thesis!.conditions, margin] }
+  history.versions = [history.thesis]
+  history.assessments = [{ ...history.assessments[0]!, results: [history.assessments[0]!.results[0]!, {
+    condition_id: CONDITION_B, status: 'supported', reason: 'The cited stored sources support this condition.', claim_refs: [], fact_refs: [FACT_A, REVENUE_FACT], method: 'model',
+    figure_refs: [{ result_id: RESULT, measure: 'Gross margin (gross profit / revenue)', period: 'FY2025 (ended 2025-12-31)', value: '74.99%' }],
+  }] }]
+  const labelled = { ...history, ref_labels: { [FACT_A]: 'Gross profit FY2025', [REVENUE_FACT]: 'Revenue FY2025' } }
+  const calculations: unknown[] = []
+  const facts: unknown[] = []
+  const harness = await mountPanel({
+    fetchImpl: async () => json(labelled),
+    inspector: { openInspection(input) { facts.push(input.ref) }, openBlockInspection() {}, openFinancialResult(id, shown) { calculations.push([id, shown]) }, closeInspection() {} },
+  })
+  try {
+    const condition = harness.document.querySelector(`[data-condition-id="${CONDITION_B}"]`)!
+    assert.deepEqual([...condition.querySelectorAll('[aria-label="Cited refs"] button')].map((ref) => ref.textContent), [
+      'F · Gross margin (gross profit / revenue) FY2025 (ended 2025-12-31) · 74.99%',
+    ])
+    const chip = condition.querySelector<HTMLButtonElement>(`[data-inspect-result="${RESULT}"]`)!
+    assert.equal(chip.getAttribute('aria-label'), 'Inspect the verified calculation for F · Gross margin (gross profit / revenue) FY2025 (ended 2025-12-31) · 74.99%')
+    await act(async () => chip.click())
+    assert.deepEqual(calculations, [[RESULT, { subject: null, measure: 'Gross margin (gross profit / revenue)', period: 'FY2025 (ended 2025-12-31)', value: '74.99%' }]])
+    assert.deepEqual([...condition.querySelectorAll('[aria-label="Inputs"] button')].map((ref) => ref.textContent), [
+      'Inspect fact evidence Gross profit FY2025',
+      'Inspect fact evidence Revenue FY2025',
+    ])
+    await clickButton(harness.document, 'Inspect fact evidence Revenue FY2025')
+    assert.deepEqual(facts, [{ kind: 'fact', id: REVENUE_FACT }])
+  } finally {
+    await harness.unmount()
+  }
+})
+
+test('a condition whose reply could not be checked reads as not enough evidence and says why', async () => {
+  const history = currentHistory()
+  const narrative = { condition_id: CONDITION_B, statement: 'Data center platforms stay the core product.', falsifier: 'The 10-K stops naming data center platforms.', horizon: 'Next 10-K' }
+  history.thesis = { ...history.thesis!, conditions: [...history.thesis!.conditions, narrative] }
+  history.versions = [history.thesis]
+  const reason = "Not enough evidence: the model's reply for this condition could not be checked against the stored sources."
+  history.assessments = [{ ...history.assessments[0]!, results: [history.assessments[0]!.results[0]!, {
+    condition_id: CONDITION_B, status: 'unresolved', reason, claim_refs: [], fact_refs: [], method: 'unchecked_reply',
+  }] }]
+  const harness = await mountPanel({ fetchImpl: async () => json(history) })
+  try {
+    const condition = harness.document.querySelector(`[data-condition-id="${CONDITION_B}"]`)!
+    assert.equal(condition.querySelector('summary')?.textContent, 'Data center platforms stay the core product.Not enough evidence1 assessment')
+    assert.equal(condition.querySelector('p.text-sm')?.textContent, reason)
+  } finally {
+    await harness.unmount()
+  }
+})
+
+test('an older model assessment with no refs does not claim it was assessed against cited sources', async () => {
+  const history = currentHistory()
+  const narrative = { condition_id: CONDITION_B, statement: 'Data center platforms stay the core product.', falsifier: 'The 10-K stops naming data center platforms.', horizon: 'Next 10-K' }
+  history.thesis = { ...history.thesis!, conditions: [...history.thesis!.conditions, narrative] }
+  history.versions = [history.thesis]
+  const result = (claimRefs: string[]) => ({ condition_id: CONDITION_B, status: 'unresolved' as const, reason: 'An older assessment. Its model-written reason is not shown.', claim_refs: claimRefs, fact_refs: [], method: 'model' as const })
+  history.assessments = [
+    { ...history.assessments[0]!, assessment_id: 'a0000000-0000-4000-8000-000000000002', assessed_at: '2026-09-09T01:00:00.000Z', prompt_version: 'living-thesis-v1', results: [result([CLAIM_B])] },
+    { ...history.assessments[0]!, prompt_version: 'living-thesis-v1', results: [result([])] },
+  ]
+  const harness = await mountPanel({ fetchImpl: async () => json(history) })
+  try {
+    const entries = [...harness.document.querySelectorAll(`[data-condition-id="${CONDITION_B}"] li[data-assessment-id]`)]
+    assert.deepEqual(entries.map((entry) => /cited certified figures/.test(entry.textContent ?? '')), [true, false])
   } finally {
     await harness.unmount()
   }

@@ -1,7 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import type { QueryExecutor } from '../../agents/src/agent-repo.ts';
+import type { ThesisEvidence, ThesisRef } from '../../agents/src/thesis-evaluator.ts';
+import type { JsonObject } from '../../observability/src/types.ts';
 import type { ThesisVersion, ConditionAssessment } from '../../agents/src/thesis-types.ts';
-import { loadLocalRuntimeEvidence, type LocalRuntimeClaimEvidence } from '../../evidence/src/local-runtime-evidence.ts';
+import { runRegisteredAnalystTool } from '../../chat/src/analyst-tools.ts';
+import { ANALYST_AGENT_BUNDLE_ID } from '../../chat/src/bundle-routing.ts';
+import type { ChatTurnRunContext } from '../../chat/src/coordinator.ts';
+import { buildEvidencePacket, mergePackets, packetForModel, type EvidencePacket } from '../../chat/src/evidence-packet.ts';
+import { certifiedFinancials } from '../../chat/src/financial-runtime.ts';
+import { LATEST } from '../../chat/src/scope-figures.ts';
+import { createRuntimeAuthority } from '../../financial-core/src/index.ts';
+import type { SavedRuleDeps } from '../../financial-engine/src/saved-rule.ts';
+import { issuerLabels, loadLocalRuntimeEvidence, type LocalRuntimeClaimEvidence } from '../../evidence/src/local-runtime-evidence.ts';
 import { buildClaimBackedSealInput, buildFactBackedSealInput, toSealFactRow, type ClaimSealDocument } from '../../snapshot/src/seal-input.ts';
 import { sealSnapshotInTransaction, snapshotTransactionClient } from '../../snapshot/src/snapshot-sealer.ts';
 import { mergeSealInputs } from '../../analyze/src/seal-input-merge.ts';
@@ -26,24 +36,38 @@ export type ThesisPacket = {
   claims: LocalRuntimeClaimEvidence[];
   documents: ClaimSealDocument[];
   facts: PacketFact[];
+  /** What the narrative conditions are assessed over: the analyst agent's packet of certified figures and claims. */
+  evidence: ThesisEvidence;
 };
+const NO_EVIDENCE: ThesisEvidence = { packet: {}, refs: {} };
+const QUIET = (() => undefined) as unknown as ChatTurnRunContext['emit'];
+const FIGURES_ASK = "The company's latest fiscal year income statement, as certified figures.";
+const NO_FIGURES = 'No certified figures were computed for this run.';
+
 export async function loadThesisPacket(db: QueryExecutor, input: {
   thesis: ThesisVersion;
   userId: string;
   asOf: string;
+  runId: string;
+  financial: SavedRuleDeps;
 }): Promise<ThesisPacket> {
+  const subject = input.thesis.subject_ref;
+  const narrative = input.thesis.conditions.some(condition => !condition.metric);
+  const filings = narrative ? await runRegisteredAnalystTool(db, 'get_claims', { subject_refs: [subject] }, { as_of: input.asOf, user_id: input.userId }) : null;
   const evidence = await loadLocalRuntimeEvidence(db, {
-    subject_refs: [input.thesis.subject_ref], user_id: input.userId,
+    subject_refs: [subject], user_id: input.userId,
     source_categories: ['filings', 'transcripts', 'news', 'issuer_ir'],
     limit: 100, as_of: input.asOf,
+    first_claim_ids: filings?.status === 'ok' && 'claims' in filings ? filings.claims.map(claim => claim.claim_id) : [],
   });
   const claims = [...evidence.claims];
   const documents = [...evidence.verifier_documents];
+  const analyst = filings ? await analystEvidence(db, input, claims, filings) : NO_EVIDENCE;
   const metrics = [...new Map(input.thesis.conditions.flatMap(condition => condition.metric
       ? [[JSON.stringify([condition.metric.metric_key, condition.metric.unit, condition.metric.period_kind]), condition.metric] as const]
       : [])).values()];
   if (!metrics.length)
-    return { claims, documents, facts: [] };
+    return { claims, documents, facts: [], evidence: analyst };
   // Bound each requested metric separately. Another unit or a dense history for
   // one condition must not displace the current evidence for another condition.
   const { rows } = await db.query<PacketFact>(`select packet.*
@@ -68,8 +92,93 @@ export async function loadThesisPacket(db: QueryExecutor, input: {
     f.as_of desc,f.fact_id limit 50
   ) packet
   order by packet.metric_key,packet.unit,packet.period_kind,packet.period_end desc,packet.as_of desc,packet.fact_id`, [input.thesis.subject_ref.id, JSON.stringify(metrics), input.asOf, input.userId]);
-  return { claims, documents, facts: rows };
+  return { claims, documents, facts: rows, evidence: analyst };
 }
+
+async function analystEvidence(
+  db: QueryExecutor,
+  input: { thesis: ThesisVersion; userId: string; asOf: string; runId: string; financial: SavedRuleDeps },
+  claims: ReadonlyArray<LocalRuntimeClaimEvidence>,
+  filings: Awaited<ReturnType<typeof runRegisteredAnalystTool>>,
+): Promise<ThesisEvidence> {
+  const issuer = input.thesis.subject_ref.id.toLowerCase();
+  const label = (await issuerLabels(db, [issuer], input.asOf))[0]?.label;
+  if (label === undefined)
+    throw new Error(`The thesis company ${issuer} is not on file.`);
+  const figures = await certifiedFigures(input, issuer, label);
+  const factsOf = await figureFacts(db, figures.figures.flatMap(figure => figure.result_id ? [figure.result_id] : []));
+  const cited = { ...figures, figures: figures.figures.filter(figure => figure.gap === undefined && factsOf.has(figure.result_id ?? '')) };
+  const tenKReadStates = 'claims' in filings ? { ...filings, claims: [] } : filings;
+  const packet = mergePackets({
+    engine: cited.figures.length ? [cited] : [],
+    route: buildEvidencePacket({ factBlocks: [], cutoff: input.asOf, claims: { claims } }),
+    analyst: [tenKReadStates],
+    figuresAskedFor: [label],
+    notes: cited.figures.length ? [] : [NO_FIGURES],
+    labels: new Map([[issuer, label]]),
+    cutoff: input.asOf,
+  });
+  const refs: Record<string, ThesisRef> = Object.fromEntries([
+    ...packet.figures.map(figure => [figure.id, {
+      claim_refs: [],
+      fact_refs: factsOf.get(figure.result_id!)!,
+      figure_refs: [{ result_id: figure.result_id!, measure: figure.metric.trim(), period: figure.period?.trim() || null, value: figure.value.trim() }],
+    }] as const),
+    ...packet.claims.map(claim => [claim.id, { claim_refs: [claim.claim_id], fact_refs: [], figure_refs: [] }] as const),
+  ]);
+  const { cutoff: _cutoff, ...sameEveryRun } = packetForModel(packet);
+  return { packet: sameEveryRun as JsonObject, refs };
+}
+
+async function certifiedFigures(
+  input: { thesis: ThesisVersion; userId: string; asOf: string; runId: string; financial: SavedRuleDeps },
+  issuer: string,
+  label: string,
+): Promise<EvidencePacket> {
+  const outcome = await certifiedFinancials({ ...input.financial, planningModel: null, clock: () => new Date(input.asOf) }, {
+    context: { threadId: input.runId, runId: input.runId, turnId: 'thesis', userId: input.userId, userIntent: FIGURES_ASK, bundleId: ANALYST_AGENT_BUNDLE_ID, emit: QUIET },
+    subjects: [{ mention: label, resolution: { status: 'resolved', subject_ref: { kind: 'issuer', id: issuer }, label } }],
+    choice: { kind: 'kept_figures', metrics: ['income_statement'], period: LATEST },
+    labels: new Map([[issuer, label]]),
+    authority: createRuntimeAuthority({
+      owner_user_id: input.userId,
+      egress_channel: 'thesis',
+      parent: { kind: 'thesis_version', id: input.thesis.thesis_version_id, version: `v${input.thesis.version}` },
+      allowed_source_classes: ['sec_filing'],
+      feature: { surface: 'thesis', capability: 'thesis-evidence', mode: 'enforce' },
+      approval_state: 'not_required',
+      lease: null,
+    }),
+    requestKey: `thesis:${input.runId}:figures`,
+    persistParent: async () => {},
+  });
+  // A company with nothing on file still publishes, with gap figures, so any other outcome is a fault the run fails on.
+  if (outcome.status !== 'published')
+    throw new Error(`Certified figures were not computed (${outcome.status}${'reason' in outcome ? `: ${outcome.reason}` : ''}).`);
+  return outcome.packet();
+}
+
+// ponytail: one dependency level, which every income statement figure has (a margin reads two reported lines).
+// A figure with a computed input is left out rather than cited on part of its facts; a walk would keep it.
+async function figureFacts(db: QueryExecutor, resultIds: ReadonlyArray<string>): Promise<Map<string, string[]>> {
+  if (!resultIds.length) return new Map();
+  const { rows } = await db.query<{ result_id: string; fact_ids: string[] }>(
+    `select r.result_id::text as result_id, array_agg(distinct i.fact_id::text order by i.fact_id::text) as fact_ids
+       from financial_results r
+       join financial_run_inputs i on i.run_id = r.run_id and i.binding_status = 'bound' and i.fact_id is not null
+        and (i.input_slot = r.node_id or r.dependencies ? i.input_slot)
+      where r.result_id = any($1::uuid[])
+        and not exists (
+          select 1 from jsonb_array_elements_text(r.dependencies) dependency(slot)
+           where not exists (select 1 from financial_run_inputs bound
+                              where bound.run_id = r.run_id and bound.input_slot = dependency.slot
+                                and bound.binding_status = 'bound' and bound.fact_id is not null))
+      group by r.result_id`,
+    [resultIds],
+  );
+  return new Map(rows.map(row => [row.result_id, row.fact_ids]));
+}
+
 /**
  * Loads facts a verified condition cited that the packet's own bounded query
  * did not include: current (not superseded or invalidated) and visible to the
