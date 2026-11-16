@@ -21,7 +21,7 @@ const GOALS: Readonly<Record<string, (company: string) => string>> = {
   competitive_position: (company) =>
     `How does ${company} compete as its 10-K's competition claims (business.competition) state it, and which industry peers are on file?`,
   downside_risks: (company) =>
-    `What are ${company}'s main downside risks as the risk factors in its 10-K (risk.factor claims) state them?`,
+    `What are ${company}'s main downside risks as the risk factors in its 10-K (risk.factor claims) state them, and how do its revenue and gross margin over its latest two fiscal years show them?`,
 };
 
 const NO_AGENT_SECTION = "The analyst agent writes no section of this playbook yet; it writes the Investment memo's narrative sections.";

@@ -29,6 +29,8 @@ type Section = { kind: string; title?: string; data_ref: { params?: { playbook_s
 
 type Script = Readonly<{
   inferences?: ReadonlyArray<string>;
+  // One theme: an attribution of every claim, and the inferences resting on it.
+  themes?: boolean;
   verdict?: "entailed" | "unsupported";
   onCall?: (kind: "read" | "answer" | "judge", certified: boolean) => void;
 }>;
@@ -66,10 +68,15 @@ function scriptedModel(calls: string[], script: Script = {}): () => LlmChatClien
     const { evidence_packet: packet } = JSON.parse(answer) as { evidence_packet: { figures: Array<{ id: string; gap?: string }>; claims: Array<{ id: string }> } };
     const figures = packet.figures.filter((figure) => figure.gap === undefined).map((figure) => figure.id);
     script.onCall?.("answer", figures.length > 0);
+    const observed = figures.length > 0 ? [{ kind: "observation", text: "Revenue was reported.", evidence: figures }] : [];
+    const quoted = script.themes
+      ? [{ kind: "management_attribution", text: "The 10-K says so.", evidence: packet.claims.map((claim) => claim.id) }]
+      : packet.claims.map((claim) => ({ kind: "management_attribution", text: "The 10-K says so.", evidence: [claim.id] }));
+    const theme = script.themes ? [observed.length] : [0];
     const assertions = [
-      ...(figures.length > 0 ? [{ kind: "observation", text: "Revenue was reported.", evidence: figures }] : []),
-      ...packet.claims.map((claim) => ({ kind: "management_attribution", text: "The 10-K says so.", evidence: [claim.id] })),
-      ...(script.inferences ?? []).map((text) => ({ kind: "analyst_inference", text, supports: [0] })),
+      ...observed,
+      ...quoted,
+      ...(script.inferences ?? []).map((text) => ({ kind: "analyst_inference", text, supports: theme })),
     ];
     return { text: `\`\`\`assertions\n${JSON.stringify(assertions)}\n\`\`\`` };
   };
@@ -284,7 +291,7 @@ test("the analyst agent writes an investment memo's sections from stored sources
     buildAnalyzeRunSeals,
   });
 
-  await t.test("an inference shows only beside certified figures, only when the judge entails it, and never in stance words", async () => {
+  await t.test("an inference shows in every section when the judge entails it, and never in stance words", async () => {
     const NEUTRAL = "Customers buy the devices in bulk.";
     const STANCE = "This is a buy.";
     const shownWhen = async (verdict: "entailed" | "unsupported") => {
@@ -293,8 +300,28 @@ test("the analyst agent writes an investment memo's sections from stored sources
       const saved = (await db.query(`select blocks from analyze_template_runs where run_id = $1`, [run.run_id])).rows[0].blocks;
       return sectionsOf(saved).map((section) => [NEUTRAL, STANCE].filter((text) => JSON.stringify(section.children).includes(text)));
     };
-    assert.deepEqual(await shownWhen("entailed"), [[NEUTRAL], [], [], []], "only the thesis certified a figure, and its stance inference is left out");
+    assert.deepEqual(await shownWhen("entailed"), [[NEUTRAL], [NEUTRAL], [NEUTRAL], [NEUTRAL]], "each section's stance inference is left out");
     assert.deepEqual(await shownWhen("unsupported"), [[], [], [], []]);
+  });
+
+  await t.test("a theme cites the claims it rests on, sealed with the memo, and its quotes come back when the judge does not entail it", async () => {
+    const THEME = "Industrial demand: a downturn would cut its sales.";
+    const risksWhen = async (verdict: "entailed" | "unsupported") => {
+      const judged = adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps({ ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" }, scriptedModel([], { inferences: [THEME], themes: true, verdict }))));
+      const run = await judged.analyze.createRun({ userId: IDS.owner, body: memoBody });
+      const saved = (await db.query(`select blocks, snapshot_id::text from analyze_template_runs where run_id = $1`, [run.run_id])).rows[0];
+      const risks = sectionsOf(saved.blocks).find((section) => section.data_ref.params?.playbook_section_id === "downside_risks")!;
+      const card = risks.children.find((child) => child.analyst_commentary === true) as { commentary: Array<Record<string, unknown>>; segments: Array<{ ref_id?: string }> };
+      const sealed = (await db.query(`select claim_refs from snapshots where snapshot_id = $1`, [saved.snapshot_id])).rows[0].claim_refs as string[];
+      return { commentary: card.commentary, quoted: card.segments.some((segment) => segment.ref_id === claimOf["risk.factor"]), sealed: sealed.includes(claimOf["risk.factor"]!) };
+    };
+    const quote = { type: "ref", ref_kind: "claim", ref_id: claimOf["risk.factor"], format: "A downturn in industrial demand could reduce our sales." };
+    assert.deepEqual(await risksWhen("entailed"), {
+      commentary: [{ kind: "inference", subject: null, basis: null, text: THEME, cites: [quote] }],
+      quoted: true,
+      sealed: true,
+    }, "the quote stands behind the theme's citation, and the memo's seal binds it");
+    assert.deepEqual(await risksWhen("unsupported"), { commentary: [{ kind: "figures", segments: [quote] }], quoted: true, sealed: true });
   });
 
   await t.test("a rerun reads at the original memo's cutoff, says what was on file then, and runs the current playbook", async () => {

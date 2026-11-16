@@ -128,6 +128,7 @@ type AgentAsk = Readonly<{
   snapshotId: string;
   scopedKey: (name: string) => string;
   noFilingAsOfCutoff: boolean;
+  writing: keyof typeof WRITING;
   trace: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id">;
   logToolCalls?: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
 }>;
@@ -183,6 +184,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       snapshotId: randomUUID(),
       scopedKey: (name) => name,
       noFilingAsOfCutoff: false,
+      writing: "chat",
       trace: { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}) },
       ...(logToolCalls ? { logToolCalls: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => logToolCalls(context.threadId, calls) } : {}),
     };
@@ -249,6 +251,7 @@ export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystS
       snapshotId: input.snapshotId,
       scopedKey: (name) => `${input.sectionId}:${name}`,
       noFilingAsOfCutoff: true,
+      writing: "themes",
       trace: { thread_id: input.runId, run_id: input.runId, turn_id: input.sectionId },
       ...(deps.logToolCalls ? { logToolCalls: deps.logToolCalls } : {}),
     };
@@ -456,7 +459,6 @@ async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promis
   let answeredBy: string | undefined;
   let written: Pick<AnsweredTurn, "assertions" | "blocks" | "judging" | "without">;
   let failed = false;
-  const askedFigures = certified.length > 0;
   const input = {
     context: { userIntent: question, bundleId: ANALYST_AGENT_BUNDLE_ID },
     blocks: [card],
@@ -464,8 +466,7 @@ async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promis
     factBlocks: noted,
     conversation,
     packet,
-    instructions: askedFigures ? [...ANSWER_RULES, ANALYSIS_RULE] : ANSWER_RULES,
-    ...(askedFigures ? {} : { answerShape: DESCRIPTION_SHAPE, inferences: false as const }),
+    ...WRITING[job.writing](certified.length > 0),
   };
   try {
     written = await deps.compose(input, { ...job.trace, question }, (deployment) => {
@@ -600,6 +601,29 @@ const DESCRIPTION_SHAPE = [
   "Answer with what the stored sources say: list management_attribution entries alone, each citing a claim that answers the question as asked,",
   "and write no analyst_inference, neither a takeaway nor a counterpoint.",
 ];
+// A memo section is synthesised: its claims grouped into themes, each weighed in an inference the judge checks against them.
+const THEME_SHAPE = [
+  "Write the section as two or three themes, each grouping the claims, and the figures where one bears on it, that speak to one subject",
+  "(for risk factors, themes such as customer concentration, supply chain, regulation and export controls, or competition), the themes that matter most first.",
+  "For each theme, in this order: one management_attribution whose evidence lists the C id of every claim in the theme; an observation of the figures",
+  "that bear on the theme, when one does; then one analyst_inference of one or two sentences that opens with the theme's name and a colon, sums up the theme,",
+  "and weighs it in its claims' own terms: what the filing says is at stake and, when a figure bears on it, what that figure shows, set beside the claims",
+  "without saying they caused it, since the filing does not say why its figures moved",
+  "({\"kind\":\"analyst_inference\",\"text\":\"Pricing: the filing warns that price swings may hurt its business and gross margins, and its gross margin moved widely between the two years shown.\",\"supports\":[0,1]}).",
+  "Its supports are the indexes of that management_attribution and those observations, and it says nothing they do not state or clearly imply.",
+  "It names the rivals, peers, customers or markets its claims name, and calls a filing \"the filing\", never by its form, since an inference writes no digit.",
+  "Industry peers on file share its industry and nothing more is known of them: a theme of peers names them and says only that.",
+  "Leave out a claim that fits no theme.",
+];
+
+// How an answer is written: a chat turn's takeaway and counterpoint beside certified figures, or what the claims say alone; a memo section's themes.
+const WRITING = {
+  chat: (askedFigures: boolean) => (askedFigures
+    ? { instructions: [...ANSWER_RULES, ANALYSIS_RULE] }
+    : { instructions: ANSWER_RULES, answerShape: DESCRIPTION_SHAPE, inferences: false as const }),
+  themes: () => ({ instructions: ANSWER_RULES, answerShape: THEME_SHAPE }),
+};
+
 const ANALYSIS_LEFT_OUT = "Some of the analysis was left out, as the turn reached its limit of model calls.";
 
 const UNFINISHED = {
