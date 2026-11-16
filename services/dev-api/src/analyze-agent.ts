@@ -13,15 +13,25 @@ import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import type { DevApiAnalyzeWorkflowInput, DevApiAnalyzeWorkflowResult } from "./analyze-adapter.ts";
 import { DevApiHttpError } from "./dev-api-shared.ts";
 
-const GOALS: Readonly<Record<string, (company: string) => string>> = {
-  investment_thesis: (company) =>
-    `What is the investment case for ${company} as its stored sources state it: what the business does and sells, and its latest fiscal year's revenue, gross margin and operating margin?`,
-  growth_drivers: (company) =>
-    `What drives ${company}'s growth as its 10-K states it (its products, markets and customers), and how did its revenue change over its latest two fiscal years?`,
-  competitive_position: (company) =>
-    `How does ${company} compete as its 10-K's competition claims (business.competition) state it, and which industry peers are on file?`,
-  downside_risks: (company) =>
-    `What are ${company}'s main downside risks as the risk factors in its 10-K (risk.factor claims) state them, and how do its revenue and gross margin over its latest two fiscal years show them?`,
+// Each agent section's goal. Downside risks reads figures only to weigh its risk factors, so with none it is empty.
+const GOALS: Readonly<Record<string, Readonly<{ ask: (company: string) => string; claimsRequired?: true }>>> = {
+  investment_thesis: {
+    ask: (company) =>
+      `What is the investment case for ${company} as its stored sources state it: what the business does and sells, and its latest fiscal year's revenue, gross margin and operating margin?`,
+  },
+  growth_drivers: {
+    ask: (company) =>
+      `What drives ${company}'s growth as its 10-K states it (its products, markets and customers), and how did its revenue change over its latest two fiscal years?`,
+  },
+  competitive_position: {
+    ask: (company) =>
+      `How does ${company} compete as its 10-K's competition claims (business.competition) state it, and which industry peers are on file?`,
+  },
+  downside_risks: {
+    ask: (company) =>
+      `What are ${company}'s main downside risks as the risk factors in its 10-K (risk.factor claims) state them, and how do its revenue and gross margin over its latest two fiscal years show them?`,
+    claimsRequired: true,
+  },
 };
 
 const NO_AGENT_SECTION = "The analyst agent writes no section of this playbook yet; it writes the Investment memo's narrative sections.";
@@ -68,7 +78,8 @@ export function analyzeAgentWorkflow(deps: AnalyzeAgentDeps): (input: DevApiAnal
     const authority = analyzeAuthority(input.userId, input.runId, input.template.template_id, input.template.version);
     const settled = await Promise.allSettled(sections.map((entry) => section({
       subject: company,
-      goal: GOALS[entry.section_id]!(company.label),
+      goal: GOALS[entry.section_id]!.ask(company.label),
+      ...(GOALS[entry.section_id]!.claimsRequired ? { claimsRequired: true } : {}),
       sectionId: entry.section_id,
       userId: input.userId,
       runId: input.runId,

@@ -214,6 +214,8 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
 export type AnalystSectionInput = Readonly<{
   subject: Readonly<{ issuer_id: string; label: string }>;
   goal: string;
+  // A section that weighs claims, such as risk factors, says no stored source covers it when it read no claim, whatever figures it read.
+  claimsRequired?: boolean;
   sectionId: string;
   userId: string;
   // The memo run the section's certified figures belong to, under its authority.
@@ -264,7 +266,7 @@ export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystS
     });
     if (!gathered?.toolCalls.some((entry) => entry.status === "ok")) return noted("unwritten", SECTION_UNREAD);
     const { figures, claims } = gathered.packet;
-    if (claims.length === 0 && figures.every((figure) => figure.gap !== undefined)) return noted("empty", NO_SOURCES);
+    if (claims.length === 0 && (input.claimsRequired || figures.every((figure) => figure.gap !== undefined))) return noted("empty", NO_SOURCES);
     const answered = await write(deps, job, gathered);
     return { status: answered.failed ? "unwritten" : "written", blocks: answered.blocks, packet: gathered.packet, assertions: answered.assertions };
   };

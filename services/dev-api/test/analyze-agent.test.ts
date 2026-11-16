@@ -31,6 +31,8 @@ type Script = Readonly<{
   inferences?: ReadonlyArray<string>;
   // One theme: an attribution of every claim, and the inferences resting on it.
   themes?: boolean;
+  // The risks reading finds figures and no risk factor.
+  risksWithoutClaims?: boolean;
   verdict?: "entailed" | "unsupported";
   onCall?: (kind: "read" | "answer" | "judge", certified: boolean) => void;
 }>;
@@ -60,6 +62,12 @@ function scriptedModel(calls: string[], script: Script = {}): () => LlmChatClien
         ] };
       }
       if (goal.includes("compete")) return { text: "", toolCalls: [call("get_claims", { subject_refs: [subject_ref], predicates: ["business.competition"] })] };
+      if (goal.includes("downside risks") && script.risksWithoutClaims) {
+        return { text: "", toolCalls: [
+          call("certified_financials", { subject_refs: [subject_ref], metrics: ["revenue"], period: { kind: "fiscal_year", fiscal_year: 2023 }, question: "Revenue in fiscal 2023" }),
+          call("get_claims", { subject_refs: [subject_ref], predicates: ["business.customers"] }),
+        ] };
+      }
       if (goal.includes("downside risks")) return { text: "", toolCalls: [call("get_claims", { subject_refs: [subject_ref], predicates: ["risk.factor"] })] };
       return { text: "", toolCalls: [call("get_company_profile", { subject_ref })] };
     }
@@ -245,6 +253,15 @@ test("the analyst agent writes an investment memo's sections from stored sources
     const runs = (await db.query(`select knowledge_cutoff from financial_runs where parent_id = $1`, [input.runId])).rows;
     assert.ok(runs.length > 0 && runs.every((row) => new Date(row.knowledge_cutoff).toISOString() === cutoff), "the agent's figures are planned at the memo's cutoff");
     assert.ok(sections.every((section) => JSON.stringify(section.children).includes("Beta Holdings Corp.")), "issuer B, as the engine's sections, not listing A");
+  });
+
+  await t.test("downside risks with figures and no risk factor says no stored source covers it, and writes nothing from the figures alone", async () => {
+    const calls: string[] = [];
+    const { blocks } = await analyzeAgentWorkflow(analyzeAgentDeps(LLM_ENV, scriptedModel(calls, { risksWithoutClaims: true })))(workflowInput([{ kind: "listing", id: LISTING }]));
+    const risks = blocks.at(-1) as unknown as Section;
+    assert.equal(risks.data_ref.params?.playbook_section_id, "downside_risks", "no certified figure follows the risks section");
+    assert.match((risks.children[0]!.segments as Array<{ text: string }>)[0]!.text, /^No stored source covers this section\./);
+    assert.equal(calls.filter((entry) => entry === "answer").length, 3, "only the other three sections write an answer");
   });
 
   await t.test("a section that fails fails the memo only once every other section has settled", async () => {
