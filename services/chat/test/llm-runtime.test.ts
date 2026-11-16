@@ -1222,6 +1222,30 @@ test("a quote in a stored disagreement stays in the commentary beside its other 
   ]);
 });
 
+test("a claim no ref opens keeps its date in the text and stays beside a shown inference, and an undated one stands behind it", () => {
+  const toolCall = {
+    tool_call_id: "tc-1",
+    tool_name: "research_lookup",
+    status: "ok",
+    result: { evidence: { claims: [
+      { claim_id: "c2080000-0000-4000-8000-000000000011", source_id: "s1", text_canonical: "Demand is strong.", predicate: "kpi.commentary", polarity: "positive", published_at: "2026-02-25T00:00:00.000Z" },
+      { claim_id: "consensus:capture-1", source_id: "s2", text_canonical: "Consensus revenue FY2027: $300B", predicate: "consensus.revenue", polarity: "neutral", published_at: "2026-11-10T00:00:00.000Z" },
+      { claim_id: "peer:NVDA:issuer-amd", source_id: "s3", text_canonical: "Industry peer: AMD shares NVDA's industry (Semiconductors)", predicate: "industry.peer", polarity: "neutral" },
+    ] } },
+  } as never;
+  const packet = turnPacket({ toolCalls: [toolCall] });
+  const [block] = renderedAnswer({ blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [toolCall] }, packet, checkAssertions([
+    { kind: "management_attribution", text: "Demand is strong.", evidence: ["C1"] },
+    { kind: "management_attribution", text: "Consensus expects more.", evidence: ["C2"] },
+    { kind: "management_attribution", text: "AMD is a peer.", evidence: ["C3"] },
+    { kind: "analyst_inference", text: "Demand: the sources and its peers point the same way.", supports: [0, 1, 2] },
+  ], packet)).blocks(new Map([[3, "shown"]]));
+  assert.deepEqual(block!.commentary, [
+    { kind: "figures", segments: [{ type: "text", text: "According to a source dated Nov 2026: " }, { type: "text", text: "Consensus revenue FY2027: $300B" }] },
+    { kind: "inference", subject: null, basis: null, text: "Demand: the sources and its peers point the same way.", cites: [{ type: "ref", ref_kind: "claim", ref_id: "c2080000-0000-4000-8000-000000000011", format: "Demand is strong." }] },
+  ]);
+});
+
 test("a rendered answer says when more claims matched, or none could be read (#208)", async () => {
   const truncated = { ...(A_TOOL_CALL as unknown as Record<string, unknown>) };
   truncated.result = { evidence: { ...((A_TOOL_CALL as unknown as { result: { evidence: Record<string, unknown> } }).result.evidence), truncated: true } };

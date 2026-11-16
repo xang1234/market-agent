@@ -13,7 +13,6 @@ import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import type { DevApiAnalyzeWorkflowInput, DevApiAnalyzeWorkflowResult } from "./analyze-adapter.ts";
 import { DevApiHttpError } from "./dev-api-shared.ts";
 
-// Each agent section's goal. Downside risks reads figures only to weigh its risk factors, so with none it is empty.
 const GOALS: Readonly<Record<string, Readonly<{ ask: (company: string) => string; claimsRequired?: true }>>> = {
   investment_thesis: {
     ask: (company) =>

@@ -25,12 +25,14 @@ const segmentsOf = (block: Block): Segment[] => [...(block.segments ?? []), ...(
 
 const themesOf = (block: Block): number => (block.commentary ?? []).filter((part) => part.kind === "inference").length + (block.children ?? []).reduce((sum, child) => sum + themesOf(child), 0);
 
-// The judge's line for a section of this run (answer-trace.ts): what it showed of the inferences it read, and why a call gave no verdict.
-const JUDGE_LINE = /^\[chat\] judge thread=(\S+) run=\S+ turn=(\S+)(?: on [^:]+)?: (\d+) shown, (\d+) unverified, of (\d+) inferences(?: \((.*)\))?$/gm;
+// The judge's log line, as answer-trace.ts writes it.
+const JUDGE_LINE = /^\[chat\] judge thread=(\S+) run=\S+ turn=(\S+)(?: on .+?)?: (\d+) shown, (\d+) unverified, of (\d+) inferences(?: \((.*)\))?$/gm;
 function judgedIn(log: string, runId: string | undefined) {
   const bySection = new Map<string, { shown: number; of: number; reasons: string[] }>();
   for (const [, thread, section, shown, , of, reasons] of log.matchAll(JUDGE_LINE)) {
-    if (thread === runId) bySection.set(section!, { shown: Number(shown), of: Number(of), reasons: reasons ? reasons.split("; ") : [] });
+    if (thread !== runId) continue;
+    const seen = bySection.get(section!) ?? { shown: 0, of: 0, reasons: [] };
+    bySection.set(section!, { shown: seen.shown + Number(shown), of: seen.of + Number(of), reasons: [...seen.reasons, ...(reasons ? reasons.split("; ") : [])] });
   }
   return bySection;
 }
@@ -47,7 +49,6 @@ export function memoVerdict(seen: {
   failure: string | null;
   memoMs: number | null;
   llmCalls: number | null;
-  // The dev-api log written while the memo generated.
   log: string;
   evidence: string;
 }) {

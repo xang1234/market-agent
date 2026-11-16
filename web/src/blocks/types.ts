@@ -95,8 +95,7 @@ export type RichTextSegment = TextSegment | RefSegment
 
 // One part of analyst commentary: a statement of figures, an inference the
 // judge found entailed, one it found unsupported, one it is still checking,
-// or a note. An inference's words are plain text, never Markdown; its cites
-// are the claims it rests on, whose quotes the commentary leaves out.
+// or a note. An inference's words are plain text, never Markdown.
 export type CommentaryPart =
   | { kind: 'figures'; segments: ReadonlyArray<RichTextSegment> }
   | { kind: 'inference'; subject: string | null; basis: string | null; text: string; cites?: ReadonlyArray<RefSegment> }

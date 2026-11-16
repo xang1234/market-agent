@@ -37,7 +37,6 @@ export function RichText({ block }: RichTextProps): ReactElement {
   )
 }
 
-// Each claim a block cites, numbered in the order the reader meets it.
 function citationNumbers(segments: ReadonlyArray<RichTextSegment>): ReadonlyMap<string, number> {
   const numbers = new Map<string, number>()
   for (const segment of segments) {
@@ -130,7 +129,7 @@ function Commentary({ block, parts }: { block: RichTextBlock; parts: ReadonlyArr
       <h3 id={`${block.id}-analysis`} className="text-sm font-semibold text-fg">Analysis</h3>
       {takeaways.length > 0 ? (
         <ul className="flex flex-col gap-3">
-          {takeaways.map((part, index) => <TakeawayItem key={index} block={block} part={part} numbers={numbers} />)}
+          {takeaways.map((part, index) => <TakeawayItem key={index} index={index} block={block} part={part} numbers={numbers} />)}
         </ul>
       ) : null}
       {figures.length > 0 ? list('Supporting figures', 'figures', figures) : null}
@@ -140,7 +139,7 @@ function Commentary({ block, parts }: { block: RichTextBlock; parts: ReadonlyArr
   )
 }
 
-function TakeawayItem({ block, part, numbers }: { block: RichTextBlock; part: Takeaway; numbers: ReadonlyMap<string, number> }): ReactElement {
+function TakeawayItem({ index, block, part, numbers }: { index: number; block: RichTextBlock; part: Takeaway; numbers: ReadonlyMap<string, number> }): ReactElement {
   const badge = BADGES[part.kind]
   return (
     <li data-commentary-part={part.kind}>
@@ -148,8 +147,8 @@ function TakeawayItem({ block, part, numbers }: { block: RichTextBlock; part: Ta
         <span title={badge.title} className={`${PILL_CLASS} mr-2 align-[1px] ${badge.className}`}>{badge.text}</span>
         {part.kind !== 'pending' && part.subject ? <span className="mr-1.5 font-semibold">{part.subject}</span> : null}
         {part.kind === 'pending' ? <span className="text-muted">An analyst inference is being checked against the figures it rests on.</span> : part.text}
-        {part.kind === 'inference' ? (part.cites ?? []).map((cite, index) => (
-          <Citation key={cite.ref_id} snapshotId={block.snapshot_id} blockId={block.id} index={`cite-${index}`} segment={cite} number={numbers.get(cite.ref_id)!} quoted />
+        {part.kind === 'inference' ? (part.cites ?? []).map((cite, n) => (
+          <Citation key={cite.ref_id} snapshotId={block.snapshot_id} blockId={block.id} index={`cite-${index}-${n}`} segment={cite} number={numbers.get(cite.ref_id)!} quoted />
         )) : null}
       </p>
       {part.kind === 'inference' && part.basis ? <p className="text-xs text-muted">Based on {part.basis}.</p> : null}
@@ -166,8 +165,6 @@ function OfferedChoices({ blockId, choices }: { blockId: string; choices: Readon
   )
 }
 
-// A claim's footnote marker: it opens the claim, its filing and its date. One
-// standing for a quote not on the page shows the quote on hover.
 const CITATION_CLASS = 'relative -top-[0.45em] ml-0.5 text-[0.7em] font-medium leading-none text-accent hover:underline'
 
 function Citation({ snapshotId, blockId, index, segment, number, quoted = false }: Omit<RefSegmentSpanProps, 'segment'> & {
@@ -185,7 +182,7 @@ function Citation({ snapshotId, blockId, index, segment, number, quoted = false 
         className={CITATION_CLASS}
       >
         <span aria-hidden="true">[{number}]</span>
-        <span className="sr-only">Source {number}</span>
+        <span className="sr-only">{quoted ? `Source ${number}: ${refSegmentText(segment)}` : `Source ${number}`}</span>
       </InspectableRef>
     </span>
   )

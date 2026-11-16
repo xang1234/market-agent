@@ -53,10 +53,12 @@ test("the memo flow reports each section's themes shown and what the judge did w
     `[chat] judge thread=${RUN} run=${RUN} turn=downside_risks on anthropic/claude-haiku-5-5: 2 shown, 0 unverified, of 4 inferences (judge call failed: the turn has made its model calls)`,
     `[chat] judge thread=${RUN} run=${RUN} turn=competitive_position on anthropic/claude-haiku-5-5: 1 shown, 0 unverified, of 3 inferences`,
     "[chat] judge thread=4f000000-0000-4000-8000-0000000000f2 run=4f000000-0000-4000-8000-0000000000f2 turn=growth_drivers: 0 shown, 0 unverified, of 2 inferences",
+    `[chat] judge thread=${RUN} run=${RUN} turn=investment_thesis on bedrock/anthropic.claude-haiku-5-5-v1:0: 1 shown, 0 unverified, of 2 inferences`,
+    `[chat] judge thread=${RUN} run=${RUN} turn=investment_thesis on opencode/claude-haiku:free: 2 shown, 0 unverified, of 2 inferences (judge call failed: timeout)`,
   ].join("\n");
   const { report } = memoVerdict({ ...base, run, log });
   assert.deepEqual(report.sections.map((section) => [section.id, "themes_shown" in section ? section.themes_shown : null, "judge" in section ? section.judge : null]), [
-    ["investment_thesis", 0, null],
+    ["investment_thesis", 0, { shown: 3, of: 4, reasons: ["judge call failed: timeout"] }],
     ["growth_drivers", 0, null],
     ["competitive_position", 0, { shown: 1, of: 3, reasons: [] }],
     ["downside_risks", 2, { shown: 2, of: 4, reasons: ["judge call failed: the turn has made its model calls"] }],

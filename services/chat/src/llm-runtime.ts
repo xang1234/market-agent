@@ -12,7 +12,7 @@ import type {
 } from "./coordinator.ts";
 import { buildEvidencePacket, figureCompanies, packetForModel, type ClaimEvidence, type ClaimRecord, type EvidencePacket } from "./evidence-packet.ts";
 import { assertionList, checkAssertions, MAX_ASSERTIONS, type AssertionReport } from "./assertions.ts";
-import { answerPeriods, inferenceWords, plainText, renderAssertion, renderQuotes, unverifiedInference, type InferenceWords, type RenderedAssertion } from "./render-assertions.ts";
+import { answerPeriods, datedInText, inferenceWords, plainText, renderAssertion, renderQuotes, unverifiedInference, type InferenceWords, type RenderedAssertion } from "./render-assertions.ts";
 import type { Segment } from "./prose-refs.ts";
 import type { ShownAs } from "./verdicts.ts";
 import type { ResearchScope } from "./research-scope.ts";
@@ -26,8 +26,7 @@ const NO_ANSWER_FALLBACK_TEXT = "No written answer is available for this questio
 // templates, with the notes they cannot say themselves, or a fixed sentence no
 // model wrote. The model's prose is never shown. An analyst inference's
 // paragraph names its assertion and carries its unverified form: which one
-// shows, if any, is the judge's verdict. Its cites are the claims its
-// attributions quote; an attribution's quotedBy, the inferences resting on it.
+// shows, if any, is the judge's verdict.
 type Paragraph = Pick<RenderedAssertion, "index" | "segments" | "fact_bindings" | "source_refs"> & {
   inference?: { index: number; unverified: ReadonlyArray<Segment>; words: InferenceWords; cites: ReadonlyArray<Segment> };
   quotedBy?: ReadonlyArray<number>;
@@ -42,8 +41,7 @@ type Answer =
 // one Markdown text), so a reader can lead with the inferences, badged by
 // their verdict: a statement of figures (one per comparison), an inference
 // the judge found entailed, one it found unsupported, one it is still reading,
-// or a note. A shown inference cites the claims it rests on, and the
-// commentary leaves out the quotes those cites open.
+// or a note.
 export type CommentaryPart =
   | { kind: "figures"; segments: ReadonlyArray<Segment> }
   | { kind: "inference"; subject: string | null; basis: string | null; text: string; cites?: ReadonlyArray<Segment> }
@@ -407,11 +405,11 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
       const refs = rendered.filter((entry) => entry.kind === "management_attribution" && supports.includes(entry.index)).flatMap((entry) => entry.segments.filter(isClaimRef));
       return [...new Map(refs.map((ref) => [ref.ref_id, ref])).values()];
     };
-    // A quote in a stored disagreement stays on the page beside its other side.
     const disputed = new Set(packet.disagreements.flatMap((entry) => entry.claims));
+    const dated = new Set(packet.claims.filter(datedInText).map((claim) => claim.id));
     const kept = rendered.map((entry, i) => {
       const assertion = report.accepted[i]!;
-      if (assertion.kind === "management_attribution") return { ...entry, quotedBy: assertion.evidence.some((id) => disputed.has(id)) ? [] : restingOn(assertion.index) };
+      if (assertion.kind === "management_attribution") return { ...entry, quotedBy: assertion.evidence.some((id) => disputed.has(id) || dated.has(id)) ? [] : restingOn(assertion.index) };
       if (assertion.kind !== "analyst_inference") return entry;
       const words = inferenceWords(assertion, packet, report.accepted);
       return { ...entry, inference: { index: assertion.index, unverified: unverifiedInference(assertion, packet), words, cites: quoted(assertion.supports ?? []) } };

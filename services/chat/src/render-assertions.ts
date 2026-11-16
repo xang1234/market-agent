@@ -14,6 +14,7 @@ import { periodParts } from "../../financial-core/src/index.ts";
 import type { Assertion } from "./assertions.ts";
 import { checkedComparisons, metricLabel as definedMetric, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
 import type { EvidencePacket, PacketClaim, PacketFigure } from "./evidence-packet.ts";
+import { isUuid } from "./chat-ids.ts";
 import { createSealer, type Sealer, type Segment } from "./prose-refs.ts";
 
 // Prose names an engine measure without its formula ("net margin", not "net margin (net income / revenue)"): the table's heading carries it.
@@ -150,20 +151,22 @@ export function attributionSegments(claims: ReadonlyArray<AttributedClaim>, quot
   });
 }
 
-// A management attribution as the reader sees it: each claim quoted on a line
-// of its own, its date and filing a click away on its ref, and its company
-// named only when the answer covers several. The judge reads the dated form above.
 export function renderQuotes(assertion: Assertion & { index: number }, packet: EvidencePacket, factBlocks: ReadonlyArray<Block>): RenderedAssertion {
   const seal = createSealer(factBlocks);
   const several = packet.companies.length > 1;
   const segments = assertion.evidence.flatMap((id) => packet.claims.filter((claim) => claim.id === id)).flatMap((claim, i): Segment[] => [
     ...(i === 0 ? [] : [{ type: "text" as const, text: "\n\n" }]),
-    ...(several && claim.company ? [{ type: "text" as const, text: `${claim.company}: ` }] : []),
-    seal.quote(claim),
+    ...(datedInText(claim)
+      ? attributionSegments([claim], seal.quote)
+      : [...(several && claim.company ? [{ type: "text" as const, text: `${claim.company}: ` }] : []), seal.quote(claim)]),
   ]);
   const { fact_bindings, source_refs } = seal.sealed();
   return { index: assertion.index, segments, figure_ids: [], fact_bindings, source_refs };
 }
+
+// No ref opens a dated claim with no claim row, such as a consensus capture, so its text says its date.
+export const datedInText = (claim: Pick<PacketClaim, "claim_id" | "published_at" | "effective_time">): boolean =>
+  !isUuid(claim.claim_id) && Boolean(claim.published_at || claim.effective_time);
 
 // An inference the judge found unsupported, or flagged as stating an amount
 // in words (verdicts.ts shownAs), with no checked results to lend it weight.

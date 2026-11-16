@@ -29,7 +29,6 @@ type Section = { kind: string; title?: string; data_ref: { params?: { playbook_s
 
 type Script = Readonly<{
   inferences?: ReadonlyArray<string>;
-  // One theme: an attribution of every claim, and the inferences resting on it.
   themes?: boolean;
   // The risks reading finds figures and no risk factor.
   risksWithoutClaims?: boolean;

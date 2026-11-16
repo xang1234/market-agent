@@ -214,7 +214,6 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
 export type AnalystSectionInput = Readonly<{
   subject: Readonly<{ issuer_id: string; label: string }>;
   goal: string;
-  // A section that weighs claims, such as risk factors, says no stored source covers it when it read no claim, whatever figures it read.
   claimsRequired?: boolean;
   sectionId: string;
   userId: string;
@@ -603,7 +602,6 @@ const DESCRIPTION_SHAPE = [
   "Answer with what the stored sources say: list management_attribution entries alone, each citing a claim that answers the question as asked,",
   "and write no analyst_inference, neither a takeaway nor a counterpoint.",
 ];
-// A memo section is synthesised: its claims grouped into themes, each weighed in an inference the judge checks against them.
 const THEME_SHAPE = [
   "Write the section as two or three themes, each grouping the claims, and the figures where one bears on it, that speak to one subject",
   "(for risk factors, themes such as customer concentration, supply chain, regulation and export controls, or competition), the themes that matter most first.",
@@ -618,7 +616,6 @@ const THEME_SHAPE = [
   "Leave out a claim that fits no theme.",
 ];
 
-// How an answer is written: a chat turn's takeaway and counterpoint beside certified figures, or what the claims say alone; a memo section's themes.
 const WRITING = {
   chat: (askedFigures: boolean) => (askedFigures
     ? { instructions: [...ANSWER_RULES, ANALYSIS_RULE] }

@@ -9,7 +9,7 @@ test('an answer copies as Markdown, and a chart names itself instead of vanishin
   assert.equal(
     answerText([richTextFixture, tableFixture, lineChartFixture, disclosureFixture]),
     [
-      'Apple posted Q3 revenue of $85.8B, up year over year. Management guided cautiously on services growth.',
+      'Apple posted Q3 revenue of $85.8B, up year over year. Management “guided cautiously” on services growth.',
       'Recent quarters\n\n| Quarter | Revenue | Net income |\n| --- | --- | --- |\n| Q3 FY24 | $85.8B | $21.4B |\n| Q2 FY24 | $90.8B | $23.6B |\n| Q1 FY24 | $119.6B | $33.9B |',
       '[In the app: Revenue trajectory]',
       '- Forward estimates are model-derived and may diverge from consensus.\n- Quotes are delayed by 15 minutes during regular trading hours.',
@@ -43,7 +43,7 @@ test('P/E scenarios copy with the EPS, each multiple as the user\'s, and the dis
 
 test('an answer in a format this app does not know copies nothing for that block', () => {
   const newer = { ...financialAnswerFixture, financial: { presentation_version: 'financial-presentation.v99' } } as FinancialAnswerBlock
-  assert.equal(answerText([newer, richTextFixture]), 'Apple posted Q3 revenue of $85.8B, up year over year. Management guided cautiously on services growth.')
+  assert.equal(answerText([newer, richTextFixture]), 'Apple posted Q3 revenue of $85.8B, up year over year. Management “guided cautiously” on services growth.')
 })
 
 test('a pipe in a cell cannot split a Markdown table column', () => {
@@ -81,4 +81,13 @@ test('a copied answer ends with the date of its newest data and its snapshot', (
 test('a clarification copies with the options it offered as buttons', () => {
   const clarification = { ...richTextFixture, segments: [{ type: 'text' as const, text: 'Which margin would you like?' }], clarification_choices: ['Gross margin', 'Operating margin'] }
   assert.equal(answerText([clarification]), 'Which margin would you like?\n\n- Gross margin\n- Operating margin')
+})
+
+test('a quoted claim copies inside quotation marks, so the filing\'s words stay apart from the analyst\'s', () => {
+  const block = {
+    id: 'rt-quote', kind: 'rich_text', snapshot_id: '11111111-1111-4111-8111-111111111111', data_ref: { kind: 'rich_text', id: 'rt-quote' },
+    source_refs: [], as_of: '2026-06-01T00:00:00.000Z',
+    segments: [{ type: 'text', text: 'MU: ' }, { type: 'ref', ref_kind: 'claim', ref_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', format: 'Our top customers make up *much* of our revenue.' }],
+  } as const
+  assert.equal(answerText([block as unknown as Parameters<typeof answerText>[0][number]]), 'MU: “Our top customers make up \\*much\\* of our revenue.”')
 })
