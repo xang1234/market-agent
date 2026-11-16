@@ -131,6 +131,16 @@ export async function draftThesisConditions(
 ): Promise<ThesisCondition[]> {
   const normalizedThesis = parseThesisText(thesis);
 
+  // An unusable reply is asked for once more, since claude-sonnet-5-5 sometimes corrects its JSON in prose and repeats it.
+  try {
+    return await draftOnce(llm, normalizedThesis);
+  } catch (error) {
+    if (!(error instanceof ThesisValidationError)) throw error;
+    return draftOnce(llm, normalizedThesis);
+  }
+}
+
+async function draftOnce(llm: ThesisLlm, thesis: string): Promise<ThesisCondition[]> {
   const response = await llm.complete({
     messages: [
       {
@@ -139,9 +149,9 @@ export async function draftThesisConditions(
           "Suggest exactly three independent narrative investment-thesis conditions. " +
           "Return JSON as {\"conditions\":[{\"statement\":string,\"falsifier\":string,\"horizon\":string}]}. " +
           "Keep each statement and falsifier under 500 characters and each horizon a short phrase under 120 characters. " +
-          "Do not include IDs or numerical metric conditions. State no rating, recommendation, or price target.",
+          "Do not include IDs or numerical metric conditions.",
       },
-      { role: "user", content: normalizedThesis },
+      { role: "user", content: thesis },
     ],
     temperature: 0.2,
     maxTokens: DRAFT_MAX_TOKENS,
@@ -176,24 +186,17 @@ function parseNarrativeResults(
     throw new ThesisValidationError(`${label} results must be an array`);
   }
 
-  const allowedConditionIds = new Set(conditions.map((condition) => condition.condition_id));
-  const seenConditionIds = new Set<string>();
-  const results = parsed.results.map((item, index): ConditionAssessment => {
-    const row = requireObject(item, `assessment response results[${index}]`);
-    if (typeof row.condition_id !== "string" || !allowedConditionIds.has(row.condition_id)) {
-      throw new ThesisValidationError(`assessment response results[${index}].condition_id is not supplied`);
-    }
-    if (seenConditionIds.has(row.condition_id)) {
-      throw new ThesisValidationError(`assessment response condition ${row.condition_id} is duplicated`);
-    }
-    seenConditionIds.add(row.condition_id);
-    return assessmentOrNotEnoughEvidence(row.condition_id, row.status, row.refs, refs);
-  });
-
-  if (results.length !== conditions.length) {
-    throw new ThesisValidationError("assessment response must contain every narrative condition exactly once");
+  // A row that is missing, repeated, or names no supplied condition leaves only that condition unchecked.
+  const rowsById = new Map<unknown, Record<string, unknown>[]>();
+  for (const item of parsed.results) {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    rowsById.set(row.condition_id, [...(rowsById.get(row.condition_id) ?? []), row]);
   }
-  return results;
+  return conditions.map(({ condition_id }) => {
+    const rows = rowsById.get(condition_id);
+    return rows?.length === 1 ? assessmentOrNotEnoughEvidence(condition_id, rows[0].status, rows[0].refs, refs) : uncheckedReply(condition_id);
+  });
 }
 
 function assessmentOrNotEnoughEvidence(conditionId: string, status: unknown, refIds: unknown, refs: ThesisEvidence["refs"]): ConditionAssessment {

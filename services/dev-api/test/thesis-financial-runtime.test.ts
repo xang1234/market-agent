@@ -108,3 +108,56 @@ test("a narrative condition citing a figure reuses its assessment on unchanged e
   assert.deepEqual({ ...figure, result_id: undefined }, { result_id: undefined, measure: "Gross margin (gross profit / revenue)", period: `FY${year} (ended ${year}-12-31)`, value: "74.99%" });
   assert.equal((await inspectCommittedResult(pool, IDS.owner, figure!.result_id))?.availability, "available", "the reused figure still opens its calculation");
 });
+
+test("a run that keeps results from two snapshots seals a new one holding every fact they cite", { skip: !dockerAvailable(), timeout: 300_000 }, async (t) => {
+  const db = await engineDatabase(t, "thesis-two-kept-snapshots");
+  const pool = await connectedPool(t, databaseUrl(db));
+  const year = new Date().getUTCFullYear() - 1;
+  const revenueFact = await seedReportedFact(db, { metric_key: "revenue", value: "130497000000", fiscal_year: year });
+  const grossProfitFact = await seedReportedFact(db, { metric_key: "gross_profit", value: "97858000000", fiscal_year: year });
+  const agent = await createAgent(db, {
+    user_id: IDS.owner, name: "Two-line monitor", thesis: "Alpha's revenue and gross profit hold.", cadence: "daily",
+    universe: { mode: "static", subject_refs: [{ kind: "issuer", id: IDS.issuerA }] },
+  });
+  const [revenueCondition, grossProfitCondition] = [randomUUID(), randomUUID()];
+  const thesis = await saveThesis(db, {
+    agent_id: agent.agent_id, user_id: IDS.owner, expected_version: 0, thesis: agent.thesis,
+    subject_ref: { kind: "issuer", id: IDS.issuerA },
+    conditions: [
+      { condition_id: revenueCondition, statement: "Annual revenue holds near its level.", falsifier: "Annual revenue falls by a third.", horizon: "Next fiscal year" },
+      { condition_id: grossProfitCondition, statement: "Gross profit holds near its level.", falsifier: "Gross profit falls by a third.", horizon: "Next fiscal year" },
+    ],
+  });
+  const asked: string[][] = [];
+  const citing = (metricFor: Record<string, string>): ThesisLlm => ({
+    async complete(input) {
+      const { conditions, evidence } = JSON.parse(input.messages[1]!.content) as { conditions: Array<{ condition_id: string }>; evidence: { figures: Array<{ id: string; metric: string }> } };
+      asked.push(conditions.map((condition) => condition.condition_id));
+      const ref = (id: string) => evidence.figures.find((figure) => figure.metric.trim() === metricFor[id])?.id ?? "F99";
+      return { text: JSON.stringify({ results: conditions.map((condition) => ({ condition_id: condition.condition_id, status: "supported", refs: [ref(condition.condition_id)] })) }), deployment: { channel: "test", model: "scripted" } };
+    },
+  });
+  const run = async (llm: ThesisLlm, beforePersist?: () => Promise<unknown>) => {
+    const fresh = (await getAgent(db, agent.agent_id))!;
+    const stages = createThesisAgentLoopStages({
+      db: pool, userId: IDS.owner, runId: randomUUID(), agent: fresh, thesis,
+      financial: { pool, evidence: createEvidenceFinancialPort },
+      getModel: async () => ({ llm, identity: "scripted" }),
+    });
+    if (beforePersist) {
+      const analyze = stages.analyze;
+      stages.analyze = async (stage) => { const result = await analyze(stage); await beforePersist(); return result; };
+    }
+    return runAgentLoop({ pool, agent_id: agent.agent_id, current_watermarks: fresh.watermarks, stages });
+  };
+
+  await run(citing({ [revenueCondition]: "Revenue" }), () => run(citing({ [grossProfitCondition]: "Gross profit" })));
+  await run(citing({}));
+  const [third, ...overlapping] = (await loadThesisHistory(db, { agent_id: agent.agent_id, user_id: IDS.owner })).assessments;
+  assert.equal(asked.length, 2, "the third run keeps each condition's checked result and calls no model");
+  assert.deepEqual(third!.results.map((result) => [result.method, result.fact_refs]), [["model", [revenueFact]], ["model", [grossProfitFact]]]);
+  assert.equal(new Set(overlapping.map((assessment) => assessment.snapshot_id)).size, 2, "each overlapping run sealed its own snapshot");
+  assert.ok(!overlapping.some((assessment) => assessment.snapshot_id === third!.snapshot_id), "neither snapshot seals both conditions' facts, so the run seals its own");
+  const sealed = (await db.query<{ fact_refs: string[] }>(`select fact_refs from snapshots where snapshot_id = $1::uuid`, [third!.snapshot_id])).rows[0]!.fact_refs;
+  assert.deepEqual([revenueFact, grossProfitFact].filter((fact) => !sealed.includes(fact)), [], "every cited fact is sealed in the run's snapshot");
+});

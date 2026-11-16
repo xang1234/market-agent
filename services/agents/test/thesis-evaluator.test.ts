@@ -174,29 +174,33 @@ test("evaluateThesis requires a model when narrative evidence is available", asy
   );
 });
 
-test("evaluateThesis rejects a reply that drops or repeats a condition", async () => {
-  const cases: Array<[string, unknown, RegExp]> = [
-    ["missing row", { results: [] }, /every narrative condition/],
-    ["duplicate row", { results: [
-      { condition_id: BULL_ID, status: "supported", refs: ["C1"] },
-      { condition_id: BULL_ID, status: "challenged", refs: ["C1"] },
-    ] }, /duplicated/],
-    ["unknown condition", { results: [{ condition_id: BEAR_ID, status: "supported", refs: ["C1"] }] }, /not supplied/],
+test("a reply row that is missing, repeated, null, or names no supplied condition leaves only that condition unchecked", async () => {
+  const unchecked = { condition_id: BULL_ID, status: "unresolved", reason: UNCHECKED_REPLY, claim_refs: [], fact_refs: [], method: "unchecked_reply" };
+  const bear = { condition_id: BEAR_ID, status: "challenged", refs: ["C1"] };
+  const cases: Array<[string, unknown[]]> = [
+    ["missing row", [bear]],
+    ["null row", [null, bear]],
+    ["duplicate row", [{ condition_id: BULL_ID, status: "supported", refs: ["C1"] }, { condition_id: BULL_ID, status: "challenged", refs: ["C1"] }, bear]],
+    ["unknown condition", [{ condition_id: METRIC_ID, status: "supported", refs: ["C1"] }, bear]],
+    ["no condition id", [{ status: "supported", refs: ["C1"] }, bear]],
   ];
-
-  for (const [name, response, message] of cases) {
-    await assert.rejects(
-      evaluateThesis({
-        thesis: thesis([condition(BULL_ID)]),
-        evidence: EVIDENCE,
-        known_results: [],
-        as_of: AS_OF,
-        llm: llmResponse(response),
-      }),
-      (error: unknown) => error instanceof ThesisValidationError && message.test(error.message),
-      name,
-    );
+  for (const [name, rows] of cases) {
+    const { results } = await evaluateThesis({
+      thesis: thesis([condition(BULL_ID), condition(BEAR_ID)]),
+      evidence: EVIDENCE,
+      known_results: [],
+      as_of: AS_OF,
+      llm: llmResponse({ results: rows }),
+    });
+    assert.deepEqual(results, [
+      unchecked,
+      { condition_id: BEAR_ID, status: "challenged", reason: "The cited stored sources challenge this condition.", claim_refs: [CLAIM_ID], fact_refs: [], method: "model" },
+    ], name);
   }
+  await assert.rejects(
+    evaluateThesis({ thesis: thesis([condition(BULL_ID)]), evidence: EVIDENCE, known_results: [], as_of: AS_OF, llm: llmResponse({ results: null }) }),
+    new ThesisValidationError("assessment response results must be an array"),
+  );
 });
 
 test("a condition whose status the reply cannot back is not enough evidence, says why, and the other conditions keep theirs", async () => {
@@ -311,6 +315,17 @@ test("draftThesisConditions rejects responses that do not contain exactly three 
   );
 });
 
+test("draftThesisConditions asks again when a reply corrects itself in prose, and keeps none of the first reply", async () => {
+  const suggestion = (statement: string) => ({ statement, falsifier: "Customers move production workloads to rival accelerators.", horizon: "Next 2-4 years" });
+  // The reply shape claude-sonnet-5-5 returned on 2 of 15 calls on 2026-11-16: an object, a correction in prose, then a second object.
+  const selfCorrected = JSON.stringify({ conditions: [suggestion("Platform software keeps customers on the stack."), { conditions: null, ...suggestion("Demand stays broad across buyers.") }, suggestion("Product cadence outpaces rivals.")] }) +
+    "\n\nWait, I need to correct a formatting error in the second item. Here is the valid JSON:\n\n" +
+    JSON.stringify({ conditions: [suggestion("Platform software keeps customers on the stack."), suggestion("Demand stays broad across buyers."), suggestion("Product cadence outpaces rivals.")] });
+  const replies = [selfCorrected, JSON.stringify({ conditions: [suggestion("Networking revenue keeps growing."), suggestion("Software attach rises."), suggestion("Supply keeps pace with orders.")] })];
+  const conditions = await draftThesisConditions({ async complete() { return { text: replies.shift()! }; } }, "Demand remains durable while execution improves.");
+  assert.deepEqual(conditions.map((item) => item.statement), ["Networking revenue keeps growing.", "Software attach rises.", "Supply keeps pace with orders."]);
+});
+
 test("draftThesisConditions leaves room for thinking, which counts against the token budget", async () => {
   // Captured from claude-sonnet-5-5 on 2026-11-04: up to 711 thinking tokens, then about 750 of JSON.
   const llm: ThesisLlm = {
@@ -339,11 +354,15 @@ test("draftThesisConditions tells the model the limits its conditions are valida
   }, "Demand remains durable while execution improves.");
   assert.match(system, /statement and falsifier under 500 characters/);
   assert.match(system, /horizon .*under 120 characters/);
+  assert.doesNotMatch(system, /rating|recommendation|price target/, "the adapter filters stance; naming it in the prompt made the model rewrite its reply");
 });
 
 test("draftThesisConditions names the model and the cause when a reply is unusable", async () => {
   const deployment = { channel: "anthropic", model: "claude-sonnet-5-5" };
   const thesis = "Demand remains durable while execution improves.";
+  let calls = 0;
+  await assert.rejects(draftThesisConditions({ async complete() { calls += 1; return { text: "not json", deployment }; } }, thesis), ThesisValidationError);
+  assert.equal(calls, 2, "an unusable reply is asked for once more, then fails");
   await assert.rejects(
     draftThesisConditions({ async complete() { return { text: '```json\n{"conditions":[{"statement":"Cut', truncated: true, deployment }; } }, thesis),
     new ThesisValidationError("draft response from anthropic/claude-sonnet-5-5 was cut off at the 4096-token limit"),

@@ -26,6 +26,11 @@ const handedText = (block) => (Array.isArray(block.commentary)
   : block.analyst_commentary ? [] : (block.segments ?? []).filter((segment) => segment.type === 'text').map((segment) => segment.text))
 // Words of 12 characters or more from a block's text segments, never its refs.
 const wordsOf = (blocks) => (blocks ?? []).flatMap(handedText).map((text) => text.trim()).filter((text) => text.length >= 12)
+const segmentText = (segments) => (segments ?? []).map((segment) => (segment.type === 'text' ? segment.text : segment.type === 'ref' ? segment.format || `[${segment.ref_kind}:${segment.ref_id.slice(0, 8)}]` : '')).join('')
+// Whole paragraphs as the handoff writes them, so a phrase two sections share is no match.
+const paragraphsOf = (blocks) => (blocks ?? []).flatMap((block) => (Array.isArray(block.commentary)
+  ? block.commentary.flatMap((part) => (part.kind === 'inference' ? [part.subject ? `${part.subject}: ${part.text}` : part.text] : part.kind === 'figures' ? [segmentText(part.segments)] : []))
+  : block.analyst_commentary ? [] : [segmentText(block.segments)])).flatMap((text) => text.split(/\n\n+/)).map((text) => text.trim()).filter(Boolean)
 const unverifiedOf = (blocks) => (blocks ?? []).flatMap((block) => (block.commentary ?? []).flatMap((part) => (part.kind === 'unverified' ? [part.text.trim()] : [])))
 
 const readHistory = (page) => page.locator('[data-condition-id]').evaluateAll((conditions) => conditions.map((condition) => ({
@@ -82,8 +87,10 @@ try {
     check('handoff carries every checked passage of the thesis section', own.length > 0 && own.every((words) => handedOff.includes(words)), own.filter((words) => !handedOff.includes(words)))
     const unverified = unverifiedOf(section?.children)
     check('handoff carries no unverified inference', unverified.every((words) => !handedOff.includes(words)), unverified.filter((words) => handedOff.includes(words)))
-    const others = (memo.blocks ?? []).filter((block) => block.kind === 'section' && block !== section).flatMap((block) => wordsOf(block.children)).filter((words) => !own.includes(words))
-    check('handoff carries no other section', others.every((words) => !handedOff.includes(words)), others.filter((words) => handedOff.includes(words)))
+    const handedParagraphs = new Set(handedOff.split(/\n\n+/).map((text) => text.trim()))
+    const ownParagraphs = new Set(paragraphsOf(section?.children))
+    const others = (memo.blocks ?? []).filter((block) => block.kind === 'section' && block !== section).flatMap((block) => paragraphsOf(block.children)).filter((text) => !ownParagraphs.has(text))
+    check('handoff carries no other section', others.every((text) => !handedParagraphs.has(text)), others.filter((text) => handedParagraphs.has(text)))
 
     await page.locator('[name="agent-name"]').fill(agentName)
     await page.getByRole('button', { name: 'Create agent' }).click()
