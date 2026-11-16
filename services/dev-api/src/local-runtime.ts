@@ -81,7 +81,10 @@ type LocalRuntimeClusterEvidence = {
 };
 
 export const analyzeAgentDeps = (env: NodeJS.ProcessEnv, client?: AnalyzeAgentDeps["client"]): AnalyzeAgentDeps => ({
-  db: { query: (text, values) => pool().query(text, values), connect: () => pool().connect() },
+  // A getter, so the pool opens on the first read that needs it and reopens after a test closes it.
+  get db() {
+    return pool();
+  },
   env,
   logToolCalls: async (calls) => {
     for (const call of calls) {

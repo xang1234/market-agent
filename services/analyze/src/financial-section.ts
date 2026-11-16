@@ -25,6 +25,7 @@ import { requestCancellation } from "../../financial-engine/src/run-repo.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
 import { issuerLabels, publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import type { RunRecord } from "../../financial-engine/src/run-record.ts";
+import { withPoolClient } from "../../shared/src/pool-client.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import { playbookAt, type AnalyzePlaybook } from "./playbook.ts";
 import { AnalyzeRunMetadataError, parseAnalyzeRunMetadata, type AnalyzeRunFinancialMetadata, type AnalyzeRunMetadataV1 } from "./runMetadata.ts";
@@ -212,12 +213,7 @@ const isAgentFigure = (run: RunRecord) => run.request_key !== run.parent_id;
 async function retireOnceGenerateEnded(db: FinancialPool, run: RunRecord): Promise<null> {
   if (await generateMayRun(db, run)) return null;
   await eraseUnsavedMemoFigures(db, run.parent_id);
-  const client = await db.connect();
-  try {
-    await requestCancellation(client, run.user_id, run.run_id);
-  } finally {
-    client.release();
-  }
+  await withPoolClient(db, (client) => requestCancellation(client, run.user_id, run.run_id));
   return null;
 }
 

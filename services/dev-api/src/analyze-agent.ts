@@ -38,7 +38,12 @@ export type AnalyzeAgentDeps = Readonly<{
 
 export function analyzeAgentWorkflow(deps: AnalyzeAgentDeps): (input: DevApiAnalyzeWorkflowInput) => Promise<DevApiAnalyzeWorkflowResult> {
   const section = analystSectionRunner({
-    financial: { pool: deps.db, evidence: createEvidenceFinancialPort },
+    financial: {
+      get pool() {
+        return deps.db;
+      },
+      evidence: createEvidenceFinancialPort,
+    },
     ...meteredModels(deps.env, deps.client),
     read: (name, args, turn) => runRegisteredAnalystTool(deps.db, name, args, turn).catch((reason: unknown) => {
       if (!isUnavailableRead(reason)) throw reason;
