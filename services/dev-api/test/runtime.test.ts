@@ -43,7 +43,7 @@ test("dev-api default runtime module resolves when loader cwd is the repo root",
 });
 
 test("the worker recovers memo, grid and screener valuation runs", () => {
-  const db = { query: async () => assert.fail("building the parents runs no query") };
+  const db = { query: async () => assert.fail("building the parents runs no query"), connect: async () => assert.fail("building the parents takes no client") };
   assert.deepEqual(Object.keys(recoveryParents(db)), ["analyze_memo_run", "analyst_grid_run", "screener_valuation_run"]);
 });
 

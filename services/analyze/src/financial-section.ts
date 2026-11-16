@@ -21,11 +21,13 @@ import { cashResilienceDraft, LATEST_FISCAL_YEAR } from "../../financial-engine/
 import { ParentRefusedError, type PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
 import { buildDeterministicPlan, type DeterministicUnits, type PlanningContext, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
+import { requestCancellation } from "../../financial-engine/src/run-repo.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
 import { issuerLabels, publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import type { RunRecord } from "../../financial-engine/src/run-record.ts";
+import { withPoolClient } from "../../shared/src/pool-client.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
-import { ANALYZE_PLAYBOOKS, type AnalyzePlaybook } from "./playbook.ts";
+import { playbookAt, type AnalyzePlaybook } from "./playbook.ts";
 import { AnalyzeRunMetadataError, parseAnalyzeRunMetadata, type AnalyzeRunFinancialMetadata, type AnalyzeRunMetadataV1 } from "./runMetadata.ts";
 
 /** Why a declared section has no committed row: the engine's reason, or what committed state shows. */
@@ -192,9 +194,10 @@ export async function loadAnalyzeFinancialSections(db: SqlExecutor, input: { use
 }
 
 /** Lets the supervised worker resume a memo's interrupted financial run under the memo's current owner and version. */
-export function analyzeFinancialRecovery(db: SqlExecutor): ParentRecovery {
+export function analyzeFinancialRecovery(db: FinancialPool): ParentRecovery {
   return {
     async authority(run: RunRecord) {
+      if (isAgentFigure(run)) return retireOnceGenerateEnded(db, run);
       const memo = await loadMemoRun(db, run.parent_id);
       if (!memo || memo.user_id !== run.user_id || !memo.context) return null;
       return analyzeAuthority(memo.user_id, run.parent_id, memo.template_id, memo.template_version);
@@ -203,9 +206,41 @@ export function analyzeFinancialRecovery(db: SqlExecutor): ParentRecovery {
   };
 }
 
+const LONGER_THAN_ANY_GENERATE = "15 minutes";
+
+const isAgentFigure = (run: RunRecord) => run.request_key !== run.parent_id;
+
+async function retireOnceGenerateEnded(db: FinancialPool, run: RunRecord): Promise<null> {
+  if (await generateMayRun(db, run)) return null;
+  await eraseUnsavedMemoFigures(db, run.parent_id);
+  await withPoolClient(db, (client) => requestCancellation(client, run.user_id, run.run_id));
+  return null;
+}
+
+/** A figure left to its Generate moves to the back of the oldest-first recovery queue, so young figures never fill every batch. */
+async function generateMayRun(db: SqlExecutor, run: RunRecord): Promise<boolean> {
+  const { rows } = await db.query(
+    `update financial_runs set updated_at = now()
+      where run_id = $2::uuid and created_at > now() - $3::interval
+        and not exists (select 1 from analyze_template_runs where run_id = $1::uuid)
+      returning run_id`,
+    [run.parent_id, run.run_id, LONGER_THAN_ANY_GENERATE],
+  );
+  return rows.length === 1;
+}
+
+export async function eraseUnsavedMemoFigures(db: SqlExecutor, analyzeRunId: string): Promise<void> {
+  await db.query(
+    `delete from financial_runs
+      where parent_kind = 'analyze_memo_run' and parent_id = $1::uuid
+        and not exists (select 1 from analyze_template_runs where run_id = $1::uuid)`,
+    [analyzeRunId],
+  );
+}
+
 // ---------------------------------------------------------------------------
 
-function analyzeAuthority(userId: string, analyzeRunId: string, templateId: string, templateVersion: number): FinancialRuntimeAuthority {
+export function analyzeAuthority(userId: string, analyzeRunId: string, templateId: string, templateVersion: number): FinancialRuntimeAuthority {
   return createRuntimeAuthority({
     owner_user_id: userId,
     egress_channel: "analyze",
@@ -317,7 +352,7 @@ function savedMetadata(metadata: unknown): AnalyzeRunMetadataV1 | null {
 
 /** Sections the memo's saved playbook version marks optional; an unknown playbook or version marks none, so every section counts. */
 function optionalSections(playbookId: string | null, playbookVersion: number | null): ReadonlySet<string> {
-  const playbook = ANALYZE_PLAYBOOKS.find((candidate) => candidate.playbook_id === playbookId && candidate.version === playbookVersion);
+  const playbook = playbookAt(playbookId, playbookVersion);
   return new Set(playbook?.sections.filter((section) => !section.required).map((section) => section.section_id) ?? []);
 }
 

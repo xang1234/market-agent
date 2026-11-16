@@ -13,8 +13,14 @@
 import { periodParts } from "../../financial-core/src/index.ts";
 import type { Assertion } from "./assertions.ts";
 import { checkedComparisons, metricLabel as definedMetric, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
-import type { EvidencePacket, PacketClaim, PacketFigure } from "./evidence-packet.ts";
-import { createSealer, type Sealer, type Segment } from "./prose-refs.ts";
+import type { ClaimSource, EvidencePacket, PacketClaim, PacketFigure } from "./evidence-packet.ts";
+import { isUuid } from "./chat-ids.ts";
+import { createSealer, type Sealer, type Segment as ProseSegment } from "./prose-refs.ts";
+
+// A quote's ref opens its claim, or its source when no claim row holds it (an
+// industry peer), and names that source for a copied answer's source list.
+export type QuoteRef = { type: "ref"; ref_kind: "claim" | "source"; ref_id: string; format: string; source_label: string };
+export type Segment = ProseSegment | QuoteRef;
 
 // Prose names an engine measure without its formula ("net margin", not "net margin (net income / revenue)"): the table's heading carries it.
 const metricLabel = (metric: string): string => definedMetric(metric).replace(/ \([^()]*[/×][^()]*\)$/, "");
@@ -148,6 +154,57 @@ export function attributionSegments(claims: ReadonlyArray<AttributedClaim>, quot
     const dated = published ? `a source dated ${published}${effective && effective !== published ? `, effective ${effective}` : ""}` : `a source${effective ? `, effective ${effective}` : ""}`;
     return [{ type: "text", text: `${i === 0 ? "" : " "}According to ${dated}${claim.company ? ` on ${claim.company}` : ""}${claim.period ? `, for ${claim.period}` : ""}: ` }, quote(claim)];
   });
+}
+
+export function renderQuotes(assertion: Assertion & { index: number }, packet: EvidencePacket): RenderedAssertion {
+  const several = packet.companies.length > 1;
+  const sources = new Set<string>();
+  const quote = (claim: PacketClaim): Segment[] => {
+    if (!citable(claim)) return [{ type: "text", text: claim.text }];
+    if (isUuid(claim.claim_id)) {
+      sources.add(claim.source_id);
+      return [{ type: "ref", ref_kind: "claim", ref_id: claim.claim_id, format: claim.text, source_label: sourceLabel(claimSources(claim)[0]!, claim) }];
+    }
+    // One citation per source the quote rests on, each labelled for every claim that cites it.
+    const ids = [...new Set(claimSources(claim).map((source) => source.source_id))].filter(isUuid);
+    for (const id of ids) sources.add(id);
+    return ids.map((id) => ({ type: "ref", ref_kind: "source", ref_id: id, format: claim.text, source_label: sharedSourceLabel(id, packet) }));
+  };
+  const segments = assertion.evidence.flatMap((id) => packet.claims.filter((claim) => claim.id === id)).flatMap((claim, i): Segment[] => [
+    ...(i === 0 ? [] : [{ type: "text" as const, text: "\n\n" }]),
+    ...(datedInText(claim)
+      ? attributionSegments([claim], ({ text }) => ({ type: "text", text }))
+      : [...(several && claim.company ? [{ type: "text" as const, text: `${claim.company}: ` }] : []), ...quote(claim)]),
+  ]);
+  return { index: assertion.index, segments, figure_ids: [], fact_bindings: [], source_refs: [...sources] };
+}
+
+// No ref opens a dated claim with no claim row, such as a consensus capture, so its text says its date.
+const datedInText = (claim: Pick<PacketClaim, "claim_id" | "published_at" | "effective_time">): boolean =>
+  !isUuid(claim.claim_id) && Boolean(claim.published_at || claim.effective_time);
+
+// A claim a ref opens: one with a claim row, or an undated one whose source is stored.
+export const citable = (claim: Pick<PacketClaim, "claim_id" | "source_id" | "published_at" | "effective_time">): boolean =>
+  isUuid(claim.claim_id) || (!datedInText(claim) && isUuid(claim.source_id));
+
+/** Every source a claim cites: its own, or each one an industry peer rests on. */
+export const claimSources = (claim: Pick<PacketClaim, "source_id" | "sources" | "company" | "predicate">): ReadonlyArray<ClaimSource> =>
+  claim.sources ?? [{ source_id: claim.source_id, ...(claim.company ? { company: claim.company } : {}), what: claim.predicate === "peer_set.industry" ? "industry source" : "source" }];
+
+function sourceLabel(source: Omit<ClaimSource, "source_id">, dated: Pick<PacketClaim, "published_at" | "effective_time">): string {
+  const date = dated.published_at ? `, published ${dated.published_at.slice(0, 10)}` : dated.effective_time ? `, effective ${dated.effective_time.slice(0, 10)}` : "";
+  return `${source.company ? `${source.company} ${source.what}` : source.what[0]!.toUpperCase() + source.what.slice(1)}${date}`;
+}
+
+// A source several claims cite names a company, a kind or a date only when every one of them agrees on it.
+function sharedSourceLabel(id: string, packet: EvidencePacket): string {
+  const uses = packet.claims.filter((claim) => !isUuid(claim.claim_id)).flatMap((claim) =>
+    claimSources(claim).filter((source) => source.source_id === id).map((source) => ({ ...source, published_at: claim.published_at, effective_time: claim.effective_time })));
+  const agreed = <K extends keyof (typeof uses)[number]>(key: K) => (new Set(uses.map((use) => use[key])).size === 1 ? uses[0]![key] : undefined);
+  const company = agreed("company");
+  const published_at = agreed("published_at");
+  const effective_time = agreed("effective_time");
+  return sourceLabel({ ...(company ? { company } : {}), what: agreed("what") ?? "source" }, { ...(published_at ? { published_at } : {}), ...(effective_time ? { effective_time } : {}) });
 }
 
 // An inference the judge found unsupported, or flagged as stating an amount

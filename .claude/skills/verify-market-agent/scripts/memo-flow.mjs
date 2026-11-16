@@ -1,26 +1,55 @@
-// Symbol page -> Analyze -> Generate memo, the way a user does it. Exits 1 unless the
-// memo generates on this subject and cites 8-K claims, and saves what it saw to OUT.
+// Symbol page -> Analyze -> Investment memo -> Generate memo, the way a user does it.
+// Exits 1 unless the memo generates with the analyst agent's four sections, each citing
+// stored sources or saying none covers it, with no stance word in the agent's own words.
+// Saves what it saw to OUT.
 import { createRequire } from 'node:module'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { claimIdsOf, memoVerdict } from './memo-verdict.ts'
 
-const { ROOT, WEB_URL, LISTING_ID, OUT } = process.env
+const { ROOT, WEB_URL, LISTING_ID, OUT, DATABASE_URL } = process.env
 const { chromium } = createRequire(join(ROOT, 'web/package.json'))('@playwright/test')
+const { Client } = createRequire(join(ROOT, 'services/dev-api/package.json'))('pg')
 mkdirSync(OUT, { recursive: true })
+
+const LLM_LOG = join(ROOT, '.dev/logs/dev-api.log')
+const logSize = () => (existsSync(LLM_LOG) ? statSync(LLM_LOG).size : 0)
 
 const browser = await chromium.launch()
 let failure = null
 let text = ''
+let canvas = ''
 let url = ''
+let run = null
+let memoMs = null
+const logFrom = logSize()
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
   try {
     await page.goto(`${WEB_URL}/symbol/listing:${LISTING_ID}/overview`)
     await page.locator('[data-testid=analyze-this-subject]').click({ timeout: 30_000 })
     await page.waitForURL(/\/analyze\?subject=/, { timeout: 30_000 })
+    await page.locator('select:has(option[value="investment_memo"])').selectOption('investment_memo', { timeout: 30_000 })
     await page.screenshot({ path: join(OUT, '1-analyze.png'), fullPage: true })
+    const response = page.waitForResponse((res) => res.request().method() === 'POST' && new URL(res.url()).pathname.endsWith('/v1/analyze/runs'), { timeout: 200_000 })
+    const started = Date.now()
     await page.getByRole('button', { name: 'Generate memo' }).click({ timeout: 30_000 })
-    await page.getByText(/Memo generated|Generate failed/).first().waitFor({ timeout: 180_000 })
+    await page.getByText(/Memo generated|Generate failed/).first().waitFor({ timeout: 200_000 })
+    const generated = await response
+    if (generated.ok()) {
+      await page.locator('article [data-block-kind="section"]').first().waitFor({ timeout: 30_000 })
+      memoMs = Date.now() - started
+      run = await generated.json()
+      for (const block of (run.blocks ?? []).filter((entry) => entry.kind === 'section')) {
+        await page.locator(`[data-testid="block-section-${block.id}"]`).screenshot({ path: join(OUT, `section-${block.data_ref?.params?.playbook_section_id ?? block.id}.png`), timeout: 10_000 })
+          .catch((error) => console.warn(`no still of section ${block.title}: ${error.message}`))
+      }
+    }
+    canvas = await page.locator('article').first().evaluate((node) => {
+      const copy = node.cloneNode(true)
+      copy.querySelectorAll('[data-ref-kind="claim"], [data-claim-quote]').forEach((quote) => quote.remove())
+      return copy.innerText ?? copy.textContent ?? ''
+    })
   } catch (error) {
     failure = error.message
   }
@@ -31,18 +60,34 @@ try {
   await browser.close()
 }
 
-writeFileSync(join(OUT, 'page.txt'), text)
-const report = {
-  url,
-  subject_matches: new URL(url).searchParams.get('subject') === `listing:${LISTING_ID}`,
-  generated: text.includes('Memo generated'),
-  insufficient_evidence: text.includes('Insufficient local evidence'),
-  sec_8k_mentions: (text.match(/via 8-K/g) ?? []).length,
-  failure,
-  evidence: OUT,
+const log = existsSync(LLM_LOG) ? readFileSync(LLM_LOG).subarray(logFrom).toString() : ''
+const claimIds = claimIdsOf(run)
+const predicates = new Map()
+if (claimIds.length > 0) {
+  const db = new Client({ connectionString: DATABASE_URL })
+  await db.connect()
+  try {
+    const { rows } = await db.query('select claim_id::text as id, predicate from claims where claim_id = any($1::uuid[])', [claimIds])
+    for (const row of rows) predicates.set(row.id, row.predicate)
+  } finally {
+    await db.end()
+  }
 }
+const { report, passed } = memoVerdict({
+  run,
+  unquotedArticle: canvas,
+  page: text,
+  url,
+  listingId: LISTING_ID,
+  predicates,
+  failure,
+  memoMs,
+  llmCalls: existsSync(LLM_LOG) ? (log.match(/^\[llm\] /gm) ?? []).length : null,
+  log,
+  evidence: OUT,
+})
+writeFileSync(join(OUT, 'page.txt'), text)
+writeFileSync(join(OUT, 'run.json'), JSON.stringify(run, null, 2))
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
 console.log(JSON.stringify(report, null, 2))
-const passed =
-  failure === null && report.subject_matches && report.generated && !report.insufficient_evidence && report.sec_8k_mentions > 0
 process.exit(passed ? 0 : 1)

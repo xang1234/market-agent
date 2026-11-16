@@ -15,7 +15,7 @@ import {
   turnPacket,
 } from "../src/llm-runtime.ts";
 import { checkAssertions, MAX_ASSERTIONS, type AssertionReport, type Rejection } from "../src/assertions.ts";
-import type { EvidencePacket, PacketFigure } from "../src/evidence-packet.ts";
+import { mergePackets, type EvidencePacket, type PacketFigure } from "../src/evidence-packet.ts";
 import { engineAnswerNote, scopeGapBlocks } from "../src/local-runtime.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
 import { proposal } from "./scope-fixtures.ts";
@@ -854,8 +854,7 @@ test("a turn with no figure and only gap notes points to its notes, never the mo
   assert.deepEqual(
     (await shown(BASE_ENV, withList([{ kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] }]), [A_TOOL_CALL])).segments,
     [
-      { type: "text", text: "According to a source dated Feb 2026: " },
-      { type: "ref", ref_kind: "claim", ref_id: A_CLAIM, format: "Management raised its outlook." },
+      { type: "ref", ref_kind: "claim", ref_id: A_CLAIM, format: "Management raised its outlook.", source_label: "Source, published 2026-02-25" },
       { type: "text", text: "\n\nNo figures are shown for AMD." },
     ],
   );
@@ -957,8 +956,7 @@ test("when no assertion renders, the answer is the fixed fallback sentence, neve
   });
   assert.deepEqual({ segments: blocks[0]!.segments, rejected: reports[0]!.rejected }, {
     segments: [
-      { type: "text", text: "According to a source: " },
-      { type: "ref", ref_kind: "claim", ref_id: A_CLAIM, format: "Data center demand doubled." },
+      { type: "ref", ref_kind: "claim", ref_id: A_CLAIM, format: "Data center demand doubled.", source_label: "Source" },
     ],
     rejected: [],
   });
@@ -993,7 +991,7 @@ test("a claim-only answer is rendered too (#208)", async () => {
     onAssertions: (report) => reports.push(report as unknown as Record<string, unknown>),
   });
   const segments = composed[0].segments as Array<{ type: string; ref_id?: string; text?: string; format?: string }>;
-  assert.equal(segments.map((segment) => segment.text ?? segment.format).join(""), "According to a source, effective Feb 2026: Management raised its outlook.");
+  assert.equal(segments.map((segment) => segment.text ?? segment.format).join(""), "Management raised its outlook.", "the date and filing open from the quote's ref");
   assert.equal(segments.at(-1)?.ref_id, claimId);
   assert.equal(reports[0]?.rendered, true);
 
@@ -1002,7 +1000,7 @@ test("a claim-only answer is rendered too (#208)", async () => {
     { kind: "observation", text: "A's gross margin was [[F2]].", evidence: ["F2"] },
   ]);
   // A one-letter ticker's observation renders as any other's: its value is the packet's.
-  assert.equal(text, "According to a source dated Feb 2026: Management raised its outlook.\n\nA's gross margin was 74.6% in FY2026 (ended Jan 2026).");
+  assert.equal(text, "Management raised its outlook.\n\nA's gross margin was 74.6% in FY2026 (ended Jan 2026).");
 });
 
 test("an inference resting on a management attribution renders (#302)", async () => {
@@ -1012,7 +1010,7 @@ test("an inference resting on a management attribution renders (#302)", async ()
     { kind: "analyst_inference", text: "The raised outlook signals confidence in demand.", evidence: [], supports: [0] },
     { kind: "analyst_inference", text: "The margin and the outlook point the same way.", evidence: [], supports: [0, 1] },
   ]);
-  assert.equal(text, "According to a source dated Feb 2026: Management raised its outlook." +
+  assert.equal(text, "Management raised its outlook." +
     "\n\nA's gross margin was 74.6% in FY2026 (ended Jan 2026)." +
     "\n\n> **Analyst inference:** The raised outlook signals confidence in demand." +
     "\n\n> **Analyst inference:** The margin and the outlook point the same way.");
@@ -1036,7 +1034,7 @@ test("a sourced causal claim renders with no figures shown (#208)", async () => 
     createClient: () => async () => ({ text: withList([{ kind: "management_attribution", text: "Margins rose due to a richer mix.", evidence: ["C1"] }]) }),
   });
   const claimText = (claimAnswer[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
-  assert.equal(claimText, "According to a source dated Feb 2026: Margins rose due to a richer mix.");
+  assert.equal(claimText, "Margins rose due to a richer mix.");
 });
 
 test("a rendered inference is words only: one with a figure, typed or referenced, is never rendered (#301)", async () => {
@@ -1098,7 +1096,7 @@ test("a cited claim about a compared company does not drop the note that no figu
     ]) }),
   });
   const text = (composed[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
-  assert.equal(text, "NVDA's gross margin was 74.6%.\n\nAccording to a source dated Feb 2026 on AMD: AMD expects data center growth.\n\nPeriod: FY2026 (ended Jan 2026). No figures are shown for AMD.");
+  assert.equal(text, "NVDA's gross margin was 74.6%.\n\nAMD: AMD expects data center growth.\n\nPeriod: FY2026 (ended Jan 2026). No figures are shown for AMD.");
 });
 
 test("a rendered answer keeps the other side of a stored disagreement (#208)", async () => {
@@ -1125,7 +1123,7 @@ test("a rendered answer keeps the other side of a stored disagreement (#208)", a
   const segments = composed[0].segments as Array<{ type: string; text?: string; format?: string; ref_id?: string }>;
   assert.equal(
     segments.map((segment) => segment.text ?? segment.format).join(""),
-    "According to a source dated Feb 2026: Backlog grew.\n\nA source disagrees. According to a source dated Feb 2026: Backlog shrank.",
+    "Backlog grew.\n\nA source disagrees. Backlog shrank.",
   );
   assert.deepEqual(segments.filter((segment) => segment.type === "ref").map((segment) => segment.ref_id), [
     "c2080000-0000-4000-8000-000000000011", "c2080000-0000-4000-8000-000000000012",
@@ -1176,7 +1174,7 @@ test("a rendered comparison covers every company it shows figures for, and names
     onAssertions: (report) => reports.push(report),
   });
   assert.deepEqual({ text: (claimedSide[0]!.segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join(""), rejected: reports[0]!.rejected }, {
-    text: "NVDA's gross margin was 74.6%.\n\nAccording to a source on AMD: Data center demand doubled.\n\nPeriod: FY2026 (ended Jan 2026).",
+    text: "NVDA's gross margin was 74.6%.\n\nAMD: Data center demand doubled.\n\nPeriod: FY2026 (ended Jan 2026).",
     rejected: [],
   });
 
@@ -1197,6 +1195,90 @@ test("a rendered comparison covers every company it shows figures for, and names
   assert.match(text, /\n\nPeriods: NVDA FY2026 \(ended Jan 2026\), AMD FY2026 \(ended Dec 2025\)\.$/);
 });
 
+test("a quote stays in the commentary while another inference resting on it is unverified or still being judged", () => {
+  const commentary = (inferences: Map<number, "shown" | "unverified" | "pending">) => renderedAnswer(
+    { blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [SEALED_TOOL_CALL], factBlocks: A_BLOCKS },
+    SEALED_PACKET,
+    checkAssertions([
+      { kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] },
+      { kind: "analyst_inference", text: "It expects a better year.", supports: [0] },
+      { kind: "analyst_inference", text: "The outlook may not hold.", supports: [0] },
+    ], SEALED_PACKET),
+  ).blocks(inferences)[0]!.commentary as Array<{ kind: string }>;
+  assert.deepEqual(commentary(new Map([[1, "shown"], [2, "unverified"]])).map((part) => part.kind), ["figures", "inference", "unverified"]);
+  assert.deepEqual(commentary(new Map([[1, "shown"], [2, "pending"]])).map((part) => part.kind), ["figures", "inference", "pending"]);
+  assert.deepEqual(commentary(new Map([[1, "shown"], [2, "shown"]])).map((part) => part.kind), ["inference", "inference"]);
+  assert.deepEqual(commentary(new Map([[1, "shown"]])).map((part) => part.kind), ["inference"], "a hidden one leaves the quote behind the shown one");
+});
+
+test("a quote in a stored disagreement stays in the commentary beside its other side, even when an inference shown cites it", () => {
+  const claim = (n: number, text: string, polarity: string) => ({
+    claim_id: `c2080000-0000-4000-8000-00000000001${n}`, source_id: `s${n}`, text_canonical: text, predicate: "kpi.commentary", polarity, published_at: "2026-02-25T00:00:00.000Z",
+  });
+  const toolCall = {
+    tool_call_id: "tc-1",
+    tool_name: "research_lookup",
+    status: "ok",
+    result: { evidence: {
+      claims: [claim(1, "Backlog grew.", "positive"), claim(2, "Backlog shrank.", "negative")],
+      contradictions: [["c2080000-0000-4000-8000-000000000011", "c2080000-0000-4000-8000-000000000012"]],
+    } },
+  } as never;
+  const packet = turnPacket({ toolCalls: [toolCall] });
+  const [block] = renderedAnswer({ blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [toolCall] }, packet, checkAssertions([
+    { kind: "management_attribution", text: "Backlog grew.", evidence: ["C1"] },
+    { kind: "analyst_inference", text: "Backlog: the sources disagree on its direction.", supports: [0] },
+  ], packet)).blocks(new Map([[1, "shown"]]));
+  const grew = { type: "ref", ref_kind: "claim", ref_id: "c2080000-0000-4000-8000-000000000011", format: "Backlog grew.", source_label: "Source, published 2026-02-25" };
+  const shrank = { type: "ref", ref_kind: "claim", ref_id: "c2080000-0000-4000-8000-000000000012", format: "Backlog shrank.", source_label: "Source, published 2026-02-25" };
+  assert.deepEqual(block!.commentary, [
+    { kind: "figures", segments: [grew] },
+    { kind: "inference", subject: null, basis: null, text: "Backlog: the sources disagree on its direction.", cites: [grew] },
+    { kind: "figures", segments: [{ type: "text", text: "A source disagrees. " }, shrank] },
+  ]);
+});
+
+test("a dated claim no ref opens keeps its date in the text, and industry peers cite the source that names their industry, one citation for them all", () => {
+  // A peer has no claim row; its industry source is stored, so a citation opens it (round 5 swarm finding 1).
+  const INDUSTRY_SOURCE = "c2080000-0000-4000-8000-0000000000a1";
+  const peer = (n: number, label: string, source_id: string) => ({
+    claim_id: `peer:NVDA:issuer-${label}`, source_id, text_canonical: `Industry peer: ${label} shares NVDA's industry (Semiconductors)`, predicate: "peer_set.industry", polarity: "neutral", n,
+  });
+  const toolCall = {
+    tool_call_id: "tc-1",
+    tool_name: "research_lookup",
+    status: "ok",
+    result: { evidence: { claims: [
+      { claim_id: "c2080000-0000-4000-8000-000000000011", source_id: "s1", text_canonical: "Demand is strong.", predicate: "kpi.commentary", polarity: "positive", published_at: "2026-02-25T00:00:00.000Z" },
+      { claim_id: "consensus:capture-1", source_id: "c2080000-0000-4000-8000-0000000000a2", text_canonical: "Consensus revenue FY2027: $300B", predicate: "consensus.revenue", polarity: "neutral", published_at: "2026-11-10T00:00:00.000Z" },
+      peer(3, "AMD", INDUSTRY_SOURCE),
+      peer(4, "INTC", INDUSTRY_SOURCE),
+      peer(5, "QCOM", "s5"),
+    ] } },
+  } as never;
+  const packet = turnPacket({ toolCalls: [toolCall] });
+  const answer = renderedAnswer({ blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [toolCall] }, packet, checkAssertions([
+    { kind: "management_attribution", text: "Demand is strong.", evidence: ["C1"] },
+    { kind: "management_attribution", text: "Consensus expects more.", evidence: ["C2"] },
+    { kind: "management_attribution", text: "AMD and INTC are peers.", evidence: ["C3", "C4"] },
+    { kind: "analyst_inference", text: "Demand: the sources and its peers point the same way.", supports: [0, 1, 2] },
+    { kind: "management_attribution", text: "QCOM is a peer.", evidence: ["C5"] },
+    { kind: "analyst_inference", text: "Peers: QCOM shares its industry.", supports: [4] },
+  ], packet));
+  const [block] = answer.blocks(new Map([[3, "shown"], [5, "shown"]]));
+  assert.deepEqual(block!.commentary, [
+    { kind: "figures", segments: [{ type: "text", text: "According to a source dated Nov 2026: " }, { type: "text", text: "Consensus revenue FY2027: $300B" }] },
+    { kind: "inference", subject: null, basis: null, text: "Demand: the sources and its peers point the same way.", cites: [
+      { type: "ref", ref_kind: "claim", ref_id: "c2080000-0000-4000-8000-000000000011", format: "Demand is strong.", source_label: "Source, published 2026-02-25" },
+      { type: "ref", ref_kind: "source", ref_id: INDUSTRY_SOURCE, format: "Industry peer: AMD shares NVDA's industry (Semiconductors)\nIndustry peer: INTC shares NVDA's industry (Semiconductors)", source_label: "Industry source" },
+    ] },
+    // A peer whose source is not stored has no citation, so its quote stays beside the inference.
+    { kind: "figures", segments: [{ type: "text", text: "Industry peer: QCOM shares NVDA's industry (Semiconductors)" }] },
+    { kind: "inference", subject: null, basis: null, text: "Peers: QCOM shares its industry." },
+  ]);
+  assert.ok((block!.source_refs as string[]).includes(INDUSTRY_SOURCE), "the source a citation opens is sealed with the answer");
+});
+
 test("a rendered answer says when more claims matched, or none could be read (#208)", async () => {
   const truncated = { ...(A_TOOL_CALL as unknown as Record<string, unknown>) };
   truncated.result = { evidence: { ...((A_TOOL_CALL as unknown as { result: { evidence: Record<string, unknown> } }).result.evidence), truncated: true } };
@@ -1210,7 +1292,7 @@ test("a rendered answer says when more claims matched, or none could be read (#2
     createClient: () => async () => ({ text: withList([{ kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] }]) }),
   });
   const text = (composed[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
-  assert.equal(text, "According to a source dated Feb 2026: Management raised its outlook.\n\nMore sources matched than are shown here.");
+  assert.equal(text, "Management raised its outlook.\n\nMore sources matched than are shown here.");
 
   const unreadable = { tool_call_id: "tc-u", tool_name: "research_lookup", status: "ok", result: { evidence: { claims: [], unavailable: true } } } as never;
   const answer = await composeAnalystBlocksWithLlm({
@@ -1414,16 +1496,44 @@ test("an answer its seal left claims out of is rendered again without them: an i
   ]);
   assert.equal(plain(blocks(ALL_SHOWN)[0]!),
     "A's revenue was $130.5B in FY2026 (ended Jan 2026).\n\n" +
-    "According to a source dated Feb 2026: Management raised its outlook. According to a source dated Feb 2026: Management expects higher margins.\n\n" +
-    "According to a source dated Feb 2026: Management cut its buyback.\n\n" +
+    "Management raised its outlook.\n\nManagement expects higher margins.\n\n" +
+    "Management cut its buyback.\n\n" +
     "> **Analyst inference:** It is returning less cash.\n\n> **Analyst inference:** It expects a better year.");
   const [block] = blocks(ALL_SHOWN, { withdrawn: [SEALED_CLAIM(1), SEALED_CLAIM(3)], unchecked: [] });
   assert.equal(plain(block!),
     "A's revenue was $130.5B in FY2026 (ended Jan 2026).\n\n" +
-    "According to a source dated Feb 2026: Management expects higher margins.\n\n" +
+    "Management expects higher margins.\n\n" +
     "Claims this answer quoted are no longer citable, so they are left out.");
   const refs = (block!.segments as Array<{ type: string; ref_id?: string }>).filter((segment) => segment.type === "ref").map((segment) => segment.ref_id);
   assert.deepEqual([refs, block!.source_refs], [[FACT(1), SEALED_CLAIM(2)], ["s-nvda", "s-amd", "s-claim-2"]], "only what is left is cited");
+});
+
+test("a shown inference cites the claims it rests on, its quotes stand behind those cites, and they come back as quotes when it is not shown", () => {
+  const commentary = (inferences: Map<number, "shown" | "unverified" | "pending">) => renderedAnswer(
+    { blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [SEALED_TOOL_CALL], factBlocks: A_BLOCKS },
+    SEALED_PACKET,
+    checkAssertions([
+      { kind: "management_attribution", text: "Management raised its outlook and expects higher margins.", evidence: ["C1", "C2"] },
+      { kind: "analyst_inference", text: "Outlook: it expects a better year.", supports: [0] },
+      { kind: "management_attribution", text: "Management cut its buyback.", evidence: ["C3"] },
+    ], SEALED_PACKET),
+  ).blocks(inferences)[0]!;
+  const quote = (n: number, text: string) => ({ type: "ref", ref_kind: "claim", ref_id: SEALED_CLAIM(n), format: text, source_label: "Source, published 2026-02-25" });
+  const quotes = [
+    { kind: "figures", segments: [quote(1, "Management raised its outlook.")] },
+    { kind: "figures", segments: [quote(2, "Management expects higher margins.")] },
+  ];
+  const buyback = { kind: "figures", segments: [quote(3, "Management cut its buyback.")] };
+  const shown = commentary(new Map([[1, "shown"]]));
+  assert.deepEqual(shown.commentary, [
+    { kind: "inference", subject: null, basis: null, text: "Outlook: it expects a better year.", cites: [quote(1, "Management raised its outlook."), quote(2, "Management expects higher margins.")] },
+    buyback,
+  ]);
+  assert.equal(plain(shown), "Management raised its outlook.\n\nManagement expects higher margins.\n\n> **Analyst inference:** Outlook: it expects a better year.\n\nManagement cut its buyback.",
+    "the text keeps every quote, each sealed as its claim, with no dated prefix");
+  assert.deepEqual(commentary(new Map([[1, "unverified"]])).commentary, [...quotes, { kind: "unverified", subject: null, text: "Outlook: it expects a better year." }, buyback]);
+  assert.deepEqual(commentary(new Map([[1, "pending"]])).commentary, [...quotes, { kind: "pending" }, buyback]);
+  assert.deepEqual(commentary(new Map()).commentary, [...quotes, buyback]);
 });
 
 test("an answer whose every quoted claim its seal left out says which were no longer citable and which could not be checked (#557)", () => {
@@ -1447,4 +1557,31 @@ test("an inference judged on a claim its seal left out goes, though another of i
   assert.equal(plain(blocks(ALL_SHOWN, { withdrawn: [SEALED_CLAIM(1)], unchecked: [] })[0]!),
     "A's revenue was $130.5B in FY2026 (ended Jan 2026).\n\n" +
     "A claim this answer quoted is no longer citable, so it is left out.");
+});
+
+test("an industry peer cites every source its line rests on, and a source cited for several companies names none of them (round 6 swarm findings)", () => {
+  const S = (n: number) => `c2080000-0000-4000-8000-0000000000${n}`;
+  const peerSet = (company: string, industry_source_id: string, peers: ReadonlyArray<[string, string, string | null]>) => ({
+    tool: "get_peer_set", status: "ok", company, industry: "Semiconductors", industry_source_id,
+    peers: peers.map(([label, peerIndustry, marketCap]) => ({ issuer_id: `issuer-${label}`, label, industry_source_id: peerIndustry, market_cap_source_id: marketCap })),
+  }) as never;
+  const packet = mergePackets({
+    engine: [],
+    analyst: [peerSet("NVDA", S(11), [["AMD", S(22), S(33)], ["INTC", S(44), null]]), peerSet("MU", S(11), [["WDC", S(11), null]])],
+    figuresAskedFor: [], notes: [], labels: new Map(), cutoff: "2026-11-01T00:00:00.000Z",
+  });
+  const answer = renderedAnswer({ blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [] }, packet, checkAssertions([
+    { kind: "management_attribution", text: "Peers.", evidence: ["C1", "C2", "C3"] },
+    { kind: "analyst_inference", text: "Peers: both sets share an industry.", supports: [0] },
+  ], packet));
+  const [block] = answer.blocks(new Map([[1, "shown"]]));
+  const line = (label: string, company: string) => `Industry peer: ${label} shares ${company}'s industry (Semiconductors)`;
+  const source = (id: string, format: string, source_label: string) => ({ type: "ref", ref_kind: "source", ref_id: id, format, source_label });
+  assert.deepEqual(block!.commentary, [{ kind: "inference", subject: null, basis: null, text: "Peers: both sets share an industry.", cites: [
+    source(S(11), [line("AMD", "NVDA"), line("INTC", "NVDA"), line("WDC", "MU")].join("\n"), "Industry source"),
+    source(S(22), line("AMD", "NVDA"), "AMD industry source"),
+    source(S(33), line("AMD", "NVDA"), "AMD market cap source"),
+    source(S(44), line("INTC", "NVDA"), "INTC industry source"),
+  ] }]);
+  assert.deepEqual([...(block!.source_refs as string[])].sort(), [S(11), S(22), S(33), S(44)], "every source a peer line rests on is sealed");
 });

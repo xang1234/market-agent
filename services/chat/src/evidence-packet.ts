@@ -116,12 +116,18 @@ export type PacketClaim = {
   published_at?: string;
   claim_id: string;
   source_id: string;
+  // Every source a claim with no claim row rests on, when more than source_id:
+  // an industry peer rests on its company's industry, its own, and its market cap.
+  sources?: ReadonlyArray<ClaimSource>;
 };
+
+/** A source a claim rests on, and what it is to the claim. */
+export type ClaimSource = { source_id: string; company?: string; what: "source" | "industry source" | "market cap source" };
 
 export type AnalystPacketEntry =
   | (PacketClaim & { kind: "claim"; filing: string })
   | { kind: "consensus"; id: string; text: string; predicate: string; company: string; captured_on: string; capture_id: string; source_id: string }
-  | { kind: "peer"; id: string; text: string; predicate: "peer_set.industry"; company: string; peer_issuer_id: string; source_ids: ReadonlyArray<string> }
+  | { kind: "peer"; id: string; text: string; predicate: "peer_set.industry"; company: string; peer_issuer_id: string; sources: ReadonlyArray<ClaimSource> }
   // The chosen filing's item state, and the newer 10-K that left the item unread.
   | {
     kind: "filing_read"; id: string; text: string; predicate: "filing.item_read"; company: string; item: FilingItemRead["item"]; state: FilingItemRead["state"];
@@ -180,7 +186,11 @@ function resultEntries(result: AnalystToolResult): Array<readonly [string, Unnum
         predicate: "peer_set.industry",
         company: result.company,
         peer_issuer_id: peer.issuer_id,
-        source_ids: [...new Set([result.industry_source_id, peer.industry_source_id, ...(peer.market_cap_source_id === null ? [] : [peer.market_cap_source_id])])],
+        sources: [
+          { source_id: result.industry_source_id, company: result.company, what: "industry source" },
+          { source_id: peer.industry_source_id, company: peer.label, what: "industry source" },
+          ...(peer.market_cap_source_id === null ? [] : [{ source_id: peer.market_cap_source_id, company: peer.label, what: "market cap source" as const }]),
+        ],
       }] as const);
   }
 }
@@ -251,7 +261,7 @@ function packetClaim(entry: AnalystPacketEntry): Omit<PacketClaim, "id">[] {
     case "consensus":
       return [{ text: entry.text, predicate: entry.predicate, stance: "neutral", company: entry.company, published_at: entry.captured_on, claim_id: `consensus:${entry.capture_id}`, source_id: entry.source_id }];
     case "peer":
-      return [{ text: `Industry peer: ${entry.text}`, predicate: entry.predicate, stance: "neutral", company: entry.company, claim_id: `peer:${entry.company}:${entry.peer_issuer_id}`, source_id: entry.source_ids[0] ?? "" }];
+      return [{ text: `Industry peer: ${entry.text}`, predicate: entry.predicate, stance: "neutral", company: entry.company, claim_id: `peer:${entry.company}:${entry.peer_issuer_id}`, source_id: entry.sources[0]!.source_id, sources: entry.sources }];
     case "filing_read":
     case "no_filing":
       return [];
@@ -696,7 +706,7 @@ export function packetForModel(packet: EvidencePacket): Record<string, unknown> 
     ...(packet.gaps.length > 0 ? { gaps: packet.gaps } : {}),
     ...(Object.keys(packet.query_bounds).length > 0 ? { query_bounds: packet.query_bounds } : {}),
     ...(packet.claims.length > 0
-      ? { claims: packet.claims.map(({ claim_id: _claimId, source_id: _sourceId, ...claim }) => claim) }
+      ? { claims: packet.claims.map(({ claim_id: _claimId, source_id: _sourceId, sources: _sources, ...claim }) => claim) }
       : {}),
     ...(packet.disagreements.length > 0 ? { disagreements: packet.disagreements } : {}),
     ...(packet.claims_status === "unavailable" ? { claims_status: "unavailable" } : {}),

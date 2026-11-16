@@ -50,10 +50,9 @@ import { createPostgresIssuerProfileRepository } from "../../fundamentals/src/is
 import { createPostgresMarketCacheRepository } from "../../market/src/cache-repository.ts";
 import { createCurrentPriceSource } from "../../analyze/src/current-price-source.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
+import { analyzeAgentWorkflow, type AnalyzeAgentDeps } from "./analyze-agent.ts";
 import type {
   DevApiAgentLoopStageFactory,
-  DevApiAnalyzeWorkflowInput,
-  DevApiAnalyzeWorkflowResult,
   DevApiServiceAdapterDeps,
 } from "./http.ts";
 
@@ -81,64 +80,22 @@ type LocalRuntimeClusterEvidence = {
   clusters: ReadonlyArray<LocalRuntimeClusterGroup>;
 };
 
-export async function runAnalyzeWorkflow(
-  input: DevApiAnalyzeWorkflowInput,
-): Promise<DevApiAnalyzeWorkflowResult> {
-  const asOf = new Date().toISOString();
-  const subjectRefs = normalizeSubjectRefs(input.subjectRefs);
-  const evidence = await loadLocalRuntimeEvidence(pool(), {
-    subject_refs: subjectRefs,
-    user_id: input.userId,
-    source_categories: input.sourceCategories,
-  });
-  const toolCallId = randomUUID();
-  const toolResult = {
-    kind: "local_analyze_workflow_result",
-    template_id: input.template.template_id,
-    bundle_ids: [...input.bundleIds],
-    evidence_status: evidence.claim_refs.length > 0 ? "available" : "insufficient_evidence",
-    manifest_contribution: {
-      subject_refs: subjectRefs,
-      claim_refs: evidence.claim_refs,
-      document_refs: evidence.document_refs,
-      source_ids: evidence.source_ids,
-    },
-  } satisfies JsonValue;
-  await writeLocalToolCallLog(pool(), {
-    toolCallId,
-    toolName: "local_analyze_workflow",
-    args: {
-      template_id: input.template.template_id,
-      source_categories: [...input.sourceCategories],
-      bundle_ids: [...input.bundleIds],
-      subject_refs: subjectRefs,
-    },
-    result: toolResult,
-  });
-  return {
-    blocks: [
-      {
-        id: randomUUID(),
-        kind: "rich_text",
-        snapshot_id: input.snapshotId,
-        data_ref: analyzeRunDataRef(input),
-        source_refs: evidence.source_ids,
-        claim_refs: evidence.claim_refs,
-        document_refs: evidence.document_refs,
-        tool_call_ids: [toolCallId],
-        as_of: asOf,
-        subject_refs: subjectRefs,
-        title: input.playbookName ?? input.template.name,
-        segments: [
-          {
-            type: "text",
-            text: analyzeMemoText(input, evidence),
-          },
-        ],
-      },
-    ],
-  };
-}
+export const analyzeAgentDeps = (env: NodeJS.ProcessEnv, client?: AnalyzeAgentDeps["client"]): AnalyzeAgentDeps => ({
+  // A getter, so the pool opens on the first read that needs it and reopens after a test closes it.
+  get db() {
+    return pool();
+  },
+  env,
+  logToolCalls: async (calls) => {
+    for (const call of calls) {
+      if (call.status !== "ok" || call.result === undefined) continue;
+      await writeLocalToolCallLog(pool(), { toolCallId: call.tool_call_id, toolName: call.tool_name, args: (call.arguments ?? {}) as JsonValue, result: call.result as JsonValue });
+    }
+  },
+  ...(client ? { client } : {}),
+});
+
+export const runAnalyzeWorkflow = analyzeAgentWorkflow(analyzeAgentDeps(process.env));
 
 // Builds the narrative memo's seal input from its blocks (fact_refs: []). Shared
 // with the per-section run path so the memo and deterministic-section seal inputs
@@ -148,7 +105,8 @@ export async function buildMemoSealInput(input: {
   userId: string;
   blocks: ReadonlyArray<Record<string, unknown>>;
 }): Promise<SnapshotSealInput> {
-  const blocks = input.blocks;
+  // A certified figure stays sealed under its own engine snapshot.
+  const blocks = input.blocks.filter((block) => block.kind !== "financial_answer");
   const asOf = maxBlockAsOf(blocks) ?? new Date().toISOString();
   const subjectRefs = subjectRefsFromBlocks(blocks);
   const manifest = await manifestFromBlockRefs({
@@ -224,7 +182,7 @@ export async function buildAnalyzeRunSeals(input: {
   });
   const merged = mergeSealInputs(memoSeal, sectionSeals);
   return {
-    blocks: merged.blocks as ReadonlyArray<Record<string, unknown>>,
+    blocks: [...input.memoBlocks, ...sectionSeals.flatMap((seal) => seal.blocks as ReadonlyArray<Record<string, unknown>>)],
     sealSnapshot: () => sealSnapshotWithPool(pool(), merged),
   };
 }
@@ -776,64 +734,6 @@ export async function closeLocalRuntimePoolForTests(): Promise<void> {
   const poolToClose = localPool;
   localPool = null;
   await poolToClose?.end();
-}
-
-function analyzeMemoText(
-  input: DevApiAnalyzeWorkflowInput,
-  evidence?: {
-    claims: ReadonlyArray<{
-      text_canonical: string;
-      source_disclosure?: string | null;
-      provider?: string;
-      license_class?: string;
-      source_canonical_url?: string | null;
-    }>;
-  },
-): string {
-  const sources = input.sourceCategories.length > 0 ? input.sourceCategories.join(", ") : "base template scope";
-  const subjects = input.subjectRefs.length > 0
-    ? input.subjectRefs.map((subject) => `${subject.kind}:${subject.id}`).join(", ")
-    : "the active workspace context";
-  const evidenceText = evidence === undefined
-    ? ""
-    : evidence.claims.length > 0
-    ? `Evidence claims:\n${evidence.claims.map((claim, index) => `${index + 1}. ${claim.text_canonical}${claimDisclosureSuffix(claim)}`).join("\n")}`
-    : "Insufficient local evidence: no existing claims, facts, or events were found for the requested subjects.";
-  return [
-    input.playbookPrompt,
-    `Sources: ${sources}.`,
-    `Subjects: ${subjects}.`,
-    `Bundles: ${input.bundleIds.join(", ")}.`,
-    evidenceText,
-  ].filter((line) => line.length > 0).join("\n\n");
-}
-
-function claimDisclosureSuffix(claim: {
-  source_disclosure?: string | null;
-  provider?: string;
-  license_class?: string;
-  source_canonical_url?: string | null;
-}): string {
-  const parts: string[] = [];
-  if (claim.source_disclosure) parts.push(claim.source_disclosure);
-  if (claim.provider || claim.license_class) {
-    parts.push(`Source: ${claim.provider ?? "unknown"}; license: ${claim.license_class ?? "unknown"}`);
-  }
-  if (claim.source_canonical_url) parts.push(`original URL: ${claim.source_canonical_url}`);
-  return parts.length === 0 ? "" : ` [${parts.join("; ")}]`;
-}
-
-function analyzeRunDataRef(input: DevApiAnalyzeWorkflowInput): JsonValue {
-  const base = {
-    kind: "rich_text",
-    id: `analyze:${input.template.template_id}`,
-  };
-  return input.playbookSectionId
-    ? {
-      ...base,
-      params: { playbook_section_id: input.playbookSectionId },
-    }
-    : base;
 }
 
 function subjectRefsFromBlocks(blocks: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<SnapshotSubjectRef> {

@@ -329,7 +329,7 @@ export function createDevApiServer(
         return;
       }
       const input = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
-      respondJson(res, 201, await adapters.analyze.createRun({ userId, body: input }));
+      respondJson(res, 201, await adapters.analyze.createRun({ userId, body: input, signal: clientLeft(res) }));
       return;
     }
 
@@ -369,7 +369,7 @@ export function createDevApiServer(
         return;
       }
       const runId = readRequiredUuidValue(decodeURIComponent(analyzeRerunMatch[1]), "run_id");
-      respondJson(res, 201, await adapters.analyze.rerun({ userId, runId }));
+      respondJson(res, 201, await adapters.analyze.rerun({ userId, runId, signal: clientLeft(res) }));
       return;
     }
 
@@ -1075,6 +1075,14 @@ async function readJson(req: AsyncIterable<Uint8Array | string>): Promise<unknow
   const text = Buffer.concat(chunks).toString("utf8");
   if (text.trim() === "") return null;
   return JSON.parse(text);
+}
+
+function clientLeft(res: ServerResponse): AbortSignal {
+  const left = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) left.abort();
+  });
+  return left.signal;
 }
 
 function requireUserId(req: IncomingMessage, res: ServerResponse, auth: RequestAuthConfig): string | null {

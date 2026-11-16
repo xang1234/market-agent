@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import test, { type TestContext } from "node:test";
 import {
@@ -99,6 +100,38 @@ test("POST /v1/analyze/runs returns a generated Block[] memo", async (t) => {
   assert.ok(Array.isArray(body.blocks));
   assert.equal(body.blocks[0].kind, "rich_text");
   assert.match(JSON.stringify(body.blocks), /Review margin quality/);
+});
+
+test("POST /v1/analyze/runs and its rerun tell the Generate when the client leaves, and not when it is answered", { timeout: 10_000 }, async (t) => {
+  const fixture = createFixtureDevApiAdapters();
+  const signals: AbortSignal[] = [];
+  let started = () => {};
+  const leave = (input: { signal?: AbortSignal }) => new Promise<never>((_resolve, reject) => {
+    signals.push(input.signal!);
+    started();
+    input.signal!.addEventListener("abort", () => reject(new Error("the client left")));
+  });
+  const base = await startServer(t, {}, { adapters: { ...fixture, analyze: { ...fixture.analyze, createRun: leave, rerun: leave } } as never });
+  const headers = { "content-type": "application/json", "x-user-id": "00000000-0000-4000-8000-000000000001" };
+  for (const path of ["/v1/analyze/runs", `/v1/analyze/runs/${randomUUID()}/rerun`]) {
+    const client = new AbortController();
+    const began = new Promise<void>((resolve) => { started = resolve; });
+    const request = fetch(`${base}${path}`, { method: "POST", headers, body: "{}", signal: client.signal }).catch(() => "left");
+    await began;
+    client.abort();
+    assert.equal(await request, "left");
+    await new Promise<void>((resolve) => signals.at(-1)!.aborted ? resolve() : signals.at(-1)!.addEventListener("abort", () => resolve()));
+  }
+
+  const answered = await startServer(t, {}, { adapters: { ...fixture, analyze: { ...fixture.analyze, createRun: async (input: { signal?: AbortSignal }) => {
+    signals.push(input.signal!);
+    return fixture.analyze.createRun(input as never);
+  } } } as never });
+  const response = await fetch(`${answered}/v1/analyze/runs`, { method: "POST", headers, body: JSON.stringify({ template_id: EARNINGS_TEMPLATE_ID }) });
+  assert.equal(response.status, 201);
+  await response.json();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(signals.at(-1)!.aborted, false);
 });
 
 test("POST /v1/analyze/runs accepts playbook_id and records it on the run", async (t) => {
@@ -772,10 +805,7 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
   assert.ok(workflowInput);
   assert.deepEqual(workflowInput.sourceCategories, ["filings", "news"]);
   assert.deepEqual(workflowInput.subjectRefs, [primarySubject, addedSubject]);
-  assert.equal(workflowInput.playbookSectionId, "summary");
-  assert.match(workflowInput.playbookPrompt, /Earnings quality/);
-  assert.match(workflowInput.playbookPrompt, /Required sections: Summary/);
-  assert.equal(workflowInput.playbookName, "Earnings quality");
+  assert.equal(workflowInput.playbook?.playbook_id, "earnings_quality");
   assert.ok(workflowInput.bundleIds.includes("analyze_template_run"));
   assert.ok(workflowInput.bundleIds.includes("filing_research"));
   assert.ok(workflowInput.bundleIds.includes("document_research"));
@@ -1192,7 +1222,7 @@ test("service Analyze adapter honors explicit empty source categories as base bu
   assert.ok(workflowInput);
   assert.deepEqual(workflowInput.sourceCategories, []);
   assert.deepEqual(workflowInput.bundleIds, [ANALYZE_BASE_BUNDLE_ID]);
-  assert.equal(workflowInput.playbookSectionId, "summary");
+  assert.equal(workflowInput.playbook?.sections[0]?.section_id, "summary");
 });
 
 test("POST /v1/analyze/runs rejects verifier failures before persistence", async (t) => {

@@ -87,6 +87,30 @@ export const ANALYZE_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = Object.freeze([
   }),
   Object.freeze({
     playbook_id: "investment_memo",
+    version: 2,
+    name: "Investment memo",
+    description: "Full investment memo from stored sources: thesis, financial health, growth, competitive position, risks, and ownership.",
+    default_instructions:
+      "Write a complete investment memo from stored sources. Lead with the investment thesis. Cover financial health and profitability, growth drivers, competitive position, downside risks, and ownership signals (institutional holders, insider activity).",
+    default_source_categories: Object.freeze(["filings", "transcripts", "news"]),
+    sections: Object.freeze([
+      section("investment_thesis", "Investment thesis", true, "rich_text"),
+      section("financial_health", "Financial health & profitability", true, "metric_row"),
+      section("cash_resilience", "Cash resilience", false, "metric_row"),
+      section("revenue_trend", "Revenue trend", false, "line_chart"),
+      section("growth_drivers", "Growth drivers", true, "rich_text"),
+      section("competitive_position", "Competitive position", true, "rich_text"),
+      section("downside_risks", "Downside risks", true, "table"),
+      section("ownership_signals", "Ownership & insider signals", true, "rich_text"),
+      section("analyst_overview", "Analyst overview", false, "section"),
+      section("price_targets", "Price targets", false, "section"),
+    ]),
+  }),
+]);
+
+const RETIRED_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = Object.freeze([
+  Object.freeze({
+    playbook_id: "investment_memo",
     version: 1,
     name: "Investment memo",
     description:
@@ -108,6 +132,11 @@ export const ANALYZE_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = Object.freeze([
     ]),
   }),
 ]);
+
+/** The playbook as the given version defined it, current or retired. */
+export function playbookAt(playbookId: string | null, version: number | null): AnalyzePlaybook | undefined {
+  return [...ANALYZE_PLAYBOOKS, ...RETIRED_PLAYBOOKS].find((playbook) => playbook.playbook_id === playbookId && playbook.version === version);
+}
 
 export function resolveAnalyzePlaybookRequest(
   input: AnalyzePlaybookRunRequest,

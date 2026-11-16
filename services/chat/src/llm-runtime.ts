@@ -12,8 +12,7 @@ import type {
 } from "./coordinator.ts";
 import { buildEvidencePacket, figureCompanies, packetForModel, type ClaimEvidence, type ClaimRecord, type EvidencePacket } from "./evidence-packet.ts";
 import { assertionList, checkAssertions, MAX_ASSERTIONS, type AssertionReport } from "./assertions.ts";
-import { answerPeriods, inferenceWords, plainText, renderAssertion, unverifiedInference, type InferenceWords, type RenderedAssertion } from "./render-assertions.ts";
-import type { Segment } from "./prose-refs.ts";
+import { answerPeriods, citable, inferenceWords, plainText, renderAssertion, renderQuotes, unverifiedInference, type InferenceWords, type QuoteRef, type RenderedAssertion, type Segment } from "./render-assertions.ts";
 import type { ShownAs } from "./verdicts.ts";
 import type { ResearchScope } from "./research-scope.ts";
 import type { ModelExchange } from "./answer-trace.ts";
@@ -28,7 +27,8 @@ const NO_ANSWER_FALLBACK_TEXT = "No written answer is available for this questio
 // paragraph names its assertion and carries its unverified form: which one
 // shows, if any, is the judge's verdict.
 type Paragraph = Pick<RenderedAssertion, "index" | "segments" | "fact_bindings" | "source_refs"> & {
-  inference?: { index: number; unverified: ReadonlyArray<Segment>; words: InferenceWords };
+  inference?: { index: number; unverified: ReadonlyArray<Segment>; words: InferenceWords; cites: ReadonlyArray<Segment> };
+  quotedBy?: ReadonlyArray<number>;
 };
 // commentaryNotes: the notes its commentary parts keep, without one the page
 // already says (the periods a table beside it names).
@@ -43,7 +43,7 @@ type Answer =
 // or a note.
 export type CommentaryPart =
   | { kind: "figures"; segments: ReadonlyArray<Segment> }
-  | { kind: "inference"; subject: string | null; basis: string | null; text: string }
+  | { kind: "inference"; subject: string | null; basis: string | null; text: string; cites?: ReadonlyArray<Segment> }
   | { kind: "unverified"; subject: string | null; text: string }
   | { kind: "pending" }
   | { kind: "note"; text: string };
@@ -393,13 +393,33 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
     // An inference shows no figure, so its evidence covers no company.
     const keptAssertions = report.accepted.filter((assertion) => assertion.kind !== "analyst_inference");
     const periods = answerPeriods(keptAssertions, packet);
-    const kept = report.accepted.map((assertion) => ({
-      ...renderAssertion(assertion, packet, factBlocks, report.accepted, periods.once),
+    const rendered = report.accepted.map((assertion) => ({
+      ...(assertion.kind === "management_attribution"
+        ? renderQuotes(assertion, packet)
+        : renderAssertion(assertion, packet, factBlocks, report.accepted, periods.once)),
       kind: assertion.kind,
-      ...(assertion.kind === "analyst_inference"
-        ? { inference: { index: assertion.index, unverified: unverifiedInference(assertion, packet), words: inferenceWords(assertion, packet, report.accepted) } }
-        : {}),
     }));
+    const restingOn = (index: number) => report.accepted.filter((entry) => entry.kind === "analyst_inference" && entry.supports?.includes(index)).map((entry) => entry.index);
+    const quoted = (supports: ReadonlyArray<number>) => {
+      const refs = rendered.filter((entry) => entry.kind === "management_attribution" && supports.includes(entry.index)).flatMap((entry) => entry.segments.filter(isQuoteRef));
+      // Quotes from one source (the industry peers) are one citation that shows them all.
+      const bySource = new Map<string, QuoteRef>();
+      for (const ref of refs) {
+        const seen = bySource.get(ref.ref_id);
+        bySource.set(ref.ref_id, seen === undefined ? ref : { ...seen, format: `${seen.format}\n${ref.format}` });
+      }
+      return [...bySource.values()];
+    };
+    const disputed = new Set(packet.disagreements.flatMap((entry) => entry.claims));
+    // A quote no ref opens stays in the body, so the inference resting on it never stands uncited for it.
+    const uncited = new Set(packet.claims.filter((claim) => !citable(claim)).map((claim) => claim.id));
+    const kept = rendered.map((entry, i) => {
+      const assertion = report.accepted[i]!;
+      if (assertion.kind === "management_attribution") return { ...entry, quotedBy: assertion.evidence.some((id) => disputed.has(id) || uncited.has(id)) ? [] : restingOn(assertion.index) };
+      if (assertion.kind !== "analyst_inference") return entry;
+      const words = inferenceWords(assertion, packet, report.accepted);
+      return { ...entry, inference: { index: assertion.index, unverified: unverifiedInference(assertion, packet), words, cites: quoted(assertion.supports ?? []) } };
+    });
     // The figures the kept assertions state, and their companies: a comparison
     // rendered for only some of the companies it shows figures for would read
     // one-sided, so the fallback stands instead.
@@ -439,7 +459,7 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
     const otherSides = [...new Set(packet.disagreements.flatMap(({ claims: [a, b] }) =>
       shownClaims.has(a) && !shownClaims.has(b) ? [b] : shownClaims.has(b) && !shownClaims.has(a) ? [a] : []
     ))].map((id, i) => {
-      const side = renderAssertion({ index: -1 - i, kind: "management_attribution", text: "", evidence: [id] }, packet, factBlocks);
+      const side = renderQuotes({ index: -1 - i, kind: "management_attribution", text: "", evidence: [id] }, packet);
       return { ...side, segments: [{ type: "text" as const, text: "A source disagrees. " }, ...side.segments] };
     });
     // What the rendered assertions cannot say themselves: a company with no
@@ -567,6 +587,8 @@ function claimEvidence(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>)
   };
 }
 
+const isQuoteRef = (segment: Segment): segment is QuoteRef => segment.type === "ref" && (segment.ref_kind === "claim" || segment.ref_kind === "source");
+
 // What an answer leaves out of restating: each that no verified inference it
 // shows rests on (one still pending may verify), once any inference is shown,
 // so commentary whose every inference is hidden still says its figures. An
@@ -607,8 +629,9 @@ function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answ
       if (entry.inference === undefined) return [{ ...entry, part: { kind: "figures", segments: entry.segments } }];
       const state = inferences.get(entry.inference.index);
       const { subject, basis, text } = entry.inference.words;
+      const { cites } = entry.inference;
       const as = {
-        shown: { ...entry, part: { kind: "inference" as const, subject, basis, text } },
+        shown: { ...entry, part: { kind: "inference" as const, subject, basis, text, ...(cites.length > 0 ? { cites } : {}) } },
         unverified: { ...entry, segments: entry.inference.unverified, part: { kind: "unverified" as const, subject, text } },
         pending: { ...PENDING_INFERENCE, part: { kind: "pending" as const } },
       };
@@ -618,8 +641,13 @@ function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answ
       ...paragraphs.flatMap((entry, i) => [...(i === 0 ? [] : [{ type: "text", text: "\n\n" }]), ...entry.segments]),
       ...(notes.length > 0 ? [{ type: "text", text: `\n\n${notes.join(" ")}` }] : []),
     ];
+    // A quote stays while an inference resting on it is unverified or still being judged, since only a shown one cites it.
+    const citedByShown = (entry: Pick<Paragraph, "quotedBy">) => {
+      const states = (entry.quotedBy ?? []).map((index) => inferences.get(index));
+      return states.includes("shown") && !states.some((state) => state === "unverified" || state === "pending");
+    };
     const commentary = block.analyst_commentary !== true ? [] : [
-      ...paragraphs.flatMap(({ part }) => (part.kind === "figures" ? statements(part.segments) : [part])),
+      ...paragraphs.filter((entry) => !citedByShown(entry)).flatMap(({ part }) => (part.kind === "figures" ? statements(part.segments) : [part])),
       ...answer.commentaryNotes.map((text): CommentaryPart => ({ kind: "note", text })),
     ];
     const factBindings = [...new Map(paragraphs.flatMap((entry) => entry.fact_bindings).map((binding) => [binding.fact_id, binding])).values()];

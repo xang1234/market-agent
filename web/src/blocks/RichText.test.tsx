@@ -7,6 +7,7 @@ import { createRoot } from 'react-dom/client'
 
 import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from '../evidence/evidenceInspectorContext.ts'
 import type { EvidenceInspectionRef } from '../evidence/inspectionTypes.ts'
+import { validateBlock } from './BlockValidator.ts'
 import { RichText } from './RichText.tsx'
 import type { RichTextBlock } from './types.ts'
 
@@ -562,4 +563,125 @@ test('commentary with only figures shows them alone, and one saved before parts 
   assert.equal(saved.querySelector('[data-analyst-commentary]')!.textContent, 'Analyst commentary')
   assert.equal(saved.querySelector('blockquote')!.textContent!.trim(), 'Analyst inference on MU (from the revenue ranking): It leads on revenue.')
   assert.equal(saved.querySelector('h3'), null)
+})
+
+const CLAIM_A = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+const CLAIM_B = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+const CLAIM_C = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+const claimRef = (id: string, format: string) => ({ type: 'ref', ref_kind: 'claim', ref_id: id, format }) as const
+const CITATION = 'button[data-ref-kind="claim"], button[data-ref-kind="source"]'
+
+async function renderWithInspector(block: RichTextBlock, run: (doc: Document) => Promise<void>): Promise<EvidenceInspectionRef[]> {
+  const opened: EvidenceInspectionRef[] = []
+  const inspector: EvidenceInspectorContextValue = {
+    openInspection(input) { opened.push(input.ref) },
+    openBlockInspection() {},
+    closeInspection() {},
+  }
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  try {
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        <EvidenceInspectorContext.Provider value={inspector}>
+          <RichText block={block} />
+        </EvidenceInspectorContext.Provider>,
+      )
+    })
+    await run(dom.window.document)
+    for (const chip of dom.window.document.querySelectorAll<HTMLElement>(CITATION)) {
+      await act(async () => chip.click())
+    }
+    await act(async () => root.unmount())
+  } finally {
+    restoreGlobals()
+  }
+  return opened
+}
+
+const citations = (scope: Element) => [...scope.querySelectorAll(CITATION)].map((chip) => chip.querySelector('[aria-hidden]')!.textContent)
+
+test('a theme cites its claims by number, each quote a hover and a click away, and a quote it does not cite is listed apart from the figures', async () => {
+  const themed: RichTextBlock = {
+    ...richTextBlock('commentary-themes', []),
+    analyst_commentary: true,
+    commentary: [
+      { kind: 'figures', segments: [{ type: 'text', text: "MU's revenue was " }, { type: 'ref', ref_kind: 'fact', ref_id: FACT_A, format: '$133.2B' }, { type: 'text', text: '.' }] },
+      { kind: 'inference', subject: null, basis: null, text: 'Customer concentration: a few buyers carry its revenue.', cites: [claimRef(CLAIM_A, 'Our top customers make up much of our revenue.'), claimRef(CLAIM_B, 'We depend on hyperscale customers.')] },
+      { kind: 'figures', segments: [claimRef(CLAIM_C, 'Debt obligations could adversely affect our financial condition.')] },
+    ],
+  }
+  const opened = await renderWithInspector(themed, async (doc) => {
+    const card = doc.querySelector('[data-testid="block-rich-text-commentary-themes"]')!
+    const theme = card.querySelector('[data-commentary-part="inference"]')!
+    assert.equal(theme.querySelector('p')!.firstChild!.nextSibling!.textContent, 'Customer concentration: a few buyers carry its revenue.')
+    assert.deepEqual(citations(theme), ['[1]', '[2]'])
+    assert.deepEqual([...theme.querySelectorAll('span[title]')].slice(1).map((span) => span.getAttribute('title')), [
+      'Our top customers make up much of our revenue.',
+      'We depend on hyperscale customers.',
+    ], 'a cited quote shows on hover')
+    assert.deepEqual([...card.querySelectorAll('h3, h4')].map((heading) => heading.textContent), ['Analysis', 'Supporting figures', 'Quoted sources'])
+    const quoted = [...card.querySelectorAll('h4')].find((heading) => heading.textContent === 'Quoted sources')!.parentElement!
+    assert.equal(quoted.querySelector('[data-claim-quote]')!.textContent, '“Debt obligations could adversely affect our financial condition.”')
+    assert.deepEqual(citations(quoted), ['[3]'])
+    assert.equal(card.textContent!.includes('According to'), false)
+  })
+  assert.deepEqual(opened, [{ kind: 'claim', id: CLAIM_A }, { kind: 'claim', id: CLAIM_B }, { kind: 'claim', id: CLAIM_C }], 'each citation opens its claim')
+})
+
+test('a claim in Markdown text reads as its quote and a numbered citation, and a claim quoted twice keeps its number', async () => {
+  const opened = await renderWithInspector(richTextBlock('rt-quotes', [
+    claimRef(CLAIM_A, 'Demand is strong.'),
+    { type: 'text', text: '\n\nNVDA: ' },
+    claimRef(CLAIM_B, 'Supply is tight.'),
+    { type: 'text', text: '\n\n' },
+    claimRef(CLAIM_A, 'Demand is strong.'),
+  ]), async (doc) => {
+    assert.deepEqual([...doc.querySelectorAll('p')].map((paragraph) => paragraph.textContent), [
+      '“Demand is strong.”[1]Source 1',
+      'NVDA: “Supply is tight.”[2]Source 2',
+      '“Demand is strong.”[1]Source 1',
+    ])
+  })
+  assert.deepEqual(opened.map((ref) => ref.id), [CLAIM_A, CLAIM_B, CLAIM_A])
+})
+
+test('a theme of industry peers cites the source that names their industry, and the citation opens it', async () => {
+  const SOURCE = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+  const peers = { type: 'ref', ref_kind: 'source', ref_id: SOURCE, format: "Industry peer: AMD shares NVDA's industry (Semiconductors)\nIndustry peer: INTC shares NVDA's industry (Semiconductors)", source_label: 'NVDA industry source' } as const
+  const block: RichTextBlock = {
+    ...richTextBlock('commentary-peers', []),
+    analyst_commentary: true,
+    commentary: [{ kind: 'inference', subject: null, basis: null, text: 'Industry peers: AMD and INTC share its industry.', cites: [claimRef(CLAIM_A, 'We compete with AMD.'), peers] }],
+  }
+  assert.deepEqual(validateBlock(block), { valid: true, block }, 'a source ref is a block the schema accepts')
+  const opened = await renderWithInspector(block, async (doc) => {
+    const theme = doc.querySelector('[data-commentary-part="inference"]')!
+    assert.deepEqual(citations(theme), ['[1]', '[2]'])
+    assert.equal(theme.querySelector('button[data-ref-kind="source"] .sr-only')!.textContent, `Source 2: ${peers.format}`)
+  })
+  assert.deepEqual(opened, [{ kind: 'claim', id: CLAIM_A }, { kind: 'source', id: SOURCE }])
+})
+
+test('a quote resting on several sources shows once with a citation for each, and a citation\'s hover names its source', async () => {
+  const INDUSTRY = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+  const MARKET_CAP = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+  const line = "Industry peer: AMD shares NVDA's industry (Semiconductors)"
+  const source = (id: string, source_label: string) => ({ type: 'ref', ref_kind: 'source', ref_id: id, format: line, source_label }) as const
+  const block: RichTextBlock = {
+    ...richTextBlock('commentary-peer-sources', []),
+    analyst_commentary: true,
+    commentary: [
+      { kind: 'inference', subject: null, basis: null, text: 'Industry peers: AMD shares its industry.', cites: [source(INDUSTRY, 'Industry source')] },
+      { kind: 'figures', segments: [source(INDUSTRY, 'Industry source'), source(MARKET_CAP, 'AMD market cap source')] },
+    ],
+  }
+  await renderWithInspector(block, async (doc) => {
+    const theme = doc.querySelector('[data-commentary-part="inference"]')!
+    assert.equal(theme.querySelector('span[title]:not([class])')!.getAttribute('title'), `Industry source\n${line}`)
+    const quoted = [...doc.querySelectorAll('h4')].find((heading) => heading.textContent === 'Quoted sources')!.parentElement!
+    assert.deepEqual([...quoted.querySelectorAll('[data-claim-quote]')].map((quote) => quote.textContent), [`“${line}”`])
+    assert.deepEqual(citations(quoted), ['[1]', '[2]'])
+  })
 })
