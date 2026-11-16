@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test, { type TestContext } from "node:test";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
-import type { PlanningModel } from "../../financial-engine/src/planner.ts";
-import { databaseUrl, IDS, RESTATED_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
+import type { PlanningModel, RequestedSubject } from "../../financial-engine/src/planner.ts";
+import { authorityFor, databaseUrl, IDS, RESTATED_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
 import type { ChatAnalystToolRuntime, ChatAssistantMessagePersistence } from "../src/coordinator.ts";
 import { financialMessageId } from "../src/chat-ids.ts";
 import { persistUserChatMessage } from "../src/messages.ts";
-import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
+import { certifiedFinancials, createChatFinancialRuntime, requestKeyFor } from "../src/financial-runtime.ts";
 import { createTurnHydrator } from "../src/turn-hydration.ts";
-import { SCOPE_METRICS } from "../src/scope-figures.ts";
+import { SCOPE_METRICS, type PlanChoice } from "../src/scope-figures.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
 import { proposedMetric, resolveResearchScope, type CompanyChange, type ScopeProposal } from "../src/research-scope.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
@@ -1121,6 +1121,113 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.equal(retried.message_id, answered.message_id);
     assert.equal(second.calls, 0, "the retry does not plan again");
     assert.equal((await db.query(`select count(*)::int as n from chat_messages where message_id = $1`, [answered.message_id])).rows[0].n, 1);
+  });
+
+  const NVDA_AS_AAA: RequestedSubject = { mention: "NVDA", resolution: { status: "resolved", subject_ref: { kind: "issuer", id: IDS.issuerA }, label: "Alpha Industries Inc." } };
+  const certify = (turnId: string, n: number, choice: PlanChoice, planningModel: PlanningModel | null = null) => certifiedFinancials(
+    { pool, planningModel, evidence: createEvidenceFinancialPort },
+    {
+      context: { ...base, runId: turnId, turnId, userIntent: "NVDA revenue in fiscal 2023", bundleId: "financial_answer", emit: () => assert.fail("a certified call streams nothing") },
+      subjects: [NVDA_AS_AAA],
+      choice,
+      labels: new Map([[IDS.issuerA, "NVDA"]]),
+      authority: authorityFor(),
+      requestKey: requestKeyFor(turnId, n),
+      persistParent: async () => {},
+    },
+  );
+  const PLANNER: PlanChoice = { kind: "planner" };
+  const incomeStatement: PlanChoice = { kind: "kept_figures", metrics: ["income_statement"], period: { kind: "fiscal_year", fiscal_year: 2023 } };
+  const figuresOf = async (result: Awaited<ReturnType<typeof certify>>) => {
+    assert(result.status === "published");
+    return (await result.packet()).figures.map(({ id, metric, value }) => `${id} ${metric}: ${value}`);
+  };
+
+  await t.test("a certified-financials call returns the published content, its packet with F ids, and its run", async () => {
+    const turnId = randomUUID();
+    const result = await certify(turnId, 1, PLANNER, revenueModel(["NVDA"]));
+    assert.equal(result.status, "published");
+    assert.deepEqual(result.content?.results.map((entry) => entry.disposition), ["verified"]);
+    assert.deepEqual(await figuresOf(result), ["F1 Revenue: $383.0B"]);
+    const { rows: [run] } = await db.query(`select run_id::text, request_key from financial_runs where run_id = $1`, [result.run_id]);
+    assert.deepEqual(run, { run_id: result.run_id, request_key: `turn:${turnId}:1` });
+  });
+
+  await t.test("two certified calls in one turn are two runs under their own keys", async () => {
+    const turnId = randomUUID();
+    const first = await certify(turnId, 1, PLANNER, revenueModel(["NVDA"]));
+    const second = await certify(turnId, 2, incomeStatement);
+    assert.deepEqual([await figuresOf(first), await figuresOf(second)], [
+      ["F1 Revenue: $383.0B"],
+      [
+        "F1 Revenue: $383.0B",
+        "F2 Gross profit: $169.1B",
+        "F3 Operating income: No eligible input was public before the knowledge cutoff.",
+        "F4 Net income: No eligible input was public before the knowledge cutoff.",
+        "F5 Gross margin (gross profit / revenue): 44.16%",
+        "F6 Operating margin (operating income / revenue): A required input or calculation is unavailable.",
+        "F7 Net margin (net income / revenue): A required input or calculation is unavailable.",
+      ],
+    ]);
+    const runs = [first, second].flatMap((result) => result.status === "published" ? [result.run_id] : []);
+    const { rows } = await db.query(`select request_key from financial_runs where run_id = any($1::uuid[]) order by request_key`, [runs]);
+    assert.deepEqual(rows.map((row) => row.request_key), [`turn:${turnId}:1`, `turn:${turnId}:2`]);
+  });
+
+  await t.test("a certified call about two companies names each figure's company by the label given for its issuer", async () => {
+    const turnId = randomUUID();
+    const BBB: RequestedSubject = { mention: "BBB", resolution: { status: "resolved", subject_ref: { kind: "issuer", id: IDS.issuerB }, label: "Beta Holdings Corp." } };
+    const result = await certifiedFinancials(
+      { pool, planningModel: null, evidence: createEvidenceFinancialPort },
+      {
+        context: { ...base, runId: turnId, turnId, userIntent: "Compare AAA and BBB", bundleId: "financial_answer", emit: () => assert.fail("a certified call streams nothing") },
+        subjects: [NVDA_AS_AAA, BBB],
+        choice: { kind: "kept_figures", metrics: ["income_statement"], period: { kind: "fiscal_year", fiscal_year: 2023 } },
+        labels: new Map([[IDS.issuerA.toUpperCase(), "NVDA"], [IDS.issuerB, "BBB"]]),
+        authority: authorityFor(),
+        requestKey: requestKeyFor(turnId, 1),
+        persistParent: async () => {},
+      },
+    );
+    assert(result.status === "published");
+    const packet = await result.packet();
+    assert.deepEqual(
+      [packet.companies, packet.figures.filter((figure) => figure.metric === "Gross profit").map((figure) => `${figure.company}: ${figure.value}`)],
+      [["NVDA", "BBB"], ["NVDA: $169.1B", "BBB: No eligible input was public before the knowledge cutoff."]],
+    );
+  });
+
+  await t.test("a later call under a published key resumes its run without planning, and leaves the block to its parent", async () => {
+    const turnId = randomUUID();
+    const first = await certify(turnId, 1, PLANNER, revenueModel(["NVDA"]));
+    assert(first.status === "published");
+    const model = revenueModel(["NVDA"], 2022);
+    const again = await certify(turnId, 1, PLANNER, model);
+    assert.deepEqual([again, model.calls], [{ status: "existing", run_id: first.run_id }, 0]);
+  });
+
+  await t.test("two calls that plan different figures under one key: one publishes, the other is request_conflict", async () => {
+    let release!: () => void;
+    const bothPlanning = new Promise<void>((resolve) => release = resolve);
+    let planning = 0;
+    const afterBothPlanning = (draft: PlanningModel): PlanningModel => async (...args) => {
+      planning += 1;
+      if (planning === 2) release();
+      await bothPlanning;
+      return draft(...args);
+    };
+    const turnId = randomUUID();
+    const results = await Promise.all([
+      certify(turnId, 1, PLANNER, afterBothPlanning(revenueModel(["NVDA"]))),
+      certify(turnId, 1, PLANNER, afterBothPlanning(revenueModel(["NVDA"], 2022))),
+    ]);
+    assert.deepEqual(results.map((result) => "reason" in result ? result.reason : result.status).sort(), ["published", "request_conflict"]);
+  });
+
+  await t.test("the chat lane keys its run by the bare turn id, as stored runs are keyed", async () => {
+    const { turnId } = await chatHarness(pool, { model: revenueModel(["AAA"]) }).run({ ...base, userIntent: "Revenue for AAA" });
+    const { rows } = await db.query(`select request_key from financial_runs where parent_id = $1 and parent_version = $2`, [threadId, `turn:${turnId}`]);
+    assert.deepEqual(rows, [{ request_key: turnId }]);
   });
 });
 
