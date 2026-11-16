@@ -378,7 +378,9 @@ create table documents (
   parse_status parse_status not null default 'pending',
   deleted_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  -- A 10-K's read state per item (migration 0084).
+  read_state jsonb check (read_state is null or jsonb_typeof(read_state) = 'object')
 );
 create unique index documents_content_hash_idx on documents(content_hash, raw_blob_id);
 create index documents_source_idx on documents(source_id);

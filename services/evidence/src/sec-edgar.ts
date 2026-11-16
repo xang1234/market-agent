@@ -464,7 +464,7 @@ export async function ingestSecFiling(
   return Object.freeze({ source, ingest });
 }
 
-async function cleanupSourceAfterFailedIngest(
+export async function cleanupSourceAfterFailedIngest(
   db: QueryExecutor,
   sourceId: string,
   ingestError: unknown,

@@ -233,6 +233,7 @@ export async function loadLocalRuntimeEvidence(
           -- competitor, customer or other party is another company's claim.
           and (not $10::boolean or ca.role = 'subject')
           and (($5::boolean and ${ISSUER_IR_DOCUMENT_SQL}) or ($6::boolean and not ${ISSUER_IR_DOCUMENT_SQL}))
+          and (not (c.predicate like any($16::text[])) or coalesce(c.predicate like any($8::text[]), false) or c.claim_id = any($14::uuid[]))
         -- The company the claim is about: its subject role before a competitor
         -- or affected party, the issuer row before a listing, then by id so the
         -- pick is stable.
@@ -318,6 +319,7 @@ export async function loadLocalRuntimeEvidence(
       input.selection?.fiscal_year ?? null,
       firstClaimIds,
       input.selection?.fiscal_year == null ? null : input.selection.fiscal_period ?? null,
+      NAMED_ONLY_PREDICATES,
     ],
   );
   const evidence = evidenceFromClaimRows(subjectRefs, rows.slice(0, limit), input.selection !== undefined);
@@ -515,6 +517,10 @@ export async function lockCitableClaims(
     unchecked: new Set(rows.flatMap((row) => (row.locked ? [] : [row.claim_id]))),
   };
 }
+
+// One 10-K adds dozens of claims dated by a single filing. Unnamed, they would
+// crowd every release and event out of a read and out of a selection's spare slots.
+const NAMED_ONLY_PREDICATES = ["business.%", "risk.factor"];
 
 // d, the claim's document, is a copy fetched from the issuer's IR site.
 const ISSUER_IR_DOCUMENT_SQL = `exists (select 1 from ir_document_assets ira where ira.document_id = d.document_id)`;

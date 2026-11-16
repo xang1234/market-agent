@@ -67,8 +67,8 @@ export type ReleaseMetric = (typeof RELEASE_METRICS)[number];
 // explanation or guidance is the model's (as for enriched 8-K narratives).
 const RELEASE_CONFIDENCE = 0.8;
 const MAX_STATEMENTS = 8;
-const MIN_QUOTE_CHARS = 20;
-const MAX_QUOTE_CHARS = 600;
+export const MIN_QUOTE_CHARS = 20;
+export const MAX_QUOTE_CHARS = 600;
 // The release and the CFO commentary together run to ~40k characters.
 const MAX_PROMPT_CHARS = 60_000;
 // A release reports a quarter ended at most this long before it is filed. A
@@ -165,24 +165,30 @@ export function releaseExhibits(submission: string): ReleaseExhibit[] {
   for (const [, document] of submission.matchAll(/<DOCUMENT>([\s\S]*?)<\/DOCUMENT>/g)) {
     const type = /<TYPE>([^\n<]+)/.exec(document!)?.[1]?.trim() ?? "";
     if (!/^EX-99(?:\.\d+)?$/i.test(type)) continue;
-    const body = /<TEXT>([\s\S]*)<\/TEXT>/.exec(document!)?.[1] ?? "";
-    const blocks = (MARKUP.test(body) ? body.split(BLOCK_BREAK) : plainTextBlocks(body))
-      .map(canonicalText)
-      .filter((block) => block !== "");
-    const edges = new Set<number>();
-    let at = 0;
-    for (const block of blocks) {
-      edges.add(at);
-      at += block.length;
-      edges.add(at);
-      at += 1; // the space joining blocks
-    }
-    const text = blocks.join(" ");
+    const { text, edges } = blockText(/<TEXT>([\s\S]*)<\/TEXT>/.exec(document!)?.[1] ?? "");
     if (text !== "") exhibits.push({ type: type.toUpperCase(), text, edges });
   }
   return exhibits;
 }
 
+// HTML (or plain text) as canonical text, its blocks joined by a space, with
+// where each block starts and ends in it.
+export function blockText(body: string): Omit<ReleaseExhibit, "type"> {
+  const blocks = (MARKUP.test(body) ? body.split(BLOCK_BREAK) : plainTextBlocks(body))
+    .map(canonicalText)
+    .filter((block) => block !== "");
+  const edges = new Set<number>();
+  let at = 0;
+  for (const block of blocks) {
+    edges.add(at);
+    at += block.length;
+    edges.add(at);
+    at += BLOCK_JOIN.length;
+  }
+  return { text: blocks.join(BLOCK_JOIN), edges };
+}
+
+const BLOCK_JOIN = " ";
 // A closing block tag, or a line break (with any attributes).
 const BLOCK_BREAK = /<(?:\/(?:div|p|li|tr|td|th|h[1-6]|table|ul|ol)\s*|br\b[^>]*)>/i;
 const MARKUP = /<\/?(?:html|body|div|p|br|table|font|span)\b/i;
@@ -330,7 +336,10 @@ export function explainedPeriod(quarterEnd: IsoDate | null, statement: Pick<Rele
 // hold, a clause cut from a sentence ("decline due to weaker demand" out of
 // "Revenue did not decline due to weaker demand"), or one too short or long.
 // The stored text is the exhibit's, not the model's.
-export function verifyStatement(statement: ReleaseStatement, exhibits: ReadonlyArray<ReleaseExhibit>): VerifiedStatement | null {
+export function verifyStatement<S extends { quote: string }>(
+  statement: S,
+  exhibits: ReadonlyArray<ReleaseExhibit>,
+): (S & { exhibit: string; start: number; end: number }) | null {
   const quote = canonicalText(statement.quote);
   if (quote.length < MIN_QUOTE_CHARS || quote.length > MAX_QUOTE_CHARS) return null;
   for (const exhibit of exhibits) {
@@ -494,13 +503,19 @@ async function fetchReleaseExhibits(secClient: SecFilingFetcher, cik: number, ac
 // ran, not what it said). Low reasoning: it picks sentences, and the quote
 // check does the rest; a large model's default reasoning took 4 minutes on one
 // release in a probe.
-async function completeLogged(deps: ExtractReleaseDeps, toolName: string, args: JsonObject, messages: LlmChatMessage[]): Promise<{ model: string; text: string }> {
+export async function completeLogged(
+  deps: Pick<ExtractReleaseDeps, "db" | "llm">,
+  toolName: string,
+  args: JsonObject,
+  messages: LlmChatMessage[],
+  maxTokens = 3_000,
+): Promise<{ model: string; text: string; truncated: boolean }> {
   return runLoggedToolCall(deps.db, {
     tool_name: toolName,
     args,
     invoke: async () => {
-      const reply = await deps.llm.complete({ messages, temperature: 0, maxTokens: 3_000, reasoning: "low" });
-      return { model: reply.deployment.model, text: reply.text };
+      const reply = await deps.llm.complete({ messages, temperature: 0, maxTokens, reasoning: "low" });
+      return { model: reply.deployment.model, text: reply.text, truncated: reply.truncated === true };
     },
   });
 }
