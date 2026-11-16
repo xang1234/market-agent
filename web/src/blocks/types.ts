@@ -83,22 +83,26 @@ export type BaseBlock = {
 export type TextSegmentTone = 'positive' | 'negative' | 'neutral'
 export type TextSegment = { type: 'text'; text: string; tone?: TextSegmentTone }
 
-export const REF_SEGMENT_KINDS = ['fact', 'claim', 'event', 'series', 'result'] as const
+export const REF_SEGMENT_KINDS = ['fact', 'claim', 'event', 'series', 'result', 'source'] as const
 export type RefSegmentKind = (typeof REF_SEGMENT_KINDS)[number]
 
 export type RefSegment =
-  | { type: 'ref'; ref_kind: Exclude<RefSegmentKind, 'result'>; ref_id: string; format?: string }
+  // A quote (a claim ref, or a source ref for a claim with no claim row) names its source for a copied answer.
+  | { type: 'ref'; ref_kind: Exclude<RefSegmentKind, 'result'>; ref_id: string; format?: string; source_label?: string }
   // An engine result in commentary on its financial answer, with its period as that answer labels it.
   | { type: 'ref'; ref_kind: 'result'; ref_id: string; format?: string; period?: string }
 
 export type RichTextSegment = TextSegment | RefSegment
+
+// A quote's ref, shown as a numbered citation.
+export type CitationRef = Extract<RefSegment, { ref_kind: Exclude<RefSegmentKind, 'result'> }> & { ref_kind: 'claim' | 'source' }
 
 // One part of analyst commentary: a statement of figures, an inference the
 // judge found entailed, one it found unsupported, one it is still checking,
 // or a note. An inference's words are plain text, never Markdown.
 export type CommentaryPart =
   | { kind: 'figures'; segments: ReadonlyArray<RichTextSegment> }
-  | { kind: 'inference'; subject: string | null; basis: string | null; text: string; cites?: ReadonlyArray<RefSegment> }
+  | { kind: 'inference'; subject: string | null; basis: string | null; text: string; cites?: ReadonlyArray<CitationRef> }
   | { kind: 'unverified'; subject: string | null; text: string }
   | { kind: 'pending' }
   | { kind: 'note'; text: string }

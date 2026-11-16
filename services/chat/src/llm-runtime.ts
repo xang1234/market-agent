@@ -12,8 +12,7 @@ import type {
 } from "./coordinator.ts";
 import { buildEvidencePacket, figureCompanies, packetForModel, type ClaimEvidence, type ClaimRecord, type EvidencePacket } from "./evidence-packet.ts";
 import { assertionList, checkAssertions, MAX_ASSERTIONS, type AssertionReport } from "./assertions.ts";
-import { answerPeriods, datedInText, inferenceWords, plainText, renderAssertion, renderQuotes, unverifiedInference, type InferenceWords, type RenderedAssertion } from "./render-assertions.ts";
-import type { Segment } from "./prose-refs.ts";
+import { answerPeriods, citable, inferenceWords, plainText, renderAssertion, renderQuotes, unverifiedInference, type InferenceWords, type QuoteRef, type RenderedAssertion, type Segment } from "./render-assertions.ts";
 import type { ShownAs } from "./verdicts.ts";
 import type { ResearchScope } from "./research-scope.ts";
 import type { ModelExchange } from "./answer-trace.ts";
@@ -396,20 +395,27 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
     const periods = answerPeriods(keptAssertions, packet);
     const rendered = report.accepted.map((assertion) => ({
       ...(assertion.kind === "management_attribution"
-        ? renderQuotes(assertion, packet, factBlocks)
+        ? renderQuotes(assertion, packet)
         : renderAssertion(assertion, packet, factBlocks, report.accepted, periods.once)),
       kind: assertion.kind,
     }));
     const restingOn = (index: number) => report.accepted.filter((entry) => entry.kind === "analyst_inference" && entry.supports?.includes(index)).map((entry) => entry.index);
     const quoted = (supports: ReadonlyArray<number>) => {
-      const refs = rendered.filter((entry) => entry.kind === "management_attribution" && supports.includes(entry.index)).flatMap((entry) => entry.segments.filter(isClaimRef));
-      return [...new Map(refs.map((ref) => [ref.ref_id, ref])).values()];
+      const refs = rendered.filter((entry) => entry.kind === "management_attribution" && supports.includes(entry.index)).flatMap((entry) => entry.segments.filter(isQuoteRef));
+      // Quotes from one source (the industry peers) are one citation that shows them all.
+      const bySource = new Map<string, QuoteRef>();
+      for (const ref of refs) {
+        const seen = bySource.get(ref.ref_id);
+        bySource.set(ref.ref_id, seen === undefined ? ref : { ...seen, format: `${seen.format}\n${ref.format}` });
+      }
+      return [...bySource.values()];
     };
     const disputed = new Set(packet.disagreements.flatMap((entry) => entry.claims));
-    const dated = new Set(packet.claims.filter(datedInText).map((claim) => claim.id));
+    // A quote no ref opens stays in the body, so the inference resting on it never stands uncited for it.
+    const uncited = new Set(packet.claims.filter((claim) => !citable(claim)).map((claim) => claim.id));
     const kept = rendered.map((entry, i) => {
       const assertion = report.accepted[i]!;
-      if (assertion.kind === "management_attribution") return { ...entry, quotedBy: assertion.evidence.some((id) => disputed.has(id) || dated.has(id)) ? [] : restingOn(assertion.index) };
+      if (assertion.kind === "management_attribution") return { ...entry, quotedBy: assertion.evidence.some((id) => disputed.has(id) || uncited.has(id)) ? [] : restingOn(assertion.index) };
       if (assertion.kind !== "analyst_inference") return entry;
       const words = inferenceWords(assertion, packet, report.accepted);
       return { ...entry, inference: { index: assertion.index, unverified: unverifiedInference(assertion, packet), words, cites: quoted(assertion.supports ?? []) } };
@@ -453,7 +459,7 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
     const otherSides = [...new Set(packet.disagreements.flatMap(({ claims: [a, b] }) =>
       shownClaims.has(a) && !shownClaims.has(b) ? [b] : shownClaims.has(b) && !shownClaims.has(a) ? [a] : []
     ))].map((id, i) => {
-      const side = renderQuotes({ index: -1 - i, kind: "management_attribution", text: "", evidence: [id] }, packet, factBlocks);
+      const side = renderQuotes({ index: -1 - i, kind: "management_attribution", text: "", evidence: [id] }, packet);
       return { ...side, segments: [{ type: "text" as const, text: "A source disagrees. " }, ...side.segments] };
     });
     // What the rendered assertions cannot say themselves: a company with no
@@ -581,7 +587,7 @@ function claimEvidence(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>)
   };
 }
 
-const isClaimRef = (segment: Segment): segment is Extract<Segment, { type: "ref" }> => segment.type === "ref" && segment.ref_kind === "claim";
+const isQuoteRef = (segment: Segment): segment is QuoteRef => segment.type === "ref" && (segment.ref_kind === "claim" || segment.ref_kind === "source");
 
 // What an answer leaves out of restating: each that no verified inference it
 // shows rests on (one still pending may verify), once any inference is shown,

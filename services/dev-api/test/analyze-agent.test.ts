@@ -331,7 +331,7 @@ test("the analyst agent writes an investment memo's sections from stored sources
       const sealed = (await db.query(`select claim_refs from snapshots where snapshot_id = $1`, [saved.snapshot_id])).rows[0].claim_refs as string[];
       return { commentary: card.commentary, quoted: card.segments.some((segment) => segment.ref_id === claimOf["risk.factor"]), sealed: sealed.includes(claimOf["risk.factor"]!) };
     };
-    const quote = { type: "ref", ref_kind: "claim", ref_id: claimOf["risk.factor"], format: "A downturn in industrial demand could reduce our sales." };
+    const quote = { type: "ref", ref_kind: "claim", ref_id: claimOf["risk.factor"], format: "A downturn in industrial demand could reduce our sales.", source_label: "AAA source, published 2026-02-25" };
     assert.deepEqual(await risksWhen("entailed"), {
       commentary: [{ kind: "inference", subject: null, basis: null, text: THEME, cites: [quote] }],
       quoted: true,

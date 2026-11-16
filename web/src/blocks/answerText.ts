@@ -2,7 +2,7 @@
 // answer shows them, tables as Markdown tables. A chart or other visual names
 // itself rather than vanishing, so the reader knows the note leaves it out.
 import { labelText, resultLabel, resultsById, supportedFinancialContent } from './financialAnswer.ts'
-import { isRefSegment, refSegmentText } from './richText.ts'
+import { citationNumbers, commentaryCard, isCitationRef, isRefSegment, refSegmentText } from './richText.ts'
 import { formatTableCell } from './table.ts'
 import type {
   Block,
@@ -10,8 +10,9 @@ import type {
   FinancialAnswerBlock,
   FinancialPresentedResult,
   FindingCardBlock,
-  RefSegment,
+  CommentaryPart,
   RichTextBlock,
+  RichTextSegment,
   SectionBlock,
   SourcesBlock,
   TableBlock,
@@ -76,6 +77,46 @@ function financialAnswerText(block: FinancialAnswerBlock): string {
     .join('\n\n')
 }
 
+// Plain runs are the answer's Markdown source; refs and toned runs render
+// literally, a quote in quotation marks with its citation's number.
+function segmentText(segments: ReadonlyArray<RichTextSegment>, numbers: ReadonlyMap<string, number>): string {
+  return segments.map((segment) => {
+    if (isCitationRef(segment)) return `“${literal(refSegmentText(segment))}” [${numbers.get(segment.ref_id)}]`
+    if (isRefSegment(segment)) return literal(refSegmentText(segment))
+    return segment.tone === undefined || segment.tone === 'neutral' ? segment.text : literal(segment.text)
+  }).join('')
+}
+
+// The text, then the source each citation number opens, so a pasted quote keeps its date and source.
+function withSources(segments: ReadonlyArray<RichTextSegment>, numbers: ReadonlyMap<string, number>, text: string): string {
+  const labels = new Map<number, string>()
+  for (const segment of segments) {
+    if (!isCitationRef(segment)) continue
+    const n = numbers.get(segment.ref_id)!
+    if (!labels.has(n)) labels.set(n, segment.source_label ?? 'Source')
+  }
+  const list = [...labels].sort(([a], [b]) => a - b).map(([n, label]) => `[${n}] ${literal(label)}`)
+  return list.length === 0 ? text : `${text}\n\nSources\n\n${list.join('\n')}`
+}
+
+const TAKEAWAY_BADGES = { inference: 'Inference', unverified: 'Unverified', pending: 'Checking' } as const
+
+// Commentary as its card shows it: the takeaways, each by its badge, then the
+// figures and the quotes. A hidden takeaway is no part, so it is never copied.
+function commentaryText(parts: ReadonlyArray<CommentaryPart>): string {
+  const { takeaways, figures, quotes, notes, numbers } = commentaryCard(parts)
+  const takeaway = takeaways.map((part) => {
+    if (part.kind === 'pending') return `- ${TAKEAWAY_BADGES.pending}: An analyst inference is being checked against the figures it rests on.`
+    const words = `- ${TAKEAWAY_BADGES[part.kind]}: ${part.subject ? `${literal(part.subject)} ` : ''}${literal(part.text)}`
+    if (part.kind === 'unverified') return words
+    return `${words}${(part.cites ?? []).map((cite) => ` [${numbers.get(cite.ref_id)}]`).join('')}${part.basis ? `\n  Based on ${literal(part.basis)}.` : ''}`
+  })
+  const list = (title: string, items: typeof figures) => (items.length === 0 ? '' : `${title}\n\n${items.map((part) => `- ${segmentText(part.segments, numbers)}`).join('\n')}`)
+  const text = ['Analysis', takeaway.join('\n'), list('Supporting figures', figures), list('Quoted sources', quotes), notes.join(' ')].filter(Boolean).join('\n\n')
+  const cited = [...takeaways.flatMap((part) => (part.kind === 'inference' ? part.cites ?? [] : [])), ...[...figures, ...quotes].flatMap((part) => part.segments)]
+  return withSources(cited, numbers, text)
+}
+
 type TextBlocks = {
   rich_text: RichTextBlock
   financial_answer: FinancialAnswerBlock
@@ -87,13 +128,11 @@ type TextBlocks = {
 }
 
 const BLOCK_TEXT: { readonly [K in keyof TextBlocks]: (block: TextBlocks[K]) => string } = {
-  rich_text: ({ segments, analyst_commentary, clarification_choices }) => {
-    // Plain runs are the answer's Markdown source; refs and toned runs render literally.
-    const ref = (segment: RefSegment) => (segment.ref_kind === 'claim' ? `“${literal(refSegmentText(segment))}”` : literal(refSegmentText(segment)))
-    const text = segments.map((segment) => (isRefSegment(segment) ? ref(segment) : segment.tone === undefined || segment.tone === 'neutral' ? segment.text : literal(segment.text))).join('')
+  rich_text: ({ segments, analyst_commentary, clarification_choices, commentary }) => {
+    const text = commentary ? commentaryText(commentary) : withSources(segments, citationNumbers(segments), segmentText(segments, citationNumbers(segments)))
     // A clarification's text is its question; the app shows its options as buttons.
     const choices = clarification_choices?.map((choice) => `- ${literal(choice)}`) ?? []
-    return [analyst_commentary ? `Analyst commentary\n\n${text}` : text, choices.join('\n')].filter(Boolean).join('\n\n')
+    return [analyst_commentary && !commentary ? `Analyst commentary\n\n${text}` : text, choices.join('\n')].filter(Boolean).join('\n\n')
   },
   financial_answer: financialAnswerText,
   table: ({ title, columns, rows }) => {

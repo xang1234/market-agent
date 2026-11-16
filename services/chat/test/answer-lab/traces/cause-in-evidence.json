@@ -2770,7 +2770,8 @@
           "type": "ref",
           "ref_kind": "claim",
           "ref_id": "6d499c74-bc94-43d6-8468-ae34d0becda2",
-          "format": "As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges."
+          "format": "As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.",
+          "source_label": "AMD source, published 2025-08-05"
         },
         {
           "type": "text",

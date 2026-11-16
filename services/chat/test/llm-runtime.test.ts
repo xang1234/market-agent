@@ -854,7 +854,7 @@ test("a turn with no figure and only gap notes points to its notes, never the mo
   assert.deepEqual(
     (await shown(BASE_ENV, withList([{ kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] }]), [A_TOOL_CALL])).segments,
     [
-      { type: "ref", ref_kind: "claim", ref_id: A_CLAIM, format: "Management raised its outlook." },
+      { type: "ref", ref_kind: "claim", ref_id: A_CLAIM, format: "Management raised its outlook.", source_label: "Source, published 2026-02-25" },
       { type: "text", text: "\n\nNo figures are shown for AMD." },
     ],
   );
@@ -956,7 +956,7 @@ test("when no assertion renders, the answer is the fixed fallback sentence, neve
   });
   assert.deepEqual({ segments: blocks[0]!.segments, rejected: reports[0]!.rejected }, {
     segments: [
-      { type: "ref", ref_kind: "claim", ref_id: A_CLAIM, format: "Data center demand doubled." },
+      { type: "ref", ref_kind: "claim", ref_id: A_CLAIM, format: "Data center demand doubled.", source_label: "Source" },
     ],
     rejected: [],
   });
@@ -1229,8 +1229,8 @@ test("a quote in a stored disagreement stays in the commentary beside its other 
     { kind: "management_attribution", text: "Backlog grew.", evidence: ["C1"] },
     { kind: "analyst_inference", text: "Backlog: the sources disagree on its direction.", supports: [0] },
   ], packet)).blocks(new Map([[1, "shown"]]));
-  const grew = { type: "ref", ref_kind: "claim", ref_id: "c2080000-0000-4000-8000-000000000011", format: "Backlog grew." };
-  const shrank = { type: "ref", ref_kind: "claim", ref_id: "c2080000-0000-4000-8000-000000000012", format: "Backlog shrank." };
+  const grew = { type: "ref", ref_kind: "claim", ref_id: "c2080000-0000-4000-8000-000000000011", format: "Backlog grew.", source_label: "Source, published 2026-02-25" };
+  const shrank = { type: "ref", ref_kind: "claim", ref_id: "c2080000-0000-4000-8000-000000000012", format: "Backlog shrank.", source_label: "Source, published 2026-02-25" };
   assert.deepEqual(block!.commentary, [
     { kind: "figures", segments: [grew] },
     { kind: "inference", subject: null, basis: null, text: "Backlog: the sources disagree on its direction.", cites: [grew] },
@@ -1238,28 +1238,45 @@ test("a quote in a stored disagreement stays in the commentary beside its other 
   ]);
 });
 
-test("a claim no ref opens keeps its date in the text and stays beside a shown inference, and an undated one stands behind it", () => {
+test("a dated claim no ref opens keeps its date in the text, and industry peers cite the source that names their industry, one citation for them all", () => {
+  // A peer has no claim row; its industry source is stored, so a citation opens it (round 5 swarm finding 1).
+  const INDUSTRY_SOURCE = "c2080000-0000-4000-8000-0000000000a1";
+  const peer = (n: number, label: string, source_id: string) => ({
+    claim_id: `peer:NVDA:issuer-${label}`, source_id, text_canonical: `Industry peer: ${label} shares NVDA's industry (Semiconductors)`, predicate: "peer_set.industry", polarity: "neutral", n,
+  });
   const toolCall = {
     tool_call_id: "tc-1",
     tool_name: "research_lookup",
     status: "ok",
     result: { evidence: { claims: [
       { claim_id: "c2080000-0000-4000-8000-000000000011", source_id: "s1", text_canonical: "Demand is strong.", predicate: "kpi.commentary", polarity: "positive", published_at: "2026-02-25T00:00:00.000Z" },
-      { claim_id: "consensus:capture-1", source_id: "s2", text_canonical: "Consensus revenue FY2027: $300B", predicate: "consensus.revenue", polarity: "neutral", published_at: "2026-11-10T00:00:00.000Z" },
-      { claim_id: "peer:NVDA:issuer-amd", source_id: "s3", text_canonical: "Industry peer: AMD shares NVDA's industry (Semiconductors)", predicate: "industry.peer", polarity: "neutral" },
+      { claim_id: "consensus:capture-1", source_id: "c2080000-0000-4000-8000-0000000000a2", text_canonical: "Consensus revenue FY2027: $300B", predicate: "consensus.revenue", polarity: "neutral", published_at: "2026-11-10T00:00:00.000Z" },
+      peer(3, "AMD", INDUSTRY_SOURCE),
+      peer(4, "INTC", INDUSTRY_SOURCE),
+      peer(5, "QCOM", "s5"),
     ] } },
   } as never;
   const packet = turnPacket({ toolCalls: [toolCall] });
-  const [block] = renderedAnswer({ blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [toolCall] }, packet, checkAssertions([
+  const answer = renderedAnswer({ blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [toolCall] }, packet, checkAssertions([
     { kind: "management_attribution", text: "Demand is strong.", evidence: ["C1"] },
     { kind: "management_attribution", text: "Consensus expects more.", evidence: ["C2"] },
-    { kind: "management_attribution", text: "AMD is a peer.", evidence: ["C3"] },
+    { kind: "management_attribution", text: "AMD and INTC are peers.", evidence: ["C3", "C4"] },
     { kind: "analyst_inference", text: "Demand: the sources and its peers point the same way.", supports: [0, 1, 2] },
-  ], packet)).blocks(new Map([[3, "shown"]]));
+    { kind: "management_attribution", text: "QCOM is a peer.", evidence: ["C5"] },
+    { kind: "analyst_inference", text: "Peers: QCOM shares its industry.", supports: [4] },
+  ], packet));
+  const [block] = answer.blocks(new Map([[3, "shown"], [5, "shown"]]));
   assert.deepEqual(block!.commentary, [
     { kind: "figures", segments: [{ type: "text", text: "According to a source dated Nov 2026: " }, { type: "text", text: "Consensus revenue FY2027: $300B" }] },
-    { kind: "inference", subject: null, basis: null, text: "Demand: the sources and its peers point the same way.", cites: [{ type: "ref", ref_kind: "claim", ref_id: "c2080000-0000-4000-8000-000000000011", format: "Demand is strong." }] },
+    { kind: "inference", subject: null, basis: null, text: "Demand: the sources and its peers point the same way.", cites: [
+      { type: "ref", ref_kind: "claim", ref_id: "c2080000-0000-4000-8000-000000000011", format: "Demand is strong.", source_label: "Source, published 2026-02-25" },
+      { type: "ref", ref_kind: "source", ref_id: INDUSTRY_SOURCE, format: "Industry peer: AMD shares NVDA's industry (Semiconductors)\nIndustry peer: INTC shares NVDA's industry (Semiconductors)", source_label: "Industry source" },
+    ] },
+    // A peer whose source is not stored has no citation, so its quote stays beside the inference.
+    { kind: "figures", segments: [{ type: "text", text: "Industry peer: QCOM shares NVDA's industry (Semiconductors)" }] },
+    { kind: "inference", subject: null, basis: null, text: "Peers: QCOM shares its industry." },
   ]);
+  assert.ok((block!.source_refs as string[]).includes(INDUSTRY_SOURCE), "the source a citation opens is sealed with the answer");
 });
 
 test("a rendered answer says when more claims matched, or none could be read (#208)", async () => {
@@ -1501,7 +1518,7 @@ test("a shown inference cites the claims it rests on, its quotes stand behind th
       { kind: "management_attribution", text: "Management cut its buyback.", evidence: ["C3"] },
     ], SEALED_PACKET),
   ).blocks(inferences)[0]!;
-  const quote = (n: number, text: string) => ({ type: "ref", ref_kind: "claim", ref_id: SEALED_CLAIM(n), format: text });
+  const quote = (n: number, text: string) => ({ type: "ref", ref_kind: "claim", ref_id: SEALED_CLAIM(n), format: text, source_label: "Source, published 2026-02-25" });
   const quotes = [
     { kind: "figures", segments: [quote(1, "Management raised its outlook.")] },
     { kind: "figures", segments: [quote(2, "Management expects higher margins.")] },

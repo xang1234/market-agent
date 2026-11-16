@@ -7,6 +7,7 @@ import { createRoot } from 'react-dom/client'
 
 import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from '../evidence/evidenceInspectorContext.ts'
 import type { EvidenceInspectionRef } from '../evidence/inspectionTypes.ts'
+import { validateBlock } from './BlockValidator.ts'
 import { RichText } from './RichText.tsx'
 import type { RichTextBlock } from './types.ts'
 
@@ -568,6 +569,7 @@ const CLAIM_A = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 const CLAIM_B = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
 const CLAIM_C = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
 const claimRef = (id: string, format: string) => ({ type: 'ref', ref_kind: 'claim', ref_id: id, format }) as const
+const CITATION = 'button[data-ref-kind="claim"], button[data-ref-kind="source"]'
 
 async function renderWithInspector(block: RichTextBlock, run: (doc: Document) => Promise<void>): Promise<EvidenceInspectionRef[]> {
   const opened: EvidenceInspectionRef[] = []
@@ -588,7 +590,7 @@ async function renderWithInspector(block: RichTextBlock, run: (doc: Document) =>
       )
     })
     await run(dom.window.document)
-    for (const chip of dom.window.document.querySelectorAll<HTMLElement>('button[data-ref-kind="claim"]')) {
+    for (const chip of dom.window.document.querySelectorAll<HTMLElement>(CITATION)) {
       await act(async () => chip.click())
     }
     await act(async () => root.unmount())
@@ -598,7 +600,7 @@ async function renderWithInspector(block: RichTextBlock, run: (doc: Document) =>
   return opened
 }
 
-const citations = (scope: Element) => [...scope.querySelectorAll('button[data-ref-kind="claim"]')].map((chip) => chip.querySelector('[aria-hidden]')!.textContent)
+const citations = (scope: Element) => [...scope.querySelectorAll(CITATION)].map((chip) => chip.querySelector('[aria-hidden]')!.textContent)
 
 test('a theme cites its claims by number, each quote a hover and a click away, and a quote it does not cite is listed apart from the figures', async () => {
   const themed: RichTextBlock = {
@@ -643,4 +645,21 @@ test('a claim in Markdown text reads as its quote and a numbered citation, and a
     ])
   })
   assert.deepEqual(opened.map((ref) => ref.id), [CLAIM_A, CLAIM_B, CLAIM_A])
+})
+
+test('a theme of industry peers cites the source that names their industry, and the citation opens it', async () => {
+  const SOURCE = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+  const peers = { type: 'ref', ref_kind: 'source', ref_id: SOURCE, format: "Industry peer: AMD shares NVDA's industry (Semiconductors)\nIndustry peer: INTC shares NVDA's industry (Semiconductors)", source_label: 'NVDA industry source' } as const
+  const block: RichTextBlock = {
+    ...richTextBlock('commentary-peers', []),
+    analyst_commentary: true,
+    commentary: [{ kind: 'inference', subject: null, basis: null, text: 'Industry peers: AMD and INTC share its industry.', cites: [claimRef(CLAIM_A, 'We compete with AMD.'), peers] }],
+  }
+  assert.deepEqual(validateBlock(block), { valid: true, block }, 'a source ref is a block the schema accepts')
+  const opened = await renderWithInspector(block, async (doc) => {
+    const theme = doc.querySelector('[data-commentary-part="inference"]')!
+    assert.deepEqual(citations(theme), ['[1]', '[2]'])
+    assert.equal(theme.querySelector('button[data-ref-kind="source"] .sr-only')!.textContent, `Source 2: ${peers.format}`)
+  })
+  assert.deepEqual(opened, [{ kind: 'claim', id: CLAIM_A }, { kind: 'source', id: SOURCE }])
 })

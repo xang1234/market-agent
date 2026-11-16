@@ -331,13 +331,18 @@
             "claim",
             "event",
             "series",
-            "result"
+            "result",
+            "source"
           ]
         },
         "ref_id": {
           "$ref": "#/$defs/UUID"
         },
         "format": {
+          "type": "string"
+        },
+        "source_label": {
+          "description": "A quote's source, as a copied answer lists it.",
           "type": "string"
         },
         "period": {

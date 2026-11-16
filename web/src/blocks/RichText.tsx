@@ -1,8 +1,8 @@
 import { useContext, type ReactElement } from 'react'
 import { InspectableRef } from '../evidence/InspectableRef.tsx'
 import { InspectableResult } from '../evidence/InspectableResult.tsx'
-import type { CommentaryPart, RefSegment, RichTextBlock, RichTextSegment, TextSegmentTone } from './types.ts'
-import { isRefSegment, refSegmentText } from './richText.ts'
+import type { CitationRef, CommentaryPart, RefSegment, RichTextBlock, RichTextSegment, TextSegmentTone } from './types.ts'
+import { citationNumbers, commentaryCard, isCitationRef, isRefSegment, refSegmentText, type Takeaway } from './richText.ts'
 import { Markdown } from './Markdown.tsx'
 import { OpenClarificationContext } from './openClarification.ts'
 import { CARD_CLASS } from '../symbol/surfaceStyles.ts'
@@ -37,16 +37,6 @@ export function RichText({ block }: RichTextProps): ReactElement {
   )
 }
 
-function citationNumbers(segments: ReadonlyArray<RichTextSegment>): ReadonlyMap<string, number> {
-  const numbers = new Map<string, number>()
-  for (const segment of segments) {
-    if (isRefSegment(segment) && segment.ref_kind === 'claim' && !numbers.has(segment.ref_id)) numbers.set(segment.ref_id, numbers.size + 1)
-  }
-  return numbers
-}
-
-const isQuote = (part: { segments: ReadonlyArray<RichTextSegment> }) => part.segments.some((segment) => isRefSegment(segment) && segment.ref_kind === 'claim')
-
 // Segments as Markdown source, each ref an inspectable value. key keeps the
 // refs of several runs in one block apart.
 function markdownParts(block: RichTextBlock, segments: ReadonlyArray<RichTextSegment>, numbers: ReadonlyMap<string, number>, key = '') {
@@ -64,7 +54,7 @@ function markdownParts(block: RichTextBlock, segments: ReadonlyArray<RichTextSeg
           </InspectableResult>
         )
       }
-      if (segment.ref_kind === 'claim') {
+      if (isCitationRef(segment)) {
         return (
           <>
             <span data-claim-quote>{`“${refSegmentText(segment)}”`}</span>
@@ -86,8 +76,6 @@ function markdownParts(block: RichTextBlock, segments: ReadonlyArray<RichTextSeg
   })
 }
 
-type Takeaway = Extract<CommentaryPart, { kind: 'inference' | 'unverified' | 'pending' }>
-
 // Each takeaway's badge: what the judge found of it.
 const BADGES: Readonly<Record<Takeaway['kind'], { text: string; title: string; className: string }>> = {
   inference: { text: 'Inference', title: 'Checked against the figures shown', className: VERIFICATION_CLASSES.verified },
@@ -95,22 +83,12 @@ const BADGES: Readonly<Record<Takeaway['kind'], { text: string; title: string; c
   pending: { text: 'Checking', title: 'Being checked against the figures shown', className: VERIFICATION_CLASSES.not_verified },
 }
 
-const isTakeaway = (part: CommentaryPart): part is Takeaway => part.kind in BADGES
-
 // Commentary as a card continuing the answer above it: the analyst's
 // takeaways first, each badged by its verdict, then the figures they rest
 // on, then any note. Its words are plain text, as the analyst wrote them.
 function Commentary({ block, parts }: { block: RichTextBlock; parts: ReadonlyArray<CommentaryPart> }): ReactElement {
-  const takeaways = parts.filter(isTakeaway)
-  const statements = parts.flatMap((part) => (part.kind === 'figures' ? [part] : []))
-  const figures = statements.filter((part) => !isQuote(part))
-  const quotes = statements.filter(isQuote)
-  const notes = parts.flatMap((part) => (part.kind === 'note' ? [part.text] : []))
-  const numbers = citationNumbers([
-    ...takeaways.flatMap((part) => (part.kind === 'inference' ? part.cites ?? [] : [])),
-    ...[...figures, ...quotes].flatMap((part) => part.segments),
-  ])
-  const list = (title: string, key: string, items: typeof statements) => (
+  const { takeaways, figures, quotes, notes, numbers } = commentaryCard(parts)
+  const list = (title: string, key: string, items: typeof figures) => (
     <div>
       <h4 className="text-xs font-medium text-muted">{title}</h4>
       <ul className="mt-1 flex list-disc flex-col gap-1 pl-5">
@@ -168,7 +146,7 @@ function OfferedChoices({ blockId, choices }: { blockId: string; choices: Readon
 const CITATION_CLASS = 'relative -top-[0.45em] ml-0.5 text-[0.7em] font-medium leading-none text-accent hover:underline'
 
 function Citation({ snapshotId, blockId, index, segment, number, quoted = false }: Omit<RefSegmentSpanProps, 'segment'> & {
-  segment: RefSegment
+  segment: CitationRef
   number: number
   quoted?: boolean
 }): ReactElement {
@@ -176,9 +154,9 @@ function Citation({ snapshotId, blockId, index, segment, number, quoted = false 
     <span title={quoted ? refSegmentText(segment) : undefined}>
       <InspectableRef
         snapshotId={snapshotId}
-        inspectionRef={{ kind: 'claim', id: segment.ref_id }}
+        inspectionRef={{ kind: segment.ref_kind, id: segment.ref_id }}
         testId={`block-rich-text-${blockId}-ref-${index}`}
-        dataAttrs={{ 'data-ref-kind': 'claim', 'data-ref-id': segment.ref_id }}
+        dataAttrs={{ 'data-ref-kind': segment.ref_kind, 'data-ref-id': segment.ref_id }}
         className={CITATION_CLASS}
       >
         <span aria-hidden="true">[{number}]</span>

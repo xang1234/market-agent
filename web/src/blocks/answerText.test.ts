@@ -9,7 +9,7 @@ test('an answer copies as Markdown, and a chart names itself instead of vanishin
   assert.equal(
     answerText([richTextFixture, tableFixture, lineChartFixture, disclosureFixture]),
     [
-      'Apple posted Q3 revenue of $85.8B, up year over year. Management “guided cautiously” on services growth.',
+      'Apple posted Q3 revenue of $85.8B, up year over year. Management “guided cautiously” [1] on services growth.\n\nSources\n\n[1] Source',
       'Recent quarters\n\n| Quarter | Revenue | Net income |\n| --- | --- | --- |\n| Q3 FY24 | $85.8B | $21.4B |\n| Q2 FY24 | $90.8B | $23.6B |\n| Q1 FY24 | $119.6B | $33.9B |',
       '[In the app: Revenue trajectory]',
       '- Forward estimates are model-derived and may diverge from consensus.\n- Quotes are delayed by 15 minutes during regular trading hours.',
@@ -43,7 +43,7 @@ test('P/E scenarios copy with the EPS, each multiple as the user\'s, and the dis
 
 test('an answer in a format this app does not know copies nothing for that block', () => {
   const newer = { ...financialAnswerFixture, financial: { presentation_version: 'financial-presentation.v99' } } as FinancialAnswerBlock
-  assert.equal(answerText([newer, richTextFixture]), 'Apple posted Q3 revenue of $85.8B, up year over year. Management “guided cautiously” on services growth.')
+  assert.equal(answerText([newer, richTextFixture]), 'Apple posted Q3 revenue of $85.8B, up year over year. Management “guided cautiously” [1] on services growth.\n\nSources\n\n[1] Source')
 })
 
 test('a pipe in a cell cannot split a Markdown table column', () => {
@@ -89,5 +89,53 @@ test('a quoted claim copies inside quotation marks, so the filing\'s words stay 
     source_refs: [], as_of: '2026-06-01T00:00:00.000Z',
     segments: [{ type: 'text', text: 'MU: ' }, { type: 'ref', ref_kind: 'claim', ref_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', format: 'Our top customers make up *much* of our revenue.' }],
   } as const
-  assert.equal(answerText([block as unknown as Parameters<typeof answerText>[0][number]]), 'MU: “Our top customers make up \\*much\\* of our revenue.”')
+  assert.equal(answerText([block as unknown as Parameters<typeof answerText>[0][number]]), 'MU: “Our top customers make up \\*much\\* of our revenue.” [1]\n\nSources\n\n[1] Source')
+})
+
+const SNAPSHOT = '11111111-1111-4111-8111-111111111111'
+const commentaryBlock = (commentary: unknown, segments: unknown = []) => ({
+  id: 'rt-memo', kind: 'rich_text', snapshot_id: SNAPSHOT, data_ref: { kind: 'rich_text', id: 'rt-memo' }, source_refs: [], as_of: '2026-06-01T00:00:00.000Z',
+  analyst_commentary: true, segments, commentary,
+}) as unknown as Parameters<typeof answerText>[0][number]
+
+test('a copied quote keeps its citation number, and the copy ends with the source each number opens', () => {
+  const block = {
+    id: 'rt-quote', kind: 'rich_text', snapshot_id: SNAPSHOT, data_ref: { kind: 'rich_text', id: 'rt-quote' }, source_refs: [], as_of: '2026-06-01T00:00:00.000Z',
+    segments: [
+      { type: 'text', text: 'NVDA: ' },
+      { type: 'ref', ref_kind: 'claim', ref_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', format: 'Demand is strong.', source_label: 'NVDA source, published 2026-02-25' },
+      { type: 'text', text: '\n\nAMD: ' },
+      { type: 'ref', ref_kind: 'claim', ref_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', format: 'Supply is tight.', source_label: 'AMD source, published 2026-01-30' },
+    ],
+  } as unknown as Parameters<typeof answerText>[0][number]
+  assert.equal(answerText([block]), [
+    'NVDA: “Demand is strong.” [1]\n\nAMD: “Supply is tight.” [2]',
+    'Sources',
+    '[1] NVDA source, published 2026-02-25\n[2] AMD source, published 2026-01-30',
+  ].join('\n\n'))
+})
+
+test('commentary copies as its card shows it: shown themes with their citations, the quotes left beside them, and the sources, never a hidden theme', () => {
+  const cite = (id: string, format: string, source_label: string, ref_kind = 'claim') => ({ type: 'ref', ref_kind, ref_id: id, format, source_label })
+  const competition = cite('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'We compete with AMD.', 'NVDA source, published 2026-02-25')
+  const peers = cite('ffffffff-ffff-4fff-8fff-ffffffffffff', "Industry peer: AMD shares NVDA's industry (Semiconductors)", 'NVDA industry source', 'source')
+  const debt = cite('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'Our debt could limit us.', 'NVDA source, published 2026-02-25')
+  // The flat text still holds the hidden theme and the cited quotes, as a block saved before parts did.
+  const hidden = '> **Analyst inference:** A hidden theme the judge did not entail.'
+  const block = commentaryBlock([
+    { kind: 'inference', subject: null, basis: null, text: 'Rivals: AMD competes and shares its industry.', cites: [competition, peers] },
+    { kind: 'unverified', subject: null, text: 'Margins may narrow.' },
+    { kind: 'figures', segments: [debt] },
+    { kind: 'note', text: 'Periods: NVDA FY2026.' },
+  ], [competition, { type: 'text', text: `\n\n${hidden}\n\n` }, peers])
+  const copied = answerText([block])
+  assert.equal(copied, [
+    'Analysis',
+    '- Inference: Rivals: AMD competes and shares its industry. [1] [2]\n- Unverified: Margins may narrow.',
+    'Quoted sources\n\n- “Our debt could limit us.” [3]',
+    'Periods: NVDA FY2026.',
+    'Sources',
+    '[1] NVDA source, published 2026-02-25\n[2] NVDA industry source\n[3] NVDA source, published 2026-02-25',
+  ].join('\n\n'))
+  assert.equal(copied.includes('hidden theme'), false)
 })

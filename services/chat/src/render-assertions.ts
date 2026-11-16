@@ -15,7 +15,12 @@ import type { Assertion } from "./assertions.ts";
 import { checkedComparisons, metricLabel as definedMetric, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
 import type { EvidencePacket, PacketClaim, PacketFigure } from "./evidence-packet.ts";
 import { isUuid } from "./chat-ids.ts";
-import { createSealer, type Sealer, type Segment } from "./prose-refs.ts";
+import { createSealer, type Sealer, type Segment as ProseSegment } from "./prose-refs.ts";
+
+// A quote's ref opens its claim, or its source when no claim row holds it (an
+// industry peer), and names that source for a copied answer's source list.
+export type QuoteRef = { type: "ref"; ref_kind: "claim" | "source"; ref_id: string; format: string; source_label: string };
+export type Segment = ProseSegment | QuoteRef;
 
 // Prose names an engine measure without its formula ("net margin", not "net margin (net income / revenue)"): the table's heading carries it.
 const metricLabel = (metric: string): string => definedMetric(metric).replace(/ \([^()]*[/×][^()]*\)$/, "");
@@ -151,22 +156,39 @@ export function attributionSegments(claims: ReadonlyArray<AttributedClaim>, quot
   });
 }
 
-export function renderQuotes(assertion: Assertion & { index: number }, packet: EvidencePacket, factBlocks: ReadonlyArray<Block>): RenderedAssertion {
-  const seal = createSealer(factBlocks);
+export function renderQuotes(assertion: Assertion & { index: number }, packet: EvidencePacket): RenderedAssertion {
   const several = packet.companies.length > 1;
+  const sources = new Set<string>();
+  const quote = (claim: PacketClaim): Segment => {
+    if (!citable(claim)) return { type: "text", text: claim.text };
+    sources.add(claim.source_id);
+    const source_label = sourceLabel(claim);
+    return isUuid(claim.claim_id)
+      ? { type: "ref", ref_kind: "claim", ref_id: claim.claim_id, format: claim.text, source_label }
+      : { type: "ref", ref_kind: "source", ref_id: claim.source_id, format: claim.text, source_label };
+  };
   const segments = assertion.evidence.flatMap((id) => packet.claims.filter((claim) => claim.id === id)).flatMap((claim, i): Segment[] => [
     ...(i === 0 ? [] : [{ type: "text" as const, text: "\n\n" }]),
     ...(datedInText(claim)
-      ? attributionSegments([claim], seal.quote)
-      : [...(several && claim.company ? [{ type: "text" as const, text: `${claim.company}: ` }] : []), seal.quote(claim)]),
+      ? attributionSegments([claim], ({ text }) => ({ type: "text", text }))
+      : [...(several && claim.company ? [{ type: "text" as const, text: `${claim.company}: ` }] : []), quote(claim)]),
   ]);
-  const { fact_bindings, source_refs } = seal.sealed();
-  return { index: assertion.index, segments, figure_ids: [], fact_bindings, source_refs };
+  return { index: assertion.index, segments, figure_ids: [], fact_bindings: [], source_refs: [...sources] };
 }
 
 // No ref opens a dated claim with no claim row, such as a consensus capture, so its text says its date.
-export const datedInText = (claim: Pick<PacketClaim, "claim_id" | "published_at" | "effective_time">): boolean =>
+const datedInText = (claim: Pick<PacketClaim, "claim_id" | "published_at" | "effective_time">): boolean =>
   !isUuid(claim.claim_id) && Boolean(claim.published_at || claim.effective_time);
+
+// A claim a ref opens: one with a claim row, or an undated one whose source is stored.
+export const citable = (claim: Pick<PacketClaim, "claim_id" | "source_id" | "published_at" | "effective_time">): boolean =>
+  isUuid(claim.claim_id) || (!datedInText(claim) && isUuid(claim.source_id));
+
+function sourceLabel(claim: PacketClaim): string {
+  const date = claim.published_at ? `, published ${claim.published_at.slice(0, 10)}` : claim.effective_time ? `, effective ${claim.effective_time.slice(0, 10)}` : "";
+  const what = claim.predicate === "peer_set.industry" ? "industry source" : "source";
+  return `${claim.company ? `${claim.company} ${what}` : what[0]!.toUpperCase() + what.slice(1)}${date}`;
+}
 
 // An inference the judge found unsupported, or flagged as stating an amount
 // in words (verdicts.ts shownAs), with no checked results to lend it weight.
