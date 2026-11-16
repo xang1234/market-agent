@@ -4,6 +4,7 @@ import {
   claimAgentRun,
   completeAgentRun,
   failAgentRun,
+  type AgentRunAdmission,
   type AgentRunRow,
 } from "./agent-run-repo.ts";
 
@@ -16,12 +17,15 @@ export type AgentRunMessage = {
 export type HandleAgentRunMessageInput = {
   message: unknown;
   execute(): Promise<JsonValue>;
+  admit?: AgentRunAdmission;
+  failed_outputs_summary?: JsonValue;
 };
 
 export type AgentRunMessageResult =
   | { status: "completed"; run_id: string; run: AgentRunRow; outputs_summary: JsonValue }
   | { status: "duplicate"; run_id: string; run: AgentRunRow }
   | { status: "skipped_concurrency_limit"; run_id: string; active_run: AgentRunRow }
+  | { status: "not_admitted"; run_id: string }
   | { status: "failed"; run_id: string; run: AgentRunRow; error: string };
 
 export class AgentRunMessageValidationError extends Error {
@@ -47,8 +51,12 @@ export async function handleAgentRunMessage(
     inputs_watermark: message.enqueued_at === undefined
       ? null
       : { enqueued_at: message.enqueued_at },
+    admit: input.admit,
   });
   if (!claim.claimed) {
+    if (claim.reason === "not_admitted") {
+      return Object.freeze({ status: "not_admitted", run_id: message.run_id });
+    }
     if (claim.reason === "concurrency_limit") {
       return Object.freeze({
         status: "skipped_concurrency_limit",
@@ -80,6 +88,7 @@ export async function handleAgentRunMessage(
     const run = await failAgentRun(db, {
       run_id: message.run_id,
       error: errorMessage,
+      outputs_summary: input.failed_outputs_summary,
     });
     return Object.freeze({
       status: "failed",

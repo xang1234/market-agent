@@ -549,6 +549,18 @@ test("service Themes adapter lists membership rationale through the read model",
   assert.equal(result.memberships[0]?.rationale_supported, true);
 });
 
+test("POST /v1/agents accepts a watchlist universe", async (t) => {
+  const base = await startServer(t);
+  const universe = { mode: "watchlist", watchlist_id: "33333333-3333-4333-8333-333333333333" };
+  const created = await fetch(`${base}/v1/agents`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-user-id": "00000000-0000-4000-8000-000000000001" },
+    body: JSON.stringify({ name: "Watchlist bot", thesis: "Track guidance", cadence: "hourly", universe }),
+  });
+  assert.equal(created.status, 201);
+  assert.deepEqual((await created.json() as { universe?: unknown }).universe, universe);
+});
+
 test("PATCH and DELETE /v1/agents expose update and delete controls", async (t) => {
   const base = await startServer(t);
   const headers = {
@@ -914,7 +926,7 @@ test("service Agent adapter reloads watermarks after claiming the run", async ()
 
   assert.equal(run?.status, "completed");
   assert.deepEqual(observedWatermarks, { cursor: "fresh" });
-  assert.equal(db.queries.filter((query) => query.text.includes("from agents") && query.text.includes("where agent_id")).length, 2);
+  assert.equal(db.queries.filter((query) => query.text.includes("from agents") && query.text.includes("where agent_id")).length, 3);
 });
 
 test("service Agent adapter lets durable loop stages create findings and evaluate alerts", async () => {

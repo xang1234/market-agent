@@ -1,4 +1,16 @@
 import { getCurrentThesis } from "../../agents/src/thesis-repo.ts";
+import { getAgent, type AgentUniverse } from "../../agents/src/agent-repo.ts";
+import type { AgentLoopStages } from "../../agents/src/agent-loop.ts";
+import { resolveUniverse, type UniverseResolverDeps } from "../../analyst-grids/src/universe.ts";
+import { createUniverseResolverDeps, resolveScreenWith } from "../../analyst-grids/src/universe-wiring.ts";
+import { createPostgresCandidateRepository } from "../../screener/src/db-candidates.ts";
+import { createVendorScreenerCandidateRepository } from "../../screener/src/db-candidates-vendor.ts";
+import { executeScreenerQuery } from "../../screener/src/executor.ts";
+import { replayScreen } from "../../screener/src/screen-subject.ts";
+import { createPostgresScreenRepository } from "../../screener/src/screen-repository.ts";
+import { resolveDynamicWatchlistMembers } from "../../watchlists/src/dynamic-membership.ts";
+import type { QueryExecutor as WatchlistsQueryExecutor } from "../../watchlists/src/queries.ts";
+import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import { createDiscoveryRepository } from "../../discovery/src/repository.ts";
 import { createDiscoveryReadModel } from "../../discovery/src/read-model.ts";
 import { createDiscoveryService as createDiscoveryCampaignService } from "../../discovery/src/service.ts";
@@ -254,11 +266,93 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = async (input) 
         thesis,
         financial: { pool: pool(), evidence: createEvidenceFinancialPort },
       })
-    : createLegacyAgentLoopStages(input);
+    : createLegacyAgentLoopStages(input, await agentUniverseSubjectRefs(pool(), input.userId, input.agent.universe));
 };
 
-const createLegacyAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId, agent, trigger = "scheduled" }) => {
-  const subjectRefs = normalizeSubjectRefs(subjectRefsFromUniverse(agent.universe));
+export class AgentUniverseUnavailableError extends Error {
+  name = "AgentUniverseUnavailableError";
+}
+
+// The grids replay a screen over reported candidates and read a watchlist's
+// stored members only. An agent follows the screener's candidate source and
+// the watchlist's mode, so a dynamic watchlist never reads as empty.
+export function agentUniverseResolvers(
+  db: QueryExecutor,
+  env: { SCREENER_CANDIDATE_SOURCE?: string } = process.env,
+): UniverseResolverDeps {
+  const grid = createUniverseResolverDeps(db);
+  const resolveScreen: UniverseResolverDeps["resolveScreen"] = async (userId, screenId) => {
+    const source = (env.SCREENER_CANDIDATE_SOURCE ?? "reported").trim().toLowerCase();
+    if (source !== "reported" && source !== "vendor") {
+      throw new AgentUniverseUnavailableError(`SCREENER_CANDIDATE_SOURCE must be 'reported' or 'vendor' (got '${source}')`);
+    }
+    const candidates = source === "vendor" ? createVendorScreenerCandidateRepository(db) : createPostgresCandidateRepository(db);
+    const screens = createPostgresScreenRepository(db);
+    return resolveScreenWith({
+      find: (id) => screens.find(id),
+      execute: (screen) => executeScreenerQuery({ candidates, clock: () => new Date() }, replayScreen(screen)),
+    }, userId, screenId);
+  };
+  return {
+    ...grid,
+    resolveScreen,
+    resolveWatchlist: async (userId, watchlistId) => {
+      const membership = await resolveDynamicWatchlistMembers({
+        db: db as WatchlistsQueryExecutor,
+        screens: { find: (screenId) => screenId },
+        executeScreen: async (screenId) => ({
+          rows: (await resolveScreen(userId, String(screenId))).map((subject_ref) => ({ subject_ref })),
+        }),
+        agents: {
+          get: async (agentId) => {
+            const agent = await getAgent(db, agentId);
+            if (agent?.universe.mode === "watchlist") {
+              throw new AgentUniverseUnavailableError(`agent ${agentId} follows a watchlist, which a watchlist cannot mirror`);
+            }
+            return agent ? { ...agent, universe: agent.universe } : undefined;
+          },
+        },
+      }, { user_id: userId, watchlist_id: watchlistId });
+      return membership.members.map((member) => member.subject_ref);
+    },
+  };
+}
+
+export async function agentUniverseSubjectRefs(
+  db: QueryExecutor,
+  userId: string,
+  universe: AgentUniverse,
+  resolvers: UniverseResolverDeps = agentUniverseResolvers(db),
+): Promise<ReadonlyArray<SubjectRef>> {
+  switch (universe.mode) {
+    case "static":
+      return resolveUniverse(resolvers, userId, { source: "manual", subject_refs: universe.subject_refs });
+    case "screen":
+      return resolveUniverse(resolvers, userId, { source: "screen", screen_id: universe.screen_id });
+    case "watchlist":
+      return resolveUniverse(resolvers, userId, { source: "watchlist", watchlist_id: universe.watchlist_id });
+    case "portfolio":
+      return resolveUniverse(resolvers, userId, { source: "portfolio", portfolio_id: universe.portfolio_id });
+    case "theme":
+      return [{ kind: "theme", id: universe.theme_id }];
+    case "agent": {
+      const mirrored = await getAgent(db, universe.agent_id);
+      if (mirrored?.user_id !== userId) {
+        throw new AgentUniverseUnavailableError(`agent ${universe.agent_id} not found or not accessible`);
+      }
+      if (mirrored.universe.mode === "agent") {
+        throw new AgentUniverseUnavailableError(`agent ${universe.agent_id} mirrors another agent, and mirrors do not chain`);
+      }
+      return agentUniverseSubjectRefs(db, userId, mirrored.universe, resolvers);
+    }
+  }
+}
+
+function createLegacyAgentLoopStages(
+  { userId, runId, agent, trigger = "scheduled" }: Parameters<DevApiAgentLoopStageFactory>[0],
+  universeRefs: ReadonlyArray<SubjectRef>,
+): AgentLoopStages {
+  const subjectRefs = normalizeSubjectRefs(universeRefs);
   const asOf = new Date().toISOString();
   const activityClock = activityClockFrom(asOf);
   let findings: ReadonlyArray<FindingRow> = [];
@@ -393,7 +487,7 @@ const createLegacyAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runI
     },
     alertFindings: async () => findings,
   };
-};
+}
 
 async function sealAgentEvidenceSnapshot(input: {
   tx: QueryExecutor;
@@ -746,19 +840,6 @@ function subjectRefsFromBlocks(blocks: ReadonlyArray<Record<string, unknown>>): 
     }
   }
   return normalizeSubjectRefs(refs);
-}
-
-function subjectRefsFromUniverse(universe: unknown): ReadonlyArray<SnapshotSubjectRef> {
-  if (!isJsonObject(universe)) return [];
-  if (universe.mode === "static" && Array.isArray(universe.subject_refs)) {
-    return universe.subject_refs.filter(isSnapshotSubjectRef);
-  }
-  if (typeof universe.mode === "string" && typeof universe[`${universe.mode}_id`] === "string") {
-    const kind = universe.mode === "agent" ? "screen" : universe.mode;
-    const id = universe[`${universe.mode}_id`];
-    if (isSnapshotSubjectKind(kind) && typeof id === "string" && isUuid(id)) return [{ kind, id }];
-  }
-  return [];
 }
 
 function normalizeSubjectRefs(

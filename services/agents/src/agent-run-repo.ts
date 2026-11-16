@@ -1,4 +1,5 @@
 import type { JsonValue } from "../../observability/src/types.ts";
+import { withTransaction } from "../../evidence/src/transaction.ts";
 import type { QueryExecutor } from "./agent-repo.ts";
 
 export type AgentRunStatus = "running" | "completed" | "failed";
@@ -32,7 +33,10 @@ type AgentRunDbRow = {
 export type AgentRunClaim =
   | { claimed: true; row: AgentRunRow }
   | { claimed: false; reason: "duplicate"; row: AgentRunRow }
-  | { claimed: false; reason: "concurrency_limit"; row: AgentRunRow };
+  | { claimed: false; reason: "concurrency_limit"; row: AgentRunRow }
+  | { claimed: false; reason: "not_admitted" };
+
+export type AgentRunAdmission = (tx: QueryExecutor) => Promise<boolean>;
 
 export class AgentRunStateError extends Error {
   constructor(message: string) {
@@ -52,6 +56,10 @@ const SELECT_COLUMNS = `agent_run_log_id::text as agent_run_log_id,
        error,
        claim_expires_at`;
 
+const INSERT_RUNNING = `insert into agent_run_logs
+         (agent_run_log_id, agent_id, inputs_watermark, status, claim_expires_at)
+       values ($1::uuid, $2::uuid, $3::jsonb, 'running', $4::timestamptz)`;
+
 export async function claimAgentRun(
   db: QueryExecutor,
   input: {
@@ -59,38 +67,67 @@ export async function claimAgentRun(
     agent_id: string;
     inputs_watermark?: JsonValue | null;
     lease_expires_at?: string;
+    admit?: AgentRunAdmission;
   },
 ): Promise<AgentRunClaim> {
-  const leaseExpiresAt = input.lease_expires_at ?? defaultLeaseExpiresAt();
+  const values = [
+    input.run_id,
+    input.agent_id,
+    input.inputs_watermark === undefined ? null : JSON.stringify(input.inputs_watermark),
+    input.lease_expires_at ?? defaultLeaseExpiresAt(),
+  ];
 
   await expireStaleAgentRuns(db, input.agent_id);
 
+  // A conflict with a run that ends before the readback leaves the slot free, so the claim tries again.
+  for (let attempt = 1; attempt <= CLAIM_ATTEMPTS; attempt += 1) {
+    const claim = await attemptAgentRunClaim(db, input, values);
+    if (claim !== null) return claim;
+  }
+  throw new AgentRunStateError("agent run claim conflicted but no duplicate or active run was found");
+}
+
+const CLAIM_ATTEMPTS = 3;
+
+async function attemptAgentRunClaim(
+  db: QueryExecutor,
+  input: { run_id: string; agent_id: string; admit?: AgentRunAdmission },
+  values: unknown[],
+): Promise<AgentRunClaim | null> {
+  if (input.admit !== undefined) {
+    const admit = input.admit;
+    // The agent row lock orders this check against a disable, a delete, and every other admitted claim.
+    const outcome = await withTransaction(db, async ({ db: tx }) => {
+      await tx.query("select 1 from agents where agent_id = $1::uuid for update", [input.agent_id]);
+      if (!(await admit(tx))) return "not_admitted" as const;
+      const { rows } = await tx.query<AgentRunDbRow>(`${INSERT_RUNNING} on conflict do nothing returning ${SELECT_COLUMNS}`, values);
+      return rows[0] ?? null;
+    });
+    if (outcome !== null && outcome !== "not_admitted") return Object.freeze({ claimed: true, row: rowFromDb(outcome) });
+    return unclaimedAgentRun(db, input, outcome === "not_admitted");
+  }
+
   try {
-    const { rows } = await db.query<AgentRunDbRow>(
-      `insert into agent_run_logs
-         (agent_run_log_id, agent_id, inputs_watermark, status, claim_expires_at)
-       values ($1::uuid, $2::uuid, $3::jsonb, 'running', $4::timestamptz)
-       returning ${SELECT_COLUMNS}`,
-      [
-        input.run_id,
-        input.agent_id,
-        input.inputs_watermark === undefined ? null : JSON.stringify(input.inputs_watermark),
-        leaseExpiresAt,
-      ],
-    );
+    const { rows } = await db.query<AgentRunDbRow>(`${INSERT_RUNNING} returning ${SELECT_COLUMNS}`, values);
     return Object.freeze({ claimed: true, row: rowFromDb(rows[0]) });
   } catch (error) {
     if (!isUniqueViolation(error)) throw error;
-    const duplicate = await getAgentRun(db, input.run_id);
-    if (duplicate !== null) {
-      return Object.freeze({ claimed: false, reason: "duplicate", row: duplicate });
-    }
-    const active = await findActiveAgentRun(db, input);
-    if (active === null) {
-      throw new AgentRunStateError("agent run claim conflicted but no duplicate or active run was found");
-    }
-    return Object.freeze({ claimed: false, reason: "concurrency_limit", row: active });
+    return unclaimedAgentRun(db, input, false);
   }
+}
+
+async function unclaimedAgentRun(
+  db: QueryExecutor,
+  input: { run_id: string; agent_id: string },
+  notAdmitted: boolean,
+): Promise<AgentRunClaim | null> {
+  const duplicate = await getAgentRun(db, input.run_id);
+  if (duplicate !== null) {
+    return Object.freeze({ claimed: false, reason: "duplicate", row: duplicate });
+  }
+  if (notAdmitted) return Object.freeze({ claimed: false, reason: "not_admitted" });
+  const active = await findActiveAgentRun(db, input);
+  return active === null ? null : Object.freeze({ claimed: false, reason: "concurrency_limit", row: active });
 }
 
 async function expireStaleAgentRuns(db: QueryExecutor, agentId: string): Promise<void> {

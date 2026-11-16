@@ -741,21 +741,19 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           throw new DevApiHttpError(503, "durable agent loop stages are not configured");
         }
         const runId = randomUUID();
+        let loopAgent = null as Awaited<ReturnType<typeof getAgent>>;
         const claimed = await claimAgentRun(deps.db, {
           run_id: runId,
           agent_id: agentId,
           inputs_watermark: { trigger: "manual" },
+          admit: async (tx) => {
+            loopAgent = await getAgent(tx, agentId);
+            return loopAgent?.user_id === userId;
+          },
         });
-        if (!claimed.claimed) return toDevAgentRun(claimed.row);
+        if (!claimed.claimed) return claimed.reason === "not_admitted" ? null : toDevAgentRun(claimed.row);
         try {
-          const loopAgent = await getAgent(deps.db, agentId);
-          if (loopAgent === null || loopAgent.user_id !== userId) {
-            return toDevAgentRun(await failAgentRun(deps.db, {
-              run_id: runId,
-              error: "agent not found after run claim",
-              outputs_summary: { trigger: "manual", status: "failed" },
-            }));
-          }
+          if (loopAgent === null) throw new Error("an admitted run claim read no agent");
           const loopResult = await runAgentLoop({
             pool: deps.db,
             agent_id: agentId,
@@ -886,12 +884,13 @@ function readUniverse(value: unknown): AgentUniverse {
   }
   if (universe.mode === "screen") return readDynamicUniverse(universe, "screen_id");
   if (universe.mode === "theme") return readDynamicUniverse(universe, "theme_id");
+  if (universe.mode === "watchlist") return readDynamicUniverse(universe, "watchlist_id");
   if (universe.mode === "portfolio") return readDynamicUniverse(universe, "portfolio_id");
   if (universe.mode === "agent") return readDynamicUniverse(universe, "agent_id");
   throw new DevApiHttpError(400, "universe.mode is invalid");
 }
 
-function readDynamicUniverse<T extends "screen_id" | "theme_id" | "portfolio_id" | "agent_id">(
+function readDynamicUniverse<T extends "screen_id" | "theme_id" | "watchlist_id" | "portfolio_id" | "agent_id">(
   universe: Record<string, unknown>,
   key: T,
 ): Extract<AgentUniverse, Record<T, string>> {

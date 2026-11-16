@@ -39,6 +39,11 @@ export type ThemeAgentUniverse = {
   theme_id: string;
 };
 
+export type WatchlistAgentUniverse = {
+  mode: "watchlist";
+  watchlist_id: string;
+};
+
 export type PortfolioAgentUniverse = {
   mode: "portfolio";
   portfolio_id: string;
@@ -53,6 +58,7 @@ export type AgentUniverse =
   | StaticAgentUniverse
   | ScreenAgentUniverse
   | ThemeAgentUniverse
+  | WatchlistAgentUniverse
   | PortfolioAgentUniverse
   | AgentMirrorUniverse;
 
@@ -306,6 +312,10 @@ export function assertAgentUniverse(value: unknown, label: string): asserts valu
     assertUuidString(raw.theme_id, `${label}.theme_id`);
     return;
   }
+  if (raw.mode === "watchlist") {
+    assertUuidString(raw.watchlist_id, `${label}.watchlist_id`);
+    return;
+  }
   if (raw.mode === "portfolio") {
     assertUuidString(raw.portfolio_id, `${label}.portfolio_id`);
     return;
@@ -314,7 +324,7 @@ export function assertAgentUniverse(value: unknown, label: string): asserts valu
     assertUuidString(raw.agent_id, `${label}.agent_id`);
     return;
   }
-  throw new AgentValidationError(`${label}.mode: must be static, screen, theme, portfolio, or agent`);
+  throw new AgentValidationError(`${label}.mode: must be static, screen, theme, watchlist, portfolio, or agent`);
 }
 
 function assertSubjectRefArray(value: unknown, label: string): asserts value is ReadonlyArray<SubjectRef> {

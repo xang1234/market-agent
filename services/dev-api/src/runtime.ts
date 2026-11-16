@@ -5,6 +5,7 @@ import {
   createFixtureDevApiAdapters,
   createServiceDevApiAdapters,
   type DevApiAdapters,
+  type DevApiAgentLoopStageFactory,
   type DevApiServiceAdapterDeps,
 } from "./http.ts";
 import type { DiscoveryService } from "../../discovery/src/ports.ts";
@@ -18,6 +19,7 @@ import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
 import type { FinancialWorker } from "../../financial-engine/src/worker.ts";
 import { screenerUniverseRecovery } from "./screener-certification.ts";
 import { logPoolErrors } from "../../shared/src/pool-client.ts";
+import { startAgentSchedulerFromEnv, type AgentScheduler } from "./agent-scheduler.ts";
 
 export type DevApiRuntimeEnv = FinancialWorkerEnv & FinancialEnv & {
   MA_DEV_API_FIXTURE_ADAPTER?: string;
@@ -25,10 +27,15 @@ export type DevApiRuntimeEnv = FinancialWorkerEnv & FinancialEnv & {
   DATABASE_URL?: string;
   DEV_API_RUNTIME_MODULE?: string;
   DEV_API_ANALYZE_SEAL_MODULE?: string;
+  AGENT_SCHEDULER_INTERVAL_MS?: string;
 };
 
-/** The adapters to serve, and the financial worker whose lifetime the caller owns. */
-export type DevApiRuntime = Readonly<{ adapters: DevApiAdapters | undefined; worker: FinancialWorker | null }>;
+/** The adapters to serve, and the financial worker and agent scheduler whose lifetimes the caller owns. */
+export type DevApiRuntime = Readonly<{
+  adapters: DevApiAdapters | undefined;
+  worker: FinancialWorker | null;
+  scheduler: AgentScheduler | null;
+}>;
 
 const DEFAULT_DEV_API_RUNTIME_MODULE = new URL("./local-runtime.ts", import.meta.url).href;
 
@@ -37,13 +44,13 @@ export async function createDevApiRuntimeFromEnv(
   cwd = process.cwd(),
 ): Promise<DevApiRuntime> {
   if (env.MA_DEV_API_FIXTURE_ADAPTER === "true") {
-    return { adapters: createFixtureDevApiAdapters(), worker: null };
+    return { adapters: createFixtureDevApiAdapters(), worker: null, scheduler: null };
   }
   const databaseUrl = env.DEV_API_DATABASE_URL ?? env.DATABASE_URL;
   const sealModulePath = env.DEV_API_RUNTIME_MODULE?.trim() ||
     env.DEV_API_ANALYZE_SEAL_MODULE?.trim() ||
     DEFAULT_DEV_API_RUNTIME_MODULE;
-  if (!databaseUrl) return { adapters: undefined, worker: null };
+  if (!databaseUrl) return { adapters: undefined, worker: null, scheduler: null };
   const financialConfig = loadFinancialConfig(env);
 
   const module = await import(moduleSpecifier(sealModulePath, cwd));
@@ -89,7 +96,10 @@ export async function createDevApiRuntimeFromEnv(
     analyzeFinancial: lane as DevApiServiceAdapterDeps["analyzeFinancial"],
     discovery,
   });
-  return { adapters, worker };
+  const scheduler = module.createAgentLoopStages === undefined
+    ? null
+    : startAgentSchedulerFromEnv({ db: pool, createAgentLoopStages: module.createAgentLoopStages as DevApiAgentLoopStageFactory }, env);
+  return { adapters, worker, scheduler };
 }
 
 /** Parents whose verified units are resumable after a restart. Discovery-owned runs are never resumed here, only under the Discovery worker's fence. */
