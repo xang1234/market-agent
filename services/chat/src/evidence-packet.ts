@@ -15,6 +15,8 @@ import { dependencyClosure, type FinancialAnswerContent, type FinancialPlan } fr
 import { returnLabel } from "../../market/src/perf-points.ts";
 import { QUARTERS_SHOWN, type ResearchScope, type ScopeQuarter } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
+import type { AnalystToolResult } from "./analyst-tools.ts";
+import type { FilingItemRead, TenKFiling } from "../../evidence/src/local-runtime-evidence.ts";
 
 type Block = Record<string, unknown>;
 
@@ -115,6 +117,125 @@ export type PacketClaim = {
   claim_id: string;
   source_id: string;
 };
+
+export type AnalystPacketEntry =
+  | (PacketClaim & { kind: "claim"; filing: string })
+  | { kind: "consensus"; id: string; text: string; predicate: string; company: string; captured_on: string; capture_id: string; source_id: string }
+  | { kind: "peer"; id: string; text: string; predicate: "peer_set.industry"; company: string; peer_issuer_id: string; source_ids: ReadonlyArray<string> }
+  // The chosen filing's item state, and the newer 10-K that left the item unread.
+  | {
+    kind: "filing_read"; id: string; text: string; predicate: "filing.item_read"; company: string; item: FilingItemRead["item"]; state: FilingItemRead["state"];
+    document_id: string; source_id: string; newer_unread: { document_id: string; source_id: string; state: NonNullable<FilingItemRead["newer_unread"]>["state"] } | null;
+  }
+  // An issuer read as the subject with no 10-K on file at the cutoff.
+  | { kind: "no_filing"; id: string; text: string; predicate: "filing.none"; company: string; issuer_id: string };
+
+type UnnumberedEntry<E = AnalystPacketEntry> = E extends unknown ? Omit<E, "id"> : never;
+
+/**
+ * The analyst tools' results as packet entries, numbered C1 on in the order
+ * read: the same results give the same ids. A row two results both return is
+ * one entry, as the first gave it.
+ */
+export function analystPacketEntries(results: ReadonlyArray<AnalystToolResult>): AnalystPacketEntry[] {
+  const entries = new Map<string, UnnumberedEntry>();
+  for (const result of results) {
+    for (const [key, entry] of resultEntries(result)) if (!entries.has(key)) entries.set(key, entry);
+  }
+  return [...entries.values()].map((entry, index) => ({ ...entry, id: `C${index + 1}` }) as AnalystPacketEntry);
+}
+
+function resultEntries(result: AnalystToolResult): Array<readonly [string, UnnumberedEntry]> {
+  const reads = "reads" in result ? [...result.reads.flatMap(readEntry), ...result.no_filing.map(noFilingEntry)] : [];
+  if (result.status !== "ok") return reads;
+  switch (result.tool) {
+    case "get_company_profile":
+    case "get_claims":
+      return [...result.claims.map((claim) => [`claim:${claim.claim_id}`, {
+        kind: "claim",
+        text: claim.text_canonical,
+        predicate: claim.predicate,
+        stance: STANCE[claim.polarity] ?? "unclassified",
+        company: claim.filer_label,
+        ...(claim.effective_time ? { effective_time: claim.effective_time } : {}),
+        ...(claim.published_at ? { published_at: claim.published_at } : {}),
+        filing: filingLabel({ title: claim.document_title, accession: claim.accession, published_at: claim.published_at, link: claim.link }),
+        claim_id: claim.claim_id,
+        source_id: claim.source_id,
+      }] as const), ...reads];
+    case "get_analyst_consensus":
+      return result.values.map((value) => [`consensus:${value.capture_id}`, {
+        kind: "consensus",
+        text: `attributed consensus: ${value.provider} ${value.label}${value.fiscal_period ? ` (${value.fiscal_period})` : ""}, captured ${result.captured_on}: ${value.raw_value}${CONSENSUS_UNIT_TEXT[value.unit]}`,
+        predicate: `consensus.${value.field_key}`,
+        company: result.company,
+        captured_on: result.captured_on,
+        capture_id: value.capture_id,
+        source_id: value.source_id,
+      }] as const);
+    case "get_peer_set":
+      return result.peers.map((peer) => [`peer:${result.company}:${peer.issuer_id}`, {
+        kind: "peer",
+        text: `${peer.label} shares ${result.company}'s industry (${result.industry})`,
+        predicate: "peer_set.industry",
+        company: result.company,
+        peer_issuer_id: peer.issuer_id,
+        source_ids: [...new Set([result.industry_source_id, peer.industry_source_id, ...(peer.market_cap_source_id === null ? [] : [peer.market_cap_source_id])])],
+      }] as const);
+  }
+}
+
+function filingLabel(filing: Pick<TenKFiling, "title" | "accession" | "published_at" | "link">): string {
+  return [filing.title ?? "filing", filing.accession && `accession ${filing.accession}`, filing.published_at && `filed ${filing.published_at.slice(0, 10)}`, filing.link]
+    .filter(Boolean).join(", ");
+}
+
+const TEN_K_ITEM_NAMES: Readonly<Record<FilingItemRead["item"], string>> = { "1": "Item 1 (business)", "1A": "Item 1A (risk factors)" };
+
+const UNREAD_TEXT: Readonly<Record<Exclude<FilingItemRead["state"], "read" | "cut">, string>> = {
+  unread: "was not read",
+  not_found: "was not found in the filing",
+  not_sectioned: "has not been read yet",
+  not_yet_extracted: "was not read by the cutoff",
+};
+
+// An item not read in full, or read from an older 10-K than the newest, as an
+// entry, so an answer cannot take missing claims for a filing that states none.
+function readEntry(read: FilingItemRead): Array<readonly [string, UnnumberedEntry]> {
+  if (read.state === "read" && read.newer_unread === null) return [];
+  const newer = read.newer_unread;
+  return [[`read:${read.filer_issuer_id}:${read.item}:${read.filing.document_id}`, {
+    kind: "filing_read",
+    text: readText(read),
+    predicate: "filing.item_read",
+    company: read.filer_label,
+    item: read.item,
+    state: read.state,
+    document_id: read.filing.document_id,
+    source_id: read.filing.source_id,
+    newer_unread: newer && { document_id: newer.document_id, source_id: newer.source_id, state: newer.state },
+  }] as const];
+}
+
+function readText(read: FilingItemRead): string {
+  const item = TEN_K_ITEM_NAMES[read.item];
+  const chosen = read.state === "read" ? ""
+    : read.state === "cut" ? `${item} was read in part, ${read.cut!.prompts} of ${read.cut!.of} prompts, so claims from the rest of it are missing`
+    : `${item} ${UNREAD_TEXT[read.state]}, so no claims from it are on file`;
+  if (read.newer_unread === null) return `${read.filer_label}'s ${filingLabel(read.filing)}: ${chosen}`;
+  const from = `${read.filer_label}'s ${item} claims come from its ${filingLabel(read.filing)}${chosen && `, where ${chosen}`}`;
+  return `${from}. In its newer ${filingLabel(read.newer_unread)}, ${item} ${UNREAD_TEXT[read.newer_unread.state]}`;
+}
+
+function noFilingEntry(issuer: { issuer_id: string; label: string }): readonly [string, UnnumberedEntry] {
+  return [`no_filing:${issuer.issuer_id}`, {
+    kind: "no_filing",
+    text: `${issuer.label} has no 10-K on file, so no business or risk factor claims from one`,
+    predicate: "filing.none",
+    company: issuer.label,
+    issuer_id: issuer.issuer_id,
+  }] as const;
+}
 
 export type EvidencePacket = {
   route: string;
@@ -452,6 +573,13 @@ function packetClaims(
     claims_truncated: evidence?.truncated === true,
   };
 }
+
+const CONSENSUS_UNIT_TEXT: Readonly<Record<string, string>> = {
+  usd: " USD",
+  usd_per_share: " USD per share",
+  percent: "",
+  recommendation_1_to_5: "",
+};
 
 const STANCE: Readonly<Record<string, PacketClaim["stance"]>> = {
   positive: "supporting",

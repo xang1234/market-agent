@@ -33,6 +33,7 @@ import {
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
 import { answerTurn, type AnswerTraceInput } from "./answer-trace.ts";
+import { isAnalystToolName, isUnavailableRead, runRegisteredAnalystTool } from "./analyst-tools.ts";
 import { isUuid, noteBlock } from "./chat-ids.ts";
 import { claimSelection } from "./evidence-packet.ts";
 import { causeFamilies, reReadExplained, type Explained } from "./filed-cause.ts";
@@ -191,7 +192,15 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     return evidence;
   };
   const registryRuntime = createRegistryBackedAnalystToolRuntime({
-    executeTool: async ({ toolName, arguments: args }) => {
+    executeTool: async ({ toolName, arguments: args }): Promise<JsonValue> => {
+      if (isAnalystToolName(toolName)) {
+        const result = await runRegisteredAnalystTool(pool(), toolName, args, { as_of: asOf, user_id: context.userId ?? null }).catch((reason: unknown) => {
+          if (!isUnavailableRead(reason)) throw reason;
+          console.warn(`[chat] ${toolName} failed; answering without it`, reason);
+          return { tool: toolName, status: "unavailable" as const, reason: "the read failed" };
+        });
+        return { kind: "analyst_tool_result", tool_name: toolName, arguments: args, result } satisfies JsonValue;
+      }
       const read = {
         subject_refs: subjectRefs,
         user_id: context.userId ?? null,
