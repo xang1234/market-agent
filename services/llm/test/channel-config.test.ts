@@ -268,3 +268,22 @@ test("without AGENT_LITELLM_MODEL, agent calls lead with the primary model", () 
     "opencode/qwen3.8-max",
   ]);
 });
+
+test("Analyze calls lead with ANALYZE_LITELLM_MODEL, else AGENT_LITELLM_MODEL, else the primary model", () => {
+  const both = parseLlmEnv({ ...ANTHROPIC_ENV, AGENT_LITELLM_MODEL: "anthropic/claude-sonnet-5-5", ANALYZE_LITELLM_MODEL: "anthropic/claude-haiku-5-5" });
+  assert.deepEqual(both.issues, []);
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(both, "analyze")), ["anthropic/claude-haiku-5-5", "opencode/qwen3.8-max"]);
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(both, "agent")), ["anthropic/claude-sonnet-5-5", "opencode/qwen3.8-max"]);
+
+  const agentOnly = parseLlmEnv({ ...ANTHROPIC_ENV, AGENT_LITELLM_MODEL: "anthropic/claude-haiku-5-5" });
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(agentOnly, "analyze")), ["anthropic/claude-haiku-5-5", "opencode/qwen3.8-max"]);
+
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(parseLlmEnv(ANTHROPIC_ENV), "analyze")), ["anthropic/claude-sonnet-5-5", "opencode/qwen3.8-max"]);
+});
+
+test("an ANALYZE_LITELLM_MODEL on no configured channel is reported and ignored", () => {
+  const settings = parseLlmEnv({ ...ANTHROPIC_ENV, AGENT_LITELLM_MODEL: "anthropic/claude-haiku-5-5", ANALYZE_LITELLM_MODEL: "missing/model" });
+  assert.equal(settings.analyzeModel, null);
+  assert.ok(settings.issues.some((issue) => issue.startsWith("ANALYZE_LITELLM_MODEL")), settings.issues.join("; "));
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(settings, "analyze")), ["anthropic/claude-haiku-5-5", "opencode/qwen3.8-max"]);
+});

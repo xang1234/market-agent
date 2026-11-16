@@ -136,6 +136,32 @@ test('SettingsView saves the chosen extraction and judge models, and "Use primar
   }
 })
 
+test('SettingsView saves the chosen Analyze model beside the agent model, and "Use agent model" clears it', async () => {
+  const saved: LlmEditableSettings[] = []
+  const changes: LlmEditableSettings[] = []
+  const { document, cleanup } = renderIntoDom(
+    <SettingsView
+      state={{ kind: 'ready', version: 'sha256:test', settings: { ...settings(), agentModel: 'openai/gpt-4.1', analyzeModel: 'openai/o3' } }}
+      onChange={(next) => changes.push(next)}
+      onSave={async (next) => {
+        saved.push(next)
+      }}
+    />,
+  )
+
+  try {
+    assert.equal(selectByLabel(document, 'Analyze model').value, 'openai/o3')
+    assert.equal(selectByLabel(document, 'Analyze model').options[0]?.text, 'Use agent model')
+    await click(buttonByText(document, 'Save'))
+    await change(selectByLabel(document, 'Analyze model'), '')
+
+    assert.deepEqual([saved[0]?.agentModel, saved[0]?.analyzeModel], ['openai/gpt-4.1', 'openai/o3'])
+    assert.deepEqual([changes[0]?.agentModel, changes[0]?.analyzeModel], ['openai/gpt-4.1', null])
+  } finally {
+    cleanup()
+  }
+})
+
 test('SettingsView displays pending and failed diagnostics states', () => {
   const pending = renderToString(
     <SettingsView
@@ -189,6 +215,7 @@ function settings(): LlmEditableSettings {
     primaryModel: 'openai/gpt-4.1',
     fallbackModels: [],
     agentModel: null,
+    analyzeModel: null,
     extractionModel: null,
     judgeModel: null,
     issues: [],

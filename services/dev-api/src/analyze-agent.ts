@@ -53,7 +53,7 @@ export function analyzeAgentWorkflow(deps: AnalyzeAgentDeps): (input: DevApiAnal
       },
       evidence: createEvidenceFinancialPort,
     },
-    ...meteredModels(deps.env, deps.client),
+    ...meteredModels(deps.env, deps.client, "analyze"),
     read: (name, args, turn) => runRegisteredAnalystTool(deps.db, name, args, turn).catch((reason: unknown) => {
       if (!isUnavailableRead(reason)) throw reason;
       console.warn(`[analyze] ${name} failed; the section is written without it`, reason);
@@ -70,8 +70,8 @@ export function analyzeAgentWorkflow(deps: AnalyzeAgentDeps): (input: DevApiAnal
       return { blocks: [{ ...note, subject_refs: input.subjectRefs }] };
     }
     const settings = await loadLlmSettingsFromEnv(deps.env);
-    // A section reads on the agent's model and writes its answer on the default one.
-    if ((["agent", "default"] as const).some((purpose) => buildLlmDeploymentOrder(settings, purpose).length === 0)) {
+    // A section reads on Analyze's model and writes its answer on the default one.
+    if ((["analyze", "default"] as const).some((purpose) => buildLlmDeploymentOrder(settings, purpose).length === 0)) {
       throw new DevApiHttpError(503, "the analyst agent's model is not configured");
     }
     const authority = analyzeAuthority(input.userId, input.runId, input.template.template_id, input.template.version);
