@@ -397,10 +397,11 @@ function goldenHistory(): ChatMessage[] {
   return (JSON.parse(read.body) as { messages: ChatMessage[] }).messages
 }
 
+// A commentary block renders from its parts, so both are dropped.
 function withoutSegments<T extends { blocks: ChatMessage['blocks'] }>(message: T, blockId: string): T {
   return {
     ...message,
-    blocks: message.blocks.map((block) => block.id === blockId ? Object.fromEntries(Object.entries(block).filter(([key]) => key !== 'segments')) : block),
+    blocks: message.blocks.map((block) => block.id === blockId ? Object.fromEntries(Object.entries(block).filter(([key]) => key !== 'segments' && key !== 'commentary')) : block),
   }
 }
 
@@ -482,7 +483,7 @@ test('a valid golden completion renders every block with no notice', async () =>
     assert.deepEqual(notices(h), [])
     const answer = h.said('assistant') ?? ''
     assert.deepEqual(
-      ["NVDA's revenue rose in every period from Q1 FY2025 (USD 26,044,000,000.00) to Q4 FY2026 (USD 62,100,000,000.00).", 'All 24 requested results verified', 'NVIDIA Corporation: Revenue'].map((text) => answer.includes(text)),
+      ["NVDA's revenue rose in every period from Q1 FY2025 (ended Apr 2024) ($26.0B) to Q4 FY2026 (ended Jan 2026) ($62.1B).", 'All 24 requested results verified', 'NVIDIA Corporation: Revenue'].map((text) => answer.includes(text)),
       [true, true, true],
     )
   } finally {
