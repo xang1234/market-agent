@@ -174,7 +174,7 @@ test("evaluateThesis requires a model when narrative evidence is available", asy
   );
 });
 
-test("a reply row that is missing, repeated, null, or names no supplied condition leaves only that condition unchecked", async () => {
+test("a reply row that is missing, repeated, null, or names no supplied condition leaves only that condition unchecked, and a reply with no usable row fails", async () => {
   const unchecked = { condition_id: BULL_ID, status: "unresolved", reason: UNCHECKED_REPLY, claim_refs: [], fact_refs: [], method: "unchecked_reply" };
   const bear = { condition_id: BEAR_ID, status: "challenged", refs: ["C1"] };
   const cases: Array<[string, unknown[]]> = [
@@ -197,10 +197,18 @@ test("a reply row that is missing, repeated, null, or names no supplied conditio
       { condition_id: BEAR_ID, status: "challenged", reason: "The cited stored sources challenge this condition.", claim_refs: [CLAIM_ID], fact_refs: [], method: "model" },
     ], name);
   }
-  await assert.rejects(
-    evaluateThesis({ thesis: thesis([condition(BULL_ID)]), evidence: EVIDENCE, known_results: [], as_of: AS_OF, llm: llmResponse({ results: null }) }),
-    new ThesisValidationError("assessment response results must be an array"),
-  );
+  const unusable: Array<[unknown, string]> = [
+    [{ results: null }, "assessment response results must be an array"],
+    [{ results: [] }, "assessment response names none of the supplied conditions"],
+    [{ results: [{ id: BULL_ID, status: "supported", refs: ["C1"] }, null] }, "assessment response names none of the supplied conditions"],
+  ];
+  for (const [reply, message] of unusable) {
+    await assert.rejects(
+      evaluateThesis({ thesis: thesis([condition(BULL_ID), condition(BEAR_ID)]), evidence: EVIDENCE, known_results: [], as_of: AS_OF, llm: llmResponse(reply) }),
+      new ThesisValidationError(message),
+      "a reply with no usable row fails the run rather than reading as not enough evidence",
+    );
+  }
 });
 
 test("a condition whose status the reply cannot back is not enough evidence, says why, and the other conditions keep theirs", async () => {
@@ -354,7 +362,7 @@ test("draftThesisConditions tells the model the limits its conditions are valida
   }, "Demand remains durable while execution improves.");
   assert.match(system, /statement and falsifier under 500 characters/);
   assert.match(system, /horizon .*under 120 characters/);
-  assert.doesNotMatch(system, /rating|recommendation|price target/, "the adapter filters stance; naming it in the prompt made the model rewrite its reply");
+  assert.match(system, /never the share price or a view on the stock/, "statesStance misses price targets and upside, so the prompt keeps drafts off the stock");
 });
 
 test("draftThesisConditions names the model and the cause when a reply is unusable", async () => {

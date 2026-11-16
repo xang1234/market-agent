@@ -149,7 +149,8 @@ async function draftOnce(llm: ThesisLlm, thesis: string): Promise<ThesisConditio
           "Suggest exactly three independent narrative investment-thesis conditions. " +
           "Return JSON as {\"conditions\":[{\"statement\":string,\"falsifier\":string,\"horizon\":string}]}. " +
           "Keep each statement and falsifier under 500 characters and each horizon a short phrase under 120 characters. " +
-          "Do not include IDs or numerical metric conditions.",
+          "Do not include IDs or numerical metric conditions. " +
+          "Conditions describe the business, never the share price or a view on the stock.",
       },
       { role: "user", content: thesis },
     ],
@@ -192,6 +193,9 @@ function parseNarrativeResults(
     if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
     const row = item as Record<string, unknown>;
     rowsById.set(row.condition_id, [...(rowsById.get(row.condition_id) ?? []), row]);
+  }
+  if (!conditions.some(({ condition_id }) => rowsById.has(condition_id))) {
+    throw new ThesisValidationError(`${label} names none of the supplied conditions`);
   }
   return conditions.map(({ condition_id }) => {
     const rows = rowsById.get(condition_id);

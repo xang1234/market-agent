@@ -16,7 +16,7 @@ mkdirSync(OUT, { recursive: true })
 const checks = []
 const check = (name, ok, detail) => checks.push({ name, ok: Boolean(ok), ...(detail === undefined ? {} : { detail }) })
 const timings = {}
-const agentName = `${TICKER} thesis ${new Date().toISOString().slice(0, 16)}`
+const agentName = `${TICKER} thesis ${new Date().toISOString().slice(0, 19)}`
 let failure = null
 const LLM_LOG = join(ROOT, '.dev/logs/dev-api.log')
 const logSize = () => (existsSync(LLM_LOG) ? statSync(LLM_LOG).size : 0)
@@ -27,7 +27,7 @@ const handedText = (block) => (Array.isArray(block.commentary)
 // Words of 12 characters or more from a block's text segments, never its refs.
 const wordsOf = (blocks) => (blocks ?? []).flatMap(handedText).map((text) => text.trim()).filter((text) => text.length >= 12)
 const segmentText = (segments) => (segments ?? []).map((segment) => (segment.type === 'text' ? segment.text : segment.type === 'ref' ? segment.format || `[${segment.ref_kind}:${segment.ref_id.slice(0, 8)}]` : '')).join('')
-// Whole paragraphs as the handoff writes them, so a phrase two sections share is no match.
+// Whole paragraphs as the handoff writes them, so a phrase two sections share is no match but a merged leak is.
 const paragraphsOf = (blocks) => (blocks ?? []).flatMap((block) => (Array.isArray(block.commentary)
   ? block.commentary.flatMap((part) => (part.kind === 'inference' ? [part.subject ? `${part.subject}: ${part.text}` : part.text] : part.kind === 'figures' ? [segmentText(part.segments)] : []))
   : block.analyst_commentary ? [] : [segmentText(block.segments)])).flatMap((text) => text.split(/\n\n+/)).map((text) => text.trim()).filter(Boolean)
@@ -87,10 +87,9 @@ try {
     check('handoff carries every checked passage of the thesis section', own.length > 0 && own.every((words) => handedOff.includes(words)), own.filter((words) => !handedOff.includes(words)))
     const unverified = unverifiedOf(section?.children)
     check('handoff carries no unverified inference', unverified.every((words) => !handedOff.includes(words)), unverified.filter((words) => handedOff.includes(words)))
-    const handedParagraphs = new Set(handedOff.split(/\n\n+/).map((text) => text.trim()))
-    const ownParagraphs = new Set(paragraphsOf(section?.children))
-    const others = (memo.blocks ?? []).filter((block) => block.kind === 'section' && block !== section).flatMap((block) => paragraphsOf(block.children)).filter((text) => !ownParagraphs.has(text))
-    check('handoff carries no other section', others.every((text) => !handedParagraphs.has(text)), others.filter((text) => handedParagraphs.has(text)))
+    const ownParagraphs = paragraphsOf(section?.children)
+    const others = (memo.blocks ?? []).filter((block) => block.kind === 'section' && block !== section).flatMap((block) => paragraphsOf(block.children)).filter((text) => text.length >= 40 && !ownParagraphs.some((own) => own.includes(text)))
+    check('handoff carries no other section', others.length > 0 && others.every((text) => !handedOff.includes(text)), others.filter((text) => handedOff.includes(text)))
 
     await page.locator('[name="agent-name"]').fill(agentName)
     await page.getByRole('button', { name: 'Create agent' }).click()
