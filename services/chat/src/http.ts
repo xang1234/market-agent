@@ -83,6 +83,7 @@ export type ChatServerOptions = {
   onThreadTitleGenerationError?: ChatCoordinatorOptions["onThreadTitleGenerationError"];
   analystToolRuntime?: ChatAnalystToolRuntime;
   financialRuntime?: ChatFinancialRuntime;
+  analystAgent?: ChatCoordinatorOptions["analystAgent"];
   verificationMode?: ChatVerificationMode;
   runActivityHub?: RunActivityHub;
   auth?: RequestAuthConfig;
@@ -103,6 +104,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
     onThreadTitleGenerationError: options.onThreadTitleGenerationError,
     analystToolRuntime: options.analystToolRuntime,
     financialRuntime: options.financialRuntime,
+    ...(options.analystAgent ? { analystAgent: options.analystAgent } : {}),
     verificationMode: options.verificationMode,
   });
   const threadsDb = options.threadsDb;

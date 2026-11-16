@@ -65,6 +65,10 @@
     {
       "bundle_id": "analyze_template_run",
       "description": "Analyze template execution"
+    },
+    {
+      "bundle_id": "analyst_agent",
+      "description": "The analyst agent's tools: certified financials and the stored-source company reads"
     }
   ],
   "tools": [
@@ -814,15 +818,213 @@
       ]
     },
     {
+      "name": "certified_financials",
+      "audience": "analyst",
+      "bundles": [
+        "analyst_agent"
+      ],
+      "description": "Certified financial figures from SEC filings, planned and verified by the financial engine: every number shown is a checked result. Name the companies, the catalog metrics and the period when the question gives them, and the ask in your own words. income_statement is the whole statement (revenue, gross profit, operating income and net income, each with its margin); a line the question names alone, such as revenue or gross_margin, is that line's own metric. Statuses: published gives the figures; existing means an earlier attempt of this turn computed them and they cannot be shown again; clarification asks a question; declined and gap give the engine's reason; invalid_arguments, no_subject and unavailable as for the other tools.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_refs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "description": "A company the turn names, as its prompt lists it.",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "issuer"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "kind",
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "metrics": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "enum": [
+                "income_statement",
+                "operating_cash_flow",
+                "capex",
+                "free_cash_flow",
+                "eps_basic",
+                "eps_diluted",
+                "balance_sheet",
+                "cash_and_equivalents",
+                "total_assets",
+                "total_liabilities",
+                "total_equity",
+                "pretax_income",
+                "income_tax_expense",
+                "stock_based_compensation",
+                "long_term_debt",
+                "short_term_debt",
+                "marketable_securities",
+                "remaining_performance_obligations",
+                "net_cash",
+                "total_debt",
+                "revenue",
+                "gross_profit",
+                "gross_margin",
+                "operating_income",
+                "operating_margin",
+                "net_income",
+                "net_margin"
+              ]
+            }
+          },
+          "period": {
+            "type": "object",
+            "description": "latest (period quarter or fiscal_year), a fiscal_year, or a fiscal_quarter. Latest when absent.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "latest",
+                  "fiscal_year",
+                  "fiscal_quarter"
+                ]
+              },
+              "period": {
+                "enum": [
+                  "quarter",
+                  "fiscal_year"
+                ]
+              },
+              "fiscal_year": {
+                "type": "integer"
+              },
+              "fiscal_period": {
+                "enum": [
+                  "Q1",
+                  "Q2",
+                  "Q3",
+                  "Q4"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          },
+          "question": {
+            "type": "string",
+            "description": "The ask this call answers, in one sentence."
+          }
+        },
+        "required": [
+          "subject_refs",
+          "question"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "const": "certified_financials"
+          },
+          "status": {
+            "enum": [
+              "published",
+              "existing",
+              "clarification",
+              "declined",
+              "gap",
+              "no_subject",
+              "invalid_arguments",
+              "unavailable"
+            ]
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "figures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "company": {
+                  "type": "string"
+                },
+                "metric": {
+                  "type": "string"
+                },
+                "period": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "gap": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "metric",
+                "period"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "kind": {
+            "type": "string"
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
       "name": "get_company_profile",
       "audience": "analyst",
       "bundles": [
         "quote_lookup",
         "single_subject_analysis",
         "peer_comparison",
-        "analyze_template_run"
+        "analyze_template_run",
+        "analyst_agent"
       ],
-      "description": "Return issuer profile and key descriptors.",
+      "description": "A company's business as its latest 10-K states it: the verbatim Item 1 claims (business.description, business.products, business.customers, business.competition), each with its filing, and each item's read state. no_business_claims: Item 1 was read in full and holds none. no_filing: no 10-K is on file for a subject. incomplete_read: no claim came back and an item was cut, unread or not found, a newer 10-K left it unread, or a limit left filers out, so it says nothing about what the filing states. Every result has a status. no_subject: a subject_ref names no stored company. invalid_arguments: an argument is not one this tool reads. unavailable: the database could not be read, which says nothing about what is on file.",
       "read_only": true,
       "approval_required": false,
       "cost_class": "low",
@@ -830,23 +1032,14 @@
       "input_json_schema": {
         "type": "object",
         "properties": {
-          "agent_id": {
-            "type": "string",
-            "format": "uuid"
-          },
           "subject_ref": {
             "type": "object",
+            "description": "A company the turn names, as its prompt lists it.",
             "properties": {
               "kind": {
                 "type": "string",
                 "enum": [
-                  "issuer",
-                  "instrument",
-                  "listing",
-                  "theme",
-                  "macro_topic",
-                  "portfolio",
-                  "screen"
+                  "issuer"
                 ]
               },
               "id": {
@@ -859,6 +1052,10 @@
               "id"
             ],
             "additionalProperties": false
+          },
+          "query": {
+            "type": "string",
+            "description": "The question this read serves."
           }
         },
         "required": [
@@ -869,85 +1066,225 @@
       "output_json_schema": {
         "type": "object",
         "properties": {
-          "profile": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/$defs/analyst_safe_json_value"
-            },
-            "propertyNames": {
-              "not": {
-                "enum": [
-                  "raw_blob_url",
-                  "raw_blob_id",
-                  "raw_bytes",
-                  "raw_html",
-                  "raw_pdf",
-                  "raw_text",
-                  "raw_transcript",
-                  "raw_content",
-                  "document_bytes"
-                ]
-              }
-            }
+          "tool": {
+            "const": "get_company_profile"
           },
-          "source_ids": {
+          "status": {
+            "enum": [
+              "ok",
+              "no_business_claims",
+              "no_filing",
+              "incomplete_read",
+              "no_subject",
+              "invalid_arguments",
+              "unavailable"
+            ]
+          },
+          "claims": {
             "type": "array",
             "items": {
-              "type": "string",
-              "format": "uuid"
+              "type": "object",
+              "description": "A verbatim 10-K claim and its filing.",
+              "properties": {
+                "claim_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "document_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "source_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "text_canonical": {
+                  "type": "string"
+                },
+                "predicate": {
+                  "type": "string"
+                },
+                "polarity": {
+                  "type": "string"
+                },
+                "effective_time": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "published_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "filer_issuer_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "filer_label": {
+                  "type": "string"
+                },
+                "accession": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "document_title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "link": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "claim_id",
+                "document_id",
+                "source_id",
+                "text_canonical",
+                "predicate",
+                "filer_issuer_id",
+                "filer_label"
+              ],
+              "additionalProperties": false
             }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "A limit (20 filers, 200 claims) left some out."
+          },
+          "reads": {
+            "type": "array",
+            "description": "Each 10-K item read, per filer: its state and the filing it was read from.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "filer_issuer_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "filer_label": {
+                  "type": "string"
+                },
+                "item": {
+                  "enum": [
+                    "1",
+                    "1A"
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "read",
+                    "cut",
+                    "unread",
+                    "not_found",
+                    "not_sectioned",
+                    "not_yet_extracted"
+                  ]
+                },
+                "cut": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "filing": {
+                  "type": "object",
+                  "properties": {
+                    "document_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "source_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "title": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "accession": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "published_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "link": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "document_id",
+                    "source_id"
+                  ],
+                  "additionalProperties": false
+                },
+                "newer_unread": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "filer_issuer_id",
+                "filer_label",
+                "item",
+                "state",
+                "filing"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "no_filing": {
+            "type": "array",
+            "description": "Subjects with no 10-K on file at the cutoff.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "issuer_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "issuer_id",
+                "label"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "reason": {
+            "type": "string"
           }
         },
         "required": [
-          "profile",
-          "source_ids"
+          "tool",
+          "status"
         ],
-        "additionalProperties": false,
-        "$defs": {
-          "analyst_safe_json_value": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/$defs/analyst_safe_json_value"
-                }
-              },
-              {
-                "type": "object",
-                "propertyNames": {
-                  "not": {
-                    "enum": [
-                      "raw_blob_url",
-                      "raw_blob_id",
-                      "raw_bytes",
-                      "raw_html",
-                      "raw_pdf",
-                      "raw_text",
-                      "raw_transcript",
-                      "raw_content",
-                      "document_bytes"
-                    ]
-                  }
-                },
-                "additionalProperties": {
-                  "$ref": "#/$defs/analyst_safe_json_value"
-                }
-              }
-            ]
-          }
-        }
+        "additionalProperties": false
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -1449,9 +1786,10 @@
         "single_subject_analysis",
         "estimates_analysis",
         "peer_comparison",
-        "analyze_template_run"
+        "analyze_template_run",
+        "analyst_agent"
       ],
-      "description": "Return analyst rating distribution, targets, and coverage warnings.",
+      "description": "Attributed analyst consensus (ADR 0006): the newest capture at most 7 days before the cutoff, each value labelled with its provider, field and capture date, and the mean recommendation score on a 1 to 5 scale, never a buy or sell word. no_consensus: no such capture holds a value. Every result has a status. no_subject: a subject_ref names no stored company. invalid_arguments: an argument is not one this tool reads. unavailable: the database could not be read, which says nothing about what is on file.",
       "read_only": true,
       "approval_required": false,
       "cost_class": "medium",
@@ -1461,17 +1799,12 @@
         "properties": {
           "subject_ref": {
             "type": "object",
+            "description": "A company the turn names, as its prompt lists it.",
             "properties": {
               "kind": {
                 "type": "string",
                 "enum": [
-                  "issuer",
-                  "instrument",
-                  "listing",
-                  "theme",
-                  "macro_topic",
-                  "portfolio",
-                  "screen"
+                  "issuer"
                 ]
               },
               "id": {
@@ -1484,6 +1817,10 @@
               "id"
             ],
             "additionalProperties": false
+          },
+          "query": {
+            "type": "string",
+            "description": "The question this read serves."
           }
         },
         "required": [
@@ -1494,111 +1831,86 @@
       "output_json_schema": {
         "type": "object",
         "properties": {
-          "rating_distribution": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/$defs/analyst_safe_json_value"
-            },
-            "propertyNames": {
-              "not": {
-                "enum": [
-                  "raw_blob_url",
-                  "raw_blob_id",
-                  "raw_bytes",
-                  "raw_html",
-                  "raw_pdf",
-                  "raw_text",
-                  "raw_transcript",
-                  "raw_content",
-                  "document_bytes"
-                ]
-              }
-            }
+          "tool": {
+            "const": "get_analyst_consensus"
           },
-          "price_target": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/$defs/analyst_safe_json_value"
-            },
-            "propertyNames": {
-              "not": {
-                "enum": [
-                  "raw_blob_url",
-                  "raw_blob_id",
-                  "raw_bytes",
-                  "raw_html",
-                  "raw_pdf",
-                  "raw_text",
-                  "raw_transcript",
-                  "raw_content",
-                  "document_bytes"
-                ]
-              }
-            }
+          "status": {
+            "enum": [
+              "ok",
+              "no_consensus",
+              "no_subject",
+              "invalid_arguments",
+              "unavailable"
+            ]
           },
-          "analyst_count": {
-            "type": "integer"
+          "company": {
+            "type": "string"
           },
-          "as_of": {
+          "captured_on": {
             "type": "string",
-            "format": "date-time"
+            "format": "date"
           },
-          "coverage_warning": {
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "capture_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "source_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "field_key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "raw_value": {
+                  "type": "string"
+                },
+                "unit": {
+                  "enum": [
+                    "usd_per_share",
+                    "percent",
+                    "usd",
+                    "recommendation_1_to_5"
+                  ]
+                },
+                "fiscal_period": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "capture_id",
+                "source_id",
+                "provider",
+                "field_key",
+                "label",
+                "raw_value",
+                "unit"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "reason": {
             "type": "string"
           }
         },
         "required": [
-          "rating_distribution",
-          "price_target",
-          "analyst_count",
-          "as_of"
+          "tool",
+          "status"
         ],
-        "additionalProperties": false,
-        "$defs": {
-          "analyst_safe_json_value": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/$defs/analyst_safe_json_value"
-                }
-              },
-              {
-                "type": "object",
-                "propertyNames": {
-                  "not": {
-                    "enum": [
-                      "raw_blob_url",
-                      "raw_blob_id",
-                      "raw_bytes",
-                      "raw_html",
-                      "raw_pdf",
-                      "raw_text",
-                      "raw_transcript",
-                      "raw_content",
-                      "document_bytes"
-                    ]
-                  }
-                },
-                "additionalProperties": {
-                  "$ref": "#/$defs/analyst_safe_json_value"
-                }
-              }
-            ]
-          }
-        }
+        "additionalProperties": false
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -1900,9 +2212,10 @@
         "filing_research",
         "single_subject_analysis",
         "agent_management",
-        "analyze_template_run"
+        "analyze_template_run",
+        "analyst_agent"
       ],
-      "description": "Return claims for a set of subjects with predicate and time filters.",
+      "description": "Verbatim 10-K claims about companies: business (Item 1) and risk factors (Item 1A, risk.factor), by predicate. role subject (the default) reads each company's own 10-K; role competitor reads other filers' 10-Ks that name the company as a competitor, each claim labelled with its filer. no_claims: every item read holds none. no_filing: no 10-K is on file for a subject. incomplete_read: no claim came back and an item was cut, unread or not found, a newer 10-K left it unread, or a limit left filers out, so it says nothing about what the filing states. Every result has a status. no_subject: a subject_ref names no stored company. invalid_arguments: an argument is not one this tool reads. unavailable: the database could not be read, which says nothing about what is on file.",
       "read_only": true,
       "approval_required": false,
       "cost_class": "medium",
@@ -1910,21 +2223,38 @@
       "input_json_schema": {
         "type": "object",
         "properties": {
+          "subject_ref": {
+            "type": "object",
+            "description": "A company the turn names, as its prompt lists it.",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          },
           "subject_refs": {
             "type": "array",
+            "minItems": 1,
             "items": {
               "type": "object",
+              "description": "A company the turn names, as its prompt lists it.",
               "properties": {
                 "kind": {
                   "type": "string",
                   "enum": [
-                    "issuer",
-                    "instrument",
-                    "listing",
-                    "theme",
-                    "macro_topic",
-                    "portfolio",
-                    "screen"
+                    "issuer"
                   ]
                 },
                 "id": {
@@ -1937,181 +2267,257 @@
                 "id"
               ],
               "additionalProperties": false
-            }
+            },
+            "description": "Several companies; give this or subject_ref."
           },
           "predicates": {
             "type": "array",
+            "minItems": 1,
             "items": {
-              "type": "string"
+              "enum": [
+                "business.description",
+                "business.products",
+                "business.customers",
+                "business.competition",
+                "risk.factor"
+              ]
             }
           },
-          "range": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/$defs/analyst_safe_json_value"
-            },
-            "propertyNames": {
-              "not": {
-                "enum": [
-                  "raw_blob_url",
-                  "raw_blob_id",
-                  "raw_bytes",
-                  "raw_html",
-                  "raw_pdf",
-                  "raw_text",
-                  "raw_transcript",
-                  "raw_content",
-                  "document_bytes"
-                ]
-              }
-            }
-          },
-          "trust_min": {
-            "type": "string"
-          }
-        },
-        "required": [],
-        "additionalProperties": {
-          "$ref": "#/$defs/analyst_safe_json_value"
-        },
-        "propertyNames": {
-          "not": {
+          "role": {
             "enum": [
-              "raw_blob_url",
-              "raw_blob_id",
-              "raw_bytes",
-              "raw_html",
-              "raw_pdf",
-              "raw_text",
-              "raw_transcript",
-              "raw_content",
-              "document_bytes"
+              "subject",
+              "competitor"
             ]
+          },
+          "query": {
+            "type": "string",
+            "description": "The question this read serves."
           }
         },
-        "$defs": {
-          "analyst_safe_json_value": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/$defs/analyst_safe_json_value"
-                }
-              },
-              {
-                "type": "object",
-                "propertyNames": {
-                  "not": {
-                    "enum": [
-                      "raw_blob_url",
-                      "raw_blob_id",
-                      "raw_bytes",
-                      "raw_html",
-                      "raw_pdf",
-                      "raw_text",
-                      "raw_transcript",
-                      "raw_content",
-                      "document_bytes"
-                    ]
-                  }
-                },
-                "additionalProperties": {
-                  "$ref": "#/$defs/analyst_safe_json_value"
-                }
-              }
-            ]
-          }
-        }
+        "additionalProperties": false
       },
       "output_json_schema": {
         "type": "object",
         "properties": {
+          "tool": {
+            "const": "get_claims"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "no_claims",
+              "no_filing",
+              "incomplete_read",
+              "no_subject",
+              "invalid_arguments",
+              "unavailable"
+            ]
+          },
           "claims": {
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": {
-                "$ref": "#/$defs/analyst_safe_json_value"
-              },
-              "propertyNames": {
-                "not": {
-                  "enum": [
-                    "raw_blob_url",
-                    "raw_blob_id",
-                    "raw_bytes",
-                    "raw_html",
-                    "raw_pdf",
-                    "raw_text",
-                    "raw_transcript",
-                    "raw_content",
-                    "document_bytes"
+              "description": "A verbatim 10-K claim and its filing.",
+              "properties": {
+                "claim_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "document_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "source_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "text_canonical": {
+                  "type": "string"
+                },
+                "predicate": {
+                  "type": "string"
+                },
+                "polarity": {
+                  "type": "string"
+                },
+                "effective_time": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "published_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "filer_issuer_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "filer_label": {
+                  "type": "string"
+                },
+                "accession": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "document_title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "link": {
+                  "type": [
+                    "string",
+                    "null"
                   ]
                 }
-              }
+              },
+              "required": [
+                "claim_id",
+                "document_id",
+                "source_id",
+                "text_canonical",
+                "predicate",
+                "filer_issuer_id",
+                "filer_label"
+              ],
+              "additionalProperties": false
             }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "A limit (20 filers, 200 claims) left some out."
+          },
+          "reads": {
+            "type": "array",
+            "description": "Each 10-K item read, per filer: its state and the filing it was read from.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "filer_issuer_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "filer_label": {
+                  "type": "string"
+                },
+                "item": {
+                  "enum": [
+                    "1",
+                    "1A"
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "read",
+                    "cut",
+                    "unread",
+                    "not_found",
+                    "not_sectioned",
+                    "not_yet_extracted"
+                  ]
+                },
+                "cut": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "filing": {
+                  "type": "object",
+                  "properties": {
+                    "document_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "source_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "title": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "accession": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "published_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "link": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "document_id",
+                    "source_id"
+                  ],
+                  "additionalProperties": false
+                },
+                "newer_unread": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "filer_issuer_id",
+                "filer_label",
+                "item",
+                "state",
+                "filing"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "no_filing": {
+            "type": "array",
+            "description": "Subjects with no 10-K on file at the cutoff.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "issuer_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "issuer_id",
+                "label"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "reason": {
+            "type": "string"
           }
         },
         "required": [
-          "claims"
+          "tool",
+          "status"
         ],
-        "additionalProperties": false,
-        "$defs": {
-          "analyst_safe_json_value": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/$defs/analyst_safe_json_value"
-                }
-              },
-              {
-                "type": "object",
-                "propertyNames": {
-                  "not": {
-                    "enum": [
-                      "raw_blob_url",
-                      "raw_blob_id",
-                      "raw_bytes",
-                      "raw_html",
-                      "raw_pdf",
-                      "raw_text",
-                      "raw_transcript",
-                      "raw_content",
-                      "document_bytes"
-                    ]
-                  }
-                },
-                "additionalProperties": {
-                  "$ref": "#/$defs/analyst_safe_json_value"
-                }
-              }
-            ]
-          }
-        }
+        "additionalProperties": false
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -3252,9 +3658,10 @@
       "bundles": [
         "peer_comparison",
         "single_subject_analysis",
-        "analyze_template_run"
+        "analyze_template_run",
+        "analyst_agent"
       ],
-      "description": "Return a ranked peer set for comparison.",
+      "description": "A company's industry peers: issuers of its stored industry, each evidenced by an industry source the user may see, ranked by reported market cap. no_peers gives its reason: no_industry or no_same_industry_issuer. Every result has a status. no_subject: a subject_ref names no stored company. invalid_arguments: an argument is not one this tool reads. unavailable: the database could not be read, which says nothing about what is on file.",
       "read_only": true,
       "approval_required": false,
       "cost_class": "low",
@@ -3264,17 +3671,12 @@
         "properties": {
           "subject_ref": {
             "type": "object",
+            "description": "A company the turn names, as its prompt lists it.",
             "properties": {
               "kind": {
                 "type": "string",
                 "enum": [
-                  "issuer",
-                  "instrument",
-                  "listing",
-                  "theme",
-                  "macro_topic",
-                  "portfolio",
-                  "screen"
+                  "issuer"
                 ]
               },
               "id": {
@@ -3289,104 +3691,91 @@
             "additionalProperties": false
           },
           "criteria": {
-            "type": "string",
-            "enum": [
-              "sector",
-              "industry",
-              "size",
-              "custom"
-            ]
+            "const": "industry",
+            "description": "Peers are chosen by industry only."
           },
           "n": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 20
+            "maximum": 20,
+            "description": "How many peers, 5 by default."
+          },
+          "query": {
+            "type": "string",
+            "description": "The question this read serves."
           }
         },
         "required": [
-          "subject_ref",
-          "criteria",
-          "n"
+          "subject_ref"
         ],
         "additionalProperties": false
       },
       "output_json_schema": {
         "type": "object",
         "properties": {
+          "tool": {
+            "const": "get_peer_set"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "no_peers",
+              "no_subject",
+              "invalid_arguments",
+              "unavailable"
+            ]
+          },
+          "company": {
+            "type": "string"
+          },
+          "industry": {
+            "type": "string"
+          },
+          "industry_source_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "peers": {
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": {
-                "$ref": "#/$defs/analyst_safe_json_value"
-              },
-              "propertyNames": {
-                "not": {
-                  "enum": [
-                    "raw_blob_url",
-                    "raw_blob_id",
-                    "raw_bytes",
-                    "raw_html",
-                    "raw_pdf",
-                    "raw_text",
-                    "raw_transcript",
-                    "raw_content",
-                    "document_bytes"
+              "properties": {
+                "issuer_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "industry_source_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "market_cap_source_id": {
+                  "type": [
+                    "string",
+                    "null"
                   ]
                 }
-              }
+              },
+              "required": [
+                "issuer_id",
+                "label",
+                "industry_source_id",
+                "market_cap_source_id"
+              ],
+              "additionalProperties": false
             }
+          },
+          "reason": {
+            "type": "string"
           }
         },
         "required": [
-          "peers"
+          "tool",
+          "status"
         ],
-        "additionalProperties": false,
-        "$defs": {
-          "analyst_safe_json_value": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/$defs/analyst_safe_json_value"
-                }
-              },
-              {
-                "type": "object",
-                "propertyNames": {
-                  "not": {
-                    "enum": [
-                      "raw_blob_url",
-                      "raw_blob_id",
-                      "raw_bytes",
-                      "raw_html",
-                      "raw_pdf",
-                      "raw_text",
-                      "raw_transcript",
-                      "raw_content",
-                      "document_bytes"
-                    ]
-                  }
-                },
-                "additionalProperties": {
-                  "$ref": "#/$defs/analyst_safe_json_value"
-                }
-              }
-            ]
-          }
-        }
+        "additionalProperties": false
       },
       "error_codes": [
         "INVALID_ARGUMENT",

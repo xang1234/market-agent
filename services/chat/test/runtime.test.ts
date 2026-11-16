@@ -55,6 +55,13 @@ test("with a database set, the server takes each piece of the in-repo runtime on
   await assert.rejects(() => loadChatServerOptionsFromEnv({ CHAT_DATABASE_URL: "postgres://golden.invalid/market_agent" }, load), /not ready/u);
 });
 
+test("only CHAT_ANALYST_AGENT=1 hands the server the analyst agent", async () => {
+  const runtime = { financialRuntime: { assertReady: async () => {} }, analystAgent: Object.assign(() => assert.fail("not called"), { piece: "analystAgent" }) };
+  const load = async () => runtime as never;
+  const agentOf = async (flag: string | undefined) => (await loadChatServerOptionsFromEnv({ DATABASE_URL: "postgres://golden.invalid/market_agent", ...(flag === undefined ? {} : { CHAT_ANALYST_AGENT: flag }) }, load)).analystAgent;
+  assert.deepEqual(await Promise.all([undefined, "0", "true", "1"].map(agentOf)), [undefined, undefined, undefined, runtime.analystAgent]);
+});
+
 test("in-repo chat runtime runs without the local stub tool executor mode", async () => {
   const previous = process.env.CHAT_LOCAL_TOOL_EXECUTOR;
   delete process.env.CHAT_LOCAL_TOOL_EXECUTOR;

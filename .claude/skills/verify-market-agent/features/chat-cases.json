@@ -108,5 +108,54 @@
     "id": "nvda-amd-ytd",
     "budget_ms": { "first_text": 15000, "saved": 15000 },
     "turns": [{ "ask": "Compare NVDA with AMD year to date", "expect": { "subjects": ["NVDA", "AMD"], "tools": ["get_quote"] } }]
+  },
+  {
+    "id": "agent-compare-sells",
+    "note": "AA5 lane 2, CHAT_ANALYST_AGENT=1 on a data stack with the 10-K fixtures loaded",
+    "budget_ms": { "saved": 60000 },
+    "turns": [
+      { "ask": "Compare NVDA and MU revenue, and what each sells", "expect": { "subjects": ["NVDA", "MU"], "tools": ["certified_financials", "get_company_profile"], "text": ["NVIDIA", "Micron Technology", "Revenue", "Analysis"], "not_text": ["Commentary is unavailable"] } }
+    ]
+  },
+  {
+    "id": "agent-prototype",
+    "note": "AA5 lane 3, flag on",
+    "budget_ms": { "saved": 60000 },
+    "turns": [{ "ask": "Compare NVDA and MU revenue", "expect": { "subjects": ["NVDA", "MU"], "tools": ["certified_financials"], "text": ["Revenue", "Analysis"] } }]
+  },
+  {
+    "id": "agent-two-blocks",
+    "note": "AA5 lane 4, flag on: two certified calls, each company's figures its own",
+    "budget_ms": { "saved": 60000 },
+    "turns": [
+      { "ask": "NVDA revenue and MU gross margin last fiscal year", "expect": { "subjects": ["NVDA", "MU"], "tools": ["certified_financials"], "text": ["NVIDIA Corp, Revenue", "Micron Technology Inc, Gross margin", "Analysis"], "not_text": ["Commentary is unavailable"] } }
+    ]
+  },
+  {
+    "id": "agent-products-risks",
+    "note": "AA5 lanes 5 and 8, flag on: the follow-up keeps MU and reads its risk factors",
+    "budget_ms": { "saved": 60000 },
+    "turns": [
+      { "ask": "What does MU sell?", "expect": { "subjects": ["MU"], "tools": ["get_company_profile"], "text": ["DRAM", "NAND"], "not_text": ["No figures are shown", "names it as a competitor"] } },
+      { "ask": "What are its main risks?", "expect": { "subjects": ["MU"], "tools": ["get_claims"], "text": ["average selling prices"] } }
+    ]
+  },
+  {
+    "id": "agent-no-source",
+    "note": "AA5 lane 6, flag on: no KO 10-K is loaded",
+    "budget_ms": { "saved": 60000 },
+    "turns": [{ "ask": "What does KO sell?", "expect": { "subjects": ["KO"], "tools": ["get_company_profile"], "text": ["KO has no 10-K on file"] } }]
+  },
+  {
+    "id": "agent-competitors",
+    "note": "AA5 lane 9, flag on; in 1 of 5 runs the model wrote the peer list as an observation, which the checks reject, so the peers go unshown",
+    "budget_ms": { "saved": 60000 },
+    "turns": [{ "ask": "Who does NVDA compete with?", "expect": { "subjects": ["NVDA"], "tools": ["get_claims", "get_peer_set"], "text": ["Advanced Micro Devices"] } }]
+  },
+  {
+    "id": "agent-consensus",
+    "note": "AA5 lane 10, flag on: an attributed consensus when one is captured, else its typed note; both say consensus",
+    "budget_ms": { "saved": 60000 },
+    "turns": [{ "ask": "What do analysts expect for AAPL?", "expect": { "subjects": ["AAPL"], "tools": ["get_analyst_consensus"], "text": ["consensus"], "not_text": ["Buy", "Hold", "Sell"] } }]
   }
 ]

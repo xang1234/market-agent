@@ -185,6 +185,90 @@ function resultEntries(result: AnalystToolResult): Array<readonly [string, Unnum
   }
 }
 
+export function mergePackets(input: {
+  engine: ReadonlyArray<EvidencePacket>;
+  route?: EvidencePacket;
+  analyst: ReadonlyArray<AnalystToolResult>;
+  figuresAskedFor: ReadonlyArray<string>;
+  notes: ReadonlyArray<string>;
+  labels: ReadonlyMap<string, string>;
+  cutoff: string;
+}): EvidencePacket {
+  let figureCount = 0;
+  const figures = input.engine.flatMap((packet) => {
+    const ids = new Map(packet.figures.map((figure) => [figure.id, `F${++figureCount}`]));
+    const renumbered = (id: string) => ids.get(id) ?? id;
+    const company = packet.companies.length === 1 ? packet.companies[0] : undefined;
+    return packet.figures.map(({ derived_from, ...figure }) => ({
+      ...(company ? { company } : {}),
+      ...figure,
+      id: renumbered(figure.id),
+      ...(derived_from ? { derived_from: [renumbered(derived_from[0]), renumbered(derived_from[1])] as const } : {}),
+    }));
+  });
+  const entries = analystPacketEntries(input.analyst.map((result) => relabelled(result, input.labels)));
+  const routeClaims = input.route?.claims ?? [];
+  const claims: PacketClaim[] = [];
+  const idOf = new Map<string, string>();
+  for (const claim of [...routeClaims, ...entries.flatMap(packetClaim)]) {
+    if (idOf.has(claim.claim_id)) continue;
+    const id = `C${claims.length + 1}`;
+    idOf.set(claim.claim_id, id);
+    claims.push({ ...claim, id });
+  }
+  const routeIds = new Map(routeClaims.map((claim) => [claim.id, idOf.get(claim.claim_id)!]));
+  const companies = [...new Set([
+    ...input.figuresAskedFor,
+    ...input.engine.flatMap((packet) => packet.companies),
+    ...(input.route?.companies ?? []),
+    ...claims.flatMap((claim) => (claim.company === undefined ? [] : [claim.company])),
+  ])];
+  const shown = new Set(input.engine.flatMap((packet) => packet.coverage.filter((entry) => entry.status === "shown").map((entry) => entry.company)));
+  return {
+    route: input.engine.length > 0 ? "financial_engine" : "analyst_agent",
+    cutoff: input.cutoff,
+    companies,
+    figures,
+    coverage: [...new Set(input.figuresAskedFor)].map((company) => ({ company, status: shown.has(company) ? "shown" : "not_shown" })),
+    gaps: [...input.notes, ...entries.flatMap((entry) => (entry.kind === "filing_read" || entry.kind === "no_filing" ? [`${entry.text}.`] : []))],
+    query_bounds: {},
+    claims,
+    disagreements: (input.route?.disagreements ?? []).map(({ claims: [a, b], basis }) => ({ claims: [routeIds.get(a) ?? a, routeIds.get(b) ?? b] as const, basis })),
+    claims_status: input.analyst.some((result) => result.status === "unavailable") || input.route?.claims_status === "unavailable"
+      ? "unavailable"
+      : claims.length > 0 ? "available" : "none",
+    claims_truncated: input.route?.claims_truncated === true || input.analyst.some((result) => "truncated" in result && result.truncated),
+    ...(input.engine.some((packet) => packet.periods_shown) ? { periods_shown: true as const } : {}),
+  };
+}
+
+function packetClaim(entry: AnalystPacketEntry): Omit<PacketClaim, "id">[] {
+  switch (entry.kind) {
+    case "claim": {
+      const { kind: _kind, filing: _filing, id: _id, ...claim } = entry;
+      return [claim];
+    }
+    case "consensus":
+      return [{ text: entry.text, predicate: entry.predicate, stance: "neutral", company: entry.company, published_at: entry.captured_on, claim_id: `consensus:${entry.capture_id}`, source_id: entry.source_id }];
+    case "peer":
+      return [{ text: `Industry peer: ${entry.text}`, predicate: entry.predicate, stance: "neutral", company: entry.company, claim_id: `peer:${entry.company}:${entry.peer_issuer_id}`, source_id: entry.source_ids[0] ?? "" }];
+    case "filing_read":
+    case "no_filing":
+      return [];
+  }
+}
+
+function relabelled(result: AnalystToolResult, labels: ReadonlyMap<string, string>): AnalystToolResult {
+  if (!("reads" in result)) return result;
+  const label = (issuer: string, fallback: string) => labels.get(issuer.toLowerCase()) ?? fallback;
+  return {
+    ...result,
+    reads: result.reads.map((read) => ({ ...read, filer_label: label(read.filer_issuer_id, read.filer_label) })),
+    no_filing: result.no_filing.map((issuer) => ({ ...issuer, label: label(issuer.issuer_id, issuer.label) })),
+    ...(result.status === "ok" ? { claims: result.claims.map((claim) => ({ ...claim, filer_label: label(claim.filer_issuer_id, claim.filer_label) })) } : {}),
+  } as AnalystToolResult;
+}
+
 function filingLabel(filing: Pick<TenKFiling, "title" | "accession" | "published_at" | "link">): string {
   return [filing.title ?? "filing", filing.accession && `accession ${filing.accession}`, filing.published_at && `filed ${filing.published_at.slice(0, 10)}`, filing.link]
     .filter(Boolean).join(", ");

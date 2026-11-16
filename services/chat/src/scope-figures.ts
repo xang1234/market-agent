@@ -272,6 +272,11 @@ export const ENGINE_READS_BY_CATALOG_METRIC: Readonly<Record<string, ReadonlyArr
   total_debt: balanceSum("total_debt"),
 };
 
+export const INCOME_LINE_READS: Readonly<Record<string, ReadonlyArray<string | Computed>>> = Object.fromEntries([
+  ["revenue", ["revenue"]],
+  ...MARGINS.flatMap(({ metric, numerator }) => [[numerator, [numerator]], [metric, [{ operation: metric, inputs: { numerator, revenue: "revenue" } }]]]),
+]);
+
 // The chat catalog key (research-scope.ts) of each figure the engine names,
 // or null for a figure no chat reader serves: a follow-up reads the others.
 // Every engine metric is listed (#381), so a new one cannot silently drop out.
@@ -350,7 +355,7 @@ export async function planScopeFigures(
   period: ReadPeriod,
 ): Promise<ReadyPlan | null> {
   const valuations = metrics.filter((key): key is Valuation => VALUATIONS.has(key));
-  const figures = metrics.filter((key) => !VALUATIONS.has(key)).map((key) => ENGINE_READS_BY_CATALOG_METRIC[key]);
+  const figures = metrics.filter((key) => !VALUATIONS.has(key)).map((key) => ENGINE_READS_BY_CATALOG_METRIC[key] ?? INCOME_LINE_READS[key]);
   if (metrics.length === 0 || figures.some((entry) => entry === undefined) || (valuations.length > 0 && period.kind !== "latest")) return null;
   const selectors = await periodSelectors(context, evidence, period);
   if (selectors === null) return null;

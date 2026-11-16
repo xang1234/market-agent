@@ -1132,7 +1132,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       choice,
       labels: new Map([[IDS.issuerA, "NVDA"]]),
       authority: authorityFor(),
-      requestKey: requestKeyFor(turnId, n),
+      requestKey: requestKeyFor(turnId, turnId, String(n)),
       persistParent: async () => {},
     },
   );
@@ -1150,7 +1150,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(result.content?.results.map((entry) => entry.disposition), ["verified"]);
     assert.deepEqual(await figuresOf(result), ["F1 Revenue: $383.0B"]);
     const { rows: [run] } = await db.query(`select run_id::text, request_key from financial_runs where run_id = $1`, [result.run_id]);
-    assert.deepEqual(run, { run_id: result.run_id, request_key: `turn:${turnId}:1` });
+    assert.deepEqual(run, { run_id: result.run_id, request_key: requestKeyFor(turnId, turnId, "1") });
   });
 
   await t.test("two certified calls in one turn are two runs under their own keys", async () => {
@@ -1171,7 +1171,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     ]);
     const runs = [first, second].flatMap((result) => result.status === "published" ? [result.run_id] : []);
     const { rows } = await db.query(`select request_key from financial_runs where run_id = any($1::uuid[]) order by request_key`, [runs]);
-    assert.deepEqual(rows.map((row) => row.request_key), [`turn:${turnId}:1`, `turn:${turnId}:2`]);
+    assert.deepEqual(rows.map((row) => row.request_key), [requestKeyFor(turnId, turnId, "1"), requestKeyFor(turnId, turnId, "2")]);
   });
 
   await t.test("a certified call about two companies names each figure's company by the label given for its issuer", async () => {
@@ -1185,7 +1185,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
         choice: { kind: "kept_figures", metrics: ["income_statement"], period: { kind: "fiscal_year", fiscal_year: 2023 } },
         labels: new Map([[IDS.issuerA.toUpperCase(), "NVDA"], [IDS.issuerB, "BBB"]]),
         authority: authorityFor(),
-        requestKey: requestKeyFor(turnId, 1),
+        requestKey: requestKeyFor(turnId, turnId, "1"),
         persistParent: async () => {},
       },
     );

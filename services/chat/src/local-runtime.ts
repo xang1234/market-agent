@@ -21,7 +21,8 @@ import { STAGED_SNAPSHOT_MANIFEST } from "../../snapshot/src/manifest-staging.ts
 import { sealSnapshotInTransaction, snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { planningModelFromRouter } from "../../financial-engine/src/planner.ts";
-import { createLlmRouterFromEnv } from "../../llm/src/index.ts";
+import { createDefaultPiLlmChatClient, createLlmRouterFromEnv, type LlmChatClient } from "../../llm/src/index.ts";
+import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import {
   createRegistryBackedAnalystToolRuntime,
   type ChatAnalystToolRuntime,
@@ -47,6 +48,7 @@ import { createLlmThreadTitleModel, type DroppedClaims } from "./llm-runtime.ts"
 import { structuredRefsFromHandoff } from "./local-runtime-structured.ts";
 import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
 import { saveCommentary } from "./engine-commentary.ts";
+import { analystAgentRouter, analystAgentRunner, type AnalystAgentDeps } from "./analyst-agent.ts";
 import { ChatSnapshotSealError, createChatMessagePersistence, saveChatMessageWorkSummary, type ChatSealResult } from "./messages.ts";
 import type { ChatWorkSummarySave } from "./work-summary.ts";
 import {
@@ -388,8 +390,6 @@ export function analystTurnScope(
   return turnScope(threadId, question, covered, false, reading);
 }
 
-export const readQuestion = (question: string) => proposeScope({ question });
-
 // The turn's research scope at a cutoff (research-scope.ts): what it asks for,
 // keeping the previous answer's scope where it continues it. The companies are
 // the ones the answer compares, auto-selected peers included, so the price
@@ -514,20 +514,66 @@ export async function financialResearchScope(
   return (await turnScope(context.threadId, context.userIntent ?? "", covered, true, reading))(turnNow(process.env));
 }
 
-export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime({
-  pool: { query: (text, values) => pool().query(text, values), connect: () => pool().connect() },
-  planningModel: async (request) => {
-    const router = await createLlmRouterFromEnv(process.env);
-    if (!router) throw new Error("LLM router is not configured");
-    return planningModelFromRouter(router)(request);
-  },
-  resolveMention: (mention) => preResolveSubject({ text: mention }),
-  priorSubjects: (threadId) => loadPriorSubjects({ threadId }),
+const planningModelWith = (options?: Parameters<typeof createLlmRouterFromEnv>[1], env: NodeJS.ProcessEnv = process.env) => async (request: Parameters<ReturnType<typeof planningModelFromRouter>>[0]) => {
+  const router = await createLlmRouterFromEnv(env, options);
+  if (!router) throw new Error("LLM router is not configured");
+  return planningModelFromRouter(router)(request);
+};
+
+const financialDeps = {
+  pool: { query: (text: string, values?: unknown[]) => pool().query(text, values), connect: () => pool().connect() },
+  planningModel: planningModelWith(),
+  resolveMention: (mention: string) => preResolveSubject({ text: mention }),
+  priorSubjects: (threadId: string) => loadPriorSubjects({ threadId }),
   evidence: createEvidenceFinancialPort,
   researchScope: financialResearchScope,
+};
+
+export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime({
+  ...financialDeps,
   hydrate: hydrateTurn,
   commentary: (db, input) => saveCommentary(db, (answer, turn, onAnswered) =>
     answerTurn(answer, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered }), input),
+});
+
+const defaultClient = (): Promise<LlmChatClient> => {
+  const replay = process.env.LLM_REPLAY_FILE?.trim();
+  return replay ? createReplayLlmChatClient(replay) : createDefaultPiLlmChatClient();
+};
+
+export const guardedClient = (beforeModelCall: () => void, base: () => Promise<LlmChatClient> | LlmChatClient = defaultClient) => async (): Promise<LlmChatClient> => {
+  const client = await base();
+  return (deployment, request, options) => {
+    beforeModelCall();
+    return client(deployment, request, options);
+  };
+};
+
+export const meteredAgentDeps = (env: NodeJS.ProcessEnv, base: () => Promise<LlmChatClient> | LlmChatClient = defaultClient) => ({
+  readQuestion: (question: string, beforeModelCall?: () => void) =>
+    proposeScope({ question, env, ...(beforeModelCall ? { createClient: guardedClient(beforeModelCall, base) } : {}) }),
+  router: (beforeModelCall: () => void) => analystAgentRouter(env, { createClient: guardedClient(beforeModelCall, base) }),
+  planner: (beforeModelCall: () => void) => planningModelWith({ createClient: guardedClient(beforeModelCall, base) }, env),
+  compose: ((input, turn, onAnswered, beforeModelCall) =>
+    answerTurn(input, turn, { env, traceDir: env.CHAT_TRACE_DIR?.trim(), onAnswered, createClient: guardedClient(beforeModelCall, base) })) satisfies AnalystAgentDeps["compose"],
+});
+
+const { planningModel: _unmetered, ...agentFinancialDeps } = financialDeps;
+const { readQuestion: reading, ...agentModels } = meteredAgentDeps(process.env);
+
+export const readQuestion = reading;
+
+export const analystAgent = analystAgentRunner({
+  financial: { ...agentFinancialDeps, hydrate: hydrateTurn },
+  ...agentModels,
+  read: (name, args, turn) => runRegisteredAnalystTool(pool(), name, args, turn).catch((reason: unknown) => {
+    if (!isUnavailableRead(reason)) throw reason;
+    console.warn(`[chat] ${name} failed; the analyst agent answers without it`, reason);
+    return { tool: name, status: "unavailable" as const, reason: "the read failed" };
+  }),
+  asOf: () => turnNow(process.env),
+  conversation: (threadId) => loadRecentConversation(pool(), { threadId, limit: CONVERSATION_MESSAGES }),
+  logToolCalls: writeLocalToolCallLogs,
 });
 
 export const persistAssistantMessage: ChatAssistantMessagePersistence = async (message) =>
@@ -544,16 +590,20 @@ export const generateThreadTitle: ChatThreadTitleGenerator = async (job) =>
     model: createLlmThreadTitleModel(),
   })(job);
 
+const sealedHere = (blocks: ReadonlyArray<Record<string, unknown>>) => blocks.filter((block) => block.kind !== "financial_answer");
+
 async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersistenceInput): Promise<ChatSealResult> {
-  const snapshotId = snapshotIdFromBlocks(input.blocks);
-  const asOf = maxBlockAsOf(input.blocks) ?? turnNow(process.env);
+  const own = sealedHere(input.blocks);
+  const snapshotId = snapshotIdFromBlocks(own);
+  const asOf = maxBlockAsOf(own) ?? turnNow(process.env);
   const userId = await threadUserId(input.threadId);
   return withPoolClient(pool(), async (client: PoolClient) => {
     try {
       await client.query("begin");
-      const dropped = await droppedClaims(client, input.blocks, { user_id: userId, as_of: asOf });
+      const dropped = await droppedClaims(client, own, { user_id: userId, as_of: asOf });
       if (dropped && !input.without) throw new ChatSnapshotSealError([{ reason_code: "missing_claim_ref", details: dropped }]);
-      const blocks = dropped ? input.without!(dropped) : input.blocks;
+      const saved = dropped ? input.without!(dropped) : input.blocks;
+      const blocks = sealedHere(saved);
       // On this client alone: one waiting for another while it holds its locks
       // would stall the pool once every client did.
       const manifest = await manifestFromBlockRefs(client, {
@@ -582,7 +632,7 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
       });
       // A refused seal keeps its audit row.
       await client.query("commit");
-      return dropped ? { ...seal, blocks } : seal;
+      return dropped ? { ...seal, blocks: saved } : seal;
     } catch (error) {
       await client.query("rollback").catch((rollbackError: unknown) => {
         (error as { rollback_error?: unknown }).rollback_error = rollbackError;
@@ -734,7 +784,7 @@ async function loadToolCallResultHashes(
   );
 }
 
-async function writeLocalToolCallLogs(
+export async function writeLocalToolCallLogs(
   threadId: string,
   toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>,
 ): Promise<void> {

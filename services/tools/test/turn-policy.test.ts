@@ -11,7 +11,7 @@ import { loadToolRegistry, type ToolDefinition } from "../src/registry.ts";
 test("createTurnToolPolicy selects each registered bundle with a default budget", () => {
   const registry = loadToolRegistry();
 
-  assert.equal(registry.bundleIds().length, 14);
+  assert.equal(registry.bundleIds().length, 15);
   for (const bundle_id of registry.bundleIds()) {
     const policy = createTurnToolPolicy({
       registry,

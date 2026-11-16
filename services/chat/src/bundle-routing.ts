@@ -34,6 +34,7 @@ const BUNDLE_BY_SUBJECT_KIND: Readonly<Record<SubjectKind, string>> = Object.fre
 // thread before the first message). Matches the most general default in the
 // prompt-template catalog.
 export const DEFAULT_BUNDLE_ID = "single_subject_analysis";
+export const ANALYST_AGENT_BUNDLE_ID = "analyst_agent";
 
 // Accepts undefined as well as null so callers can pass `thread.primary_subject_ref?.kind`
 // directly without an explicit `?? null` — both mean "no primary subject yet" and route to

@@ -16,8 +16,9 @@ export type InferenceVerdict =
 export type ShownAs = "shown" | "unverified" | "hidden";
 
 // Which answer an inference is in: an analyst answer, written from claims and
-// the year-to-date chart, or the commentary on an engine answer.
-export type AnswerPath = "analyst" | "engine";
+// the year-to-date chart, the commentary on an engine answer, or the analyst
+// agent's answer.
+export type AnswerPath = "analyst" | "engine" | "agent";
 
 // An unsupported inference goes beyond the figures without contradicting
 // them, so it shows, labelled as such (render-assertions.ts
@@ -31,6 +32,7 @@ const SHOWN_AS: Readonly<Record<Verdict, ShownAs>> = { entailed: "shown", unsupp
 // that is not a packet value, as far as the judge's flag catches them.
 export function shownAs(verdict: InferenceVerdict, path: AnswerPath): ShownAs {
   if (verdict.verdict === "error") return "hidden";
+  if (path === "agent") return verdict.verdict === "entailed" && !verdict.worded_amount ? "shown" : "hidden";
   const as = SHOWN_AS[verdict.verdict];
   if (!verdict.worded_amount) return as;
   return path === "analyst" ? "hidden" : as === "shown" ? "unverified" : as;

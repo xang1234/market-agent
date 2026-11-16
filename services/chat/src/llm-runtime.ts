@@ -157,6 +157,12 @@ export async function composeAnalystBlocksWithLlm(input: {
   // The evidence the answer is written from, when the caller built it (an
   // engine answer's, enginePacket); otherwise the turn's (turnPacket).
   packet?: EvidencePacket;
+  // Said after the system prompt's own rules (the analyst agent's packet holds claims of its own kinds).
+  instructions?: ReadonlyArray<string>;
+  // What the answer is made of, in place of the analyst's takeaway, evidence and counterpoint.
+  answerShape?: ReadonlyArray<string>;
+  // Set false to reject every analyst_inference the answer lists, with no repair asked for one.
+  inferences?: false;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
   // Receives the deployment (channel/model) that wrote the answer (#183).
   onAnswered?: (deployment: string) => void;
@@ -193,10 +199,12 @@ export async function composeAnalystBlocksWithLlm(input: {
           "analyst_inference's text is shown as written. Every entry's text says it in one short sentence.",
           // An analyst's answer, not a list of numbers (#179): the #124 baseline scored
           // conclusions 6/18 and counterarguments 2/18.
-          "Answer as a buy-side analyst would: first your takeaway, answering the question directly, as an analyst_inference;",
-          "then the observations and comparisons that show the trend across every period shown, not just the latest, and what",
-          "is strong or weak against the other periods or companies shown; an unknown_cause for a change the evidence gives no",
-          "cause for; and last one specific counterpoint grounded in the data that cuts against the takeaway, as an analyst_inference.",
+          ...(input.answerShape ?? [
+            "Answer as a buy-side analyst would: first your takeaway, answering the question directly, as an analyst_inference;",
+            "then the observations and comparisons that show the trend across every period shown, not just the latest, and what",
+            "is strong or weak against the other periods or companies shown; an unknown_cause for a change the evidence gives no",
+            "cause for; and last one specific counterpoint grounded in the data that cuts against the takeaway, as an analyst_inference.",
+          ]),
           // A gap's words name a metric or company nothing checks (#302).
           "List nothing for what the data shown cannot tell: the answer's own notes say what is missing, from evidence_packet.gaps.",
           "If the data shown does not answer the question (the metric or period asked for is not there), list nothing about",
@@ -244,6 +252,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           "subject as \"it\" or \"its\" ({\"kind\":\"analyst_inference\",\"subject\":\"AMD\",\"text\":\"Its net margin may understate",
           "underlying profitability, given the one-time charge management disclosed.\",\"supports\":[2,3]}).",
           "When evidence_packet has neither figures nor claims, reply with an empty list.",
+          ...(input.instructions ?? []),
         ].join(" "),
       },
       {
@@ -274,7 +283,9 @@ export async function composeAnalystBlocksWithLlm(input: {
     ...(usage ? { usage } : {}),
   });
   if (usage) input.onUsage?.(usage);
-  const report = checkAssertions(assertionList(result.text), packet);
+  const list = assertionList(result.text);
+  const checked = checkAssertions(list, packet);
+  const report = input.inferences === false ? withoutInferences(checked, list ?? []) : checked;
   if (report.status !== "checked" || report.rejected.length > 0) {
     console.info(`[chat] assertions ${report.status}: ${report.accepted.length} accepted, ${report.rejected.length} rejected`);
   }
@@ -288,6 +299,22 @@ export async function composeAnalystBlocksWithLlm(input: {
   else if (report.status === "checked" && report.accepted.length === 0 && report.rejected.length === 0 && packet.gaps.length > 0) console.info("[chat] the assertion list was empty; showing the fallback sentence");
   else console.warn(`[chat] no assertion rendered (list ${report.status}${result.truncated ? ", answer cut off at the token limit" : ""}); showing the fallback sentence`);
   return rendering.blocks;
+}
+
+function withoutInferences(report: AssertionReport, list: ReadonlyArray<unknown>): AssertionReport {
+  const inferences = new Set(list.flatMap((item, index) => (isRecord(item) && item.kind === "analyst_inference" ? [index] : [])));
+  if (report.status !== "checked" || inferences.size === 0) return report;
+  return {
+    ...report,
+    accepted: report.accepted.filter((entry) => !inferences.has(entry.index)),
+    rejected: [
+      ...report.rejected.filter((entry) => !inferences.has(entry.index)),
+      ...[...inferences].map((index) => {
+        const item = list[index] as Record<string, unknown>;
+        return { index, ...(typeof item.text === "string" ? { text: item.text } : {}), check: "limit" as const, reason: "this answer holds no analyst inference" };
+      }),
+    ].sort((a, b) => a.index - b.index),
+  };
 }
 
 export type AnswerInput = Pick<Parameters<typeof composeAnalystBlocksWithLlm>[0], "blocks" | "toolCalls" | "factBlocks" | "scope">;
