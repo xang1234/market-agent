@@ -7,22 +7,56 @@ import {
   type LlmPurpose,
   type LlmSettings,
 } from "./channel-config.ts";
+import type { JsonObject } from "../../shared/src/json.ts";
+
+/** A tool the model may call, its arguments described by the JSON Schema in `parameters`. */
+export type LlmTool = {
+  name: string;
+  description: string;
+  parameters: JsonObject;
+};
+
+export type LlmToolCall = {
+  id: string;
+  name: string;
+  arguments: JsonObject;
+};
 
 export type LlmChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
+  toolCalls?: never;
 };
+
+export type LlmToolCallMessage = {
+  role: "assistant";
+  content: string;
+  toolCalls: ReadonlyArray<LlmToolCall>;
+  /** Who made the calls: replayed to another model after a fallback, their ids are rewritten to its format. */
+  deployment: Pick<LlmDeployment, "channel" | "model">;
+};
+
+export type LlmToolResultMessage = {
+  role: "toolResult";
+  toolCallId: string;
+  toolName: string;
+  content: string;
+  isError: boolean;
+};
+
+export type LlmMessage = LlmChatMessage | LlmToolCallMessage | LlmToolResultMessage;
 
 /** How much a reasoning model should think; each model gets the nearest level it supports. */
 export type LlmReasoningLevel = "off" | "minimal" | "low" | "medium" | "high";
 
 export type LlmChatRequest = {
-  messages: ReadonlyArray<LlmChatMessage>;
+  messages: ReadonlyArray<LlmMessage>;
   temperature?: number;
   /** Ceiling on output tokens, reasoning included. */
   maxTokens?: number;
   /** Omitted: the provider's default (often a lot of reasoning). Ignored by non-reasoning models. */
   reasoning?: LlmReasoningLevel;
+  tools?: ReadonlyArray<LlmTool>;
 };
 
 export type LlmUsage = {
@@ -41,6 +75,8 @@ export type LlmChatResult = {
   usage?: LlmUsage;
   /** The reply stopped at maxTokens, so its text may end mid-sentence (or be empty). */
   truncated?: boolean;
+  /** Present when the model asked to call tools. */
+  toolCalls?: ReadonlyArray<LlmToolCall>;
 };
 
 /** One provider attempt, for cost/latency logging (analyst mode, #123). A failed
