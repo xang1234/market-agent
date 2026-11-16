@@ -6,10 +6,10 @@ type Block = {
   claim_refs?: string[];
   source_refs?: string[];
   segments?: Segment[];
-  commentary?: Array<{ segments?: Segment[] }>;
+  commentary?: Array<{ kind?: string; segments?: Segment[] }>;
   children?: Block[];
 };
-export type MemoRun = { blocks?: Block[] } | null;
+export type MemoRun = { run_id?: string; blocks?: Block[] } | null;
 
 export const SECTIONS = ["investment_thesis", "growth_drivers", "competitive_position", "downside_risks"];
 const EMPTY = /^No stored source covers this section/;
@@ -23,6 +23,18 @@ const stanceIn = (text: string) => [CAPITALIZED_RATINGS, STANCE_WORDS, RATED].fl
 const sectionsOf = (run: MemoRun) => (run?.blocks ?? []).filter((block) => block.kind === "section" && SECTIONS.includes(block.data_ref?.params?.playbook_section_id ?? ""));
 const segmentsOf = (block: Block): Segment[] => [...(block.segments ?? []), ...(block.commentary ?? []).flatMap((part) => part.segments ?? []), ...(block.children ?? []).flatMap(segmentsOf)];
 
+const themesOf = (block: Block): number => (block.commentary ?? []).filter((part) => part.kind === "inference").length + (block.children ?? []).reduce((sum, child) => sum + themesOf(child), 0);
+
+// The judge's line for a section of this run (answer-trace.ts): what it showed of the inferences it read, and why a call gave no verdict.
+const JUDGE_LINE = /^\[chat\] judge thread=(\S+) run=\S+ turn=(\S+)(?: on [^:]+)?: (\d+) shown, (\d+) unverified, of (\d+) inferences(?: \((.*)\))?$/gm;
+function judgedIn(log: string, runId: string | undefined) {
+  const bySection = new Map<string, { shown: number; of: number; reasons: string[] }>();
+  for (const [, thread, section, shown, , of, reasons] of log.matchAll(JUDGE_LINE)) {
+    if (thread === runId) bySection.set(section!, { shown: Number(shown), of: Number(of), reasons: reasons ? reasons.split("; ") : [] });
+  }
+  return bySection;
+}
+
 export const claimIdsOf = (run: MemoRun) => [...new Set(sectionsOf(run).flatMap((section) => section.claim_refs ?? []))];
 
 export function memoVerdict(seen: {
@@ -35,9 +47,12 @@ export function memoVerdict(seen: {
   failure: string | null;
   memoMs: number | null;
   llmCalls: number | null;
+  // The dev-api log written while the memo generated.
+  log: string;
   evidence: string;
 }) {
   const sections = sectionsOf(seen.run);
+  const judged = judgedIn(seen.log, seen.run?.run_id);
   const report = {
     url: seen.url,
     subject_matches: new URL(seen.url).searchParams.get("subject") === `listing:${seen.listingId}`,
@@ -58,6 +73,8 @@ export function memoVerdict(seen: {
         sources: (section.source_refs ?? []).length,
         empty: notes.some((note) => EMPTY.test(note)),
         unwritten: notes.some((note) => UNWRITTEN.test(note)),
+        themes_shown: themesOf(section),
+        judge: judged.get(id) ?? null,
       };
     }),
     certified_blocks: (seen.run?.blocks ?? []).filter((block) => block.kind === "financial_answer").length,

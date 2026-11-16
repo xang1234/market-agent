@@ -40,10 +40,14 @@ try {
       await page.locator('article [data-block-kind="section"]').first().waitFor({ timeout: 30_000 })
       memoMs = Date.now() - started
       run = await generated.json()
+      for (const block of (run.blocks ?? []).filter((entry) => entry.kind === 'section')) {
+        await page.locator(`[data-testid="block-section-${block.id}"]`).screenshot({ path: join(OUT, `section-${block.data_ref?.params?.playbook_section_id ?? block.id}.png`), timeout: 10_000 })
+          .catch((error) => console.warn(`no still of section ${block.title}: ${error.message}`))
+      }
     }
     canvas = await page.locator('article').first().evaluate((node) => {
       const copy = node.cloneNode(true)
-      copy.querySelectorAll('[data-ref-kind="claim"]').forEach((quote) => quote.remove())
+      copy.querySelectorAll('[data-ref-kind="claim"], [data-claim-quote]').forEach((quote) => quote.remove())
       return copy.innerText ?? copy.textContent ?? ''
     })
   } catch (error) {
@@ -56,6 +60,7 @@ try {
   await browser.close()
 }
 
+const log = existsSync(LLM_LOG) ? readFileSync(LLM_LOG).subarray(logFrom).toString() : ''
 const claimIds = claimIdsOf(run)
 const predicates = new Map()
 if (claimIds.length > 0) {
@@ -77,7 +82,8 @@ const { report, passed } = memoVerdict({
   predicates,
   failure,
   memoMs,
-  llmCalls: existsSync(LLM_LOG) ? (readFileSync(LLM_LOG).subarray(logFrom).toString().match(/^\[llm\] /gm) ?? []).length : null,
+  llmCalls: existsSync(LLM_LOG) ? (log.match(/^\[llm\] /gm) ?? []).length : null,
+  log,
   evidence: OUT,
 })
 writeFileSync(join(OUT, 'page.txt'), text)

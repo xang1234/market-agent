@@ -27,6 +27,7 @@ function seen(note: string, canvasExtra = "", figure = false) {
     failure: null,
     memoMs: 40,
     llmCalls: 0,
+    log: "",
     evidence: "/tmp/memo",
   };
 }
@@ -39,4 +40,25 @@ test("the memo flow fails a memo no model wrote, and passes one whose every sect
   assert.equal(memoVerdict(seen(empty, "This is a buy.")).passed, false, "buy as a rating fails it");
   assert.equal(memoVerdict(seen(empty, "Customers buy in bulk.")).passed, true, "buy as a verb does not");
   assert.equal(memoVerdict(seen("Commentary is unavailable for this answer.", "", true)).passed, false, "a figure with no answer written beside it is not a written section");
+});
+
+test("the memo flow reports each section's themes shown and what the judge did with them, from this run's log lines alone", () => {
+  const RUN = "4f000000-0000-4000-8000-0000000000f1";
+  const base = seen("A note.");
+  const run = {
+    run_id: RUN,
+    blocks: base.run.blocks.map((block, i) => (i === 3 ? { ...block, children: [{ kind: "rich_text", commentary: [{ kind: "inference" }, { kind: "figures", segments: [] }, { kind: "inference" }] }] } : block)),
+  };
+  const log = [
+    `[chat] judge thread=${RUN} run=${RUN} turn=downside_risks on anthropic/claude-haiku-5-5: 2 shown, 0 unverified, of 4 inferences (judge call failed: the turn has made its model calls)`,
+    `[chat] judge thread=${RUN} run=${RUN} turn=competitive_position on anthropic/claude-haiku-5-5: 1 shown, 0 unverified, of 3 inferences`,
+    "[chat] judge thread=4f000000-0000-4000-8000-0000000000f2 run=4f000000-0000-4000-8000-0000000000f2 turn=growth_drivers: 0 shown, 0 unverified, of 2 inferences",
+  ].join("\n");
+  const { report } = memoVerdict({ ...base, run, log });
+  assert.deepEqual(report.sections.map((section) => [section.id, "themes_shown" in section ? section.themes_shown : null, "judge" in section ? section.judge : null]), [
+    ["investment_thesis", 0, null],
+    ["growth_drivers", 0, null],
+    ["competitive_position", 0, { shown: 1, of: 3, reasons: [] }],
+    ["downside_risks", 2, { shown: 2, of: 4, reasons: ["judge call failed: the turn has made its model calls"] }],
+  ]);
 });
