@@ -211,6 +211,20 @@ test("a reply row that is missing, repeated, null, or names no supplied conditio
   }
 });
 
+test("an assessment reply that is not one JSON object is asked for once more, then fails the run", async () => {
+  const valid = { results: [{ condition_id: BULL_ID, status: "challenged", refs: ["C1"] }] };
+  // claude-sonnet-5-5 returned this shape live on 2026-11-16, an object with more text after it.
+  const replies = [`${JSON.stringify({ results: [{ condition_id: BULL_ID, status: "supported", refs: ["C1"] }] })}\n\nCorrection, the condition is challenged:\n${JSON.stringify(valid)}`, JSON.stringify(valid)];
+  let calls = 0;
+  const run = (llm: ThesisLlm) => evaluateThesis({ thesis: thesis([condition(BULL_ID)]), evidence: EVIDENCE, known_results: [], as_of: AS_OF, llm });
+  const { results } = await run({ async complete() { calls += 1; return { text: replies.shift()! }; } });
+  assert.deepEqual(results.map((result) => result.status), ["challenged"]);
+  assert.equal(calls, 2);
+  calls = 0;
+  await assert.rejects(run({ async complete() { calls += 1; return { text: "not json" }; } }), ThesisValidationError);
+  assert.equal(calls, 2, "a second unusable reply fails the run");
+});
+
 test("a condition whose status the reply cannot back is not enough evidence, says why, and the other conditions keep theirs", async () => {
   const rows: Array<[string, Record<string, unknown>]> = [
     ["uncited conclusion", { status: "supported", refs: [] }],
@@ -325,7 +339,7 @@ test("draftThesisConditions rejects responses that do not contain exactly three 
 
 test("draftThesisConditions asks again when a reply corrects itself in prose, and keeps none of the first reply", async () => {
   const suggestion = (statement: string) => ({ statement, falsifier: "Customers move production workloads to rival accelerators.", horizon: "Next 2-4 years" });
-  // The reply shape claude-sonnet-5-5 returned on 2 of 15 calls on 2026-11-16: an object, a correction in prose, then a second object.
+  // claude-sonnet-5-5 returned this shape on 2 of 15 calls on 2026-11-16, an object, a correction in prose, then a second object.
   const selfCorrected = JSON.stringify({ conditions: [suggestion("Platform software keeps customers on the stack."), { conditions: null, ...suggestion("Demand stays broad across buyers.") }, suggestion("Product cadence outpaces rivals.")] }) +
     "\n\nWait, I need to correct a formatting error in the second item. Here is the valid JSON:\n\n" +
     JSON.stringify({ conditions: [suggestion("Platform software keeps customers on the stack."), suggestion("Demand stays broad across buyers."), suggestion("Product cadence outpaces rivals.")] });
