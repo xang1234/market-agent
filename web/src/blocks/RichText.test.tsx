@@ -563,3 +563,84 @@ test('commentary with only figures shows them alone, and one saved before parts 
   assert.equal(saved.querySelector('blockquote')!.textContent!.trim(), 'Analyst inference on MU (from the revenue ranking): It leads on revenue.')
   assert.equal(saved.querySelector('h3'), null)
 })
+
+const CLAIM_A = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+const CLAIM_B = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+const CLAIM_C = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+const claimRef = (id: string, format: string) => ({ type: 'ref', ref_kind: 'claim', ref_id: id, format }) as const
+
+async function renderWithInspector(block: RichTextBlock, run: (doc: Document) => Promise<void>): Promise<EvidenceInspectionRef[]> {
+  const opened: EvidenceInspectionRef[] = []
+  const inspector: EvidenceInspectorContextValue = {
+    openInspection(input) { opened.push(input.ref) },
+    openBlockInspection() {},
+    closeInspection() {},
+  }
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  try {
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        <EvidenceInspectorContext.Provider value={inspector}>
+          <RichText block={block} />
+        </EvidenceInspectorContext.Provider>,
+      )
+    })
+    await run(dom.window.document)
+    for (const chip of dom.window.document.querySelectorAll<HTMLElement>('button[data-ref-kind="claim"]')) {
+      await act(async () => chip.click())
+    }
+    await act(async () => root.unmount())
+  } finally {
+    restoreGlobals()
+  }
+  return opened
+}
+
+const citations = (scope: Element) => [...scope.querySelectorAll('button[data-ref-kind="claim"]')].map((chip) => chip.querySelector('[aria-hidden]')!.textContent)
+
+test('a theme cites its claims by number, each quote a hover and a click away, and a quote it does not cite is listed apart from the figures', async () => {
+  const themed: RichTextBlock = {
+    ...richTextBlock('commentary-themes', []),
+    analyst_commentary: true,
+    commentary: [
+      { kind: 'figures', segments: [{ type: 'text', text: "MU's revenue was " }, { type: 'ref', ref_kind: 'fact', ref_id: FACT_A, format: '$133.2B' }, { type: 'text', text: '.' }] },
+      { kind: 'inference', subject: null, basis: null, text: 'Customer concentration: a few buyers carry its revenue.', cites: [claimRef(CLAIM_A, 'Our top customers make up much of our revenue.'), claimRef(CLAIM_B, 'We depend on hyperscale customers.')] },
+      { kind: 'figures', segments: [claimRef(CLAIM_C, 'Debt obligations could adversely affect our financial condition.')] },
+    ],
+  }
+  const opened = await renderWithInspector(themed, async (doc) => {
+    const card = doc.querySelector('[data-testid="block-rich-text-commentary-themes"]')!
+    const theme = card.querySelector('[data-commentary-part="inference"]')!
+    assert.equal(theme.querySelector('p')!.firstChild!.nextSibling!.textContent, 'Customer concentration: a few buyers carry its revenue.')
+    assert.deepEqual(citations(theme), ['[1]', '[2]'])
+    assert.deepEqual([...theme.querySelectorAll('span[title]')].slice(1).map((span) => span.getAttribute('title')), [
+      'Our top customers make up much of our revenue.',
+      'We depend on hyperscale customers.',
+    ], 'a cited quote shows on hover')
+    assert.deepEqual([...card.querySelectorAll('h3, h4')].map((heading) => heading.textContent), ['Analysis', 'Supporting figures', 'Quoted sources'])
+    const quoted = [...card.querySelectorAll('h4')].find((heading) => heading.textContent === 'Quoted sources')!.parentElement!
+    assert.equal(quoted.querySelector('[data-claim-quote]')!.textContent, '“Debt obligations could adversely affect our financial condition.”')
+    assert.deepEqual(citations(quoted), ['[3]'])
+    assert.equal(card.textContent!.includes('According to'), false)
+  })
+  assert.deepEqual(opened, [{ kind: 'claim', id: CLAIM_A }, { kind: 'claim', id: CLAIM_B }, { kind: 'claim', id: CLAIM_C }], 'each citation opens its claim')
+})
+
+test('a claim in Markdown text reads as its quote and a numbered citation, and a claim quoted twice keeps its number', async () => {
+  const opened = await renderWithInspector(richTextBlock('rt-quotes', [
+    claimRef(CLAIM_A, 'Demand is strong.'),
+    { type: 'text', text: '\n\nNVDA: ' },
+    claimRef(CLAIM_B, 'Supply is tight.'),
+    { type: 'text', text: '\n\n' },
+    claimRef(CLAIM_A, 'Demand is strong.'),
+  ]), async (doc) => {
+    assert.deepEqual([...doc.querySelectorAll('p')].map((paragraph) => paragraph.textContent), [
+      '“Demand is strong.”[1]Source 1',
+      'NVDA: “Supply is tight.”[2]Source 2',
+      '“Demand is strong.”[1]Source 1',
+    ])
+  })
+  assert.deepEqual(opened.map((ref) => ref.id), [CLAIM_A, CLAIM_B, CLAIM_A])
+})

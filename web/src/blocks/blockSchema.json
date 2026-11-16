@@ -245,6 +245,14 @@
             "text": {
               "type": "string",
               "minLength": 1
+            },
+            "cites": {
+              "description": "The claims the inference rests on, each a ref that opens its quote, filing and date; the commentary leaves their quotes out.",
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/RefSegment"
+              }
             }
           },
           "additionalProperties": false

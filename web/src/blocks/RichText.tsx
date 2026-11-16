@@ -31,15 +31,26 @@ export function RichText({ block }: RichTextProps): ReactElement {
     >
       {/* Its figures are the answer's; its words are not verified. */}
       {block.analyst_commentary ? <p data-analyst-commentary className="text-xs font-medium text-muted">Analyst commentary</p> : null}
-      <Markdown text={markdownParts(block, block.segments)} />
+      <Markdown text={markdownParts(block, block.segments, citationNumbers(block.segments))} />
       {block.clarification_choices ? <OfferedChoices blockId={block.id} choices={block.clarification_choices} /> : null}
     </div>
   )
 }
 
+// Each claim a block cites, numbered in the order the reader meets it.
+function citationNumbers(segments: ReadonlyArray<RichTextSegment>): ReadonlyMap<string, number> {
+  const numbers = new Map<string, number>()
+  for (const segment of segments) {
+    if (isRefSegment(segment) && segment.ref_kind === 'claim' && !numbers.has(segment.ref_id)) numbers.set(segment.ref_id, numbers.size + 1)
+  }
+  return numbers
+}
+
+const isQuote = (part: { segments: ReadonlyArray<RichTextSegment> }) => part.segments.some((segment) => isRefSegment(segment) && segment.ref_kind === 'claim')
+
 // Segments as Markdown source, each ref an inspectable value. key keeps the
 // refs of several runs in one block apart.
-function markdownParts(block: RichTextBlock, segments: ReadonlyArray<RichTextSegment>, key = '') {
+function markdownParts(block: RichTextBlock, segments: ReadonlyArray<RichTextSegment>, numbers: ReadonlyMap<string, number>, key = '') {
   return segments.map((segment, index) => {
     if (isRefSegment(segment)) {
       if (segment.ref_kind === 'result') {
@@ -52,6 +63,14 @@ function markdownParts(block: RichTextBlock, segments: ReadonlyArray<RichTextSeg
           >
             {shown}
           </InspectableResult>
+        )
+      }
+      if (segment.ref_kind === 'claim') {
+        return (
+          <>
+            <span data-claim-quote>{`“${refSegmentText(segment)}”`}</span>
+            <Citation snapshotId={block.snapshot_id} blockId={block.id} index={`${key}${index}`} segment={segment} number={numbers.get(segment.ref_id)!} />
+          </>
         )
       }
       return (
@@ -84,8 +103,22 @@ const isTakeaway = (part: CommentaryPart): part is Takeaway => part.kind in BADG
 // on, then any note. Its words are plain text, as the analyst wrote them.
 function Commentary({ block, parts }: { block: RichTextBlock; parts: ReadonlyArray<CommentaryPart> }): ReactElement {
   const takeaways = parts.filter(isTakeaway)
-  const figures = parts.flatMap((part) => (part.kind === 'figures' ? [part] : []))
+  const statements = parts.flatMap((part) => (part.kind === 'figures' ? [part] : []))
+  const figures = statements.filter((part) => !isQuote(part))
+  const quotes = statements.filter(isQuote)
   const notes = parts.flatMap((part) => (part.kind === 'note' ? [part.text] : []))
+  const numbers = citationNumbers([
+    ...takeaways.flatMap((part) => (part.kind === 'inference' ? part.cites ?? [] : [])),
+    ...[...figures, ...quotes].flatMap((part) => part.segments),
+  ])
+  const list = (title: string, key: string, items: typeof statements) => (
+    <div>
+      <h4 className="text-xs font-medium text-muted">{title}</h4>
+      <ul className="mt-1 flex list-disc flex-col gap-1 pl-5">
+        {items.map((part, index) => <li key={index}><Markdown text={markdownParts(block, part.segments, numbers, `${key}-${index}-`)} /></li>)}
+      </ul>
+    </div>
+  )
   return (
     <section
       data-testid={`block-rich-text-${block.id}`}
@@ -97,23 +130,17 @@ function Commentary({ block, parts }: { block: RichTextBlock; parts: ReadonlyArr
       <h3 id={`${block.id}-analysis`} className="text-sm font-semibold text-fg">Analysis</h3>
       {takeaways.length > 0 ? (
         <ul className="flex flex-col gap-3">
-          {takeaways.map((part, index) => <TakeawayItem key={index} part={part} />)}
+          {takeaways.map((part, index) => <TakeawayItem key={index} block={block} part={part} numbers={numbers} />)}
         </ul>
       ) : null}
-      {figures.length > 0 ? (
-        <div>
-          <h4 className="text-xs font-medium text-muted">Supporting figures</h4>
-          <ul className="mt-1 flex list-disc flex-col gap-1 pl-5">
-            {figures.map((part, index) => <li key={index}><Markdown text={markdownParts(block, part.segments, `${index}-`)} /></li>)}
-          </ul>
-        </div>
-      ) : null}
+      {figures.length > 0 ? list('Supporting figures', 'figures', figures) : null}
+      {quotes.length > 0 ? list('Quoted sources', 'quotes', quotes) : null}
       {notes.length > 0 ? <p className="text-xs text-muted">{notes.join(' ')}</p> : null}
     </section>
   )
 }
 
-function TakeawayItem({ part }: { part: Takeaway }): ReactElement {
+function TakeawayItem({ block, part, numbers }: { block: RichTextBlock; part: Takeaway; numbers: ReadonlyMap<string, number> }): ReactElement {
   const badge = BADGES[part.kind]
   return (
     <li data-commentary-part={part.kind}>
@@ -121,6 +148,9 @@ function TakeawayItem({ part }: { part: Takeaway }): ReactElement {
         <span title={badge.title} className={`${PILL_CLASS} mr-2 align-[1px] ${badge.className}`}>{badge.text}</span>
         {part.kind !== 'pending' && part.subject ? <span className="mr-1.5 font-semibold">{part.subject}</span> : null}
         {part.kind === 'pending' ? <span className="text-muted">An analyst inference is being checked against the figures it rests on.</span> : part.text}
+        {part.kind === 'inference' ? (part.cites ?? []).map((cite, index) => (
+          <Citation key={cite.ref_id} snapshotId={block.snapshot_id} blockId={block.id} index={`cite-${index}`} segment={cite} number={numbers.get(cite.ref_id)!} quoted />
+        )) : null}
       </p>
       {part.kind === 'inference' && part.basis ? <p className="text-xs text-muted">Based on {part.basis}.</p> : null}
     </li>
@@ -133,6 +163,31 @@ function OfferedChoices({ blockId, choices }: { blockId: string; choices: Readon
     <ul aria-label="Options offered" className="mt-1 list-disc pl-5 text-muted">
       {choices.map((choice, index) => <li key={index}>{choice}</li>)}
     </ul>
+  )
+}
+
+// A claim's footnote marker: it opens the claim, its filing and its date. One
+// standing for a quote not on the page shows the quote on hover.
+const CITATION_CLASS = 'relative -top-[0.45em] ml-0.5 text-[0.7em] font-medium leading-none text-accent hover:underline'
+
+function Citation({ snapshotId, blockId, index, segment, number, quoted = false }: Omit<RefSegmentSpanProps, 'segment'> & {
+  segment: RefSegment
+  number: number
+  quoted?: boolean
+}): ReactElement {
+  return (
+    <span title={quoted ? refSegmentText(segment) : undefined}>
+      <InspectableRef
+        snapshotId={snapshotId}
+        inspectionRef={{ kind: 'claim', id: segment.ref_id }}
+        testId={`block-rich-text-${blockId}-ref-${index}`}
+        dataAttrs={{ 'data-ref-kind': 'claim', 'data-ref-id': segment.ref_id }}
+        className={CITATION_CLASS}
+      >
+        <span aria-hidden="true">[{number}]</span>
+        <span className="sr-only">Source {number}</span>
+      </InspectableRef>
+    </span>
   )
 }
 

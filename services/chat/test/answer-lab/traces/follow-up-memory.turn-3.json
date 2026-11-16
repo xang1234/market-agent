@@ -2229,7 +2229,7 @@
       },
       {
         "role": "assistant",
-        "text": "Of NVDA and AMD, NVDA's price return was highest:  NVDA   , AMD    (YTD 2026: Dec 2025 close to Aug 2026 close) . \n\n Of NVDA and AMD, NVDA's revenue was highest:  NVDA    (FY2026, ended Jan 2026) , AMD    (FY2025, ended Dec 2025) . \n\n Of NVDA and AMD, NVDA's gross margin was highest:  NVDA    (FY2026, ended Jan 2026) , AMD    (FY2025, ended Dec 2025) . \n\n Of NVDA and AMD, NVDA's net margin was highest:  NVDA    (FY2026, ended Jan 2026) , AMD    (FY2025, ended Dec 2025) . \n\n Of NVDA and AMD, NVDA's revenue growth (YoY) was highest:  NVDA    (FY2026, ended Jan 2026) , AMD    (FY2025, ended Dec 2025) . \n\n According to a source dated Aug 2025, effective Jun 2025 on AMD:   \n\n > **Unverified analyst view on NVDA** (not backed by the figures shown): It leads on scale, growth, margins and YTD share performance, so the fundamental gap is clearly wider than the YTD price gap. \n\n > **Unverified analyst view on AMD** (not backed by the figures shown): Its net margin may understate underlying profitability, given the export-control charge management disclosed. \n\nThe periods compared end at different times, so they do not line up: NVDA's FY2026 ended Jan 2026 and AMD's FY2025 ended Dec 2025."
+        "text": "Of NVDA and AMD, NVDA's price return was highest:  NVDA   , AMD    (YTD 2026: Dec 2025 close to Aug 2026 close) . \n\n Of NVDA and AMD, NVDA's revenue was highest:  NVDA    (FY2026, ended Jan 2026) , AMD    (FY2025, ended Dec 2025) . \n\n Of NVDA and AMD, NVDA's gross margin was highest:  NVDA    (FY2026, ended Jan 2026) , AMD    (FY2025, ended Dec 2025) . \n\n Of NVDA and AMD, NVDA's net margin was highest:  NVDA    (FY2026, ended Jan 2026) , AMD    (FY2025, ended Dec 2025) . \n\n Of NVDA and AMD, NVDA's revenue growth (YoY) was highest:  NVDA    (FY2026, ended Jan 2026) , AMD    (FY2025, ended Dec 2025) . \n\n AMD:   \n\n > **Unverified analyst view on NVDA** (not backed by the figures shown): It leads on scale, growth, margins and YTD share performance, so the fundamental gap is clearly wider than the YTD price gap. \n\n > **Unverified analyst view on AMD** (not backed by the figures shown): Its net margin may understate underlying profitability, given the export-control charge management disclosed. \n\nThe periods compared end at different times, so they do not line up: NVDA's FY2026 ended Jan 2026 and AMD's FY2025 ended Dec 2025."
       },
       {
         "role": "user",
@@ -2969,7 +2969,7 @@
         },
         {
           "type": "text",
-          "text": "According to a source dated Aug 2025, effective Jun 2025 on AMD: "
+          "text": "AMD: "
         },
         {
           "type": "ref",

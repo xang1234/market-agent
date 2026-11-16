@@ -240,7 +240,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const narrative = answer.blocks[0]!;
     assert.equal(narrativeText(narrative), [
       "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17%.",
-      `According to a source dated Aug 2025 on AMD: ${AMD_Q2_2025_RELEASE.text}`,
+      `AMD: ${AMD_Q2_2025_RELEASE.text}`,
       "Period: YTD 2026: Dec 2025 close to Aug 2026 close.",
     ].join("\n\n"));
     const [claim] = refsOf(narrative).filter(([kind]) => kind === "claim");
@@ -955,7 +955,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const answer = await latestAssistantMessage(base, guidanceThread.thread_id);
     assert.deepEqual(answer.blocks.map((block) => block.kind), ["rich_text"]);
     const [narrative] = answer.blocks;
-    assert.equal(narrativeText(narrative!), `According to a source dated Aug 2025 on AMD: ${AMD_Q2_2025_RELEASE.text}\n\nNo figures are shown for AMD.`);
+    assert.equal(narrativeText(narrative!), `${AMD_Q2_2025_RELEASE.text}\n\nNo figures are shown for AMD.`);
     const [claim, ...others] = refsOf(narrative!);
     assert.deepEqual([claim![0], claim![2], others], ["claim", AMD_Q2_2025_RELEASE.text, []]);
     const words = (narrative!.segments as Array<{ type: string; text?: string }>).filter((segment) => segment.type === "text").map((segment) => segment.text).join("");
