@@ -18,6 +18,7 @@ export type LlmEditableSettings = {
   primaryModel: string | null
   fallbackModels: string[]
   agentModel: string | null
+  analyzeModel: string | null
   extractionModel: string | null
   judgeModel: string | null
   issues?: string[]
@@ -276,6 +277,13 @@ export function SettingsView({
             </select>
           </label>
           <label className={FIELD_LABEL}>
+            Analyze model
+            <select className={INPUT_CLASS} value={settings.analyzeModel ?? ''} onChange={(event) => onChange({ ...settings, analyzeModel: event.target.value || null })}>
+              <option value="">Use agent model</option>
+              {modelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
+            </select>
+          </label>
+          <label className={FIELD_LABEL}>
             Extraction model
             <select className={INPUT_CLASS} value={settings.extractionModel ?? ''} onChange={(event) => onChange({ ...settings, extractionModel: event.target.value || null })}>
               <option value="">Use primary</option>
@@ -322,6 +330,7 @@ function normalizeSettings(settings: LlmEditableSettings): LlmEditableSettings {
     primaryModel: settings.primaryModel ?? null,
     fallbackModels: settings.fallbackModels ?? [],
     agentModel: settings.agentModel ?? null,
+    analyzeModel: settings.analyzeModel ?? null,
     extractionModel: settings.extractionModel ?? null,
     judgeModel: settings.judgeModel ?? null,
     issues: settings.issues ?? [],

@@ -34,6 +34,8 @@ JUDGE_LITELLM_MODEL=anthropic/claude-haiku-5-5
 |---|---|
 | `LITELLM_MODEL` | Every call that has no more specific setting |
 | `LITELLM_FALLBACK_MODELS` | Comma-separated models to try when the main one fails or refuses |
+| `AGENT_LITELLM_MODEL` | The analyst agent's tool loop in chat. Falls back to `LITELLM_MODEL`. |
+| `ANALYZE_LITELLM_MODEL` | The same tool loop writing an Analyze memo's sections. Falls back to `AGENT_LITELLM_MODEL`, then `LITELLM_MODEL`. |
 | `EXTRACTION_LITELLM_MODEL` | SEC 8-K and earnings-release extraction, analyst-grid reader columns, and chat's metric scope proposal. Falls back to `LITELLM_MODEL`. |
 | `JUDGE_LITELLM_MODEL` | The judge that checks each analyst inference in a chat answer. It has no fallback. When it is unset, chat shows figures but no inferences. |
 

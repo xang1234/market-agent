@@ -32,6 +32,7 @@ export type LlmSettings = {
   primaryModel: LlmModelRef | null;
   fallbackModels: ReadonlyArray<LlmModelRef>;
   agentModel: LlmModelRef | null;
+  analyzeModel: LlmModelRef | null;
   extractionModel: LlmModelRef | null;
   judgeModel: LlmModelRef | null;
   issues: ReadonlyArray<string>;
@@ -40,8 +41,10 @@ export type LlmSettings = {
 /** What a call is for. "extraction" leads with EXTRACTION_LITELLM_MODEL (a cheaper model
  * for reading filings and picking from fixed lists) when set, "judge" with
  * JUDGE_LITELLM_MODEL (checking a written answer against its evidence), "agent" with
- * AGENT_LITELLM_MODEL (the analyst's tool loop); else the primary model. */
-export type LlmPurpose = "default" | "extraction" | "judge" | "agent";
+ * AGENT_LITELLM_MODEL (the analyst's tool loop in chat), "analyze" with
+ * ANALYZE_LITELLM_MODEL (the same loop writing an Analyze memo), else AGENT_LITELLM_MODEL;
+ * else the primary model. */
+export type LlmPurpose = "default" | "extraction" | "judge" | "agent" | "analyze";
 
 export type LlmDeployment = {
   channel: string;
@@ -65,6 +68,7 @@ export function parseLlmEnv(env: LlmEnv): LlmSettings {
       return ref === null ? [] : [ref];
     });
   const agentModel = parseOptionalModelRef("AGENT_LITELLM_MODEL", env.AGENT_LITELLM_MODEL, channels, issues);
+  const analyzeModel = parseOptionalModelRef("ANALYZE_LITELLM_MODEL", env.ANALYZE_LITELLM_MODEL, channels, issues);
   const extractionModel = parseOptionalModelRef(
     "EXTRACTION_LITELLM_MODEL",
     env.EXTRACTION_LITELLM_MODEL,
@@ -78,6 +82,7 @@ export function parseLlmEnv(env: LlmEnv): LlmSettings {
     primaryModel,
     fallbackModels: Object.freeze(dedupeModelRefs(fallbackModels)),
     agentModel,
+    analyzeModel,
     extractionModel,
     judgeModel,
     issues: Object.freeze(issues),
@@ -104,6 +109,7 @@ export function buildLlmDeploymentOrder(
     extraction: settings.extractionModel,
     judge: settings.judgeModel,
     agent: settings.agentModel,
+    analyze: settings.analyzeModel ?? settings.agentModel,
   }[purpose] ?? settings.primaryModel;
   // A chosen judge has no fallback: verdicts from another model are another
   // measurement, and judging every turn on a fallback was not approved.

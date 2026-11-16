@@ -9,6 +9,7 @@ import {
   MASKED_LLM_SECRET,
   LlmSettingsVersionConflictError,
   editableLlmSettingsFromEnv,
+  readLlmSettingsEnvFile,
   writeLlmSettingsEnvFile,
 } from "../src/settings-file.ts";
 
@@ -156,3 +157,34 @@ test("writeLlmSettingsEnvFile uses a rename-only final file", async () => {
 function versionForText(text: string): string {
   return `sha256:${createHash("sha256").update(text).digest("hex")}`;
 }
+
+test("a Settings save rewrites ANALYZE_LITELLM_MODEL beside AGENT_LITELLM_MODEL, drops it when cleared, and reads it back", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "llm-settings-file-analyze-"));
+  const file = join(dir, ".env.dev");
+  await writeFile(file, [
+    "LLM_CHANNELS=anthropic",
+    "LLM_ANTHROPIC_PROTOCOL=anthropic",
+    "LLM_ANTHROPIC_API_KEY=sk-ant",
+    "LLM_ANTHROPIC_MODELS=claude-sonnet-5-5,claude-opus-5-5",
+    "LITELLM_MODEL=anthropic/claude-sonnet-5-5",
+    "ANALYZE_LITELLM_MODEL=anthropic/claude-sonnet-5-5",
+    "",
+  ].join("\n"));
+  const channels = [{ name: "anthropic", protocol: "anthropic", apiKeys: [MASKED_LLM_SECRET], models: ["claude-sonnet-5-5", "claude-opus-5-5"] }];
+
+  const written = await writeLlmSettingsEnvFile(file, {
+    channels,
+    primaryModel: "anthropic/claude-sonnet-5-5",
+    agentModel: "anthropic/claude-sonnet-5-5",
+    analyzeModel: "anthropic/claude-opus-5-5",
+  });
+  const text = await readFile(file, "utf8");
+  assert.deepEqual(text.match(/^ANALYZE_LITELLM_MODEL=.*$/gmu), ["ANALYZE_LITELLM_MODEL=anthropic/claude-opus-5-5"]);
+  assert.deepEqual(text.match(/^AGENT_LITELLM_MODEL=.*$/gmu), ["AGENT_LITELLM_MODEL=anthropic/claude-sonnet-5-5"]);
+  assert.deepEqual([written.settings.agentModel, written.settings.analyzeModel], ["anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5"]);
+  assert.equal((await readLlmSettingsEnvFile(file)).settings.analyzeModel, "anthropic/claude-opus-5-5");
+
+  const cleared = await writeLlmSettingsEnvFile(file, { channels, primaryModel: "anthropic/claude-sonnet-5-5", analyzeModel: null });
+  assert.equal((await readFile(file, "utf8")).match(/^ANALYZE_LITELLM_MODEL=.*$/gmu), null);
+  assert.equal(cleared.settings.analyzeModel, null);
+});

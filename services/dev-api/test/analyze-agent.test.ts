@@ -388,6 +388,20 @@ test("the analyst agent writes an investment memo's sections from stored sources
     assert.equal(await figureRuns(runIds[0]!), 0);
   });
 
+  await t.test("a memo's sections read on ANALYZE_LITELLM_MODEL, not chat's agent model", async () => {
+    const env = { ...LLM_ENV, LLM_OPENAI_MODELS: "gpt-4.1,o3,o4-mini", ANALYZE_LITELLM_MODEL: "openai/o4-mini" };
+    const reads = new Set<string>();
+    const scripted = scriptedModel([]);
+    await adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps(env, () => {
+      const client = scripted();
+      return (deployment, request, options) => {
+        if (request.tools?.length) reads.add(deployment.model);
+        return client(deployment, request, options);
+      };
+    }))).analyze.createRun({ userId: IDS.owner, body: memoBody });
+    assert.deepEqual([...reads], ["o4-mini"]);
+  });
+
   await t.test("with no analyst model configured, a Generate is refused and nothing is saved", async () => {
     const memos = await savedMemos();
     const unconfigured = adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps({}, () => async () => assert.fail("no model call"))));

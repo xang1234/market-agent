@@ -29,9 +29,9 @@ const LLM_ENV = {
   AGENT_LITELLM_MODEL: "openai/o3",
 };
 
-test("the agent's router leads with the agent model, not the primary one", async () => {
+test("the agent's router leads with the agent model, not the primary one or Analyze's", async () => {
   const models: string[] = [];
-  const router = await analystAgentRouter(LLM_ENV, {
+  const router = await analystAgentRouter({ ...LLM_ENV, ANALYZE_LITELLM_MODEL: "openai/gpt-4.1" }, {
     createClient: () => async (deployment) => {
       models.push(deployment.model);
       return { text: "DONE" };

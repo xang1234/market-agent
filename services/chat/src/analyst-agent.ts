@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { FinancialRuntimeAuthority, FinancialSubjectRef } from "../../financial-core/src/index.ts";
 import { planningModelFromRouter, type Clarification, type PlanningModel, type RequestedSubject } from "../../financial-engine/src/planner.ts";
-import { createDefaultPiLlmChatClient, createLlmRouterFromEnv, LlmClientError, LlmProviderError, LlmRouterError, withLlmAbortSignal, type LlmChatClient, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
+import { createDefaultPiLlmChatClient, createLlmRouterFromEnv, LlmClientError, LlmProviderError, LlmRouterError, withLlmAbortSignal, type LlmChatClient, type LlmPurpose, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import type { ControlledRouter, LlmToolCall } from "../../llm/src/router.ts";
 import { runToolLoop, type ToolLoopOutput, type ToolLoopResult } from "../../llm/src/tool-loop.ts";
@@ -74,9 +74,9 @@ export class TurnDeadline extends Error {
 
 export async function analystAgentRouter(
   env: LlmSettingsLoaderEnv,
-  options: { createClient?: () => Promise<LlmChatClient> | LlmChatClient } = {},
+  options: { createClient?: () => Promise<LlmChatClient> | LlmChatClient; purpose?: Extract<LlmPurpose, "agent" | "analyze"> } = {},
 ): Promise<ControlledRouter | null> {
-  const router = await createLlmRouterFromEnv(env, { ...options, purpose: "agent" });
+  const router = await createLlmRouterFromEnv(env, { purpose: "agent", ...options });
   return router && perStepDeadlines(router);
 }
 
@@ -87,6 +87,7 @@ function perStepDeadlines(router: ControlledRouter): ControlledRouter {
 export function meteredModels(
   env: NodeJS.ProcessEnv,
   base: () => Promise<LlmChatClient> | LlmChatClient = () => (env.LLM_REPLAY_FILE?.trim() ? createReplayLlmChatClient(env.LLM_REPLAY_FILE.trim()) : createDefaultPiLlmChatClient()),
+  purpose: Extract<LlmPurpose, "agent" | "analyze"> = "agent",
 ): Pick<AgentModels, "router" | "planner" | "compose"> {
   const guarded = (beforeModelCall: () => void) => async (): Promise<LlmChatClient> => {
     const client = await base();
@@ -96,7 +97,7 @@ export function meteredModels(
     };
   };
   return {
-    router: (beforeModelCall) => analystAgentRouter(env, { createClient: guarded(beforeModelCall) }),
+    router: (beforeModelCall) => analystAgentRouter(env, { createClient: guarded(beforeModelCall), purpose }),
     planner: (beforeModelCall) => async (request) => {
       const router = await createLlmRouterFromEnv(env, { createClient: guarded(beforeModelCall) });
       if (!router) throw new Error("LLM router is not configured");
