@@ -2,7 +2,7 @@ import { useContext, type ReactElement } from 'react'
 import { InspectableRef } from '../evidence/InspectableRef.tsx'
 import { InspectableResult } from '../evidence/InspectableResult.tsx'
 import type { CitationRef, CommentaryPart, RefSegment, RichTextBlock, RichTextSegment, TextSegmentTone } from './types.ts'
-import { citationNumbers, commentaryCard, isCitationRef, isRefSegment, refSegmentText, type Takeaway } from './richText.ts'
+import { citationNumbers, citesQuoteBefore, commentaryCard, isCitationRef, isRefSegment, refSegmentText, type Takeaway } from './richText.ts'
 import { Markdown } from './Markdown.tsx'
 import { OpenClarificationContext } from './openClarification.ts'
 import { CARD_CLASS } from '../symbol/surfaceStyles.ts'
@@ -57,7 +57,7 @@ function markdownParts(block: RichTextBlock, segments: ReadonlyArray<RichTextSeg
       if (isCitationRef(segment)) {
         return (
           <>
-            <span data-claim-quote>{`“${refSegmentText(segment)}”`}</span>
+            {citesQuoteBefore(segments, index) ? null : <span data-claim-quote>{`“${refSegmentText(segment)}”`}</span>}
             <Citation snapshotId={block.snapshot_id} blockId={block.id} index={`${key}${index}`} segment={segment} number={numbers.get(segment.ref_id)!} />
           </>
         )
@@ -151,7 +151,7 @@ function Citation({ snapshotId, blockId, index, segment, number, quoted = false 
   quoted?: boolean
 }): ReactElement {
   return (
-    <span title={quoted ? refSegmentText(segment) : undefined}>
+    <span title={quoted ? [segment.source_label, refSegmentText(segment)].filter(Boolean).join('\n') : undefined}>
       <InspectableRef
         snapshotId={snapshotId}
         inspectionRef={{ kind: segment.ref_kind, id: segment.ref_id }}

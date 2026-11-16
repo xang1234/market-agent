@@ -2,7 +2,7 @@
 // answer shows them, tables as Markdown tables. A chart or other visual names
 // itself rather than vanishing, so the reader knows the note leaves it out.
 import { labelText, resultLabel, resultsById, supportedFinancialContent } from './financialAnswer.ts'
-import { citationNumbers, commentaryCard, isCitationRef, isRefSegment, refSegmentText } from './richText.ts'
+import { citationNumbers, citesQuoteBefore, commentaryCard, isCitationRef, isRefSegment, refSegmentText } from './richText.ts'
 import { formatTableCell } from './table.ts'
 import type {
   Block,
@@ -80,8 +80,8 @@ function financialAnswerText(block: FinancialAnswerBlock): string {
 // Plain runs are the answer's Markdown source; refs and toned runs render
 // literally, a quote in quotation marks with its citation's number.
 function segmentText(segments: ReadonlyArray<RichTextSegment>, numbers: ReadonlyMap<string, number>): string {
-  return segments.map((segment) => {
-    if (isCitationRef(segment)) return `“${literal(refSegmentText(segment))}” [${numbers.get(segment.ref_id)}]`
+  return segments.map((segment, index) => {
+    if (isCitationRef(segment)) return citesQuoteBefore(segments, index) ? ` [${numbers.get(segment.ref_id)}]` : `“${literal(refSegmentText(segment))}” [${numbers.get(segment.ref_id)}]`
     if (isRefSegment(segment)) return literal(refSegmentText(segment))
     return segment.tone === undefined || segment.tone === 'neutral' ? segment.text : literal(segment.text)
   }).join('')

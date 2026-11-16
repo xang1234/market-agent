@@ -28,6 +28,7 @@ import {
   type ChatFinancialRuntimeDeps,
   type ChatFinancialTurnContext,
 } from "./financial-runtime.ts";
+import { claimSources } from "./render-assertions.ts";
 import { ANSWER_DEADLINES, renderedAnswer, withDeadlines, type AnswerInput, type DroppedClaims } from "./llm-runtime.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS, LATEST, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 import { turnStopSignal } from "./turn-stop.ts";
@@ -842,7 +843,8 @@ const rendered = (block: Record<string, unknown>) => Array.isArray(block.comment
 
 function citedSources(report: AnsweredTurn["assertions"], packet: EvidencePacket): ReadonlyArray<string> {
   const cited = new Set((report?.accepted ?? []).flatMap((entry) => entry.evidence));
-  return packet.claims.filter((claim) => cited.has(claim.id) && !isUuid(claim.claim_id) && isUuid(claim.source_id)).map((claim) => claim.source_id);
+  return packet.claims.filter((claim) => cited.has(claim.id) && !isUuid(claim.claim_id) && isUuid(claim.source_id))
+    .flatMap((claim) => claimSources(claim).map((source) => source.source_id).filter(isUuid));
 }
 
 function withRefs(

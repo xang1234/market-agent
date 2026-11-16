@@ -139,3 +139,15 @@ test('commentary copies as its card shows it: shown themes with their citations,
   ].join('\n\n'))
   assert.equal(copied.includes('hidden theme'), false)
 })
+
+test('a quote resting on several sources copies once with each citation, and each source once', () => {
+  const line = "Industry peer: AMD shares NVDA's industry (Semiconductors)"
+  const source = (id: string, source_label: string) => ({ type: 'ref', ref_kind: 'source', ref_id: id, format: line, source_label })
+  assert.equal(answerText([commentaryBlock([{ kind: 'figures', segments: [source('ffffffff-ffff-4fff-8fff-ffffffffffff', 'Industry source'), source('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'AMD market cap source')] }])]), [
+    'Analysis',
+    'Quoted sources',
+    `- “${line}” [1] [2]`,
+    'Sources',
+    '[1] Industry source\n[2] AMD market cap source',
+  ].join('\n\n'))
+})

@@ -168,7 +168,7 @@ test("each tool says when no stored source exists, as a typed status", async () 
 
 test("a peer set is the resolver's same-industry peers, named", async () => {
   const result = await runAnalystTool(stackDb(), "get_peer_set", { issuer_ids: [MU], as_of: AS_OF });
-  assert.deepEqual(analystPacketEntries([result]).map((entry) => entry.kind === "peer" && [entry.text, entry.source_ids]), [
+  assert.deepEqual(analystPacketEntries([result]).map((entry) => entry.kind === "peer" && [entry.text, entry.sources.map((source) => source.source_id)]), [
     ["WDC shares MU's industry (Semiconductors)", ["ind-MU", "ind-WDC", "cap-WDC"]],
   ], "a peer cites both industries' sources and the market cap fact it is ranked by");
 });

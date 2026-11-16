@@ -18,6 +18,13 @@ export function isCitationRef(segment: RichTextSegment): segment is CitationRef 
   return segment.type === 'ref' && (segment.ref_kind === 'claim' || segment.ref_kind === 'source')
 }
 
+// A further citation of the quote just before it: the quote rests on several sources, so it shows once with each number.
+export function citesQuoteBefore(segments: ReadonlyArray<RichTextSegment>, index: number): boolean {
+  const before = segments[index - 1]
+  const segment = segments[index]!
+  return before !== undefined && isCitationRef(before) && isCitationRef(segment) && refSegmentText(before) === refSegmentText(segment)
+}
+
 export function citationNumbers(segments: ReadonlyArray<RichTextSegment>): ReadonlyMap<string, number> {
   const numbers = new Map<string, number>()
   for (const segment of segments) {

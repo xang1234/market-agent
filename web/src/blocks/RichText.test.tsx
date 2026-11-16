@@ -663,3 +663,25 @@ test('a theme of industry peers cites the source that names their industry, and 
   })
   assert.deepEqual(opened, [{ kind: 'claim', id: CLAIM_A }, { kind: 'source', id: SOURCE }])
 })
+
+test('a quote resting on several sources shows once with a citation for each, and a citation\'s hover names its source', async () => {
+  const INDUSTRY = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+  const MARKET_CAP = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+  const line = "Industry peer: AMD shares NVDA's industry (Semiconductors)"
+  const source = (id: string, source_label: string) => ({ type: 'ref', ref_kind: 'source', ref_id: id, format: line, source_label }) as const
+  const block: RichTextBlock = {
+    ...richTextBlock('commentary-peer-sources', []),
+    analyst_commentary: true,
+    commentary: [
+      { kind: 'inference', subject: null, basis: null, text: 'Industry peers: AMD shares its industry.', cites: [source(INDUSTRY, 'Industry source')] },
+      { kind: 'figures', segments: [source(INDUSTRY, 'Industry source'), source(MARKET_CAP, 'AMD market cap source')] },
+    ],
+  }
+  await renderWithInspector(block, async (doc) => {
+    const theme = doc.querySelector('[data-commentary-part="inference"]')!
+    assert.equal(theme.querySelector('span[title]:not([class])')!.getAttribute('title'), `Industry source\n${line}`)
+    const quoted = [...doc.querySelectorAll('h4')].find((heading) => heading.textContent === 'Quoted sources')!.parentElement!
+    assert.deepEqual([...quoted.querySelectorAll('[data-claim-quote]')].map((quote) => quote.textContent), [`“${line}”`])
+    assert.deepEqual(citations(quoted), ['[1]', '[2]'])
+  })
+})

@@ -15,7 +15,7 @@ import {
   turnPacket,
 } from "../src/llm-runtime.ts";
 import { checkAssertions, MAX_ASSERTIONS, type AssertionReport, type Rejection } from "../src/assertions.ts";
-import type { EvidencePacket, PacketFigure } from "../src/evidence-packet.ts";
+import { mergePackets, type EvidencePacket, type PacketFigure } from "../src/evidence-packet.ts";
 import { engineAnswerNote, scopeGapBlocks } from "../src/local-runtime.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
 import { proposal } from "./scope-fixtures.ts";
@@ -1557,4 +1557,31 @@ test("an inference judged on a claim its seal left out goes, though another of i
   assert.equal(plain(blocks(ALL_SHOWN, { withdrawn: [SEALED_CLAIM(1)], unchecked: [] })[0]!),
     "A's revenue was $130.5B in FY2026 (ended Jan 2026).\n\n" +
     "A claim this answer quoted is no longer citable, so it is left out.");
+});
+
+test("an industry peer cites every source its line rests on, and a source cited for several companies names none of them (round 6 swarm findings)", () => {
+  const S = (n: number) => `c2080000-0000-4000-8000-0000000000${n}`;
+  const peerSet = (company: string, industry_source_id: string, peers: ReadonlyArray<[string, string, string | null]>) => ({
+    tool: "get_peer_set", status: "ok", company, industry: "Semiconductors", industry_source_id,
+    peers: peers.map(([label, peerIndustry, marketCap]) => ({ issuer_id: `issuer-${label}`, label, industry_source_id: peerIndustry, market_cap_source_id: marketCap })),
+  }) as never;
+  const packet = mergePackets({
+    engine: [],
+    analyst: [peerSet("NVDA", S(11), [["AMD", S(22), S(33)], ["INTC", S(44), null]]), peerSet("MU", S(11), [["WDC", S(11), null]])],
+    figuresAskedFor: [], notes: [], labels: new Map(), cutoff: "2026-11-01T00:00:00.000Z",
+  });
+  const answer = renderedAnswer({ blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [] }, packet, checkAssertions([
+    { kind: "management_attribution", text: "Peers.", evidence: ["C1", "C2", "C3"] },
+    { kind: "analyst_inference", text: "Peers: both sets share an industry.", supports: [0] },
+  ], packet));
+  const [block] = answer.blocks(new Map([[1, "shown"]]));
+  const line = (label: string, company: string) => `Industry peer: ${label} shares ${company}'s industry (Semiconductors)`;
+  const source = (id: string, format: string, source_label: string) => ({ type: "ref", ref_kind: "source", ref_id: id, format, source_label });
+  assert.deepEqual(block!.commentary, [{ kind: "inference", subject: null, basis: null, text: "Peers: both sets share an industry.", cites: [
+    source(S(11), [line("AMD", "NVDA"), line("INTC", "NVDA"), line("WDC", "MU")].join("\n"), "Industry source"),
+    source(S(22), line("AMD", "NVDA"), "AMD industry source"),
+    source(S(33), line("AMD", "NVDA"), "AMD market cap source"),
+    source(S(44), line("INTC", "NVDA"), "INTC industry source"),
+  ] }]);
+  assert.deepEqual([...(block!.source_refs as string[])].sort(), [S(11), S(22), S(33), S(44)], "every source a peer line rests on is sealed");
 });
