@@ -596,6 +596,12 @@ test("a company's common name resolves to the one issuer whose legal name it sho
   assert.deepEqual(await resolve("Home Depot"), hydrated(homeDepot));
   assert.deepEqual(await resolve("Stellantis"), hydrated(stellantis));
   assert.deepEqual(await resolve("Orion SA"), hydrated(orion), "a legal form spelled with or without its points");
+  for (const absent of ["Apple Holdings", "Apple Group", "Orion Holdings"]) {
+    assert.deepEqual(await resolve(absent), { status: "not_found", refs: [] }, `${absent} names a company the index lacks, not another one`);
+  }
+  assert.deepEqual(await resolve("Alibaba Group"), hydrated(alibaba), "a name its legal name holds whole");
+  assert.deepEqual(await resolve("Apple stock"), hydrated(apple), "a security of the company names the company");
+  assert.deepEqual(await resolve("Alphabet Class A"), hydrated(alphabet));
   assert.deepEqual(await resolve("hello"), hydrated(hello));
   assert.deepEqual(outcomeOf(await runSearchToSubjectFlow(client, { text: "hello", exactOnly: true })), { status: "not_found", refs: [] }, "a chat message's own words match only as written");
   assert.deepEqual(await resolve("Google"), { status: "not_found", refs: [] }, "a word another name only begins with matches nothing");

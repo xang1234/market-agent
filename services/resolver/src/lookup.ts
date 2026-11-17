@@ -150,7 +150,7 @@ export async function resolveByShortName(
   const normalized = normalizeNameForLookup(name);
   const first = normalized.replace(/^the /, "").charAt(0);
   if (!first) return notFound({ normalized_input: normalized, reason: "no_candidates" });
-  // ponytail: a sequential scan for the names with the input's first letter, 2 to 5 ms over 10k aliases; index normalized_name with text_pattern_ops if that grows tenfold.
+  // ponytail: a sequential scan for the names with the input's first letter, 5.5 to 14 ms over 10k aliases under load; index normalized_name with text_pattern_ops if that grows tenfold.
   const result: QueryResult<IssuerRow & { cik: string | null; normalized_name: string }> = await db.query(
     `select iss.issuer_id, iss.legal_name, iss.cik, ia.normalized_name
        from issuer_aliases ia
@@ -159,8 +159,8 @@ export async function resolveByShortName(
       order by iss.legal_name, iss.issuer_id`,
     [first],
   );
-  const aliases = result.rows.map((row) => ({ row, names: namesGoneBy(row.normalized_name) }));
-  const goneBy = namesGoneBy(normalized).map((level) => aliases.filter(({ names }) => names.includes(level))).find((found) => found.length > 0) ?? [];
+  const aliases = result.rows.map((row) => ({ row, names: namesGoneBy(row.normalized_name, STORED_FORM) }));
+  const goneBy = namesGoneBy(normalized, ASKED_FORM).map((level) => aliases.filter(({ names }) => names.includes(level))).find((found) => found.length > 0) ?? [];
   const matches = [...new Map(goneBy.map(({ row }) => [row.issuer_id, row])).values()];
   const registrants = matches.filter((row) => row.cik !== null);
   const candidates = (registrants.length > 0 ? registrants : matches).map((row) => ({
@@ -417,13 +417,19 @@ export function normalizeNameForLookup(value: string): string {
 }
 
 const LEGAL_FORMS: Readonly<Record<string, string>> = { corporation: "corp", company: "co", incorporated: "inc", limited: "ltd" };
-const DESIGNATION = / (?:(?:class|series) [a-z]|(?:common |capital |ordinary )?(?:stock|shares)|inc|corp|co|ltd|plc|llc|lp|sa|ag|nv|se|as|asa|spa|ab|oyj|na|bv|sab de cv|holdings?|group|adrs?|ads|com)$/;
+const FORM = "(?:class|series) [a-z]|(?:common |capital |ordinary )?(?:stock|shares)|adrs?|ads|inc|corp|co|ltd|plc|llc|lp|sa|ag|nv|se|as|asa|spa|ab|oyj|na|bv|sab de cv";
+// A legal form or a security names no other company, so a name sheds it
+// either side. "Holdings" and "Group" can: a company goes by its name
+// without them ("Graham" is Graham Holdings Co), but "Apple Holdings" is
+// not Apple Inc.
+const ASKED_FORM = new RegExp(` (?:${FORM})$`);
+const STORED_FORM = new RegExp(` (?:${FORM}|holdings?|group|com)$`);
 
 // ponytail: a brand that is no legal name ("Google", "AMD") stays unresolved; a sourced alias feed would cover it.
-function namesGoneBy(normalized: string): string[] {
+function namesGoneBy(normalized: string, form: RegExp): string[] {
   const joined = normalized.replace(/^the /, "").replace(/\b([a-z]) (?=[a-z]\b)/g, "$1");
   const names = [joined.split(" ").map((word) => LEGAL_FORMS[word] ?? word).join(" ")];
-  while (DESIGNATION.test(names.at(-1)!)) names.push(names.at(-1)!.replace(DESIGNATION, ""));
+  while (form.test(names.at(-1)!)) names.push(names.at(-1)!.replace(form, ""));
   return names;
 }
 
