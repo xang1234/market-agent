@@ -39,6 +39,7 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
       },
       fetchBars: async (origin: string, listings: ReadonlyArray<HydrationListing>) => {
         bars.push({ origin, listings });
+        return [];
       },
     };
   };
@@ -159,6 +160,46 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     }
   });
 
+  await t.test("a price fetch that comes back with no bars reads failed and says so, and is not repeated for six hours (#665)", async () => {
+    let clock = 1_000_000;
+    const calls: string[][] = [];
+    const hydrate = createTurnHydrator({
+      db: pool,
+      env: { MARKET_ORIGIN: "http://market.test" },
+      now: () => clock,
+      fetchFilings: async () => {},
+      fetchBars: async (_origin, listings) => {
+        calls.push(listings.map((listing) => listing.id));
+        return listings.map((listing) => listing.id);
+      },
+    });
+    const { events, turn } = recorder();
+    await hydrate([{ issuer_id: ZETA, label: "ZETA" }], turn);
+    assert.deepEqual(events, [
+      { type: "tool.started", tool_call_id: "load_prices-t1", tool_name: "load_prices", label: "Loading prices for ZETA" },
+      { type: "tool.completed", tool_call_id: "load_prices-t1", tool_name: "load_prices", label: "No prices found for ZETA", status: "failed" },
+    ]);
+    clock += 61_000;
+    const later = recorder();
+    await hydrate([{ issuer_id: ZETA, label: "ZETA" }], later.turn);
+    assert.deepEqual([calls, later.events], [[[LISTING]], []], "a minute on, a listing the market has no bars for is not fetched again");
+    clock += 6 * 60 * 60_000;
+    await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn);
+    assert.deepEqual(calls, [[LISTING], [LISTING]], "six hours on, it is");
+    // The answer was for the range asked: a window to another cutoff is still fetched.
+    await hydrate([{ issuer_id: ZETA, label: "ZETA" }], { ...recorder().turn, ytdCutoff: "2026-06-30T21:00:00.000Z" });
+    assert.deepEqual(calls, [[LISTING], [LISTING], [LISTING]]);
+  });
+
+  await t.test("a price read fetches no filings, and names the companies whose prices could not be loaded just now (#678)", async () => {
+    const fetch = fakes();
+    const failing = createTurnHydrator({ db: pool, env: LIVE, ...fetch, fetchBars: async () => { throw new Error("the market could not answer for ZETA (rate_limited) just now"); }, logger: { warn: () => {} } });
+    const loading = await failing([{ issuer_id: ZETA, label: "ZETA" }], { ...recorder().turn, ytdCutoff: "2026-11-17T05:51:00.000Z", pricesOnly: true });
+    assert.deepEqual([fetch.sec, [...loading]], [[], [ZETA]]);
+    const loaded = await createTurnHydrator({ db: pool, env: LIVE, ...fakes() })([{ issuer_id: ZETA, label: "ZETA" }], { ...recorder().turn, ytdCutoff: "2026-11-17T05:51:00.000Z", pricesOnly: true });
+    assert.deepEqual([...loaded], []);
+  });
+
   await t.test("a turn charting a YTD window fetches a listing with bars stored, to the window's cutoff", async () => {
     await db.query(
       `insert into market_bar_ranges (listing_id, source_id, provider, interval, adjustment_basis, range_start, range_end, as_of, delay_class, currency, fetched_at, expires_at)
@@ -167,7 +208,7 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     );
     try {
       const calls: Array<{ listings: ReadonlyArray<HydrationListing>; cutoff: string }> = [];
-      const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => {}, fetchBars: async (_origin, listings, cutoff) => { calls.push({ listings, cutoff }); } });
+      const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => {}, fetchBars: async (_origin, listings, cutoff) => { calls.push({ listings, cutoff }); return []; } });
       await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn);
       const { events, turn } = recorder();
       await hydrate([{ issuer_id: ZETA }], { ...turn, ytdCutoff: "2026-06-30T20:00:00.000Z" });
@@ -191,7 +232,7 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     const [june, november] = ["2026-06-30T21:00:00.000Z", "2026-11-13T22:00:00.000Z"];
     for (const [first, second] of [[june, november], [november, june]]) {
       const calls: Array<{ listings: string[]; cutoff: string }> = [];
-      const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => {}, fetchBars: async (_origin, listings, cutoff) => { calls.push({ listings: listings.map((listing) => listing.id), cutoff }); } });
+      const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => {}, fetchBars: async (_origin, listings, cutoff) => { calls.push({ listings: listings.map((listing) => listing.id), cutoff }); return []; } });
       await hydrate([aaa.company], { ...recorder().turn, ytdCutoff: first });
       const { events, turn } = recorder();
       await hydrate([aaa.company, bbb.company], { ...turn, ytdCutoff: second });
@@ -230,9 +271,60 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     ]);
   });
 
+  await t.test("a comparison whose one listing came back empty while another failed holds the empty one, and retries the other after a minute (#689)", async () => {
+    let clock = 1_000_000;
+    const cutoff = "2026-09-01T00:00:00.000Z";
+    const requests: string[][] = [];
+    const fetchImpl = (async (_url: URL | string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { basis: string; subject_refs: Array<{ id: string }> };
+      if (body.basis === "split_adjusted") requests.push(body.subject_refs.map((ref) => ref.id));
+      const results = body.subject_refs.map((ref) => ({
+        listing: { id: ref.id },
+        outcome: body.basis === "split_adjusted" && ref.id === aaa.listing ? { outcome: "available", data: { bars: [] } }
+          : body.basis === "split_adjusted" ? { outcome: "unavailable", reason: "rate_limited" } : { outcome: "unavailable", reason: "missing_coverage" },
+      }));
+      return new Response(JSON.stringify({ results }), { status: 200 });
+    }) as typeof fetch;
+    const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, now: () => clock, fetchFilings: async () => {}, fetchBars: (origin, listings, now) => hydrateYtdBars({ origin, listings, now, fetchImpl }), logger: { warn: () => {} } });
+    await hydrate([aaa.company, bbb.company], { ...recorder().turn, ytdCutoff: cutoff });
+    clock += 30_000;
+    await hydrate([aaa.company, bbb.company], { ...recorder().turn, ytdCutoff: cutoff });
+    assert.deepEqual(requests, [[aaa.listing, bbb.listing]], "within the minute, neither is fetched again");
+    clock += 31_000;
+    await hydrate([aaa.company, bbb.company], { ...recorder().turn, ytdCutoff: cutoff });
+    assert.deepEqual(requests, [[aaa.listing, bbb.listing], [bbb.listing]], "a minute on, only the failed listing is");
+  });
+
+  await t.test("a listing a later fetch found bars for is no longer held as having none (#665)", async () => {
+    let clock = 1_000_000;
+    const cutoff = "2026-09-01T00:00:00.000Z";
+    const calls: string[][] = [];
+    const answers: Array<(noBars: ReadonlyArray<string>) => void> = [];
+    const hydrate = createTurnHydrator({
+      db: pool,
+      env: { MARKET_ORIGIN: "http://market.test" },
+      now: () => clock,
+      budgetMs: 10,
+      fetchFilings: async () => {},
+      fetchBars: (_origin, listings) => {
+        calls.push(listings.map((listing) => listing.id));
+        return new Promise((resolve) => answers.push(resolve));
+      },
+    });
+    await hydrate([aaa.company], { ...recorder().turn, ytdCutoff: cutoff });
+    await hydrate([aaa.company, bbb.company], { ...recorder().turn, ytdCutoff: cutoff });
+    answers[0]!([aaa.listing]);
+    await new Promise((resolve) => setImmediate(resolve));
+    answers[1]!([]);
+    await new Promise((resolve) => setImmediate(resolve));
+    clock += 61_000;
+    await hydrate([aaa.company], { ...recorder().turn, ytdCutoff: cutoff });
+    assert.deepEqual(calls, [[aaa.listing], [aaa.listing, bbb.listing], [aaa.listing]]);
+  });
+
   await t.test("the same comparison asked again within a minute, to the same sessions, is not fetched again", async () => {
     const calls: string[] = [];
-    const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => {}, fetchBars: async (_origin, _listings, cutoff) => { calls.push(cutoff); } });
+    const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => {}, fetchBars: async (_origin, _listings, cutoff) => { calls.push(cutoff); return []; } });
     await hydrate([aaa.company, bbb.company], { ...recorder().turn, ytdCutoff: "2026-11-13T22:00:00.000Z" });
     const { events, turn } = recorder();
     await hydrate([bbb.company, aaa.company], { ...turn, ytdCutoff: "2026-11-13T22:00:05.000Z" });

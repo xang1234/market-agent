@@ -1921,6 +1921,128 @@
       ]
     },
     {
+      "name": "get_price_performance",
+      "audience": "analyst",
+      "bundles": [
+        "analyst_agent"
+      ],
+      "description": "Price return and last close of one to five companies over the week, month or year to date at the cutoff, from stored daily closes: each return runs from the last close before the period to the latest close every company has, on one price basis, and a split-adjusted return excludes dividends. Prices a company lacks are fetched first. no_prices: no return could be drawn from the stored prices, and reason says why. Every result has a status. invalid_arguments: an argument is not one this tool reads, or names a company the prompt does not list. unavailable: the stored prices could not be read, which says nothing about what is on file.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "low",
+      "freshness_expectation": "daily",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_refs": {
+            "type": "array",
+            "description": "The companies, as the prompt lists them.",
+            "minItems": 1,
+            "maxItems": 5,
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "issuer"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "kind",
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "week",
+              "month",
+              "ytd"
+            ],
+            "description": "The period to date: this week (from Monday), this month or this year."
+          },
+          "query": {
+            "type": "string",
+            "description": "The question this read serves."
+          }
+        },
+        "required": [
+          "subject_refs",
+          "period"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "const": "get_price_performance"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "no_prices",
+              "invalid_arguments",
+              "unavailable"
+            ]
+          },
+          "figures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "company": {
+                  "type": "string"
+                },
+                "metric": {
+                  "enum": [
+                    "Price return",
+                    "Last close"
+                  ]
+                },
+                "period": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "company",
+                "metric",
+                "period",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
       "name": "get_eps_surprise",
       "audience": "analyst",
       "bundles": [

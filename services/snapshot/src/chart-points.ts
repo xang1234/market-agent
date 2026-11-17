@@ -3,7 +3,8 @@
 // a stored bar range and the digest of its bars. The seal reloads those bars
 // through its database client, in one statement, recomputes every line with the
 // function chat draws with (perf-points.ts), and requires the digests and the
-// points to match exactly. The cache replaces a range's bars in place when it
+// points to match exactly, and a spec's end close to be the close its line
+// ends on (#678). The cache replaces a range's bars in place when it
 // refreshes, so this holds at seal time only; read-back trusts the seal. Each
 // line is shown under its listing's ticker, in percent (#316).
 
@@ -14,7 +15,7 @@ import { sessionDate, windowClosedAt, type DailyClose } from "../../market/src/y
 import type { JsonValue } from "./manifest-staging.ts";
 import { isRecord, type QueryExecutor } from "../../shared/src/http.ts";
 
-export type ChartPointsReason = "count" | "duplicate" | "subject" | "unverifiable" | "range" | "label" | "window" | "hash" | "points";
+export type ChartPointsReason = "count" | "duplicate" | "subject" | "unverifiable" | "range" | "label" | "window" | "hash" | "points" | "close";
 
 export type ChartPointsFailure = { block_id: string; series_ref: string | null; reason: ChartPointsReason };
 
@@ -29,8 +30,10 @@ export type DrawnChart = {
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-type SealedWindow = { year: number; baseline_date: string; end_date: string };
+// A YTD window starts on January 1 of its year (#192); any other, on its start date (#678).
+type SealedWindow = { start: string; baseline_date: string; end_date: string };
 
 type SealedSeries = {
   bar_range_id: string;
@@ -42,6 +45,9 @@ type SealedSeries = {
   as_of: number;
   bars_sha256: string;
   window: SealedWindow | null;
+  // The close the line ends on and its currency, when a chip may show it (#678).
+  end_close: number | null;
+  currency: string | null;
 };
 
 type StoredRange = { listing_id: string; source_id: string; interval: string; adjustment_basis: string; start: number; end: number };
@@ -99,7 +105,8 @@ export async function verifyChartPoints(
     const unbound = lines.find((line) => {
       const range = stored.get(line.spec.bar_range_id);
       return range === undefined || !isDeepStrictEqual(range.identity, line.spec.range) ||
-        range.delay_class !== line.spec.delay_class || line.spec.as_of > range.as_of;
+        range.delay_class !== line.spec.delay_class || line.spec.as_of > range.as_of ||
+        (line.spec.currency !== null && line.spec.currency !== range.currency);
     });
     if (unbound !== undefined) {
       fail("range", unbound.series_ref);
@@ -121,31 +128,34 @@ export async function verifyChartPoints(
       continue;
     }
     for (const [index, line] of lines.entries()) {
-      if (outcome[index].bars_sha256 !== line.spec.bars_sha256) fail("hash", line.series_ref);
-      else if (!isDeepStrictEqual(outcome[index].points, line.points)) fail("points", line.series_ref);
+      if (outcome.lines[index].bars_sha256 !== line.spec.bars_sha256) fail("hash", line.series_ref);
+      else if (!isDeepStrictEqual(outcome.lines[index].points, line.points)) fail("points", line.series_ref);
+      else if (line.spec.end_close !== null && outcome.closes?.[index] !== line.spec.end_close) fail("close", line.series_ref);
     }
   }
   return failures;
 }
 
-// Every line, recomputed from the bars its spec pins, in the mode it was drawn in.
+// Every line, recomputed from the bars its spec pins, in the mode it was drawn
+// in, and the close each windowed line ends on.
 async function recompute(
   db: QueryExecutor,
   lines: ReadonlyArray<ChartLine>,
   listings: ReadonlyMap<string, StoredListing>,
-): Promise<ReadonlyArray<PerfLine> | "window"> {
+): Promise<{ lines: ReadonlyArray<PerfLine>; closes?: ReadonlyArray<number> } | "window"> {
   const [{ spec: { window } }] = lines;
   if (lines.some((line) => !isDeepStrictEqual(line.spec.window, window))) return "window";
   const bars = await loadBars(db, lines.map((line) => line.spec.bar_range_id));
   const barsOf = (line: ChartLine) => bars.get(line.spec.bar_range_id) ?? [];
   if (window === null) {
     const drawn = perfLines({ kind: "latest", bars: lines.map(barsOf) });
-    return drawn.ok ? drawn.lines : "window";
+    return drawn.ok ? { lines: drawn.lines } : "window";
   }
   const zoneOf = (line: ChartLine) => listings.get(line.spec.listing_id)!.timezone;
   // Sessions stored since the window ended are not part of it.
   const drawn = perfLines({
-    kind: "ytd",
+    kind: "window",
+    start: window.start,
     series: lines.map((line) => ({
       label: line.series_ref,
       timeZone: zoneOf(line),
@@ -155,13 +165,12 @@ async function recompute(
   });
   if (
     !drawn.ok ||
-    drawn.window.year !== window.year ||
     drawn.window.baselineDate !== window.baseline_date ||
     drawn.window.endDate !== window.end_date
   ) {
     return "window";
   }
-  return drawn.lines;
+  return { lines: drawn.lines, closes: drawn.window.bars.map((bars) => bars.at(-1)!.close) };
 }
 
 async function loadBars(db: QueryExecutor, barRangeIds: ReadonlyArray<string>): Promise<Map<string, DailyClose[]>> {
@@ -184,7 +193,7 @@ async function loadBars(db: QueryExecutor, barRangeIds: ReadonlyArray<string>): 
 async function loadRanges(
   db: QueryExecutor,
   barRangeIds: ReadonlyArray<string>,
-): Promise<Map<string, { identity: StoredRange; delay_class: string; as_of: number }>> {
+): Promise<Map<string, { identity: StoredRange; delay_class: string; currency: string; as_of: number }>> {
   const { rows } = await db.query<{
     bar_range_id: string;
     listing_id: string;
@@ -194,10 +203,11 @@ async function loadRanges(
     range_start: Date | string;
     range_end: Date | string;
     delay_class: string;
+    currency: string;
     as_of: Date | string;
   }>(
     `select bar_range_id::text as bar_range_id, listing_id::text as listing_id, source_id::text as source_id,
-            interval, adjustment_basis, range_start, range_end, delay_class, as_of
+            interval, adjustment_basis, range_start, range_end, delay_class, currency, as_of
        from market_bar_ranges
       where bar_range_id = any($1::uuid[])`,
     [[...new Set(barRangeIds)]],
@@ -212,6 +222,7 @@ async function loadRanges(
       end: new Date(row.range_end).getTime(),
     },
     delay_class: row.delay_class,
+    currency: row.currency,
     as_of: new Date(row.as_of).getTime(),
   }]));
 }
@@ -227,7 +238,7 @@ async function loadListings(db: QueryExecutor, listingIds: ReadonlyArray<string>
 // The fields the check reads, or null when the spec cannot be checked: only
 // daily percent returns are drawn this way.
 function sealedSeries(spec: Record<string, unknown>): SealedSeries | null {
-  const { bar_range_id, listing_id, source_id, adjustment_basis, range, delay_class, as_of, bars_sha256, interval, normalization, points, window } = spec;
+  const { bar_range_id, listing_id, source_id, adjustment_basis, range, delay_class, as_of, bars_sha256, interval, normalization, points, window, end_close, currency } = spec;
   if (
     points !== PERF_POINTS ||
     typeof bar_range_id !== "string" ||
@@ -246,7 +257,9 @@ function sealedSeries(spec: Record<string, unknown>): SealedSeries | null {
     Number.isNaN(Date.parse(as_of)) ||
     typeof bars_sha256 !== "string" ||
     interval !== "1d" ||
-    normalization !== "pct_return"
+    normalization !== "pct_return" ||
+    (end_close !== undefined && typeof end_close !== "number") ||
+    (currency !== undefined && typeof currency !== "string")
   ) {
     return null;
   }
@@ -258,15 +271,16 @@ function sealedSeries(spec: Record<string, unknown>): SealedSeries | null {
     start: Date.parse(range.start),
     end: Date.parse(range.end),
   };
-  const freshness = { delay_class, as_of: Date.parse(as_of) };
+  const freshness = { delay_class, as_of: Date.parse(as_of), end_close: typeof end_close === "number" ? end_close : null, currency: typeof currency === "string" ? currency : null };
   if (window === undefined) return { bar_range_id, listing_id, range: stored, ...freshness, bars_sha256, window: null };
+  const start = !isRecord(window) ? null : window.kind === "ytd" && typeof window.year === "number" ? `${window.year}-01-01` : window.kind === "window" ? window.start : null;
   if (
     !isRecord(window) ||
-    window.kind !== "ytd" ||
-    typeof window.year !== "number" ||
+    typeof start !== "string" ||
+    !DATE.test(start) ||
     typeof window.baseline_date !== "string" ||
     typeof window.end_date !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(window.end_date)
+    !DATE.test(window.end_date)
   ) {
     return null;
   }
@@ -276,6 +290,6 @@ function sealedSeries(spec: Record<string, unknown>): SealedSeries | null {
     range: stored,
     ...freshness,
     bars_sha256,
-    window: { year: window.year, baseline_date: window.baseline_date, end_date: window.end_date },
+    window: { start, baseline_date: window.baseline_date, end_date: window.end_date },
   };
 }

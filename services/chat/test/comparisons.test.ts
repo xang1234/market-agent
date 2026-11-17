@@ -331,3 +331,14 @@ test("a claim mixing a ranking across companies with a run over time is refused 
   assert.deepEqual(report.accepted, []);
   assert.deepEqual(report.rejected.map((entry) => entry.reason), ["comparison: a comparison is of one metric"]);
 });
+
+test("a price ranking sets companies against each other over one window, never one's week against another's month (#689)", () => {
+  const week = "the week to date, from the Nov 13, 2026 close to the Nov 16, 2026 close";
+  const prices = packet(["AAPL", "MSFT"], [
+    fig("P1", "Price return", week, "-0.98%", { company: "AAPL", series_ref: "s1" }),
+    fig("P2", "Price return", "the month to date, from the Oct 30, 2026 close to the Nov 16, 2026 close", "5.10%", { company: "MSFT", series_ref: "s2" }),
+    fig("P3", "Price return", week, "1.20%", { company: "MSFT", series_ref: "s3" }),
+  ]);
+  assert.deepEqual(checkComparison({ op: "highest", result: "P2" }, ["P1", "P2"], prices), { error: "comparison: prices across companies are compared over one window" });
+  assert.equal((checkComparison({ op: "highest", result: "P3" }, ["P1", "P3"], prices) as { comparison: { winner: PacketFigure } }).comparison.winner.id, "P3");
+});

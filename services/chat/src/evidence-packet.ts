@@ -197,6 +197,8 @@ function resultEntries(result: AnalystToolResult): Array<readonly [string, Unnum
 
 export function mergePackets(input: {
   engine: ReadonlyArray<EvidencePacket>;
+  // The figures the analyst agent's price charts show (#678), numbered after the engine's.
+  prices?: ReadonlyArray<Omit<PacketFigure, "id">>;
   route?: EvidencePacket;
   analyst: ReadonlyArray<AnalystToolResult>;
   figuresAskedFor: ReadonlyArray<string>;
@@ -215,7 +217,7 @@ export function mergePackets(input: {
       id: renumbered(figure.id),
       ...(derived_from ? { derived_from: [renumbered(derived_from[0]), renumbered(derived_from[1])] as const } : {}),
     }));
-  });
+  }).concat((input.prices ?? []).map((figure) => ({ ...figure, id: `F${++figureCount}` })));
   const entries = analystPacketEntries(input.analyst.map((result) => relabelled(result, input.labels)));
   const routeClaims = input.route?.claims ?? [];
   const claims: PacketClaim[] = [];
@@ -230,6 +232,7 @@ export function mergePackets(input: {
   const companies = [...new Set([
     ...input.figuresAskedFor,
     ...input.engine.flatMap((packet) => packet.companies),
+    ...(input.prices ?? []).flatMap((figure) => (figure.company === undefined ? [] : [figure.company])),
     ...(input.route?.companies ?? []),
     ...claims.flatMap((claim) => (claim.company === undefined ? [] : [claim.company])),
   ])];

@@ -4,6 +4,8 @@ import {
   storagePolicyForDocument,
 } from "./source-disclosure.ts";
 import { formatCompactCurrency, formatCurrency, formatPercent } from "../../analyze/src/block-format.ts";
+import { closeLabel } from "../../market/src/perf-points.ts";
+import { isPricePeriod, PERIOD_WORDS } from "../../market/src/ytd-window.ts";
 import { noncontrollingInterestInferenceText } from "../../financial-core/src/contracts.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
@@ -81,7 +83,9 @@ type SeriesSpec = {
   points?: string;
   delay_class?: string;
   range?: { start?: string; end?: string };
-  window?: { kind?: string; year?: number; baseline_date?: string; end_date?: string };
+  window?: { kind?: string; year?: number; period?: string; baseline_date?: string; end_date?: string };
+  end_close?: number;
+  currency?: string;
   as_of?: string;
 };
 
@@ -755,6 +759,9 @@ async function inspectSeries(
       { label: "Basis", value: label(ADJUSTMENT_BASIS_LABELS, spec.adjustment_basis) },
       { label: "Return", value: label(NORMALIZATION_LABELS, spec.normalization) },
       { label: "Window", value: seriesWindow(spec) },
+      ...(typeof spec.end_close === "number" && typeof spec.currency === "string"
+        ? [{ label: "Last close", value: `${closeLabel(spec.end_close, spec.currency)} on ${spec.window?.end_date ?? "its last session"}` }]
+        : []),
       { label: "Interval", value: label(INTERVAL_LABELS, spec.interval) },
       { label: "Delay", value: label(DELAY_CLASS_LABELS, spec.delay_class) },
       { label: "As of", value: spec.as_of ?? "Unknown" },
@@ -772,6 +779,9 @@ function seriesWindow(spec: SeriesSpec): string {
   const { window, range } = spec;
   if (window?.kind === "ytd") {
     return `YTD ${window.year}: ${window.baseline_date} close to ${window.end_date} close`;
+  }
+  if (window?.kind === "window" && isPricePeriod(window.period)) {
+    return `${PERIOD_WORDS[window.period].range}: ${window.baseline_date} close to ${window.end_date} close`;
   }
   const date = (value: string | undefined) => value?.slice(0, 10) ?? "unknown";
   return `${date(range?.start)} to ${date(range?.end)}`;

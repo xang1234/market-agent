@@ -59,8 +59,9 @@ const YTD = {
 
 type Window = Record<string, string | number>;
 
-function spec(seriesRef: string, listingId: string, barRangeId: string, hash: string, window?: Window) {
+function spec(seriesRef: string, listingId: string, barRangeId: string, hash: string, window?: Window, close?: { end_close: number; currency: string }) {
   return {
+    ...close,
     series_ref: seriesRef,
     source_id: sourceId,
     listing_id: listingId,
@@ -79,11 +80,11 @@ function spec(seriesRef: string, listingId: string, barRangeId: string, hash: st
 
 function sealInput(
   chart: { hashes: string[]; series: Line[] },
-  options: { window?: Window; seriesRefs?: string[]; subjectLabels?: string[] } = {},
+  options: { window?: Window; seriesRefs?: string[]; subjectLabels?: string[]; closes?: Array<{ end_close: number; currency: string }> } = {},
 ): SnapshotVerificationInput {
   const specs = [
-    spec(nvdaSeries, nvdaListing, nvdaRange, chart.hashes[0], options.window),
-    spec(amdSeries, amdListing, amdRange, chart.hashes[1], options.window),
+    spec(nvdaSeries, nvdaListing, nvdaRange, chart.hashes[0], options.window, options.closes?.[0]),
+    spec(amdSeries, amdListing, amdRange, chart.hashes[1], options.window, options.closes?.[1]),
   ];
   const manifest = {
     subject_refs: [{ kind: "listing" as const, id: nvdaListing }, { kind: "listing" as const, id: amdListing }],
@@ -127,6 +128,7 @@ type StoredRange = {
   range_start: string;
   range_end: string;
   delay_class: string;
+  currency: string;
   as_of: string;
 };
 
@@ -139,6 +141,7 @@ const STORED: Record<string, StoredRange> = Object.fromEntries([[nvdaRange, nvda
   range_start: "2025-12-01T05:00:00.000Z",
   range_end: AS_OF,
   delay_class: "eod",
+  currency: "USD",
   as_of: AS_OF,
 }]));
 
@@ -327,4 +330,47 @@ test("a price return chip in prose that does not cite its series' source fails (
   assert.deepEqual(failures(result), [
     ["missing_source_ref", { block_id: "answer", series_ref: nvdaSeries, source_id: sourceId, scope: "block_series_source" }],
   ]);
+});
+
+// The week of Monday Aug 31: from Friday Aug 28's close. Sep 1 was stored after the window ended.
+const WEEK_WINDOW = { kind: "window", period: "week", start: "2026-08-31", baseline_date: "2026-08-28", end_date: "2026-08-31" };
+const WEEK = {
+  bars: {
+    [nvdaRange]: [ny("2026-08-27", 95), ny("2026-08-28", 100), ny("2026-08-31", 120), ny("2026-09-01", 130)],
+    [amdRange]: [ny("2026-08-28", 50), ny("2026-08-31", 60)],
+  },
+  hashes: [
+    sha256('[["2026-08-28T04:00:00.000Z",100],["2026-08-31T04:00:00.000Z",120]]'),
+    sha256('[["2026-08-28T04:00:00.000Z",50],["2026-08-31T04:00:00.000Z",60]]'),
+  ],
+  series: [
+    { points: [{ x: "2026-08-28", y: 0 }, { x: "2026-08-31", y: 20 }] },
+    { points: [{ x: "2026-08-28", y: 0 }, { x: "2026-08-31", y: 20 }] },
+  ],
+};
+const CLOSES = [{ end_close: 120, currency: "USD" }, { end_close: 60, currency: "USD" }];
+
+test("a chart drawn over a week from its start date seals against it, and one sealed from another start does not (#678)", async () => {
+  assert.deepEqual(await verifySnapshotSeal(sealInput(WEEK, { window: WEEK_WINDOW }), barsDb(WEEK.bars)), { ok: true, failures: [] });
+  // From Jan 1, the same bars hold no close before the window.
+  const yearly = await verifySnapshotSeal(sealInput(WEEK, { window: { ...WEEK_WINDOW, start: "2026-01-01" } }), barsDb(WEEK.bars));
+  assert.deepEqual(pointsFailures(yearly), [{ block_id: "perf", series_ref: null, reason: "window" }]);
+  const moved = await verifySnapshotSeal(sealInput(WEEK, { window: { ...WEEK_WINDOW, baseline_date: "2026-08-27" } }), barsDb(WEEK.bars));
+  assert.deepEqual(pointsFailures(moved), [{ block_id: "perf", series_ref: null, reason: "window" }]);
+});
+
+test("a close chip showing the close its line ends on, in its range's currency, seals (#678)", async () => {
+  const input = sealInput(WEEK, { window: WEEK_WINDOW, closes: CLOSES });
+  assert.deepEqual(await verifySnapshotSeal(withChips(input, [[nvdaSeries, "$120.00"], [amdSeries, "20%"]]), barsDb(WEEK.bars)), { ok: true, failures: [] });
+  const wrong = await verifySnapshotSeal(withChips(input, [[nvdaSeries, "$121.00"]]), barsDb(WEEK.bars));
+  assert.deepEqual(failures(wrong), [
+    ["series_ref_format_mismatch", { block_id: "answer", series_ref: nvdaSeries, format: "$121.00", shown: ["20%", "$120.00"] }],
+  ]);
+});
+
+test("a series spec whose end close is not its bars', or whose currency is not its range's, fails (#678)", async () => {
+  const close = await verifySnapshotSeal(sealInput(WEEK, { window: WEEK_WINDOW, closes: [{ end_close: 121, currency: "USD" }, CLOSES[1]!] }), barsDb(WEEK.bars));
+  assert.deepEqual(pointsFailures(close), [{ block_id: "perf", series_ref: nvdaSeries, reason: "close" }]);
+  const currency = await verifySnapshotSeal(sealInput(WEEK, { window: WEEK_WINDOW, closes: [{ end_close: 120, currency: "EUR" }, CLOSES[1]!] }), barsDb(WEEK.bars));
+  assert.deepEqual(pointsFailures(currency), [{ block_id: "perf", series_ref: nvdaSeries, reason: "range" }]);
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { completedSessionsEnd, isCompletedSession, isCurrentEnd, selectYtdWindow, sessionDate, windowClosedAt, ytdReturns, type DailyClose } from "../src/ytd-window.ts";
+import { completedSessionsEnd, isCompletedSession, isCurrentEnd, periodStart, selectWindow, selectYtdWindow, sessionDate, windowClosedAt, ytdReturns, type DailyClose } from "../src/ytd-window.ts";
 
 const NY = "America/New_York";
 // Bars are stamped at the start of their New York session date: 05:00Z in
@@ -147,4 +147,31 @@ test("selecting at the window's close finds the window a later cutoff selected (
   const series = [{ label: "NVDA", timeZone: NY, bars: [bar("2025-12-31", 100), bar("2026-01-02", 110), bar("2026-08-31", 120)] }];
   const original = selectYtdWindow(series, "2026-09-01T03:00:00.000Z");
   assert.deepEqual(selectYtdWindow(series, windowClosedAt("2026-08-31", [NY])), original);
+});
+
+test("a period starts on its week's Monday, its month's first or January 1, on the exchange's calendar (#678)", () => {
+  // Tuesday Nov 17, 2026 at 00:51 New York.
+  const cutoff = "2026-11-17T05:51:00.000Z";
+  assert.deepEqual(["week", "month", "ytd"].map((period) => periodStart(period as "week" | "month" | "ytd", cutoff, NY)), ["2026-11-16", "2026-11-01", "2026-01-01"]);
+  // Sunday Nov 22 is still the week that began Monday Nov 16; Monday Nov 23 begins the next.
+  assert.equal(periodStart("week", "2026-11-22T17:00:00.000Z", NY), "2026-11-16");
+  assert.equal(periodStart("week", "2026-11-23T17:00:00.000Z", NY), "2026-11-23");
+  // 01:00Z on Monday Nov 23 is still Sunday in New York.
+  assert.equal(periodStart("week", "2026-11-23T01:00:00.000Z", NY), "2026-11-16");
+});
+
+test("a week to date runs from the prior week's last close to the latest close, and names its gaps by date (#678)", () => {
+  const series = [{ label: "AAPL", timeZone: NY, bars: [bar("2026-11-12", 98), bar("2026-11-13", 100), bar("2026-11-16", 103)] }];
+  const window = selectWindow(series, "2026-11-17T05:51:00.000Z", "2026-11-16");
+  assert.ok(window.ok);
+  assert.deepEqual([window.start, window.baselineDate, window.endDate, window.dates], ["2026-11-16", "2026-11-13", "2026-11-16", ["2026-11-13", "2026-11-16"]]);
+  assert.equal(ytdReturns(window.bars[0]).at(-1), 3);
+  const gap = (bars: ReadonlyArray<DailyClose>, cutoff = "2026-11-17T05:51:00.000Z") => {
+    const selected = selectWindow([{ label: "AAPL", timeZone: NY, bars }], cutoff, "2026-11-16");
+    return selected.ok ? "" : selected.gap;
+  };
+  assert.equal(gap([bar("2026-11-16", 103)]), "AAPL has no prices from before 2026-11-16");
+  assert.equal(gap([bar("2026-10-30", 90), bar("2026-11-16", 103)]), "AAPL has no close in the week before 2026-11-16");
+  // Monday morning in New York: no session of the week has closed.
+  assert.equal(gap([bar("2026-11-13", 100)], "2026-11-16T15:00:00.000Z"), "no session since 2026-11-16 has closed yet");
 });

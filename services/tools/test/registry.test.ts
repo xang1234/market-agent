@@ -49,6 +49,7 @@ test("the analyst_agent bundle holds certified financials and the stored-source 
     "certified_financials",
     "get_company_profile",
     "get_analyst_consensus",
+    "get_price_performance",
     "get_claims",
     "get_peer_set",
   ]);

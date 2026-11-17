@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
-import { perfLines, returnLabel } from "../src/perf-points.ts";
+import { closeLabel, perfLines, returnLabel } from "../src/perf-points.ts";
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 const daily = (closes: number[]) => closes.map((close, index) => ({ ts: `2026-08-${22 + index}T00:00:00.000Z`, close }));
@@ -57,4 +57,17 @@ test("YTD: returns from the baseline close on session dates, digest over only th
 
 test("a line's return label is what its chart's hover shows", () => {
   assert.deepEqual([20, -4.25, -0.0449, 6.6, 3.5800000000000001, 1234.5, 0].map(returnLabel), ["20%", "-4.25%", "-0.04%", "6.6%", "3.58%", "1,235%", "0%"]);
+});
+
+test("a window from a start date draws returns from the close before it, and a close reads in its currency (#678)", () => {
+  const drawn = perfLines({
+    kind: "window",
+    start: "2026-11-16",
+    cutoff: "2026-11-17T05:51:00.000Z",
+    series: [{ label: "AAPL", timeZone: "America/New_York", bars: [98, 100, 103].map((close, index) => ({ ts: `2026-11-${["12", "13", "16"][index]}T05:00:00.000Z`, close })) }],
+  });
+  assert.ok(drawn.ok);
+  assert.deepEqual(drawn.lines.map((line) => line.points), [[{ x: "2026-11-13", y: 0 }, { x: "2026-11-16", y: 3 }]]);
+  assert.deepEqual([drawn.window.baselineDate, drawn.window.endDate, drawn.window.bars[0].at(-1)?.close], ["2026-11-13", "2026-11-16", 103]);
+  assert.deepEqual([closeLabel(271.4, "USD"), closeLabel(1234.567, "JPY")], ["$271.40", "1,234.57 JPY"]);
 });

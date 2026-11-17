@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { returnLabel } from "../../market/src/perf-points.ts";
+import { closeLabel, returnLabel } from "../../market/src/perf-points.ts";
 import type {
   JsonObject,
   JsonValue,
@@ -1387,14 +1387,20 @@ function verifyFactRefFormats(
 }
 
 // A series chip in prose is a price return: the last point of the line its
-// series draws in the message's price charts, as the chart labels it. The
-// points themselves are checked against the stored bars (chart-points.ts), so
-// a chip no chart draws has nothing verified to show and fails.
+// series draws in the message's price charts, as the chart labels it; or the
+// close that line ends on, when its spec states one (#678). The points and the
+// close are checked against the stored bars (chart-points.ts), so a chip no
+// chart draws has nothing verified to show and fails.
 function verifySeriesRefFormats(
   input: NormalizedInput,
   addFailure: (reason: SnapshotVerifierReasonCode, details: JsonObject) => void,
 ): void {
   const blocks = flattenBlocks(input.blocks);
+  const closes = new Map((input.manifest.series_specs ?? []).flatMap((spec) =>
+    isRecord(spec) && typeof spec.series_ref === "string" && typeof spec.end_close === "number" && typeof spec.currency === "string"
+      ? [[spec.series_ref, closeLabel(spec.end_close, spec.currency)] as const]
+      : []
+  ));
   const shown = new Map<string, Set<string>>();
   for (const block of blocks) {
     if (block.kind !== "perf_comparison") continue;
@@ -1405,6 +1411,8 @@ function verifySeriesRefFormats(
       if (refs[index] === undefined || !isRecord(last) || typeof last.y !== "number") continue;
       const labels = shown.get(refs[index]) ?? new Set<string>();
       labels.add(returnLabel(last.y));
+      const close = closes.get(refs[index]);
+      if (close !== undefined) labels.add(close);
       shown.set(refs[index], labels);
     }
   }
