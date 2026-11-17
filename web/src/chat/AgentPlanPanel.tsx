@@ -26,7 +26,8 @@ export function AgentPlanPanel({ steps: streamed, active }: AgentPlanPanelProps)
   // Each step's clock, by step_id: from the first render that shows it running to the first that shows it ended.
   const stepTimes = useRef(new Map<string, StepTime>())
   const steps = active ? streamed : streamed.map((step) => step.status === 'running' ? { ...step, status: 'error' as const } : step)
-  const working = active && !steps.some((step) => step.status === 'error') && !steps.every((step) => step.status === 'done')
+  // A step that failed mid-turn ends only itself; the turn works on while any step runs or waits.
+  const working = active && steps.some((step) => step.status === 'running' || step.status === 'waiting')
   const tick = useCallback((node: HTMLElement | null) => {
     if (node === null) return
     const write = () => { node.textContent = formatElapsed(Date.now() - startedAt) }

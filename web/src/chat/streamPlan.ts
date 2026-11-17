@@ -109,7 +109,8 @@ function planStepForTool(
   // A step the server names (a fetch for the turn's companies) shows that name.
   const label = readString(event.label) ?? toolStepLabel(toolName)
   return Object.freeze({
-    step_id: label === 'Planner' ? 'planner' : `tool:${toolCallId}`,
+    // The server's answer-writing step is the plan's own composer row.
+    step_id: label === 'Planner' ? 'planner' : toolName === 'write_answer' ? 'composer' : `tool:${toolCallId}`,
     label,
     detail: toolStepDetail(toolName, event, status),
     status,

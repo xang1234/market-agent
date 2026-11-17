@@ -37,6 +37,26 @@ test('the plan panel reads "Working" with a ticking clock until every step is do
   await act(async () => root.unmount())
 })
 
+test('a step that failed while others still run leaves the turn working, its clock ticking', async (t) => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  t.after(restore)
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'], now: 0 })
+  const container = dom.window.document.getElementById('root')!
+  const root = createRoot(container)
+  const heading = () => container.querySelector('h3')?.textContent
+
+  await act(async () => root.render(<AgentPlanPanel steps={[step('Planner', 'running'), step('Reading a 10-K', 'error'), step('Composer', 'waiting')]} active />))
+  await act(async () => t.mock.timers.tick(3_000))
+  assert.equal(heading(), 'Working · 3s')
+
+  await act(async () => root.render(<AgentPlanPanel steps={[step('Planner', 'done'), step('Reading a 10-K', 'error'), step('Composer', 'done')]} active />))
+  await act(async () => t.mock.timers.tick(2_000))
+  assert.equal(heading(), 'Worked for 3s')
+
+  await act(async () => root.unmount())
+})
+
 test('a turn that ended stops the clock and the spinner, and the clock stays out of live announcements', async (t) => {
   const dom = new JSDOM('<!doctype html><div id="root"></div>')
   const restore = installDomGlobals(dom.window as unknown as Window)
