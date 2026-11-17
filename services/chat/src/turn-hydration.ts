@@ -19,14 +19,16 @@ import { frozenDataMode, marketHydrationOrigin, ytdRequestRange, type HydrationL
 export type TurnCompany = Readonly<{ issuer_id: string; label?: string; listing_id?: string }>;
 
 /**
- * Returns the issuers, lowercased, whose filings are still loading: a fetch
- * still running at the budget, or one that failed within the last minute.
- * What is stored so far is answered from; the answer says the rest is loading.
+ * Returns the issuers, lowercased, whose filings are still loading (with
+ * `pricesOnly`, whose prices are): a fetch still running at the budget, or
+ * one that failed within the last minute. What is stored so far is answered
+ * from; the answer says the rest is loading.
  */
 export type TurnHydrator = (
   companies: ReadonlyArray<TurnCompany>,
   // `ytdCutoff`: the cutoff of the YTD window the turn charts, if it charts one.
-  turn: { emit: ChatTurnEmit; turnId: string; ytdCutoff?: string },
+  // `pricesOnly`: fetch no filings, as for a price read (#678).
+  turn: { emit: ChatTurnEmit; turnId: string; ytdCutoff?: string; pricesOnly?: boolean },
 ) => Promise<ReadonlySet<string>>;
 
 const BUDGET_MS = 15_000;
@@ -86,7 +88,7 @@ export function createTurnHydrator(deps: {
   return async (companies, turn) => {
     const capped = companies.slice(0, MAX_TURN_SUBJECTS).map((company) => ({ ...company, issuer_id: company.issuer_id.toLowerCase() }));
     const origin = marketHydrationOrigin(deps.env);
-    const sec = !frozenDataMode(deps.env) && Boolean(deps.env.SEC_EDGAR_USER_AGENT?.trim());
+    const sec = !turn.pricesOnly && !frozenDataMode(deps.env) && Boolean(deps.env.SEC_EDGAR_USER_AGENT?.trim());
     if (capped.length === 0 || (!sec && origin === null)) return NONE;
     const ids = capped.map((company) => company.issuer_id);
     const cutoff = turn.ytdCutoff ?? new Date().toISOString();
@@ -159,6 +161,9 @@ export function createTurnHydrator(deps: {
       const status = done.some((fetch) => fetch.outcome === undefined) ? "still_loading" : done.every((fetch) => fetch.outcome === "done") && empty.length === 0 ? "ok" : "failed";
       const shown = status !== "still_loading" && empty.length > 0 ? `No prices found for ${labelList(empty.map((listing) => labelOf.get(listing.issuer_id)!))}` : label;
       turn.emit("tool.completed", { tool_call_id, tool_name, label: shown, status });
+    }
+    if (turn.pricesOnly) {
+      return new Set(units.filter(({ key }) => fetches.has(key) && fetches.get(key)!.outcome !== "done").flatMap(({ listings }) => listings.map((listing) => listing.issuer_id)));
     }
     return new Set(filings.filter(({ entry }) => entry.outcome !== "done").map(({ company }) => company.issuer_id));
   };

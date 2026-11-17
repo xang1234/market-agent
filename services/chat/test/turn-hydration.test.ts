@@ -191,6 +191,15 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(calls, [[LISTING], [LISTING], [LISTING]]);
   });
 
+  await t.test("a price read fetches no filings, and names the companies whose prices could not be loaded just now (#678)", async () => {
+    const fetch = fakes();
+    const failing = createTurnHydrator({ db: pool, env: LIVE, ...fetch, fetchBars: async () => { throw new Error("the market could not answer for ZETA (rate_limited) just now"); }, logger: { warn: () => {} } });
+    const loading = await failing([{ issuer_id: ZETA, label: "ZETA" }], { ...recorder().turn, ytdCutoff: "2026-11-17T05:51:00.000Z", pricesOnly: true });
+    assert.deepEqual([fetch.sec, [...loading]], [[], [ZETA]]);
+    const loaded = await createTurnHydrator({ db: pool, env: LIVE, ...fakes() })([{ issuer_id: ZETA, label: "ZETA" }], { ...recorder().turn, ytdCutoff: "2026-11-17T05:51:00.000Z", pricesOnly: true });
+    assert.deepEqual([...loaded], []);
+  });
+
   await t.test("a turn charting a YTD window fetches a listing with bars stored, to the window's cutoff", async () => {
     await db.query(
       `insert into market_bar_ranges (listing_id, source_id, provider, interval, adjustment_basis, range_start, range_end, as_of, delay_class, currency, fetched_at, expires_at)

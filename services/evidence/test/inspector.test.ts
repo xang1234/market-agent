@@ -584,6 +584,22 @@ test("loadEvidenceInspection renders a sealed YTD series spec with its listing a
   assert.deepEqual(calls.find((call) => call.text.includes("from listings"))?.values, [LISTING_ID, SOURCE_ID, USER_ID]);
 });
 
+test("loadEvidenceInspection words a week's series as its chart does, with the close it ends on (#678)", async () => {
+  const week = { ...SERIES_SPEC, window: { kind: "window", period: "week", start: "2026-10-12", baseline_date: "2026-10-09", end_date: "2026-10-15" }, end_close: 352.78, currency: "USD" };
+  const { db } = seriesDb(manifestRow({ series_specs: JSON.stringify([week]) }));
+
+  const result = await loadEvidenceInspection(db, {
+    user_id: USER_ID,
+    snapshot_id: SNAPSHOT_ID,
+    ref: { kind: "series", id: SERIES_REF },
+  });
+
+  assert.deepEqual(result.rows.filter((row) => row.label === "Window" || row.label === "Last close"), [
+    { label: "Window", value: "Week to date: 2026-10-09 close to 2026-10-15 close" },
+    { label: "Last close", value: "$352.78 on 2026-10-15" },
+  ]);
+});
+
 test("loadEvidenceInspection words a series without a window by its stored range, from a JSON-text manifest", async () => {
   const { window: _window, points: _points, ...latest } = SERIES_SPEC;
   const { db } = seriesDb(manifestRow({ series_specs: JSON.stringify([latest]) }));

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { loadPerfComparisonBlocks, perfDisclosureBlocks, type SealedPriceRange } from "../src/perf-block.ts";
+import { loadPerfComparisonBlocks, loadPricePerformance, perfDisclosureBlocks, type SealedPriceRange } from "../src/perf-block.ts";
 import { fakeQuery } from "./fake-query.ts";
 
 const SNAPSHOT_ID = "11111111-1111-4111-a111-111111111111";
@@ -20,6 +20,7 @@ function range(ticker: string, listingId: string, closes: number[], start = "202
     range_start: start,
     range_end: AS_OF,
     as_of: AS_OF,
+    currency: "USD",
     bars: closes.map((close, index) => ({ ts: `2026-08-${String(22 + index).padStart(2, "0")}T00:00:00.000Z`, close })),
   };
 }
@@ -38,6 +39,7 @@ function storedRow(r: SealedPriceRange) {
     range_start: r.range_start,
     range_end: r.range_end,
     as_of: r.as_of,
+    currency: r.currency,
     bars: r.bars,
   };
 }
@@ -310,4 +312,40 @@ test("a frozen dataset charts its stored YTD window whatever its age (#256)", as
   const [chart] = await loadPerfComparisonBlocks(ytdDb(staleYtdRows()), { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: CURRENT_CUTOFF, frozenPrices: true });
   assert.equal(chart?.kind, "perf_comparison");
   assert.equal(chart.default_range, "YTD 2026: 2025-12-31 close to 2026-05-29 close");
+});
+
+test("one company's week to date is charted from the prior week's last close, its spec pinning the close it ends on (#678)", async () => {
+  // Tuesday Nov 17, 2026 at 00:51 New York: the week began Monday Nov 16.
+  const asOf = "2026-11-17T05:51:00.000Z";
+  const week = [ytdBar("2026-11-12", 98), { ts: "2026-11-13T05:00:00.000Z", close: 100 }, { ts: "2026-11-16T05:00:00.000Z", close: 103.5 }];
+  const seen: Array<{ text: string; values?: unknown[] }> = [];
+  const chart = await loadPricePerformance(ytdDb([ytdRow(NVDA, week)], seen), { listings: LISTINGS.slice(0, 1), snapshotId: SNAPSHOT_ID, asOf, period: "week", scope: "w:" });
+  assert.equal(chart?.kind, "perf_comparison");
+  assert.equal(chart.title, "Price return, week to date (split-adjusted, excluding dividends)");
+  assert.equal(chart.default_range, "Week to date: 2026-11-13 close to 2026-11-16 close");
+  const [spec] = chart.provenance_series_specs as Array<Record<string, unknown>>;
+  assert.deepEqual([spec!.window, spec!.end_close, spec!.currency], [{ kind: "window", period: "week", start: "2026-11-16", baseline_date: "2026-11-13", end_date: "2026-11-16" }, 103.5, "USD"]);
+  assert.notEqual(chart.id, (await chartOf())[0]!.id, "a scoped chart's id is its own");
+  // The range must reach back over the close before Monday: from Nov 9 UTC.
+  assert.equal(seen.find((query) => query.text.includes("market_bar_ranges"))!.values?.[4], "2026-11-09T00:00:00.000Z");
+});
+
+test("a company with no prices before the period, or none at all, is a note saying so, never an empty chart (#678)", async () => {
+  const noteOf = async (rows: Array<Record<string, unknown>>) => {
+    const block = await loadPricePerformance(ytdDb(rows), { listings: LISTINGS.slice(0, 1), snapshotId: SNAPSHOT_ID, asOf: "2026-11-17T05:51:00.000Z", period: "week", scope: "w:" });
+    return [[block.kind, (block.segments as Array<{ text: string }>)[0]!.text]];
+  };
+  assert.deepEqual(await noteOf([]), [["rich_text", "Week-to-date price performance is not shown: NVDA has no prices from before 2026-11-16."]]);
+  // The provider answered with no bars: the range is stored empty.
+  assert.deepEqual(await noteOf([ytdRow(NVDA, [])]), [["rich_text", "Week-to-date price performance is not shown: NVDA has no daily prices on file."]]);
+});
+
+test("a week to date that stops days before the last completed session is a gap, never a shorter week (#678)", async () => {
+  // Saturday Nov 21 at noon New York: Friday Nov 20 is the last completed session, but the stored bars stop on Monday.
+  const week = [{ ts: "2026-11-13T05:00:00.000Z", close: 100 }, { ts: "2026-11-16T05:00:00.000Z", close: 103.5 }];
+  const block = await loadPricePerformance(ytdDb([ytdRow(NVDA, week)]), { listings: LISTINGS.slice(0, 1), snapshotId: SNAPSHOT_ID, asOf: "2026-11-21T17:00:00.000Z", period: "week", scope: "w:" });
+  assert.deepEqual([block.kind, (block.segments as Array<{ text: string }>)[0]!.text], [
+    "rich_text",
+    "Week-to-date price performance is not shown: the latest close every company has is 2026-11-16, too old to be current at the 2026-11-21 cutoff.",
+  ]);
 });

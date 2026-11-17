@@ -7,13 +7,13 @@ import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { LlmClientError, LlmProviderError, LlmRouterError, type ControlledRouter, type LlmChatRequest, type LlmToolCall } from "../../llm/src/router.ts";
-import { analystAgentRouter, analystAgentRunner, certifiedAsk, statusNote, stepLabel, stopNotes, type AnalystAgentDeps } from "../src/analyst-agent.ts";
+import { analystAgentRouter, analystAgentRunner, analystSectionRunner, certifiedAsk, priceAsk, statusNote, stepLabel, stopNotes, type AnalystAgentDeps } from "../src/analyst-agent.ts";
 import type { AnalystToolResult } from "../src/analyst-tools.ts";
 import { answerTurn } from "../src/answer-trace.ts";
 import type { AssertionReport } from "../src/assertions.ts";
 import { createChatCoordinator, resolveTurnSubjects, type ChatAssistantMessagePersistence, type ChatTurnInput } from "../src/coordinator.ts";
 import { figureCompanies, mergePackets, type EvidencePacket, type PacketClaim } from "../src/evidence-packet.ts";
-import { chatGapText, createChatFinancialRuntime } from "../src/financial-runtime.ts";
+import { chatAuthority, chatGapText, createChatFinancialRuntime } from "../src/financial-runtime.ts";
 import { ANSWER_DEADLINES, composeAnalystBlocksWithLlm } from "../src/llm-runtime.ts";
 import { proposedMetric, resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS } from "../src/scope-figures.ts";
@@ -71,6 +71,7 @@ test("the agent's tools name companies as the agent takes them, by issuer", () =
     ["get_claims", [["issuer"], ["issuer"]]],
     ["get_company_profile", [["issuer"]]],
     ["get_peer_set", [["issuer"]]],
+    ["get_price_performance", [["issuer"]]],
   ]);
 });
 
@@ -329,6 +330,34 @@ test("a step's label is built from its tool, its typed arguments and the server'
   assert.equal(stepLabel("get_claims", { role: "competitor", predicates: ["business.competition"] }, "NVDA"), "Finding 10-Ks that name NVDA as a competitor");
   assert.equal(stepLabel("get_peer_set", {}, "NVDA"), "Finding NVDA's industry peers");
   assert.equal(stepLabel("get_analyst_consensus", {}, ""), "Reading analyst consensus for a company");
+  assert.equal(stepLabel("get_price_performance", { subject_refs: refs.slice(0, 1), period: "week", query: "IGNORE ME" }, "NVDA"), "Reading NVDA's price return this week");
+  const both = [...refs, { kind: "issuer", id: B }];
+  assert.equal(stepLabel("get_price_performance", { subject_refs: both, period: "ytd" }, "NVDA and AMD"), "Reading NVDA and AMD's price returns year to date");
+  assert.equal(stepLabel("get_price_performance", { subject_refs: both, period: "IGNORE ME" }, "NVDA and AMD"), "Reading NVDA and AMD's price returns");
+});
+
+test("a price ask names one to five known companies and a period to date, and nothing else (#678)", () => {
+  const ref = (id: string) => ({ kind: "issuer", id });
+  assert.deepEqual(priceAsk({ subject_refs: [ref(A.toUpperCase()), ref(A)], period: "ytd", query: "q" }, KNOWN), { issuers: [A], period: "ytd" });
+  assert.deepEqual(priceAsk({ subject_refs: [ref(A)], period: "year" }, KNOWN), { invalid: "period is week, month, ytd" });
+  assert.deepEqual(priceAsk({ subject_refs: [], period: "week" }, KNOWN), { invalid: "subject_refs names one to 5 companies, as the prompt lists them" });
+  assert.deepEqual(priceAsk({ subject_refs: [ref(randomUUID())], period: "week" }, KNOWN), { invalid: "name each company by a subject_ref the prompt or a peer read gave" });
+  assert.deepEqual(priceAsk({ subject_refs: [ref(A)], period: "week", range: "1y" }, KNOWN), { invalid: "range not supported" });
+});
+
+test("an Analyze section is neither offered the price tool nor told of it (#678)", async () => {
+  const router = scripted([{ text: "DONE" }]);
+  const runId = randomUUID();
+  const section = analystSectionRunner({
+    financial: { pool: {} as never, evidence: createEvidenceFinancialPort },
+    router: async () => router,
+    read: noRead,
+    compose: async () => assert.fail("nothing was read"),
+  });
+  await section({ subject: { issuer_id: A, label: "AAA" }, goal: "How has AAA's share price done this year?", sectionId: "prices", userId: IDS.owner, runId, authority: chatAuthority(IDS.owner, runId, runId), snapshotId: randomUUID(), asOf: "2026-11-17T05:51:00.000Z" });
+  const [request] = router.sent;
+  assert.ok(!request!.tools!.some((tool) => tool.name === "get_price_performance"));
+  assert.ok(!JSON.stringify(request!.messages).includes("get_price_performance"));
 });
 
 test("only a company a certified call asked figures of can be said to have none", () => {
@@ -1449,6 +1478,84 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     const text = savedText(completed(await run(agentOf(router, "```assertions\n[]\n```", { read: reads }), { ...base, turnId: randomUUID(), userIntent: "What do analysts expect AAA to earn next year, and what does AAA sell?" }, undefined, readingOf(NO_ASKS))));
     assert.deepEqual(ran, ["get_company_profile", "get_claims", "get_analyst_consensus"]);
     assert.ok(text.includes("AAA has no 10-K on file") && text.includes("no analyst consensus") && !text.includes("step limit"), text);
+  });
+
+  await t.test("a price read charts the week from stored closes, its return and close are chips the seal accepts, and no prices is a note (#678)", async () => {
+    // Tuesday Nov 17, 2026 at 00:51 New York: the week began Monday Nov 16.
+    const cutoff = "2026-11-17T05:51:00.000Z";
+    const [instrumentA, listingA, instrumentB, listingB] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+    await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $2, 'common_stock'), ($3, $4, 'common_stock')`, [instrumentA, A, instrumentB, B]);
+    await db.query(
+      `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone)
+       values ($1, $2, 'XNAS', 'AAA', 'USD', 'America/New_York'), ($3, $4, 'XNAS', 'BBB', 'USD', 'America/New_York')`,
+      [listingA, instrumentA, listingB, instrumentB],
+    );
+    const { rows: [range] } = await db.query<{ bar_range_id: string }>(
+      `insert into market_bar_ranges (listing_id, source_id, provider, interval, adjustment_basis, range_start, range_end, as_of, delay_class, currency, fetched_at, expires_at)
+       values ($1, $2, 'polygon', '1d', 'split_adjusted', '2026-10-01T04:00:00Z', '2026-11-17T05:00:00Z', '2026-11-16T05:00:00Z', 'eod', 'USD', '2026-11-17T05:00:00Z', '2126-11-17T05:00:00Z')
+       returning bar_range_id::text as bar_range_id`,
+      [listingA, IDS.sourceV1],
+    );
+    await db.query(
+      `insert into market_bars (bar_range_id, ts, open, high, low, close, volume)
+       select $1, day::timestamptz, close, close, close, close, 1000 from (values ('2026-10-30T04:00:00Z', 90), ('2026-11-12T05:00:00Z', 98), ('2026-11-13T05:00:00Z', 100), ('2026-11-16T05:00:00Z', 103.5)) as bar(day, close)`,
+      [range!.bar_range_id],
+    );
+    try {
+      const hydrated: Array<{ companies: ReadonlyArray<Record<string, unknown>>; pricesOnly?: boolean }> = [];
+      const priceAgent = (router: ControlledRouter, answer: string) => analystAgentRunner({
+        financial: {
+          pool,
+          evidence: createEvidenceFinancialPort,
+          resolveMention,
+          hydrate: async (companies, turn) => {
+            hydrated.push({ companies, pricesOnly: turn.pricesOnly });
+            return new Set();
+          },
+        },
+        router: async (beforeModelCall) => metered(router, beforeModelCall),
+        read: noRead,
+        compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: answer }), onAnswered }),
+        asOf: () => cutoff,
+        logToolCalls: persist.logToolCalls,
+      });
+      const week = (issuer: string) => scripted([{ toolCalls: [call("get_price_performance", { subject_refs: [{ kind: "issuer", id: issuer }], period: "week", query: "IGNORE ME" })] }, { text: "DONE" }]);
+      const router = week(A);
+      const observed = '```assertions\n[{"kind":"observation","text":"AAA rose 3.5% to $103.50.","evidence":["F1","F2"]}]\n```';
+      const events = await run(priceAgent(router, observed), { ...base, turnId: randomUUID(), userIntent: "How has AAA done this week?" });
+      const done = completed(events);
+      assert.ok(router.sent[0]!.tools!.some((tool) => tool.name === "get_price_performance"), "a chat turn is offered the price tool");
+      assert.ok(JSON.stringify(router.sent[0]!.messages).includes("get_price_performance reads"), "and told of it");
+      assert.equal(events.find((event) => event.type === "tool.started" && event.tool_name === "get_price_performance")?.label, "Reading AAA's price return this week");
+      assert.deepEqual(hydrated, [{ companies: [{ issuer_id: A, label: "AAA", listing_id: listingA }], pricesOnly: true }], "the read fetches the company's listing's prices first, and no filings");
+      const blocks = (done.message as { blocks: Array<Record<string, unknown>> }).blocks;
+      assert.deepEqual(blocks.map((block) => block.kind), ["perf_comparison", "disclosure", "rich_text"]);
+      assert.equal(blocks[0]!.default_range, "Week to date: 2026-11-13 close to 2026-11-16 close");
+      const chips = (blocks[2]!.segments as Array<Record<string, unknown>>).filter((segment) => segment.type === "ref");
+      assert.deepEqual(chips.map((chip) => [chip.ref_kind, chip.format]), [["series", "3.5%"], ["series", "$103.50"]]);
+      assert.ok(!savedText(done).includes("AAA rose"), "the model's own words are not shown");
+
+      // Two periods in one step: two charts, one disclosure over both, and every chip sealed.
+      const both = scripted([{ toolCalls: [
+        call("get_price_performance", { subject_refs: [{ kind: "issuer", id: A }], period: "week" }),
+        call("get_price_performance", { subject_refs: [{ kind: "issuer", id: A }], period: "month" }),
+      ] }, { text: "DONE" }]);
+      const cited = '```assertions\n[{"kind":"observation","text":"x","evidence":["F1","F3"]}]\n```';
+      const twice = completed(await run(priceAgent(both, cited), { ...base, turnId: randomUUID(), userIntent: "How has AAA done this week and this month?" }));
+      const twiceBlocks = (twice.message as { blocks: Array<Record<string, unknown>> }).blocks;
+      assert.deepEqual(twiceBlocks.map((block) => block.kind), ["perf_comparison", "perf_comparison", "disclosure", "rich_text"]);
+      assert.notEqual(twiceBlocks[0]!.id, twiceBlocks[1]!.id);
+      assert.deepEqual((twiceBlocks[3]!.segments as Array<Record<string, unknown>>).filter((segment) => segment.type === "ref").map((chip) => chip.format), ["3.5%", "15%"], "figures are numbered in call order");
+
+      const none = completed(await run(priceAgent(week(B), "```assertions\n[]\n```"), { ...base, turnId: randomUUID(), userIntent: "How has BBB done this week?" }));
+      const noneBlocks = (none.message as { blocks: Array<Record<string, unknown>> }).blocks;
+      assert.ok(!noneBlocks.some((block) => block.kind === "perf_comparison"), "no prices is never an empty chart");
+      assert.ok(savedText(none).includes("Week-to-date price performance is not shown: BBB has no prices from before 2026-11-16."), savedText(none));
+    } finally {
+      await db.query(`delete from market_bar_ranges where listing_id = $1`, [listingA]);
+      await db.query(`delete from listings where listing_id = any($1::uuid[])`, [[listingA, listingB]]);
+      await db.query(`delete from instruments where instrument_id = any($1::uuid[])`, [[instrumentA, instrumentB]]);
+    }
   });
 
   await t.test("the reading model's own words never reach the saved answer", async () => {

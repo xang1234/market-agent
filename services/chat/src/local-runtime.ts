@@ -41,7 +41,7 @@ import { causeFamilies, reReadExplained, type Explained } from "./filed-cause.ts
 import { readingAsks, readsEngine, resolveResearchScope, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import { proposeScope } from "./scope-proposal.ts";
 import { frozenDataMode, hydrateYtdBars, turnNow } from "./ytd-hydration.ts";
-import { companyListings, loadPerfComparisonBlocks, priceListingsForTurn, turnCompanies } from "./perf-block.ts";
+import { companyListings, loadPerfComparisonBlocks, priceListingsForTurn, requestedListingsOf, turnCompanies } from "./perf-block.ts";
 import { loadPriorCauseClaims, loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { createLlmThreadTitleModel, type DroppedClaims } from "./llm-runtime.ts";
@@ -158,7 +158,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const draft = scopeAt(turnNow(process.env));
   const ytdCutoff = chartedWindow(draft)?.cutoff;
   await hydrateTurn(
-    draft.companies.map((company) => ({ issuer_id: company.issuer_id, label: company.label, listing_id: named.get(company.issuer_id)?.listing_id })),
+    draft.companies.map((company) => ({ issuer_id: company.issuer_id, label: company.label, listing_id: named.get(company.issuer_id.toLowerCase())?.listing_id })),
     { emit: context.emit, turnId: context.turnId ?? context.runId, ...(ytdCutoff ? { ytdCutoff } : {}) },
   ).catch((reason: unknown) => console.warn("[chat] fetching the turn's companies failed; answering from what is on file", reason));
   const asOf = turnNow(process.env);
@@ -464,21 +464,6 @@ async function continuedScope(
 export const loadPriorSubjects: ChatPriorSubjectsLoader = ({ threadId }) =>
   loadThreadPriorSubjects(pool(), { threadId });
 
-// For companies the user named by listing, that listing (and its ticker).
-function requestedListingsOf(
-  subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>,
-): Map<string, { listing_id: string; label: string }> {
-  const out = new Map<string, { listing_id: string; label: string }>();
-  for (const subject of subjects) {
-    if (subject.subject_ref.kind !== "listing") continue;
-    const refs = structuredRefsFromHandoff(subject.handoff);
-    const listing = refs.listings.find((candidate) => candidate.ref.id === subject.subject_ref.id);
-    if (refs.issuer === null || listing === undefined || out.has(refs.issuer.id)) continue;
-    out.set(refs.issuer.id, { listing_id: listing.ref.id, label: listing.ticker ?? subject.display_label });
-  }
-  return out;
-}
-
 // The turn's canonical companies, primary first, as its scope records them.
 function companiesOf(subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>): ResearchScope["companies"] {
   const seen = new Set<string>();
@@ -572,6 +557,7 @@ export const analystAgent = analystAgentRunner({
     return { tool: name, status: "unavailable" as const, reason: "the read failed" };
   }),
   asOf: () => turnNow(process.env),
+  frozenPrices: frozenDataMode(process.env),
   conversation: (threadId) => loadRecentConversation(pool(), { threadId, limit: CONVERSATION_MESSAGES }),
   logToolCalls: writeLocalToolCallLogs,
 });

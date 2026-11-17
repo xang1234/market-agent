@@ -114,6 +114,16 @@ export function ytdYear(cutoff: string, timeZone: string): number {
 export const PRICE_PERIODS = ["week", "month", "ytd"] as const;
 export type PricePeriod = (typeof PRICE_PERIODS)[number];
 
+// How each period reads: as a chart's range, a gap note's opening, a
+// figure's period and a step label.
+export const PERIOD_WORDS: Readonly<Record<PricePeriod, Readonly<{ range: string; gap: string; phrase: string; step: string }>>> = {
+  week: { range: "Week to date", gap: "Week-to-date", phrase: "the week to date", step: "this week" },
+  month: { range: "Month to date", gap: "Month-to-date", phrase: "the month to date", step: "this month" },
+  ytd: { range: "YTD", gap: "Year-to-date", phrase: "the year to date", step: "year to date" },
+};
+
+export const isPricePeriod = (value: unknown): value is PricePeriod => (PRICE_PERIODS as ReadonlyArray<unknown>).includes(value);
+
 // A period's first date on the exchange's calendar at the cutoff: its week's
 // Monday, its month's first, or January 1.
 export function periodStart(period: PricePeriod, cutoff: string, timeZone: string): string {
