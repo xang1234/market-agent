@@ -4,6 +4,7 @@ import type { QueryResult } from "pg";
 
 import {
   AgentRunStateError,
+  AgentRunSupersededError,
   completeAgentRun,
 } from "../src/agent-run-repo.ts";
 import {
@@ -105,6 +106,36 @@ test("handleAgentRunMessage claims a new run, executes once, and completes the r
   assert.match(queries.at(-1)?.text ?? "", /update agent_run_logs/);
   assert.equal(queries.at(-1)?.values?.[1], JSON.stringify({ findings: 1 }));
 });
+
+for (const [found, thrown, failureUpdates, ownFailure] of [
+  ["its commit fence", new AgentRunSupersededError("agent run lost its claim before it could commit"), 0, null],
+  ["its failure update", new Error("stage failed"), 1, "stage failed"],
+] as const) {
+  test(`handleAgentRunMessage ends a run another claim took over as superseded when ${found} finds it ended`, async () => {
+    const { db, queries } = fakeDb((text, values) => {
+      if (/insert into agent_run_logs/.test(text)) {
+        return [{ agent_run_log_id: values?.[0], agent_id: values?.[1], started_at: STARTED_AT, ended_at: null, duration_ms: null, inputs_watermark: null, outputs_summary: null, status: "running", error: null }];
+      }
+      if (text.trimStart().startsWith("select")) {
+        return [{ agent_run_log_id: RUN_ID, agent_id: AGENT_ID, started_at: STARTED_AT, ended_at: ENDED_AT, duration_ms: 1000, inputs_watermark: null, outputs_summary: {}, status: "failed", error: "agent run claim expired", claim_expires_at: null }];
+      }
+      return [];
+    });
+
+    const result = await handleAgentRunMessage(db, {
+      message: { run_id: RUN_ID, agent_id: AGENT_ID },
+      execute: async () => { throw thrown; },
+    });
+
+    assert.deepEqual(result, {
+      status: "superseded",
+      run_id: RUN_ID,
+      run: { agent_run_log_id: RUN_ID, agent_id: AGENT_ID, started_at: STARTED_AT, ended_at: ENDED_AT, duration_ms: 1000, inputs_watermark: null, outputs_summary: {}, status: "failed", error: "agent run claim expired", claim_expires_at: null },
+      error: ownFailure,
+    });
+    assert.equal(queries.filter((query) => /error = \$3/.test(query.text)).length, failureUpdates);
+  });
+}
 
 test("handleAgentRunMessage short-circuits duplicate run_id before side effects", async () => {
   let executions = 0;

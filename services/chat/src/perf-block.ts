@@ -3,7 +3,8 @@
 // until #444 lets the engine state a price return (#398 D2). Drawn only from
 // sealed bars; nothing is fetched live. A window short of the full year, or no
 // longer current at the cutoff (#256), is a named gap, never a shorter window
-// called YTD.
+// called YTD. The analyst agent's price tool draws a week or month to date the
+// same way, for one company or several (#678).
 //
 // Lines are only comparable on one price basis (#191): Polygon's prices are
 // split-adjusted only, so their returns exclude dividends, while other sources
@@ -16,11 +17,14 @@
 import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { MISLABELED_POLYGON_RANGE_SQL } from "../../market/src/cache-repository.ts";
-import { PERF_POINTS, perfLines, type PerfLine } from "../../market/src/perf-points.ts";
-import { isCurrentEnd, sessionDate, ytdYear, type YtdWindow } from "../../market/src/ytd-window.ts";
+import { closeLabel, PERF_POINTS, perfLines, returnLabel, type PerfLine } from "../../market/src/perf-points.ts";
+import { isCurrentEnd, PERIOD_WORDS, periodStart, sessionDate, type PricePeriod, type YtdWindow } from "../../market/src/ytd-window.ts";
 import { compileDisclosurePolicy } from "../../snapshot/src/disclosure-policy.ts";
 import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import { noteBlock, stableUuid } from "./chat-ids.ts";
+import type { PacketFigure } from "./evidence-packet.ts";
+import { structuredRefsFromHandoff } from "./local-runtime-structured.ts";
+import type { ChatResolvedSubjectPreResolution } from "./subjects.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
 
 const INTERVAL = "1d";
@@ -32,11 +36,16 @@ const BASIS_WORDS: Record<ComparableBasis, string> = {
   split_and_div_adjusted: "split- and dividend-adjusted",
 };
 const NORMALIZATION = "pct_return";
-// A YTD window needs a stored range that starts by Christmas Eve of the prior
-// year (exchange-local), so its last December sessions are in it. Ranges are
-// compared against the start of Dec 25 UTC, which is after Dec 24 begins in
-// every exchange's time zone; selectYtdWindow then checks the bars themselves.
-const YEAR_END_LOOKBACK = "-12-25T00:00:00.000Z";
+// A window needs a stored range that starts by the eighth day before its start
+// (exchange-local), so the close before it is in it. Ranges are compared
+// against the start of the seventh day before, UTC, which is after the eighth
+// begins in every exchange's time zone; selectWindow then checks the bars
+// themselves. For YTD that is Dec 25 UTC.
+const LOOKBACK_DAYS = 7;
+// A week or month to date that stops more than three days before the last
+// completed session is not to date: a weekend and a holiday fit in three.
+// ponytail: stands in for an exchange calendar, as ytd-window.ts's week does.
+const SHORT_PERIOD_CURRENT_DAYS = 3;
 
 type PerfInput = {
   listings: ReadonlyArray<{ id: string; label: string }>;
@@ -45,6 +54,10 @@ type PerfInput = {
   // The frozen data modes' prices (frozenDataMode): their YTD window is charted
   // whatever its age, since nothing can refresh it.
   frozenPrices?: boolean;
+  // YTD unless given (#678).
+  period?: PricePeriod;
+  // Tells apart the ids of two charts in one snapshot (#678).
+  scope?: string;
 };
 
 export type SealedPriceRange = {
@@ -58,6 +71,7 @@ export type SealedPriceRange = {
   range_start: string;
   range_end: string;
   as_of: string;
+  currency: string;
   bars: ReadonlyArray<{ ts: string; close: number }>;
 };
 
@@ -72,7 +86,7 @@ export async function loadPerfComparisonBlocks(
 ): Promise<ReadonlyArray<Block>> {
   if (input.listings.length < 2) return [];
   try {
-    const block = await loadSealedRanges(db, input);
+    const block = await loadPricePerformance(db, input);
     return block.kind === "perf_comparison" ? [block, ...perfDisclosureBlocks(block)] : [block];
   } catch (reason) {
     console.warn("[chat] price performance unavailable; answering without it", reason);
@@ -80,35 +94,85 @@ export async function loadPerfComparisonBlocks(
   }
 }
 
-// The disclosures the verifier derives from the chart's sealed series (e.g.
-// end-of-day or delayed pricing), built by the same policy so they match.
-export function perfDisclosureBlocks(chart: Block): ReadonlyArray<Block> {
+// The disclosures the verifier derives from the charts' sealed series (e.g.
+// end-of-day or delayed pricing), built by the same policy so they match. One
+// block covers every chart of a snapshot, as its id is the policy's own.
+export function perfDisclosureBlocks(...charts: ReadonlyArray<Block>): ReadonlyArray<Block> {
+  const [first] = charts;
+  if (first === undefined) return [];
   return compileDisclosurePolicy({
-    snapshot_id: String(chart.snapshot_id),
+    snapshot_id: String(first.snapshot_id),
     manifest: {
-      subject_refs: chart.subject_refs as ReadonlyArray<SnapshotSubjectRef>,
-      source_ids: chart.source_refs as ReadonlyArray<string>,
-      series_specs: chart.provenance_series_specs as never,
-      as_of: String(chart.as_of),
-      basis: chart.basis as ComparableBasis,
+      subject_refs: charts.flatMap((chart) => chart.subject_refs as ReadonlyArray<SnapshotSubjectRef>),
+      source_ids: [...new Set(charts.flatMap((chart) => chart.source_refs as ReadonlyArray<string>))],
+      series_specs: charts.flatMap((chart) => chart.provenance_series_specs as ReadonlyArray<never>),
+      as_of: charts.map((chart) => String(chart.as_of)).sort()[0]!,
+      basis: first.basis as ComparableBasis,
       normalization: NORMALIZATION,
     },
   }).required_disclosure_blocks;
 }
 
-async function loadSealedRanges(
+// The figures a price chart shows, one return and one close per line, each a
+// series chip the seal checks against the line (#678). The period reads its
+// dates in full, as a week's would read as one month by month and year.
+export function priceFigures(chart: Block, period: PricePeriod): Array<Omit<PacketFigure, "id">> {
+  const lines = chart.series as ReadonlyArray<{ name: string; points: ReadonlyArray<{ y: number }> }>;
+  const specs = chart.provenance_series_specs as ReadonlyArray<{ series_ref: string; end_close: number; currency: string; window: { baseline_date: string; end_date: string } }>;
+  const sources = chart.source_refs as ReadonlyArray<string>;
+  return lines.flatMap((line, index) => {
+    const spec = specs[index]!;
+    const { baseline_date, end_date } = spec.window;
+    return [
+      { company: line.name, metric: "Price return", period: `${PERIOD_WORDS[period].phrase}, from the ${dayText(baseline_date)} close to the ${dayText(end_date)} close`, value: returnLabel(line.points.at(-1)!.y), series_ref: spec.series_ref, source_ids: sources },
+      { company: line.name, metric: "Last close", period: `the ${dayText(end_date)} session`, value: closeLabel(spec.end_close, spec.currency), series_ref: spec.series_ref, source_ids: sources },
+    ];
+  });
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const dayText = (date: string) => `${MONTHS[Number(date.slice(5, 7)) - 1]} ${Number(date.slice(8, 10))}, ${date.slice(0, 4)}`;
+
+// For companies the user named by listing, that listing (and its ticker),
+// keyed by lowercase issuer id.
+export function requestedListingsOf(
+  subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+): Map<string, { listing_id: string; label: string }> {
+  const out = new Map<string, { listing_id: string; label: string }>();
+  for (const subject of subjects) {
+    // A handoff the resolver did not hydrate names no listing.
+    if (subject.subject_ref.kind !== "listing" || subject.handoff?.context === undefined) continue;
+    const refs = structuredRefsFromHandoff(subject.handoff);
+    const listing = refs.listings.find((candidate) => candidate.ref.id === subject.subject_ref.id);
+    const issuer = refs.issuer?.id.toLowerCase();
+    if (issuer === undefined || listing === undefined || out.has(issuer)) continue;
+    out.set(issuer, { listing_id: listing.ref.id, label: listing.ticker ?? subject.display_label });
+  }
+  return out;
+}
+
+// The price return over a period to date (YTD unless given) of one company or
+// several: the chart, or the note that stands in its place. The analyst agent
+// reads it alone (#678), its disclosures compiled once over every chart of the
+// answer (perfDisclosureBlocks). A failed read rejects.
+export async function loadPricePerformance(
   db: QueryExecutor,
   input: PerfInput,
 ): Promise<Block> {
   const zones = await listingTimeZones(db, input.listings);
   const zoneOf = (listingId: string) => zones.get(listingId) ?? "UTC";
-  const years = new Set(input.listings.map((listing) => ytdYear(input.asOf, zoneOf(listing.id))));
-  if (years.size > 1) return ytdGapBlock(input, "the companies' exchanges are in different calendar years at the cutoff");
-  const [year] = years as Set<number>;
+  const period = input.period ?? "ytd";
+  const starts = new Set(input.listings.map((listing) => periodStart(period, input.asOf, zoneOf(listing.id))));
+  if (starts.size > 1) {
+    return gapBlock(input, `the companies' exchanges are in different ${period === "ytd" ? "calendar years" : `${period}s`} at the cutoff`);
+  }
+  const [start] = starts as Set<string>;
+  const since = period === "ytd" ? start!.slice(0, 4) : start!;
   // One statement, so the range and its bars come from one consistent view: a
   // cache refresh upserts the same bar_range_id and replaces its bars, and two
   // reads could pair old metadata with new prices.
-  const { rows: ranges } = await db.query<{
+  const lookback = new Date(Date.parse(`${start}T00:00:00.000Z`) - LOOKBACK_DAYS * 86_400_000).toISOString();
+  const { rows: stored } = await db.query<{
     bar_range_id: string;
     listing_id: string;
     ticker: string;
@@ -118,11 +182,12 @@ async function loadSealedRanges(
     range_start: Date | string;
     range_end: Date | string;
     as_of: Date | string;
+    currency: string;
     bars: Array<{ ts: string; close: number }>;
   }>(
     `with picked as (
        select distinct on (listing_id, adjustment_basis)
-              bar_range_id, listing_id, adjustment_basis, source_id, delay_class, range_start, range_end, as_of
+              bar_range_id, listing_id, adjustment_basis, source_id, delay_class, range_start, range_end, as_of, currency
          from market_bar_ranges
         where listing_id = any($1::uuid[])
           and interval = $2
@@ -137,16 +202,16 @@ async function loadSealedRanges(
           -- compare the database's clock with the app's and let a concurrent
           -- refresh of the same range hide one this turn just fetched.
           and as_of <= $4::timestamptz
-          -- Only ranges that reach back over the year-end.
-          and range_start <= $5::timestamptz
-        order by listing_id, adjustment_basis, range_end desc, fetched_at desc
+        -- A range that reaches back over the close before the window first;
+        -- one that does not only says the listing has prices on file.
+        order by listing_id, adjustment_basis, range_start <= $5::timestamptz desc, range_end desc, fetched_at desc
      )
      select picked.bar_range_id::text as bar_range_id,
             picked.listing_id::text as listing_id,
             listings.ticker,
             picked.adjustment_basis,
             picked.source_id::text as source_id,
-            picked.delay_class, picked.range_start, picked.range_end, picked.as_of,
+            picked.delay_class, picked.range_start, picked.range_end, picked.as_of, picked.currency,
             coalesce(
               (select json_agg(json_build_object('ts', bar.ts, 'close', bar.close::float8) order by bar.ts)
                  from market_bars bar
@@ -160,9 +225,10 @@ async function loadSealedRanges(
       INTERVAL,
       COMPARABLE_BASES,
       input.asOf,
-      `${year! - 1}${YEAR_END_LOOKBACK}`,
+      lookback,
     ],
   );
+  const ranges = stored.filter((range) => Date.parse(iso(range.range_start)) <= Date.parse(lookback));
   const rangeOf = (listingId: string, basis: ComparableBasis) =>
     ranges.find((range) => range.listing_id === listingId && range.adjustment_basis === basis);
   const sealedOf = (listing: { id: string; label: string }, basis: ComparableBasis): SealedPriceRange | undefined => {
@@ -179,30 +245,37 @@ async function loadSealedRanges(
       range_start: iso(range.range_start),
       range_end: iso(range.range_end),
       as_of: iso(range.as_of),
+      currency: range.currency,
       bars: range.bars.map((bar) => ({ ts: iso(bar.ts), close: bar.close })),
     };
   };
-  const hasRange = (listing: { id: string }) => ranges.some((range) => range.listing_id === listing.id);
+  const priced = (listing: { id: string }, among: typeof stored) => among.some((range) => range.listing_id === listing.id && range.bars.length > 0);
   const shared = COMPARABLE_BASES.filter((basis) => input.listings.every((listing) => rangeOf(listing.id, basis)));
-  const uncovered = input.listings.find((listing) => !hasRange(listing));
-  if (uncovered) return ytdGapBlock(input, `${uncovered.label} has no prices from before ${year}`);
+  // No range stored, or one the provider answered with no bars (#678).
+  const unpriced = input.listings.find((listing) => !priced(listing, stored));
+  if (unpriced) return gapBlock(input, `${unpriced.label} has no daily prices on file`);
+  const uncovered = input.listings.find((listing) => !priced(listing, ranges));
+  if (uncovered) return gapBlock(input, `${uncovered.label} has no prices from before ${since}`);
   if (shared.length === 0) return basisGapBlock(input, ranges);
-  return ytdBlock(input, shared, sealedOf, zoneOf);
+  return windowBlock(input, start!, shared, sealedOf, zoneOf);
 }
 
-// The YTD chart on the first basis every company has that gives a full,
-// current window; otherwise the reason there is none.
-function ytdBlock(
+// The chart on the first basis every company has that gives a full, current
+// window from `start`; otherwise the reason there is none.
+function windowBlock(
   input: PerfInput,
+  start: string,
   shared: ReadonlyArray<ComparableBasis>,
   sealedOf: (listing: { id: string; label: string }, basis: ComparableBasis) => SealedPriceRange | undefined,
   zoneOf: (listingId: string) => string,
 ): Block {
+  const period = input.period ?? "ytd";
   let gap = "";
   for (const basis of shared) {
     const sealed = input.listings.map((listing) => sealedOf(listing, basis)!);
     const drawn = perfLines({
-      kind: "ytd",
+      kind: "window",
+      start,
       series: input.listings.map((listing, index) => ({ label: listing.label, timeZone: zoneOf(listing.id), bars: sealed[index].bars })),
       cutoff: input.asOf,
     });
@@ -213,15 +286,18 @@ function ytdBlock(
     const { window } = drawn;
     const stale = input.frozenPrices
       ? undefined
-      : input.listings.find((listing) => !isCurrentEnd(window.endDate, input.asOf, zoneOf(listing.id)));
-    if (stale === undefined) return buildYtdPerfBlock({ ranges: sealed, window, lines: drawn.lines, snapshotId: input.snapshotId });
+      : input.listings.find((listing) => !isCurrentEnd(window.endDate, input.asOf, zoneOf(listing.id), period === "ytd" ? undefined : SHORT_PERIOD_CURRENT_DAYS));
+    if (stale === undefined) {
+      return buildWindowPerfBlock({ ranges: sealed, window, lines: drawn.lines, snapshotId: input.snapshotId, period, scope: input.scope ?? "" });
+    }
     gap ||= `the latest close every company has is ${window.endDate}, too old to be current at the ${sessionDate(input.asOf, zoneOf(stale.id))} cutoff`;
   }
-  return ytdGapBlock(input, gap);
+  return gapBlock(input, gap);
 }
 
-function ytdGapBlock(input: PerfInput, gap: string): Block {
-  return noteBlock(input, "perf_ytd_gap", `Year-to-date price performance is not shown: ${gap}.`);
+function gapBlock(input: PerfInput, gap: string): Block {
+  const period = input.period ?? "ytd";
+  return noteBlock(input, `${input.scope ?? ""}perf_${period}_gap`, `${PERIOD_WORDS[period].gap} price performance is not shown: ${gap}.`);
 }
 
 export async function listingTimeZones(
@@ -249,31 +325,38 @@ function basisGapBlock(
   });
   return noteBlock(
     input,
-    "perf_basis_gap",
+    `${input.scope ?? ""}perf_basis_gap`,
     `Price performance is not shown: the stored prices are on different bases (${bases.join("; ")}), so their returns would not be comparable.`,
   );
 }
 
-// The YTD chart for a selected window: each line from the shared baseline close,
-// the window stated in the block, and each series' digest over exactly the bars
-// the line uses, so a reload can show nothing else.
-export function buildYtdPerfBlock(input: {
+// The chart for a selected window: each line from the shared baseline close,
+// the window stated in the block, each series' digest over exactly the bars
+// the line uses, and the close it ends on, so a reload can show nothing else.
+function buildWindowPerfBlock(input: {
   ranges: ReadonlyArray<SealedPriceRange>;
   window: YtdWindow;
   lines: ReadonlyArray<PerfLine>;
   snapshotId: string;
+  period: PricePeriod;
+  scope: string;
 }): Block {
-  const { window } = input;
+  const { window, period } = input;
   const skipped = window.skippedSessions > 0
     ? `; ${window.skippedSessions} session${window.skippedSessions === 1 ? "" : "s"} not every company traded skipped`
     : "";
+  const named = period === "ytd" ? `YTD ${window.year}` : PERIOD_WORDS[period].range;
   return assemblePerfBlock({
     ranges: input.ranges,
     snapshotId: input.snapshotId,
-    title: chartTitle(input.ranges[0].adjustment_basis, ` YTD ${window.year}`),
-    defaultRange: `YTD ${window.year}: ${window.baselineDate} close to ${window.endDate} close${skipped}`,
+    scope: input.scope,
+    title: chartTitle(input.ranges[0].adjustment_basis, period === "ytd" ? ` YTD ${window.year}` : `, ${PERIOD_WORDS[period].range.toLowerCase()}`),
+    defaultRange: `${named}: ${window.baselineDate} close to ${window.endDate} close${skipped}`,
     lines: input.lines,
-    window: { kind: "ytd", year: window.year, baseline_date: window.baselineDate, end_date: window.endDate },
+    closes: window.bars.map((bars) => bars.at(-1)!.close),
+    window: period === "ytd"
+      ? { kind: "ytd", year: window.year, baseline_date: window.baselineDate, end_date: window.endDate }
+      : { kind: "window", period, start: window.start, baseline_date: window.baselineDate, end_date: window.endDate },
   });
 }
 
@@ -287,15 +370,17 @@ function chartTitle(basis: string, period: string): string {
 function assemblePerfBlock(input: {
   ranges: ReadonlyArray<SealedPriceRange>;
   snapshotId: string;
+  scope: string;
   title: string;
   defaultRange: string;
-  // Per range, its line.
+  // Per range, its line and the close it ends on.
   lines: ReadonlyArray<PerfLine>;
+  closes: ReadonlyArray<number>;
   window: Record<string, unknown>;
 }): Block {
   const { ranges } = input;
   const specs = ranges.map((range, index) => ({
-    series_ref: stableUuid(`series:${input.snapshotId}:${range.bar_range_id}`),
+    series_ref: stableUuid(`series:${input.snapshotId}:${input.scope}${range.bar_range_id}`),
     source_id: range.source_id,
     listing_id: range.listing_id,
     bar_range_id: range.bar_range_id,
@@ -308,8 +393,10 @@ function assemblePerfBlock(input: {
     range: { start: range.range_start, end: range.range_end },
     window: input.window,
     as_of: range.as_of,
+    end_close: input.closes[index],
+    currency: range.currency,
   }));
-  const id = stableUuid(`block:${input.snapshotId}:perf_comparison`);
+  const id = stableUuid(`block:${input.snapshotId}:${input.scope}perf_comparison`);
   return {
     id,
     kind: "perf_comparison",
@@ -391,7 +478,7 @@ export function listingsForComparison(
 ): Map<string, CompanyListing> {
   const out = new Map<string, CompanyListing>();
   for (const issuerId of issuerIds) {
-    const listing = requested.get(issuerId) ?? active.get(issuerId);
+    const listing = requested.get(issuerId.toLowerCase()) ?? active.get(issuerId);
     if (listing) out.set(issuerId, listing);
   }
   return out;

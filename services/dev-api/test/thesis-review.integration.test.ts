@@ -4,7 +4,6 @@ import { randomUUID } from 'node:crypto';
 import { connectedPool, dockerAvailable } from '../../../db/test/docker-pg.ts';
 import { createAgent, getAgent } from '../../agents/src/agent-repo.ts';
 import { saveThesis, loadThesisHistory } from '../../agents/src/thesis-repo.ts';
-import { runAgentLoop } from '../../agents/src/agent-loop.ts';
 import type { ThesisMetricCheck } from '../../agents/src/thesis-types.ts';
 import { loadEvidenceInspection } from '../../evidence/src/inspector.ts';
 import { createEvidenceFinancialPort } from '../../financial-engine/src/evidence-adapter.ts';
@@ -12,6 +11,7 @@ import { databaseUrl, engineDatabase, IDS, seedReportedFact } from '../../financ
 import { createThesisAdapter } from '../src/thesis-adapter.ts';
 import { createThesisAgentLoopStages } from '../src/thesis-runtime.ts';
 import { createServiceDevApiAdapters } from '../src/http.ts';
+import { runClaimedAgentLoop } from './claimed-agent-loop.ts';
 
 const USER = IDS.owner;
 const OTHER = IDS.other;
@@ -39,8 +39,9 @@ async function fixture(t: TestContext, name: string, metric = UNCATALOGUED_CASH)
   }
   async function run(now?: () => string) {
     const fresh = (await getAgent(db, agent.agent_id))!;
-    const stages = createThesisAgentLoopStages({ db: pool, userId: USER, runId: randomUUID(), agent: fresh, thesis, financial: { pool, evidence: createEvidenceFinancialPort }, ...(now ? { now } : {}) });
-    return runAgentLoop({ pool, agent_id: agent.agent_id, current_watermarks: fresh.watermarks, stages });
+    const runId = randomUUID();
+    const stages = createThesisAgentLoopStages({ db: pool, userId: USER, runId, agent: fresh, thesis, financial: { pool, evidence: createEvidenceFinancialPort }, ...(now ? { now } : {}) });
+    return runClaimedAgentLoop({ pool, agent_id: agent.agent_id, run_id: runId, current_watermarks: fresh.watermarks, stages });
   }
   const history = () => loadThesisHistory(db, { user_id: USER, agent_id: agent.agent_id });
   const findings = async () => (await db.query('select count(*)::int as n from findings where agent_id=$1', [agent.agent_id])).rows[0].n;
@@ -102,25 +103,6 @@ test('an unchanged outcome expires once its period end passes the saved maximum 
   assert.equal(await findings(), 1, 'only the supported transition alerts');
 });
 
-test('a newer assessment is detected at microsecond precision, not lost to millisecond rounding', options, async t => {
-  const { db, insertFact, run, history } = await fixture(t, 'thesis-review-conflict-precision');
-  const earlier = new Date(Date.now() - 60_000).toISOString();
-  await insertFact(earlier, earlier.slice(0, 10));
-  await run(() => new Date(Date.now() - 30_000).toISOString());
-  assert.equal((await history()).assessments.length, 1);
-  // New evidence for the next run, whose cutoff is a whole millisecond...
-  const cutoff = new Date(Date.now() - 10_000).toISOString();
-  await insertFact(new Date(Date.parse(cutoff) - 1_000).toISOString(), cutoff.slice(0, 10));
-  // ...while another assessment finished 1 microsecond after it.
-  await db.query(
-    `update agent_thesis_assessments set assessed_at = $1::timestamptz + interval '1 microsecond'`,
-    [cutoff],
-  );
-  // It must fail on the conflict itself, not on any unrelated error.
-  await assert.rejects(run(() => cutoff), { name: 'ThesisConflictError', message: /A newer assessment finished during this run/ });
-  assert.equal((await history()).assessments.length, 1, 'the run must yield to the newer assessment');
-});
-
 test('a run whose clock is ahead of the host still assesses its evidence', options, async t => {
   const { db, run, history } = await fixture(t, 'thesis-review-clock-ahead', revenue(730));
   await seedReportedFact(db, { metric_key: 'revenue', value: '500', fiscal_year: LAST_YEAR });
@@ -139,12 +121,13 @@ test('thesis snapshots preserve document sources separately from claim reporters
   await db.query("insert into claim_arguments(claim_id,subject_kind,subject_id,role) values($1,'issuer',$2,'subject')", [claimId,ISSUER]);
   const thesis = await saveThesis(db, { agent_id: agent.agent_id, user_id: USER, expected_version: 1, thesis: 'Demand remains strong.', subject_ref: { kind: 'issuer', id: ISSUER }, conditions: [{ condition_id: CONDITION, statement: 'Demand remains strong.', falsifier: 'Customers cancel orders.', horizon: 'Next quarter' }] });
   const fresh = (await getAgent(db, agent.agent_id))!;
-  const stages = createThesisAgentLoopStages({ db: pool, userId: USER, runId: randomUUID(), agent: fresh, thesis, financial: { pool, evidence: createEvidenceFinancialPort }, getModel: async () => ({ identity: 'controlled', llm: { async complete(request) {
+  const runId = randomUUID();
+  const stages = createThesisAgentLoopStages({ db: pool, userId: USER, runId, agent: fresh, thesis, financial: { pool, evidence: createEvidenceFinancialPort }, getModel: async () => ({ identity: 'controlled', llm: { async complete(request) {
     const { evidence } = JSON.parse(request.messages[1].content) as { evidence: { claims: Array<{ id: string; text: string }> } };
     const cited = evidence.claims.find(claim => claim.text === 'Demand remains strong.')!.id;
     return { text: JSON.stringify({ results: [{ condition_id: CONDITION, status: 'supported', refs: [cited] }] }) };
   } } }) });
-  await runAgentLoop({ pool, agent_id: agent.agent_id, current_watermarks: fresh.watermarks, stages });
+  await runClaimedAgentLoop({ pool, agent_id: agent.agent_id, run_id: runId, current_watermarks: fresh.watermarks, stages });
   const assessment = (await history()).assessments[0];
   const snapshot = await db.query('select source_ids from snapshots where snapshot_id=$1', [assessment.snapshot_id]);
   assert.deepEqual(snapshot.rows[0].source_ids.sort(), [reporter,source].sort());

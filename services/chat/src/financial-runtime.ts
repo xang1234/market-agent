@@ -55,6 +55,8 @@ import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId, noteBlock } from "./chat-ids.ts";
 import { enginePacket, type EvidencePacket } from "./evidence-packet.ts";
+import { requestedListingsOf } from "./perf-block.ts";
+import type { TurnHydrator } from "./turn-hydration.ts";
 import { priceComparisonTurn } from "./scenario-price-comparison.ts";
 import { callTurn, readCallAsk } from "./call.ts";
 import { planEpsScenarios, priorScenario, SCENARIO_DECLINE, SCENARIO_GAP, SCENARIO_INPUTS, scenarioAnswer, turnScenarioAsk, type ScenarioAsk } from "./eps-scenarios.ts";
@@ -159,7 +161,7 @@ export type ChatFinancialRuntimeDeps = Readonly<{
    * fetch running at its budget, or one that failed); absent, nothing is
    * fetched. Injected, like commentary.
    */
-  hydrate?: (companies: ReadonlyArray<{ issuer_id: string; label: string }>, turn: { emit: ChatTurnRunContext["emit"]; turnId: string }) => Promise<ReadonlySet<string>>;
+  hydrate?: TurnHydrator;
 }>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -369,7 +371,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       const refs = kept.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
       // What a company lacks is fetched before its filings are counted, and
       // before the run takes its cutoff, so what the fetch stored is read.
-      const companies = refs.map((ref) => ({ issuer_id: ref.id, label: kept.labels.get(ref.id.toLowerCase()) ?? ref.id }));
+      const named = requestedListingsOf(kept.resolved);
+      const companies = refs.map((ref) => ({ issuer_id: ref.id, label: kept.labels.get(ref.id.toLowerCase()) ?? ref.id, listing_id: named.get(ref.id.toLowerCase())?.listing_id }));
       const loading = deps.hydrate ? await deps.hydrate(companies, { emit: context.emit, turnId }).catch((reason: unknown) => {
         console.warn("[chat] fetching the turn's companies failed; answering from what is on file", reason);
         return NOTHING_LOADING;

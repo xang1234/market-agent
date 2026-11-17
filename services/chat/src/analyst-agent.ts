@@ -10,12 +10,13 @@ import type { JsonObject, JsonValue } from "../../shared/src/json.ts";
 import { isRecord } from "../../shared/src/http.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import { createTurnToolPolicy, loadToolRegistry, type ToolRegistry } from "../../tools/src/index.ts";
+import { isPricePeriod, PERIOD_WORDS, PRICE_PERIODS, type PricePeriod } from "../../market/src/ytd-window.ts";
 import { CLAIM_PREDICATES, isAnalystToolName, type AnalystToolName, type AnalystToolResult } from "./analyst-tools.ts";
 import { answerPath, answerTurn, type AnsweredTurn, type AnswerTraceInput, type TurnTrace } from "./answer-trace.ts";
 import { isUuid, noteBlock } from "./chat-ids.ts";
 import { COMMENTARY_UNAVAILABLE } from "./engine-commentary.ts";
 import { ANALYST_AGENT_BUNDLE_ID } from "./bundle-routing.ts";
-import { labelList, type ChatAnalystAgent, type ChatAnalystToolRuntimeResult, type ChatAnalystToolRuntimeToolCall, type ChatTurnEmit, type ChatTurnRunContext } from "./coordinator.ts";
+import { labelList, MAX_TURN_SUBJECTS, type ChatAnalystAgent, type ChatAnalystToolRuntimeResult, type ChatAnalystToolRuntimeToolCall, type ChatTurnEmit, type ChatTurnRunContext } from "./coordinator.ts";
 import { mergePackets, type EvidencePacket } from "./evidence-packet.ts";
 import {
   certifiedFinancials,
@@ -28,6 +29,8 @@ import {
   type ChatFinancialRuntimeDeps,
   type ChatFinancialTurnContext,
 } from "./financial-runtime.ts";
+import { perfDisclosureBlocks, requestedListingsOf } from "./perf-block.ts";
+import { PRICE_RULES, PRICE_TOOL, readPrices, type Priced } from "./price-tool.ts";
 import { claimSources } from "./render-assertions.ts";
 import { ANSWER_DEADLINES, renderedAnswer, withDeadlines, type AnswerInput, type DroppedClaims } from "./llm-runtime.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS, LATEST, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
@@ -56,6 +59,8 @@ type AgentCore = AgentModels & Readonly<{ financial: Pick<ChatFinancialRuntimeDe
 export type AnalystAgentDeps = AgentModels & Readonly<{
   financial: Pick<ChatFinancialRuntimeDeps, "pool" | "evidence" | "resolveMention" | "priorSubjects" | "researchScope" | "hydrate">;
   asOf: () => string;
+  // The frozen data modes' prices, charted whatever their age (perf-block.ts).
+  frozenPrices?: boolean;
   conversation?: (threadId: string) => Promise<ReadonlyArray<{ role: string; text: string }>>;
   logToolCalls?: (threadId: string, calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
 }>;
@@ -131,6 +136,9 @@ type AgentAsk = Readonly<{
   scopedKey: (name: string) => string;
   noFilingAsOfCutoff: boolean;
   writing: keyof typeof WRITING;
+  // A chat turn's price reads (#678): the listing each company was named by,
+  // and whether prices are frozen. Without it the price tool is not offered.
+  prices?: Readonly<{ listings: ReadonlyMap<string, { listing_id: string; label: string }>; frozen: boolean }>;
   trace: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id">;
   logToolCalls?: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => Promise<void>;
 }>;
@@ -139,6 +147,7 @@ type Gathered = Readonly<{
   conversation: ReadonlyArray<{ role: string; text: string }>;
   toolCalls: ChatAnalystToolRuntimeToolCall[];
   certified: ReadonlyArray<Certified>;
+  priced: ReadonlyArray<Priced>;
   analyst: ReadonlyArray<AnalystToolResult>;
   packet: EvidencePacket;
   covered: ReadonlyArray<string>;
@@ -188,6 +197,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       scopedKey: (name) => name,
       noFilingAsOfCutoff: false,
       writing: "chat",
+      prices: { listings: requestedListingsOf(companies.resolved), frozen: deps.frozenPrices ?? false },
       trace: { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}) },
       ...(logToolCalls ? { logToolCalls: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => logToolCalls(context.threadId, calls) } : {}),
     };
@@ -310,6 +320,8 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
   const labelOf = (issuer: string) => job.labels.get(issuer) ?? known.get(issuer)?.mention ?? issuer;
   const whoOf = (args: JsonObject) => labelList(argIssuers(args).filter((issuer) => known.has(issuer)).map(labelOf));
   const certified: Certified[] = [];
+  // Each price read's chart, in the order the model asked for them, so its figures' ids do not depend on which read finished first.
+  const priceReads: Array<{ priced?: Priced }> = [];
   const askedFor = new Set<string>();
   const analyst: AnalystToolResult[] = [];
   const notes: string[] = [...job.notes];
@@ -320,7 +332,7 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
   const fetched = new Map<string, Promise<boolean>>();
   const stillLoading = (issuers: ReadonlyArray<string>) => Promise.all(issuers.map((issuer) => {
     const pending = fetched.get(issuer) ?? (deps.financial.hydrate
-      ? deps.financial.hydrate([{ issuer_id: issuer, label: labelOf(issuer) }], { emit: context.emit, turnId: `${turnId}:${issuer}` })
+      ? deps.financial.hydrate([{ issuer_id: issuer, label: labelOf(issuer), listing_id: job.prices?.listings.get(issuer)?.listing_id }], { emit: context.emit, turnId: `${turnId}:${issuer}` })
         .then((loading) => loading.has(issuer))
         .catch((reason: unknown) => {
           console.warn("[chat] fetching a company's filings failed; the analyst agent answers from what is on file", reason);
@@ -371,6 +383,35 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
     return answer;
   };
 
+  // The same ask read twice is read once, whatever order it names its companies in.
+  const pricing = new Map<string, Promise<ToolLoopOutput>>();
+  const readPrice = (args: JsonObject): Promise<ToolLoopOutput> => {
+    const ask = priceAsk(args, known);
+    if ("invalid" in ask) return Promise.resolve(invalid(PRICE_TOOL, ask.invalid));
+    const key = `${ask.period}:${[...ask.issuers].sort().join(",")}`;
+    const prior = pricing.get(key);
+    if (prior) return prior;
+    const slot: { priced?: Priced } = {};
+    priceReads.push(slot);
+    const read = readPrices(deps.financial, ask, {
+      named: job.prices!.listings,
+      frozen: job.prices!.frozen,
+      asOf,
+      clock: job.clock,
+      snapshotId: job.snapshotId,
+      scope: job.scopedKey(`prices:${key}:`),
+      emit: context.emit,
+      turnId: `${turnId}:prices:${key}`,
+      labelOf,
+    }).then(({ output, failed, notes: said, priced }) => {
+      notes.push(...said);
+      slot.priced = priced;
+      return { content: JSON.stringify(output), ...(failed ? { isError: true } : {}) };
+    });
+    pricing.set(key, read);
+    return read;
+  };
+
   const readStored = async (name: AnalystToolName, args: JsonObject): Promise<ToolLoopOutput> => {
     if (argIssuers(args).some((issuer) => !known.has(issuer))) return invalid(name, UNKNOWN_COMPANY);
     const result = await deps.read(name, lowercasedRefs(args), { as_of: asOf, user_id: context.userId ?? null });
@@ -389,13 +430,19 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
     return { content: JSON.stringify(readSummary(result)), ...(isFailure(result) ? { isError: true } : {}) };
   };
 
+  // The tools read here, beside the stored reads; the price tool only on a chat turn.
+  const runners: Readonly<Record<string, (args: JsonObject) => Promise<ToolLoopOutput>>> = {
+    certified_financials: certify,
+    ...(job.prices ? { [PRICE_TOOL]: readPrice } : {}),
+  };
   const inFlight = new Set<Promise<ToolLoopOutput>>();
   const execute = async (call: LlmToolCall): Promise<ToolLoopOutput> => {
     const name = call.name;
-    if (name !== "certified_financials" && !isAnalystToolName(name)) return invalid(name, "no such tool");
-    const shown = { tool_call_id: randomUUID(), tool_name: name, label: stepLabel(name, call.arguments, whoOf(call.arguments)) };
+    const run = Object.hasOwn(runners, name) ? runners[name as keyof typeof runners] : isAnalystToolName(name) ? (args: JsonObject) => readStored(name, args) : undefined;
+    if (!run) return invalid(name, "no such tool");
+    const shown = { tool_call_id: randomUUID(), tool_name: name, label: stepLabel(name as AgentTool, call.arguments, whoOf(call.arguments)) };
     // In flight until its step is closed and logged, so a reading that stops early waits for both.
-    const step = inStep(context.emit, shown, () => (name === "certified_financials" ? certify(call.arguments) : readStored(name, call.arguments)), (done) => !done.isError)
+    const step = inStep(context.emit, shown, () => run(call.arguments), (done) => !done.isError)
       .then((output) => {
         toolCalls.push({
           tool_call_id: shown.tool_call_id,
@@ -421,10 +468,10 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
     execute,
     request: {
       messages: [
-        { role: "system", content: [template.system_prompt, template.policy_prompt, ...GATHER_RULES].join(" ") },
+        { role: "system", content: [template.system_prompt, template.policy_prompt, ...GATHER_RULES, ...(job.prices ? PRICE_RULES : [])].join(" ") },
         { role: "user", content: JSON.stringify({ question: job.question, companies: job.named.map((subject) => companyEntry(subject, job.carried, labelOf)), conversation }) },
       ],
-      tools: policy.selection.tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.input_json_schema as JsonObject })),
+      tools: policy.selection.tools.filter((tool) => job.prices || tool.name !== PRICE_TOOL).map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.input_json_schema as JsonObject })),
       temperature: 0,
       reasoning: "low",
       maxTokens: 4096,
@@ -440,8 +487,10 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
 
   const covered = [...new Set([...job.named.map(issuerOf), ...certified.flatMap((entry) => entry.subjects)])];
   const read = job.noFilingAsOfCutoff ? datedNoFiling(analyst, asOf, labelOf) : { analyst, notes: [] };
+  const priced = priceReads.flatMap((entry) => entry.priced ?? []);
   const packet = mergePackets({
     engine: certified.map((entry) => entry.packet),
+    prices: priced.flatMap((entry) => entry.figures),
     analyst: read.analyst,
     figuresAskedFor: [...askedFor].map(labelOf),
     notes: [...new Set([...notes, ...(readCompetition ? heldCompetitorNotes : []), ...read.notes])],
@@ -449,11 +498,12 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
     cutoff: asOf,
   });
   if (toolCalls.some((entry) => entry.status === "ok")) await job.logToolCalls?.(toolCalls);
-  return { conversation, toolCalls, certified, analyst, packet, covered, labelOf };
+  return { conversation, toolCalls, certified, priced, analyst, packet, covered, labelOf };
 }
 
 async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promise<Answered> {
-  const { conversation, toolCalls, certified, analyst, packet, covered } = gathered;
+  const { conversation, toolCalls, certified, priced, analyst, packet, covered } = gathered;
+  const figured = certified.length > 0 || priced.length > 0;
   const { snapshotId, asOf, question } = job;
   const readCalls = toolCalls.filter((entry) => entry.status === "ok").map((entry) => entry.tool_call_id);
   const subjectRefs = covered.map((id) => ({ kind: "issuer" as const, id }));
@@ -474,7 +524,7 @@ async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promis
     factBlocks: noted,
     conversation,
     packet,
-    ...WRITING[job.writing](certified.length > 0),
+    ...WRITING[job.writing](figured),
   };
   const { emit } = job.planningContext;
   try {
@@ -499,8 +549,10 @@ async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promis
   const claims = analyst.flatMap((result) => (result.status === "ok" && "claims" in result ? result.claims : []));
   const cited = citedSources(written.assertions, packet);
   const certifiedBlocks = certified.map((entry, i) => ({ ...entry.block, id: `${entry.block.id}-${job.scopedKey(String(i + 1))}` }) as Record<string, unknown>);
+  const charts = priced.map((entry) => entry.chart);
+  const priceBlocks = [...charts, ...perfDisclosureBlocks(...charts)];
   const unwritten = [{
-    ...noteBlock({ snapshotId, asOf }, job.scopedKey("agent:unwritten"), certified.length > 0 ? COMMENTARY_UNAVAILABLE : failed ? ANSWER_FAILED : NO_ANSWER),
+    ...noteBlock({ snapshotId, asOf }, job.scopedKey("agent:unwritten"), figured ? COMMENTARY_UNAVAILABLE : failed ? ANSWER_FAILED : NO_ANSWER),
     subject_refs: subjectRefs,
     tool_call_ids: readCalls,
   }];
@@ -508,7 +560,7 @@ async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promis
     const shown = blocks.filter(rendered).map((block) => ({ ...withRefs(block, claims, cited), tool_call_ids: readCalls }));
     const spent = answerRefused && shown.length > 0 ? [{ ...noteBlock({ snapshotId, asOf }, job.scopedKey("agent:calls-spent"), ANALYSIS_LEFT_OUT), subject_refs: subjectRefs, tool_call_ids: readCalls }] : [];
     const own = [...shown, ...(failed ? unwritten : []), ...noted, ...spent];
-    return [...certifiedBlocks, ...(own.length > 0 ? own : unwritten)];
+    return [...certifiedBlocks, ...priceBlocks, ...(own.length > 0 ? own : unwritten)];
   };
   const turnAnswer = (shown: Pick<AnsweredTurn, "blocks" | "judging">): Pick<ChatAnalystToolRuntimeResult, "blocks"> => {
     let settled = shown.blocks;
@@ -608,6 +660,7 @@ const ANSWER_RULES = [
   "evidence_packet.claims also hold what a company's 10-K states (its business, products, customers, competition and risk factors),",
   "attributed analyst consensus values, and industry peers: cite each as a management_attribution with its C id, which quotes it as stored.",
   "Say what a company does or faces only as a claim states it, never from your own knowledge, and never write Buy, Hold, Sell or any recommendation.",
+  "A price return or last close is a figure: state it in an observation citing its F id, and set companies' price returns side by side in a comparison.",
 ];
 const ANALYSIS_RULE = "Write at most two analyst_inference entries: the takeaway and the counterpoint.";
 const DESCRIPTION_SHAPE = [
@@ -652,9 +705,10 @@ const TOPIC: Readonly<Record<string, string>> = {
   get_claims: "10-K claims",
   get_peer_set: "Industry peers",
   get_analyst_consensus: "Analyst consensus",
+  get_price_performance: "Price returns",
 };
 
-type AgentTool = AnalystToolName | "certified_financials";
+type AgentTool = AnalystToolName | "certified_financials" | typeof PRICE_TOOL;
 type PlanStep = Readonly<{ tool_call_id: string; tool_name: string; label: string }>;
 
 const PREDICATE_WORDS: Readonly<Record<(typeof CLAIM_PREDICATES)[number], string>> = {
@@ -680,6 +734,8 @@ const STEP_LABELS: Readonly<Record<AgentTool, (args: JsonObject, who: string) =>
   },
   get_peer_set: (_args, who) => `Finding ${who}'s industry peers`,
   get_analyst_consensus: (_args, who) => `Reading analyst consensus for ${who}`,
+  get_price_performance: (args, who) =>
+    `Reading ${who}'s price ${argIssuers(args).length > 1 ? "returns" : "return"}${isPricePeriod(args.period) ? ` ${PERIOD_WORDS[args.period].step}` : ""}`,
 };
 
 // The catalog's name for a figure as a sentence reads it ("diluted EPS"); a statement, which it does not name, keeps its key's words.
@@ -830,6 +886,19 @@ async function certifiedOutput(
 
 function catalogChoices(clarification: Clarification): string[] {
   return clarification.kind === "metric" ? clarification.choices.map((choice) => choice.label) : [];
+}
+
+const PRICE_ARGUMENTS = new Set(["subject_refs", "period", "query"]);
+
+export function priceAsk(args: JsonObject, known: ReadonlyMap<string, RequestedSubject>): { issuers: string[]; period: PricePeriod } | { invalid: string } {
+  const unread = Object.keys(args).filter((key) => !PRICE_ARGUMENTS.has(key));
+  if (unread.length > 0) return { invalid: `${unread.join(", ")} not supported` };
+  const refs = args.subject_refs;
+  if (!Array.isArray(refs) || refs.length === 0 || refs.length > MAX_TURN_SUBJECTS) return { invalid: `subject_refs names one to ${MAX_TURN_SUBJECTS} companies, as the prompt lists them` };
+  const issuers = refs.map((ref) => (isRecord(ref) && ref.kind === "issuer" && typeof ref.id === "string" ? ref.id.toLowerCase() : null));
+  if (issuers.some((issuer) => issuer === null || !known.has(issuer))) return { invalid: UNKNOWN_COMPANY };
+  if (!isPricePeriod(args.period)) return { invalid: `period is ${PRICE_PERIODS.join(", ")}` };
+  return { issuers: [...new Set(issuers as string[])], period: args.period };
 }
 
 function invalid(tool: string, reason: string): ToolLoopOutput {

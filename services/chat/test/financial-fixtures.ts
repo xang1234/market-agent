@@ -86,6 +86,21 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
   return Promise.resolve(table[mention] ?? ({ status: "not_found", input_text: mention, normalized_input: mention, message: "not found" } as ChatSubjectPreResolution));
 }
 
+/** ALPX: issuer A named by its listing LISTING_A, handed off as the resolver does (seedListingA first). */
+export const resolveNamedListing = (mention: string): Promise<ChatSubjectPreResolution> => mention !== "ALPX" ? resolveMention(mention) : Promise.resolve({
+  status: "resolved", input_text: mention, subject_ref: { kind: "listing", id: LISTING_A }, display_label: "ALPX · XNAS",
+  handoff: { display_labels: { ticker: "ALPX" }, context: { listing: { subject_ref: { kind: "listing", id: LISTING_A }, issuer_ref: { kind: "issuer", id: IDS.issuerA }, ticker: "ALPX" } } },
+} as unknown as ChatSubjectPreResolution);
+
+export async function seedListingA(db: Pick<Client, "query">): Promise<void> {
+  await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1::uuid, $2::uuid, 'common_stock') on conflict do nothing`, [INSTRUMENT_A, IDS.issuerA]);
+  await db.query(
+    `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone)
+     values ($1::uuid, $2::uuid, 'XNAS', 'ALPX', 'USD', 'America/New_York') on conflict do nothing`,
+    [LISTING_A, INSTRUMENT_A],
+  );
+}
+
 export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } };
 export const METRIC_READING: ScopeProposal = { ...NO_ASKS, metrics: [proposedMetric("income_statement", null, null)!] };
 /** A line at a named year, which the planner answers (#517): "Revenue for AAA in fiscal 2023". */

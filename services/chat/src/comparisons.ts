@@ -168,6 +168,10 @@ export function checkComparison(
     const perCompany = new Map<string, PacketFigure[]>();
     for (const figure of unique(sameMetric, keyOf)) perCompany.set(memberOf(figure), [...(perCompany.get(memberOf(figure)) ?? []), figure]);
     if (cited.length !== companies.size) return fail("a ranking compares one figure per company");
+    // A chart's lines share one window, which a price's period names in full.
+    if (cited.some((figure) => figure.series_ref !== undefined) && new Set(cited.map((figure) => periodKey(figure.period))).size > 1) {
+      return fail("prices across companies are compared over one window");
+    }
     // A company shown for several periods: every company at one period, so
     // no company's best period is picked against another's. A change is
     // compared over one span whatever else is shown.

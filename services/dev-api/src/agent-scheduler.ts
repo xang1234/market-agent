@@ -83,7 +83,8 @@ export function startAgentScheduler(deps: AgentSchedulerDeps, intervalMs: number
         log(`agent-scheduler: agent ${run.agent_id} run ${run.run_id} skipped: ${stopped ? "scheduler stopped" : "no longer due"}`);
         return null;
       }
-      log(`agent-scheduler: agent ${run.agent_id} run ${run.run_id} ${result.status}`);
+      const failure = result.status === "superseded" && result.error !== null ? ` after it failed: ${result.error}` : "";
+      log(`agent-scheduler: agent ${run.agent_id} run ${run.run_id} ${result.status}${failure}`);
       return result;
     } catch (error) {
       log(`agent-scheduler: agent ${run.agent_id} run ${run.run_id} errored: ${errorMessage(error)}`);

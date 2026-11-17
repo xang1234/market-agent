@@ -76,6 +76,7 @@ export type {
 
 export {
   AgentRunStateError,
+  AgentRunSupersededError,
   claimAgentRun,
   completeAgentRun,
   failAgentRun,
@@ -88,11 +89,13 @@ export type {
 
 export {
   AgentRunMessageValidationError,
+  finishClaimedAgentRun,
   handleAgentRunMessage,
 } from "./queue-runner.ts";
 export type {
   AgentRunMessage,
   AgentRunMessageResult,
+  FinishedAgentRun,
   HandleAgentRunMessageInput,
 } from "./queue-runner.ts";
 

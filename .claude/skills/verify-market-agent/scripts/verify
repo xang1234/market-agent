@@ -257,6 +257,25 @@ cmd_agents() {
     OUT="$EVIDENCE/agents-$ticker-$(stamp)" node "$HERE/agents-flow.mjs"
 }
 
+# lease-race [run-now|scheduled] [--thesis]: holds one agent run past its lease while a
+# run-now takes the agent over. Needs a stack started with hold-runtime.ts as dev-api's
+# runtime module, and for scheduled a short AGENT_SCHEDULER_INTERVAL_MS (see agents-monitor.md).
+cmd_lease_race() {
+  local mode="run-now" thesis="" arg
+  for arg in "$@"; do
+    case "$arg" in
+      run-now|scheduled) mode="$arg" ;;
+      --thesis) thesis=1 ;;
+      *) echo "usage: lease-race [run-now|scheduled] [--thesis]" >&2; return 2 ;;
+    esac
+  done
+  [[ "${DEV_API_RUNTIME_MODULE:-}" == "$HERE/hold-runtime.ts" ]] \
+    || { echo "set DEV_API_RUNTIME_MODULE=$HERE/hold-runtime.ts in $ENV_FILE, then run up" >&2; return 2; }
+  mkdir -p "$EVIDENCE"
+  PATH="$NODE_APP:$PATH" ROOT="$ROOT" API_URL="http://127.0.0.1:${DEV_API_PORT:?DEV_API_PORT is not set in $ENV_FILE}" DATABASE_URL="$DATABASE_URL" \
+    MODE="$mode" THESIS="$thesis" OUT="$EVIDENCE/lease-race-$mode${thesis:+-thesis}-$(stamp)" node "$HERE/lease-race.mjs"
+}
+
 # run_scorecard OUT CASES_FILE ONLY RUNS. Traces and [llm] usage lines exist only
 # in DEV_MODE=analyst; dev-shell.sh resolves CHAT_TRACE_DIR the same way.
 run_scorecard() {
@@ -345,9 +364,10 @@ case "${1:-}" in
   restatements) shift; cmd_restatements "$@" ;;
   memo) shift; cmd_memo "$@" ;;
   agents) shift; cmd_agents "$@" ;;
+  lease-race) shift; cmd_lease_race "$@" ;;
   chat) shift; cmd_chat "$@" ;;
   scroll) shift; cmd_scroll "$@" ;;
   scorecard) shift; cmd_scorecard "$@" ;;
   suite) shift; cmd_suite "$@" ;;
-  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|fill-ciks|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|agents [TICKER] [--stored] [--conditions=FILE]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
+  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|fill-ciks|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|agents [TICKER] [--stored] [--conditions=FILE]|lease-race [run-now|scheduled] [--thesis]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
 esac
