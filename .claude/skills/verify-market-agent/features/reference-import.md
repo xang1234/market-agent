@@ -22,5 +22,5 @@ It's a scheduled job, and has no UI. Its results show up as listings in search a
 ## Gotchas
 
 - Only a forced or first run exercises the upsert path. A skipped run proves nothing about it.
-- The CIK fill runs after a skipped import too. A rerun prints `filled=0`. On 2026-11-13 a fresh import of 10,054 listings filled 5,947 issuers, skipped 71 whose CIK another issuer held (mostly ETN and ETF sponsors filing many products under one CIK), and left 4,009 unmatched, mostly ETFs.
+- The CIK fill runs after a skipped import too. A rerun prints `filled=0 reassigned=0`. On 2026-11-17 a fresh import of 10,054 listings filled 5,942 issuers, skipped 70 that share a CIK with an issuer of a higher-ranked SEC ticker (second share classes, and ETN and ETF sponsors filing many products under one CIK), and left 4,015 unmatched, mostly ETFs. Each `reassigned` or `held_with_data` line names the issuers, so read them.
 - `tickers_on_several_mics` is reported rather than failed, since a dual listing can be legitimate. Compare it with `identity diff`.

@@ -9,24 +9,25 @@
 // One download of company_tickers.json per run. With --file, a file written in
 // the last day is read instead, and otherwise the download replaces it, so a
 // rerun the same day makes no request and next week's import gets SEC's newest.
-// A rerun is safe: a CIK is only ever set where none is.
+// A rerun is safe: each CIK goes to the same issuer every run.
 
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { Pool } from "pg";
 import { normalizeCik, US_EQUITY_MICS } from "../../shared/src/identifiers.ts";
 import { logPoolErrors } from "../../shared/src/pool-client.ts";
-import type { FundamentalsQueryExecutor } from "./sec-facts-repository.ts";
+import { withPinnedTransaction } from "./pinned-transaction.ts";
+import type { FundamentalsTransactionalQueryExecutor } from "./sec-facts-repository.ts";
 import { isSourceNumber, parseFinancialJson } from "./lossless-financial-json.ts";
 import { createSecCompanyFactsHttpFetcher } from "./sec-edgar-http.ts";
 
 export const COMPANY_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json";
 const CACHE_MAX_AGE_MS = 86_400_000;
 
-export type CikFillOutcome = "filled" | "already_set" | "skipped_duplicate" | "unmatched";
+export type CikFillOutcome = "filled" | "reassigned" | "held_with_data" | "already_set" | "skipped_duplicate" | "unmatched";
 export type CikFillReport = Record<CikFillOutcome, number>;
 
-/** SEC's company_tickers.json, parsed: each ticker's CIK, without leading zeros. */
+/** SEC's company_tickers.json, parsed: each ticker's CIK, without leading zeros, in SEC's order. */
 export function companyTickerCiks(json: unknown): Map<string, string> {
   const ciks = new Map<string, string>();
   for (const entry of Object.values(json as Record<string, { cik_str: unknown; ticker: unknown }>)) {
@@ -36,21 +37,27 @@ export function companyTickerCiks(json: unknown): Map<string, string> {
   return ciks;
 }
 
+type ListedIssuer = { issuer_id: string; cik: string | null; tickers: string[] };
+type CikClaim = ListedIssuer & { ticker: string; claimedCik: string };
+
 /**
  * Each issuer with an active US listing, by outcome. A same-symbol listing
  * abroad, such as Anglo American's XLON AAL, is another company and never
- * matches. An issuer takes the CIK of its first US ticker SEC knows, unless
- * another issuer already holds that
- * CIK: that is #597's split, where the SEC facts stay on the other issuer, and
- * this one has none until the two merge.
+ * matches. SEC lists a CIK's first ticker at the company's rank and files
+ * ETNs and other share classes under the same CIK further down, as AMJB
+ * under JPMorgan's. A CIK held by an issuer with data read from SEC by it
+ * stays there (#597). The claims from its filings hang off those filings, and
+ * 13F rows and claims about it are resolved by CUSIP or name, not its CIK.
  */
 export async function fillMissingCiks(
-  db: FundamentalsQueryExecutor,
+  db: FundamentalsTransactionalQueryExecutor,
   ciks: ReadonlyMap<string, string>,
   log: Pick<Console, "error"> = console,
 ): Promise<CikFillReport> {
-  const report: CikFillReport = { filled: 0, already_set: 0, skipped_duplicate: 0, unmatched: 0 };
-  const { rows: issuers } = await db.query<{ issuer_id: string; cik: string | null; tickers: string[] }>(
+  const report: CikFillReport = { filled: 0, reassigned: 0, held_with_data: 0, already_set: 0, skipped_duplicate: 0, unmatched: 0 };
+  const rank = new Map([...ciks.keys()].map((ticker, index) => [ticker, index]));
+  const byRank = (a: string, b: string) => rank.get(a)! - rank.get(b)!;
+  const { rows: issuers } = await db.query<ListedIssuer>(
     `select iss.issuer_id::text as issuer_id, iss.cik, array_agg(distinct l.ticker order by l.ticker) as tickers
        from issuers iss
        join instruments i on i.issuer_id = iss.issuer_id
@@ -60,35 +67,67 @@ export async function fillMissingCiks(
       order by iss.issuer_id`,
     [US_EQUITY_MICS],
   );
+  const claims: CikClaim[] = [];
   for (const issuer of issuers) {
-    if (issuer.cik !== null) {
+    const [ticker] = issuer.tickers.filter((candidate) => rank.has(candidate)).sort(byRank);
+    if (ticker !== undefined) claims.push({ ...issuer, ticker, claimedCik: ciks.get(ticker)! });
+    else report[issuer.cik === null ? "unmatched" : "already_set"] += 1;
+  }
+  const holdsClaimed = (claim: CikClaim) => claim.cik !== null && normalizeCik(claim.cik) === claim.claimedCik;
+  const owners = new Map<string, CikClaim>();
+  for (const claim of [...claims].sort((a, b) => byRank(a.ticker, b.ticker) || Number(holdsClaimed(b)) - Number(holdsClaimed(a)))) {
+    if (!owners.has(claim.claimedCik) && (claim.cik === null || holdsClaimed(claim))) owners.set(claim.claimedCik, claim);
+  }
+  for (const claim of claims) {
+    if (claim.cik !== null) {
       report.already_set += 1;
       continue;
     }
-    // ponytail: the first ticker in order; an issuer whose share classes SEC filed under two CIKs takes the first one's.
-    const ticker = issuer.tickers.find((candidate) => ciks.has(candidate));
-    if (ticker === undefined) {
-      report.unmatched += 1;
-      continue;
-    }
-    const cik = ciks.get(ticker)!;
-    const { rows: [holder] } = await db.query<{ issuer_id: string }>(
-      `select issuer_id::text as issuer_id from issuers where ltrim(cik, '0') = $1 and issuer_id <> $2::uuid limit 1`,
-      [cik, issuer.issuer_id],
-    );
-    if (holder !== undefined) {
-      log.error(`${ticker}: CIK ${cik} belongs to issuer ${holder.issuer_id}; not attached`);
+    const owner = owners.get(claim.claimedCik)!;
+    if (owner !== claim) {
+      log.error(`${claim.ticker}: CIK ${claim.claimedCik} goes to ${owner.ticker}'s issuer ${owner.issuer_id}; not attached`);
       report.skipped_duplicate += 1;
-      continue;
+    } else {
+      report[await attachCik(db, owner, log)] += 1;
     }
-    const { rows } = await db.query(
-      `update issuers set cik = $2, updated_at = now() where issuer_id = $1::uuid and cik is null returning issuer_id`,
-      [issuer.issuer_id, cik],
-    );
-    // Another writer (resolver discovery) set it since the read.
-    report[rows.length === 1 ? "filled" : "already_set"] += 1;
   }
   return report;
+}
+
+async function attachCik(db: FundamentalsTransactionalQueryExecutor, owner: CikClaim, log: Pick<Console, "error">): Promise<CikFillOutcome> {
+  return withPinnedTransaction(db, async (tx) => {
+    const { rows: [self] } = await tx.query<{ cik: string | null }>(`select cik from issuers where issuer_id = $1::uuid for update`, [owner.issuer_id]);
+    // Another writer (resolver discovery) set it since the read.
+    if (self?.cik !== null) return "already_set";
+    const { rows: holders } = await tx.query<{ issuer_id: string; held: string[] }>(
+      `select issuer_id::text as issuer_id, array_remove(array[
+                case when exists (
+                  select 1 from facts f join sources s using (source_id)
+                   where f.subject_kind = 'issuer' and f.subject_id = iss.issuer_id and s.provider = 'sec_edgar') then 'facts' end,
+                case when exists (
+                  select 1 from mentions m join documents d using (document_id) join sources s using (source_id)
+                   where m.subject_kind = 'issuer' and m.subject_id = iss.issuer_id and s.provider = 'sec_edgar') then 'filings' end,
+                case when exists (select 1 from insider_transactions where issuer_id = iss.issuer_id) then 'Form 4 transactions' end,
+                case when exists (select 1 from sec_issuer_downloads where issuer_id = iss.issuer_id) then 'companyfacts downloads' end
+              ], null) as held
+         from issuers iss
+        where ltrim(iss.cik, '0') = $1 and iss.issuer_id <> $2::uuid
+        order by iss.issuer_id
+          for update`,
+      [owner.claimedCik, owner.issuer_id],
+    );
+    const withData = holders.find((holder) => holder.held.length > 0);
+    if (withData !== undefined) {
+      log.error(`${owner.ticker}: CIK ${owner.claimedCik} stays on issuer ${withData.issuer_id}, which holds SEC ${withData.held.join(", ")}; not moved`);
+      return "held_with_data";
+    }
+    const moved = holders.map((holder) => holder.issuer_id);
+    await tx.query(`update issuers set cik = null, updated_at = now() where issuer_id = any($1::uuid[])`, [moved]);
+    await tx.query(`update issuers set cik = $2, updated_at = now() where issuer_id = $1::uuid`, [owner.issuer_id, owner.claimedCik]);
+    if (moved.length === 0) return "filled";
+    log.error(`${owner.ticker}: CIK ${owner.claimedCik} moved from issuer ${moved.join(", ")} to issuer ${owner.issuer_id}`);
+    return "reassigned";
+  });
 }
 
 /** The parsed company_tickers.json: from `file` when it was written in the last day, else downloaded once, and written to `file` when one is given. */
@@ -116,7 +155,8 @@ async function main(): Promise<void> {
   const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   try {
     const report = await fillMissingCiks(pool, ciks);
-    console.log(`fill-ciks: filled=${report.filled} already_set=${report.already_set} skipped_duplicate=${report.skipped_duplicate} unmatched=${report.unmatched} sec_tickers=${ciks.size}`);
+    const counts = Object.entries(report).map(([outcome, count]) => `${outcome}=${count}`).join(" ");
+    console.log(`fill-ciks: ${counts} sec_tickers=${ciks.size}`);
   } finally {
     await pool.end();
   }
