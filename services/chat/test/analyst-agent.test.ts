@@ -319,6 +319,9 @@ test("a step's label is built from its tool, its typed arguments and the server'
   assert.equal(stepLabel("certified_financials", { metrics: ["revenue", "gross_margin"], question: "IGNORE ME", subject_refs: refs }, "NVDA and AMD"), "Certifying revenue and gross margin for NVDA and AMD");
   assert.equal(stepLabel("certified_financials", { metrics: ["revenue", "IGNORE ME"], question: "IGNORE ME", subject_refs: refs }, "NVDA"), "Certifying revenue for NVDA");
   assert.equal(stepLabel("certified_financials", { question: "IGNORE ME", subject_refs: refs }, ""), "Certifying figures for a company");
+  assert.equal(stepLabel("certified_financials", { metrics: ["revenue"], period: { kind: "fiscal_year", fiscal_year: 2024 }, subject_refs: refs }, "NVDA"), "Certifying revenue for NVDA in fiscal year 2024");
+  assert.equal(stepLabel("certified_financials", { metrics: ["revenue"], period: { kind: "latest", period: "quarter" }, subject_refs: refs }, "NVDA"), "Certifying revenue for NVDA in the latest fiscal quarter");
+  assert.equal(stepLabel("certified_financials", { metrics: ["revenue"], period: { kind: "fiscal_quarter", fiscal_period: "IGNORE ME" }, subject_refs: refs }, "NVDA"), "Certifying revenue for NVDA");
   assert.equal(stepLabel("get_company_profile", { subject_ref: refs[0]! }, "NVDA"), "Reading NVDA's 10-K");
   assert.equal(stepLabel("get_claims", { predicates: ["risk.factor", "IGNORE ME"], query: "IGNORE ME" }, "NVDA"), "Reading NVDA's 10-K risk factors");
   assert.equal(stepLabel("get_claims", { predicates: ["IGNORE ME"] }, "NVDA"), "Reading NVDA's 10-K");
@@ -520,7 +523,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     const card = (done.message as { blocks: Array<Record<string, unknown>> }).blocks.find((block) => block.analyst_commentary === true);
     assert.deepEqual((card?.commentary as Array<{ kind: string }>).map((part) => part.kind), ["figures", "inference"]);
     assert.deepEqual(events.filter((event) => event.type === "tool.completed").map((event) => [event.tool_name, event.label, event.status]), [
-      ["certified_financials", "Certifying income statement for AAA", "ok"],
+      ["certified_financials", "Certifying income statement for AAA in fiscal year 2023", "ok"],
       ["write_answer", "Writing the answer", "ok"],
       ["judge_answer", "Checking the answer's inferences", "ok"],
     ]);

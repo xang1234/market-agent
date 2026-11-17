@@ -666,7 +666,11 @@ const PREDICATE_WORDS: Readonly<Record<(typeof CLAIM_PREDICATES)[number], string
 
 // Labels stream to the reader before anything is judged, so they read only the tool, enum arguments and the server's company labels.
 const STEP_LABELS: Readonly<Record<AgentTool, (args: JsonObject, who: string) => string>> = {
-  certified_financials: (args, who) => `Certifying ${labelList(keysOf(args.metrics, ASKABLE_FIGURES).map((metric) => metric.replaceAll("_", " "))) || "figures"} for ${who}`,
+  certified_financials: (args, who) => {
+    const period = readPeriod(args.period);
+    const when = period && periodWords(period);
+    return `Certifying ${labelList(keysOf(args.metrics, ASKABLE_FIGURES).map((metric) => metric.replaceAll("_", " "))) || "figures"} for ${who}${when ? ` in ${when}` : ""}`;
+  },
   get_company_profile: (_args, who) => `Reading ${who}'s 10-K`,
   get_claims: (args, who) => {
     if (args.role === "competitor") return `Finding 10-Ks that name ${who} as a competitor`;
