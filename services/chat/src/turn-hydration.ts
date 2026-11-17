@@ -31,16 +31,21 @@ export type TurnHydrator = (
 
 const BUDGET_MS = 15_000;
 const COOLDOWN_MS = 60_000;
+// ponytail: the market's answer for a listing changes at a session's close at
+// the earliest; six hours stands in for the next close.
+const NO_BARS_COOLDOWN_MS = 6 * 60 * 60_000;
 const NONE: ReadonlySet<string> = new Set();
 
-// One fetch, shared by every key it covers. `outcome` is unset while it runs.
-type Fetch = { at: number; settled: Promise<void>; outcome?: "done" | "failed" };
+// One fetch, shared by every key it covers. `outcome` is unset while it runs;
+// `noBars` holds the listings a price fetch found no bars for.
+type Fetch = { at: number; settled: Promise<void>; outcome?: "done" | "failed"; noBars?: ReadonlySet<string> };
 
 export function createTurnHydrator(deps: {
   db: QueryExecutor;
   env: NodeJS.ProcessEnv;
   fetchFilings(issuerId: string): Promise<void>;
-  fetchBars(origin: string, listings: ReadonlyArray<HydrationListing>, cutoff: string): Promise<void>;
+  // Resolves to the listings the market has no bars for.
+  fetchBars(origin: string, listings: ReadonlyArray<HydrationListing>, cutoff: string): Promise<ReadonlyArray<string>>;
   budgetMs?: number;
   now?: () => number;
   logger?: Pick<Console, "warn">;
@@ -53,10 +58,18 @@ export function createTurnHydrator(deps: {
   // up. The check and the start are synchronous, so concurrent turns start one.
   // ponytail: per process and never pruned; one entry per company or comparison ever named.
   const fetches = new Map<string, Fetch>();
-  const start = (keys: ReadonlyArray<string>, fetch: () => Promise<void>): Fetch => {
+  // A listing the market had no bars for over a range, and when that answer
+  // came: it is not asked for that range again for NO_BARS_COOLDOWN_MS (#665).
+  // ponytail: per process and never pruned, as `fetches` is.
+  const noBarsAt = new Map<string, number>();
+  const start = (keys: ReadonlyArray<string>, fetch: () => Promise<ReadonlyArray<string> | void>): Fetch => {
     const entry: Fetch = { at: now(), settled: Promise.resolve() };
     // The minute runs from when a fetch settles, so one that fails late still cools down.
-    entry.settled = fetch().then(() => { entry.outcome = "done"; entry.at = now(); }, (error: unknown) => {
+    entry.settled = fetch().then((noBars) => {
+      entry.outcome = "done";
+      entry.at = now();
+      entry.noBars = new Set(noBars ?? []);
+    }, (error: unknown) => {
       logger.warn("[chat] a fetch for the turn's companies failed; the answer names the gap", error);
       entry.outcome = "failed";
       entry.at = now();
@@ -77,10 +90,16 @@ export function createTurnHydrator(deps: {
     if (capped.length === 0 || (!sec && origin === null)) return NONE;
     const ids = capped.map((company) => company.issuer_id);
     const cutoff = turn.ytdCutoff ?? new Date().toISOString();
-    const [unfiled, unpriced] = await Promise.all([
+    const [unfiled, listed] = await Promise.all([
       sec ? issuersWithoutFilings(deps.db, ids) : NONE,
       origin === null ? [] : listingsToPrice(deps.db, capped, cutoff, turn.ytdCutoff === undefined),
     ]);
+    // The range a listing is requested over: hydrateYtdBars asks for its YTD window.
+    const rangeKey = (listing: HydrationListing) => {
+      const range = ytdRequestRange(cutoff, listing.timeZone);
+      return `${listing.id}@${range.start}/${range.end}`;
+    };
+    const unpriced = listed.filter((listing) => !(now() - (noBarsAt.get(rangeKey(listing)) ?? -Infinity) < NO_BARS_COOLDOWN_MS));
 
     // A company is fetched when it has no filings on file, or its last fetch
     // failed (it may have stored only some years); one with a fetch running
@@ -99,26 +118,29 @@ export function createTurnHydrator(deps: {
     // only for the listings it is given. Otherwise each bare listing is its own.
     const units = turn.ytdCutoff === undefined
       ? unpriced.map((listing) => ({ key: `bars:${listing.id}`, listings: [listing] }))
-      : unpriced.length === 0 ? [] : [{
-        key: `ytd:${unpriced.map((listing) => {
-          const range = ytdRequestRange(cutoff, listing.timeZone);
-          return `${listing.id}@${range.start}/${range.end}`;
-        }).sort().join(",")}`,
-        listings: unpriced,
-      }];
+      : unpriced.length === 0 ? [] : [{ key: `ytd:${unpriced.map(rangeKey).sort().join(",")}`, listings: unpriced }];
     const priced = units.flatMap((unit) => {
       const entry = current(unit.key);
       return entry?.outcome === undefined ? [{ ...unit, entry }] : [];
     });
     const due = priced.filter(({ entry }) => !entry);
-    const batch = due.length === 0 ? [] : [start(due.map(({ key }) => key), () => deps.fetchBars(origin!, due.flatMap(({ listings }) => listings.map(({ id, timeZone }) => ({ id, timeZone }))), cutoff))];
+    const batch = due.length === 0 ? [] : [start(due.map(({ key }) => key), async () => {
+      const listings = due.flatMap((unit) => unit.listings);
+      const noBars = await deps.fetchBars(origin!, listings.map(({ id, timeZone }) => ({ id, timeZone })), cutoff);
+      for (const listing of listings) {
+        if (noBars.includes(listing.id)) noBarsAt.set(rangeKey(listing), now());
+        else noBarsAt.delete(rangeKey(listing));
+      }
+      return noBars;
+    })];
     const listingLabel = new Map(unpriced.map((listing) => [listing.issuer_id, listing.label]));
     const labelOf = new Map(capped.map((company) => [company.issuer_id, company.label ?? listingLabel.get(company.issuer_id) ?? company.issuer_id]));
     const running = filings.filter(({ entry }) => entry.outcome === undefined);
 
+    const pricedListings = priced.flatMap(({ listings }) => listings);
     const steps = [
-      { tool_name: "fetch_filings", label: `Fetching filings for ${labelList(running.map(({ company }) => labelOf.get(company.issuer_id)!))}`, fetches: running.map(({ entry }) => entry) },
-      { tool_name: "load_prices", label: `Loading prices for ${labelList(priced.flatMap(({ listings }) => listings.map((listing) => labelOf.get(listing.issuer_id)!)))}`, fetches: [...priced.flatMap(({ entry }) => entry ?? []), ...batch] },
+      { tool_name: "fetch_filings", label: `Fetching filings for ${labelList(running.map(({ company }) => labelOf.get(company.issuer_id)!))}`, fetches: running.map(({ entry }) => entry), listings: [] },
+      { tool_name: "load_prices", label: `Loading prices for ${labelList(pricedListings.map((listing) => labelOf.get(listing.issuer_id)!))}`, fetches: [...priced.flatMap(({ entry }) => entry ?? []), ...batch], listings: pricedListings },
     ].filter((step) => step.fetches.length > 0).map((step) => ({ ...step, tool_call_id: `${step.tool_name}-${turn.turnId}` }));
     for (const { tool_call_id, tool_name, label } of steps) turn.emit("tool.started", { tool_call_id, tool_name, label });
 
@@ -131,9 +153,12 @@ export function createTurnHydrator(deps: {
       clearTimeout(timer);
     }
 
-    for (const { tool_call_id, tool_name, label, fetches: done } of steps) {
-      const status = done.some((fetch) => fetch.outcome === undefined) ? "still_loading" : done.every((fetch) => fetch.outcome === "done") ? "ok" : "failed";
-      turn.emit("tool.completed", { tool_call_id, tool_name, label, status });
+    for (const { tool_call_id, tool_name, label, fetches: done, listings } of steps) {
+      // A price fetch that stored no bars for a listing failed for it, and says which (#665).
+      const empty = listings.filter((listing) => done.some((fetch) => fetch.noBars?.has(listing.id)));
+      const status = done.some((fetch) => fetch.outcome === undefined) ? "still_loading" : done.every((fetch) => fetch.outcome === "done") && empty.length === 0 ? "ok" : "failed";
+      const shown = status !== "still_loading" && empty.length > 0 ? `No prices found for ${labelList(empty.map((listing) => labelOf.get(listing.issuer_id)!))}` : label;
+      turn.emit("tool.completed", { tool_call_id, tool_name, label: shown, status });
     }
     return new Set(filings.filter(({ entry }) => entry.outcome !== "done").map(({ company }) => company.issuer_id));
   };

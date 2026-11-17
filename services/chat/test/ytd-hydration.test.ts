@@ -15,8 +15,9 @@ const FULL = [{ ts: "2025-12-31T05:00:00.000Z", close: 100 }, { ts: "2026-08-31T
 const STALE = [{ ts: "2025-12-31T05:00:00.000Z", close: 100 }, { ts: "2026-05-29T04:00:00.000Z", close: 110 }];
 
 // A market answering each basis with, per listing, a full YTD window, one that
-// stopped in May, an "available" envelope with no bars, or unavailable.
-function fakeMarket(answers: Record<string, ReadonlyArray<"full" | "stale" | "empty" | "unavailable">>) {
+// stopped in May, an "available" envelope with no bars, unavailable, or
+// unavailable for now (a rate limit).
+function fakeMarket(answers: Record<string, ReadonlyArray<"full" | "stale" | "empty" | "unavailable" | "rate_limited" | "refused">>) {
   const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
   const fetchImpl = (async (url: URL | string, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -26,7 +27,11 @@ function fakeMarket(answers: Record<string, ReadonlyArray<"full" | "stale" | "em
       return {
         listing: { kind: "listing", id: ref.id },
         outcome: answer === "unavailable"
-          ? { outcome: "unavailable" }
+          ? { outcome: "unavailable", reason: "missing_coverage", retryable: false }
+          : answer === "rate_limited"
+          ? { outcome: "unavailable", reason: "rate_limited", retryable: true }
+          : answer === "refused"
+          ? { outcome: "unavailable", reason: "provider_error", retryable: false }
           : { outcome: "available", data: { bars: answer === "full" ? FULL : answer === "stale" ? STALE : [] } },
       };
     });
@@ -94,6 +99,30 @@ test("before the close, the fetch stops at the last completed session, never the
   await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: "2026-08-31T15:00:00.000Z", fetchImpl: market.fetchImpl });
   // 11:00 New York on Aug 31: the range ends where Aug 31 begins.
   assert.equal((market.requests[0].body.range as { end: string }).end, "2026-08-31T04:00:00.000Z");
+});
+
+test("resolves to the listings the market has no bars for on any basis, and to none when every listing has them (#665)", async () => {
+  const both = fakeMarket({ split_adjusted: ["full", "full"] });
+  assert.deepEqual(await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: both.fetchImpl }), []);
+  const one = fakeMarket({ split_adjusted: ["full", "empty"], split_and_div_adjusted: ["full", "unavailable"] });
+  assert.deepEqual(await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: one.fetchImpl }), [LISTINGS[1].id]);
+  // A window that is not current still stored bars.
+  const stale = fakeMarket({ split_adjusted: ["stale", "stale"], split_and_div_adjusted: ["unavailable", "unavailable"] });
+  assert.deepEqual(await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: stale.fetchImpl }), []);
+  // The split-adjusted answer says so: a dividend-adjusted fallback that failed changes nothing.
+  const fallback = fakeMarket({ split_adjusted: ["full", "empty"], split_and_div_adjusted: ["full", "refused"] });
+  assert.deepEqual(await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: fallback.fetchImpl }), [LISTINGS[1].id]);
+  const uncovered = fakeMarket({ split_adjusted: ["full", "unavailable"], split_and_div_adjusted: ["full", "rate_limited"] });
+  assert.deepEqual(await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: uncovered.fetchImpl }), [LISTINGS[1].id]);
+});
+
+test("a listing the market failed for rejects, so the step reads failed and is retried, whether or not it may retry (#665)", async () => {
+  // No dividend-adjusted coverage (Polygon never serves that basis) says nothing about the listing's bars.
+  const limited = fakeMarket({ split_adjusted: ["full", "rate_limited"], split_and_div_adjusted: ["full", "unavailable"] });
+  await assert.rejects(hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: limited.fetchImpl }), /rate_limited/);
+  // A refused request (a bad key, a malformed answer) is no answer about the listing's bars either.
+  const refused = fakeMarket({ split_adjusted: ["full", "refused"], split_and_div_adjusted: ["full", "unavailable"] });
+  await assert.rejects(hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: refused.fetchImpl }), /provider_error/);
 });
 
 test("a market failure or a hung market rejects, so the turn's step reads failed", async (t) => {

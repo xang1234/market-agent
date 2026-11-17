@@ -55,29 +55,44 @@ function selfHost(bindHost: string): string {
   return host.includes(":") ? `[${host}]` : host;
 }
 
+// Resolves to the listings the market has no bars for on any basis (#665):
+// their split-adjusted request was answered with none, or with no coverage.
+// That request alone says so, as the dividend-adjusted one is a fallback some
+// providers never serve (Polygon answers it with no coverage). It rejects when
+// a listing has no bars because the market failed for its split-adjusted
+// request (a rate limit, an outage, a refused request), so the step reads
+// failed, not empty.
 export async function hydrateYtdBars(input: {
   origin: string;
   listings: ReadonlyArray<HydrationListing>;
   now: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
-}): Promise<void> {
-  if (input.listings.length === 0) return;
+}): Promise<ReadonlyArray<string>> {
+  if (input.listings.length === 0) return [];
   const fetchImpl = input.fetchImpl ?? fetch;
   const signal = AbortSignal.timeout(input.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const priced = new Set<string>();
+  let failures = new Map<string, string>();
   // Every company on one basis, or the chart cannot compare them. A basis is
   // enough only when what came back makes a full YTD window (an "available"
   // answer can still hold no bars) that reaches the last completed session
   // (all series stopping months ago still agree); otherwise fetch them all on
   // the next.
-  for (const basis of BASES) {
-    const bars = await fetchWindows(fetchImpl, input.origin, input.listings, input.now, basis, signal);
+  for (const [index, basis] of BASES.entries()) {
+    const { bars, failed } = await fetchWindows(fetchImpl, input.origin, input.listings, input.now, basis, signal);
+    for (const [id, stored] of bars) if (stored.length > 0) priced.add(id);
+    if (index === 0) failures = failed;
     const window = selectYtdWindow(
       input.listings.map((listing) => ({ label: listing.id, timeZone: listing.timeZone, bars: bars.get(listing.id) ?? [] })),
       input.now,
     );
-    if (window.ok && input.listings.every((listing) => isCurrentEnd(window.endDate, input.now, listing.timeZone))) return;
+    if (window.ok && input.listings.every((listing) => isCurrentEnd(window.endDate, input.now, listing.timeZone))) return [];
   }
+  const unpriced = input.listings.map((listing) => listing.id).filter((id) => !priced.has(id));
+  const failed = unpriced.flatMap((id) => (failures.has(id) ? [`${id} (${failures.get(id)})`] : []));
+  if (failed.length > 0) throw new Error(`the market could not answer for ${failed.join(", ")} just now`);
+  return unpriced;
 }
 
 // The range a listing's window is requested over: from Dec 20 of the prior
@@ -90,7 +105,8 @@ export function ytdRequestRange(now: string, timeZone: string): { start: string;
   return { start: `${year - 1}-12-20T00:00:00.000Z`, end: completedSessionsEnd(now, timeZone) };
 }
 
-// One series request per range.
+// One series request per range: each listing's bars, and the reason for each
+// the market failed for. Only missing coverage says it has no bars.
 async function fetchWindows(
   fetchImpl: typeof fetch,
   origin: string,
@@ -98,7 +114,7 @@ async function fetchWindows(
   now: string,
   basis: (typeof BASES)[number],
   signal: AbortSignal,
-): Promise<Map<string, DailyClose[]>> {
+): Promise<{ bars: Map<string, DailyClose[]>; failed: Map<string, string> }> {
   const byRange = new Map<string, { range: { start: string; end: string }; group: HydrationListing[] }>();
   for (const listing of listings) {
     const range = ytdRequestRange(now, listing.timeZone);
@@ -106,6 +122,7 @@ async function fetchWindows(
     byRange.set(key, { range, group: [...(byRange.get(key)?.group ?? []), listing] });
   }
   const bars = new Map<string, DailyClose[]>();
+  const failed = new Map<string, string>();
   for (const { range, group } of byRange.values()) {
     const response = await fetchImpl(new URL("/v1/market/series", origin), {
       method: "POST",
@@ -124,11 +141,13 @@ async function fetchWindows(
       throw new Error(`market series request answered ${response.status}`);
     }
     const body = (await response.json()) as {
-      results?: Array<{ listing?: { id?: string }; outcome?: { outcome?: string; data?: { bars?: DailyClose[] } } }>;
+      results?: Array<{ listing?: { id?: string }; outcome?: { outcome?: string; reason?: string; data?: { bars?: DailyClose[] } } }>;
     };
     for (const result of body.results ?? []) {
-      if (result.listing?.id && result.outcome?.outcome === "available") bars.set(result.listing.id, result.outcome.data?.bars ?? []);
+      if (!result.listing?.id) continue;
+      if (result.outcome?.outcome === "available") bars.set(result.listing.id, result.outcome.data?.bars ?? []);
+      else if (result.outcome?.reason !== "missing_coverage") failed.set(result.listing.id, result.outcome?.reason ?? "unavailable");
     }
   }
-  return bars;
+  return { bars, failed };
 }
