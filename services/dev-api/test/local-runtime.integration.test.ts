@@ -4,9 +4,10 @@ import test from "node:test";
 
 import type { Client } from "pg";
 
-import { claimAgentRun } from "../../agents/src/agent-run-repo.ts";
+import { claimAgentRun, completeAgentRun } from "../../agents/src/agent-run-repo.ts";
 import { createAgent, getAgent } from "../../agents/src/agent-repo.ts";
 import { runAgentLoop } from "../../agents/src/agent-loop.ts";
+import { runClaimedAgentLoop } from "./claimed-agent-loop.ts";
 import { createClaimArgument } from "../../evidence/src/claim-argument-repo.ts";
 import { createClaimEvidence } from "../../evidence/src/claim-evidence-repo.ts";
 import { createClaim } from "../../evidence/src/claim-repo.ts";
@@ -164,6 +165,7 @@ test(
       alert_rules: alertRules,
       stages: await createAgentLoopStages({ userId: USER_ID, runId: RUN_ID, agent, trigger: "manual" }),
     });
+    await completeAgentRun(pool, { run_id: RUN_ID, outputs_summary: result.outputs_summary });
 
     assert.deepEqual(result.outputs_summary, {
       findings: 1,
@@ -298,7 +300,7 @@ test(
     const updatedAgent = await getAgent(seedClient, agent.agent_id);
     assert.notEqual(updatedAgent, null);
     const secondRunId = "30000000-0000-4000-8000-000000000013";
-    const secondResult = await runAgentLoop({
+    const secondResult = await runClaimedAgentLoop({
       pool,
       agent_id: agent.agent_id,
       run_id: secondRunId,
@@ -339,9 +341,10 @@ test(
     const agentAfterNoopRun = await getAgent(seedClient, agent.agent_id);
     assert.notEqual(agentAfterNoopRun, null);
     const thirdRunId = "30000000-0000-4000-8000-000000000023";
-    const thirdResult = await runAgentLoop({
+    const thirdResult = await runClaimedAgentLoop({
       pool,
       agent_id: agent.agent_id,
+      run_id: thirdRunId,
       current_watermarks: agentAfterNoopRun!.watermarks,
       stages: await createAgentLoopStages({ userId: USER_ID, runId: thirdRunId, agent: agentAfterNoopRun!, trigger: "manual" }),
     });

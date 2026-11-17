@@ -8,13 +8,13 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createAgent, getAgent } from "../../agents/src/agent-repo.ts";
-import { runAgentLoop } from "../../agents/src/agent-loop.ts";
 import { loadThesisHistory, saveThesis } from "../../agents/src/thesis-repo.ts";
-import type { ThesisLlm } from "../../agents/src/thesis-evaluator.ts";
+import { UNCHECKED_REPLY, type ThesisLlm } from "../../agents/src/thesis-evaluator.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { inspectCommittedResult } from "../../financial-engine/src/inspection.ts";
 import { databaseUrl, engineDatabase, IDS, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
 import { createThesisAgentLoopStages } from "../src/thesis-runtime.ts";
+import { runClaimedAgentLoop } from "./claimed-agent-loop.ts";
 
 test("thesis runtime with verified numerical conditions", { skip: !dockerAvailable(), timeout: 300_000 }, async (t) => {
   const db = await engineDatabase(t, "thesis-fin-runtime");
@@ -34,12 +34,13 @@ test("thesis runtime with verified numerical conditions", { skip: !dockerAvailab
   });
   const run = async () => {
     const fresh = (await getAgent(db, agent.agent_id))!;
+    const runId = randomUUID();
     const stages = createThesisAgentLoopStages({
-      db: pool, userId: IDS.owner, runId: randomUUID(), agent: fresh, thesis,
+      db: pool, userId: IDS.owner, runId, agent: fresh, thesis,
       financial: { pool, evidence: createEvidenceFinancialPort },
       getModel: async () => { throw new Error("no model is needed for numerical conditions"); },
     });
-    return runAgentLoop({ pool, agent_id: agent.agent_id, current_watermarks: fresh.watermarks, stages });
+    return runClaimedAgentLoop({ pool, agent_id: agent.agent_id, run_id: runId, current_watermarks: fresh.watermarks, stages });
   };
 
   await run();
@@ -90,12 +91,13 @@ test("a narrative condition citing a figure reuses its assessment on unchanged e
   };
   const run = async () => {
     const fresh = (await getAgent(db, agent.agent_id))!;
+    const runId = randomUUID();
     const stages = createThesisAgentLoopStages({
-      db: pool, userId: IDS.owner, runId: randomUUID(), agent: fresh, thesis,
+      db: pool, userId: IDS.owner, runId, agent: fresh, thesis,
       financial: { pool, evidence: createEvidenceFinancialPort },
       getModel: async () => ({ llm, identity: "scripted" }),
     });
-    return runAgentLoop({ pool, agent_id: agent.agent_id, current_watermarks: fresh.watermarks, stages });
+    return runClaimedAgentLoop({ pool, agent_id: agent.agent_id, run_id: runId, current_watermarks: fresh.watermarks, stages });
   };
 
   await run();
@@ -137,27 +139,33 @@ test("a run that keeps results from two snapshots seals a new one holding every 
       return { text: JSON.stringify({ results: conditions.map((condition) => ({ condition_id: condition.condition_id, status: "supported", refs: [ref(condition.condition_id)] })) }), deployment: { channel: "test", model: "scripted" } };
     },
   });
-  const run = async (llm: ThesisLlm, beforePersist?: () => Promise<unknown>) => {
+  const run = async (llm: ThesisLlm) => {
     const fresh = (await getAgent(db, agent.agent_id))!;
+    const runId = randomUUID();
     const stages = createThesisAgentLoopStages({
-      db: pool, userId: IDS.owner, runId: randomUUID(), agent: fresh, thesis,
+      db: pool, userId: IDS.owner, runId, agent: fresh, thesis,
       financial: { pool, evidence: createEvidenceFinancialPort },
       getModel: async () => ({ llm, identity: "scripted" }),
     });
-    if (beforePersist) {
-      const analyze = stages.analyze;
-      stages.analyze = async (stage) => { const result = await analyze(stage); await beforePersist(); return result; };
-    }
-    return runAgentLoop({ pool, agent_id: agent.agent_id, current_watermarks: fresh.watermarks, stages });
+    return runClaimedAgentLoop({ pool, agent_id: agent.agent_id, run_id: runId, current_watermarks: fresh.watermarks, stages });
   };
 
-  await run(citing({ [revenueCondition]: "Revenue" }), () => run(citing({ [grossProfitCondition]: "Gross profit" })));
+  await run(citing({ [revenueCondition]: "Revenue" }));
+  await run(citing({ [grossProfitCondition]: "Gross profit" }));
+  // Runs that overlapped before #661 could leave each condition last checked in a different snapshot.
+  await db.query(
+    `update agent_thesis_assessments a
+        set results = (select jsonb_agg(case when e.r->>'condition_id' = $1 then $2::jsonb else e.r end order by e.i)
+                         from jsonb_array_elements(a.results) with ordinality as e(r, i))
+      where a.assessed_at = (select max(assessed_at) from agent_thesis_assessments)`,
+    [revenueCondition, JSON.stringify({ condition_id: revenueCondition, status: "unresolved", reason: UNCHECKED_REPLY, claim_refs: [], fact_refs: [], method: "unchecked_reply" })],
+  );
   await run(citing({}));
-  const [third, ...overlapping] = (await loadThesisHistory(db, { agent_id: agent.agent_id, user_id: IDS.owner })).assessments;
+  const [third, ...earlier] = (await loadThesisHistory(db, { agent_id: agent.agent_id, user_id: IDS.owner })).assessments;
   assert.equal(asked.length, 2, "the third run keeps each condition's checked result and calls no model");
   assert.deepEqual(third!.results.map((result) => [result.method, result.fact_refs]), [["model", [revenueFact]], ["model", [grossProfitFact]]]);
-  assert.equal(new Set(overlapping.map((assessment) => assessment.snapshot_id)).size, 2, "each overlapping run sealed its own snapshot");
-  assert.ok(!overlapping.some((assessment) => assessment.snapshot_id === third!.snapshot_id), "neither snapshot seals both conditions' facts, so the run seals its own");
+  assert.equal(new Set(earlier.map((assessment) => assessment.snapshot_id)).size, 2, "each earlier run sealed its own snapshot");
+  assert.ok(!earlier.some((assessment) => assessment.snapshot_id === third!.snapshot_id), "neither snapshot seals both conditions' facts, so the run seals its own");
   const sealed = (await db.query<{ fact_refs: string[] }>(`select fact_refs from snapshots where snapshot_id = $1::uuid`, [third!.snapshot_id])).rows[0]!.fact_refs;
   assert.deepEqual([revenueFact, grossProfitFact].filter((fact) => !sealed.includes(fact)), [], "every cited fact is sealed in the run's snapshot");
 });

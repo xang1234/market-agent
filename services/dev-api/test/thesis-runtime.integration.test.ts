@@ -11,7 +11,7 @@ import type { ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
 import { bootstrapDatabase, connectedClient, connectedPool, dockerAvailable, registerLifoCleanup } from '../../../db/test/docker-pg.ts';
 import { createAgent, getAgent } from '../../agents/src/agent-repo.ts';
 import { saveThesis, loadThesisHistory } from '../../agents/src/thesis-repo.ts';
-import { runAgentLoop } from '../../agents/src/agent-loop.ts';
+import { runClaimedAgentLoop } from './claimed-agent-loop.ts';
 import { createThesisAgentLoopStages } from '../src/thesis-runtime.ts';
 import { createThesisAdapter } from '../src/thesis-adapter.ts';
 import { createEvidenceFinancialPort } from '../../financial-engine/src/evidence-adapter.ts';
@@ -52,14 +52,15 @@ test('thesis monitoring persists, deduplicates, reassesses changed facts and pro
   await assert.rejects(services.agents.update({userId:USER,agentId:agent.agent_id,body:{universe:{mode:'static',subject_refs:[{kind:'issuer',id:randomUUID()}]}}}),{status:409});
   async function execute(beforePersist?:()=>Promise<void>) {
     const freshAgent = (await getAgent(db, agent.agent_id))!;
-    const stages = createThesisAgentLoopStages({db:pool,userId:USER,runId:randomUUID(),agent:freshAgent,thesis,financial:{pool,evidence:createEvidenceFinancialPort}});
+    const runId = randomUUID();
+    const stages = createThesisAgentLoopStages({db:pool,userId:USER,runId,agent:freshAgent,thesis,financial:{pool,evidence:createEvidenceFinancialPort}});
     if (beforePersist) {
       const analyze = stages.analyze;
       stages.analyze = async input => { const result = await analyze(input); await beforePersist(); return result; };
     }
-    return runAgentLoop({pool,agent_id:agent.agent_id,current_watermarks:freshAgent.watermarks,stages});
+    return runClaimedAgentLoop({pool,agent_id:agent.agent_id,run_id:runId,current_watermarks:freshAgent.watermarks,stages});
   }
-  await Promise.all([execute(),execute()]);
+  await execute();
   let history = await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
   assert.equal(history.assessments.length,1);
   assert.equal(history.assessments[0].results[0].status,'supported');
@@ -168,8 +169,9 @@ test('narrative monitoring includes IR and non-IR claims, never stores a fabrica
   }};
   async function execute(llm:ThesisLlm|null=model,identity='controlled') {
     const fresh=(await getAgent(db,agent.agent_id))!;
-    const stages=createThesisAgentLoopStages({db:pool,userId:USER,runId:randomUUID(),agent:fresh,thesis,financial:{pool,evidence:createEvidenceFinancialPort},getModel:async()=>({llm,identity})});
-    return runAgentLoop({pool,agent_id:agent.agent_id,current_watermarks:fresh.watermarks,stages});
+    const runId=randomUUID();
+    const stages=createThesisAgentLoopStages({db:pool,userId:USER,runId,agent:fresh,thesis,financial:{pool,evidence:createEvidenceFinancialPort},getModel:async()=>({llm,identity})});
+    return runClaimedAgentLoop({pool,agent_id:agent.agent_id,run_id:runId,current_watermarks:fresh.watermarks,stages});
   }
   await execute();
   await execute();
@@ -236,14 +238,11 @@ async function narrativeMonitor(t:TestContext,name:string,conditionIds:string[])
   const claim=await createClaim(db,{document_id:document.document_id,predicate:'demand.change',text_canonical:'Customers kept their orders.',polarity:'positive',modality:'asserted',reported_by_source_id:source.source_id,effective_time:published,confidence:0.9,status:'extracted'});
   await createClaimArgument(db,{claim_id:claim.claim_id,subject_kind:'issuer',subject_id:ISSUER,role:'subject'});
   await createClaimEvidence(db,{claim_id:claim.claim_id,document_id:document.document_id,locator:{kind:'paragraph',index:1},confidence:0.9});
-  async function run(llm:ThesisLlm,identity:string,beforePersist?:()=>Promise<unknown>) {
+  async function run(llm:ThesisLlm,identity:string) {
     const fresh=(await getAgent(db,agent.agent_id))!;
-    const stages=createThesisAgentLoopStages({db:pool,userId:USER,runId:randomUUID(),agent:fresh,thesis,financial:{pool,evidence:createEvidenceFinancialPort},getModel:async()=>({llm,identity})});
-    if (beforePersist) {
-      const analyze=stages.analyze;
-      stages.analyze=async input=>{const result=await analyze(input); await beforePersist(); return result;};
-    }
-    return runAgentLoop({pool,agent_id:agent.agent_id,current_watermarks:fresh.watermarks,stages});
+    const runId=randomUUID();
+    const stages=createThesisAgentLoopStages({db:pool,userId:USER,runId,agent:fresh,thesis,financial:{pool,evidence:createEvidenceFinancialPort},getModel:async()=>({llm,identity})});
+    return runClaimedAgentLoop({pool,agent_id:agent.agent_id,run_id:runId,current_watermarks:fresh.watermarks,stages});
   }
   const assessments=async()=>(await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments;
   return {
@@ -275,22 +274,4 @@ test('a rerun on the same evidence asks the model again only for the condition w
   assert.notEqual(second.snapshot_id,first.snapshot_id);
   assert.equal(third.snapshot_id,second.snapshot_id,'once every condition is checked, the next run reuses that snapshot');
   assert.equal(await monitor.findings(),2);
-});
-
-test('a run overlapped by one that left the condition unchecked records its own checked reply', {skip:!dockerAvailable(),timeout:120000}, async t => {
-  const monitor=await narrativeMonitor(t,'thesis-overlap-unchecked',[CONDITION]);
-  const overlapped=await monitor.run(scripted(),'same',()=>monitor.run(scripted({citeUnknownRefFor:[CONDITION]}),'same'));
-  assert.deepEqual(overlapped.outputs_summary,{findings:1,assessments:1,reused:false});
-  assert.deepEqual(await monitor.statuses(),[['supported'],['unchecked']]);
-  assert.equal(await monitor.findings(),1);
-});
-
-test('a run overlapped by one that checked every condition on the same evidence records nothing, and on other evidence fails', {skip:!dockerAvailable(),timeout:120000}, async t => {
-  const monitor=await narrativeMonitor(t,'thesis-overlap-checked',[CONDITION]);
-  const overlapped=await monitor.run(scripted(),'same',()=>monitor.run(scripted(),'same'));
-  assert.deepEqual(overlapped.outputs_summary,{findings:0,assessments:0,reused:true});
-  assert.deepEqual(await monitor.statuses(),[['supported']]);
-  await assert.rejects(monitor.run(scripted(),'older',()=>monitor.run(scripted(),'newer')),/newer assessment finished during this run/);
-  assert.equal((await monitor.assessments()).length,2);
-  assert.equal(await monitor.findings(),1);
 });

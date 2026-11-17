@@ -2,7 +2,7 @@ import type { AgentRow, QueryExecutor } from '../../agents/src/agent-repo.ts';
 import type { AgentLoopStages } from '../../agents/src/agent-loop.ts';
 import { getCurrentThesis, getLastCheckedResults, recordThesisAssessment, type LastCheckedResult } from '../../agents/src/thesis-repo.ts';
 import { evaluateThesis, THESIS_PROMPT_VERSION, type ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
-import { ThesisConflictError, type ThesisAssessment, type ThesisVersion, type ConditionAssessment } from '../../agents/src/thesis-types.ts';
+import { ThesisConflictError, type ThesisVersion, type ConditionAssessment } from '../../agents/src/thesis-types.ts';
 import { generateThesisFinding } from './thesis-finding.ts';
 import type { FindingRow } from '../../agents/src/finding-generator.ts';
 import { writeRunActivity } from '../../observability/src/run-activity.ts';
@@ -47,7 +47,7 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
     async readDeltas() {
       // By default the cutoff comes from the database clock, the one that stamps
       // facts (now()) and assessments (assessed_at). Taking it from the app clock
-      // let skew hide a just-ingested fact or fake a newer-assessment conflict (#143).
+      // let skew hide a just-ingested fact (#143).
       const asOf = input.now ? new Date(await input.now()).toISOString() : await databaseNow(input.db);
       return { thesis_version_id: input.thesis.thesis_version_id, as_of: asOf };
     },
@@ -96,19 +96,6 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       if (latest?.thesis_version_id !== input.thesis.thesis_version_id)
         throw new ThesisConflictError('Thesis changed during assessment; run again to assess the new version.');
       const lastChecked = await getLastCheckedResults(tx, input.thesis.thesis_version_id);
-      // Compared in the database, at its microsecond precision: through JS Dates
-      // an assessment finished later in the cutoff's millisecond looked equal.
-      const finishedDuringThisRun = await tx.query<Pick<ThesisAssessment, 'input_hash'>>(
-        'select input_hash from agent_thesis_assessments where thesis_version_id = $1::uuid and assessed_at > $2::timestamptz order by assessed_at desc limit 1',
-        [input.thesis.thesis_version_id, deltas.as_of],
-      );
-      const finished = finishedDuringThisRun.rows[0];
-      if (finished !== undefined && packetHashOf(finished.input_hash) !== analysis.packet_hash)
-        throw new ThesisConflictError('A newer assessment finished during this run; run again.');
-      if (finished !== undefined && keptOn(lastChecked, analysis.packet_hash).length === analysis.results.length) {
-        await activity(tx, input, 'dismissed', 'No new thesis changes: a run that finished during this one assessed the same evidence.');
-        return { findings: 0, assessments: 0, reused: true };
-      }
       if (analysis.reused_snapshot_id !== null) {
         await recordThesisAssessment(tx, {
           thesis_version_id: input.thesis.thesis_version_id, run_id: input.runId, snapshot_id: analysis.reused_snapshot_id,

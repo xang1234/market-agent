@@ -33,6 +33,21 @@ Symbol page, Analyze, Investment memo, Generate memo (or Open), Monitor this the
 - Scheduled runs: with `AGENT_SCHEDULER_INTERVAL_MS=10000` and an hourly agent's last run two hours back, a new dated assessment appears with no click.
 - Tab reaches each condition's summary, where Enter opens it.
 
+## Lease takeover
+
+A run whose lease expired and was taken over must commit nothing (#661). Start the stack with the hold runtime, which holds the first run of the agent named in `.dev/lease-hold/hold` to finish analyze, for at most five minutes:
+
+```bash
+echo "DEV_API_RUNTIME_MODULE=$PWD/.claude/skills/verify-market-agent/scripts/hold-runtime.ts" >> .env.dev
+echo "AGENT_SCHEDULER_INTERVAL_MS=5000" >> .env.dev
+$V up
+$V lease-race run-now             # a held run-now
+$V lease-race scheduled           # a held scheduled run
+$V lease-race run-now --thesis    # a held thesis run
+```
+
+Each passes when the newer run completes, the held run's row reads failed with "agent run claim expired", the held run-now answers with that row (or the scheduler logs the held run `superseded`), the watermark names the newer run, and only the newer run's activity or assessment is stored. Remove both lines from `.env.dev` afterwards. `report.json` for each run is in `.dev/verify/lease-race-<mode>[-thesis]-<stamp>/`.
+
 ## Evidence
 
 `.dev/verify/agents-<TICKER>-<stamp>/`: `report.json` (checks, timings, and each run's model calls from `.dev/logs/dev-api.log`, failed attempts included, as the memo's count does), `memo.json`, `handoff.png`, `drafted.png`, `assessed.png`, `history.png`, `narrow.png`, `final.png`, and `page.txt`.
