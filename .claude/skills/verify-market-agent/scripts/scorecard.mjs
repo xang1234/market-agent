@@ -28,7 +28,7 @@ const expectations = {
     return missing(wanted, (name) => names.includes(name), names, 'tools called')
   },
 }
-const budgets = { first_text: 'first_text_ms', saved: 'saved_ms' }
+const budgets = { first_step: 'first_step_ms', first_text: 'first_text_ms', saved: 'saved_ms' }
 const nullOnTimeout = (error) => {
   if (error.name === 'TimeoutError') return null
   throw error
@@ -92,6 +92,16 @@ function answerTextShown(knownIds) {
   return [...document.querySelectorAll('[data-role="assistant"]')].some(
     (message) => !knownIds.includes(message.dataset.messageId) && message.innerText.trim() !== '',
   )
+}
+
+// A step the turn names live, before its answer: the plan's own Planner, Composer and Snapshot
+// rows don't count. 'none' once the reply rendered without one, so the wait ends with the turn.
+function workStepShown(knownIds) {
+  const labels = document.querySelectorAll('[data-testid="streaming-turn"] [data-testid="agent-plan-panel"] li strong')
+  if ([...labels].some((label) => !['Planner', 'Composer', 'Snapshot'].includes(label.innerText.trim()))) return 'step'
+  const rendered = !document.querySelector('[data-testid="pending-turn"], [data-testid="streaming-turn"]') &&
+    [...document.querySelectorAll('[data-role="assistant"]')].some((message) => !knownIds.includes(message.dataset.messageId))
+  return rendered ? 'none' : false
 }
 
 function replyRendered(knownIds) {
@@ -162,14 +172,21 @@ async function runTurn({ db, page, kase, index, thread, knownIds, consoleErrors,
   }
   const elapsed = () => Date.now() - started
   const waitInPage = (fn) => page.waitForFunction(fn, knownIds, { polling: 100, timeout: TURN_TIMEOUT_MS }).then(elapsed, nullOnTimeout)
-  const [firstText, saved, rendered] = await Promise.all([
+  const [firstStep, firstText, saved, rendered] = await Promise.all([
+    page.waitForFunction(workStepShown, knownIds, { polling: 100, timeout: TURN_TIMEOUT_MS })
+      .then(async (shown) => {
+        const ms = elapsed()
+        const seen = await shown.jsonValue()
+        await shown.dispose()
+        return seen === 'step' ? ms : null
+      }, nullOnTimeout),
     waitInPage(answerTextShown),
     savedReply(db, page, () => thread.id, submitted, started),
     waitInPage(replyRendered),
   ])
 
   const turn = { question: ask, user_message_id: null, assistant_message_id: null, block_kinds: [], subjects: null, tools: null, judge: null, reply: null }
-  turn.timings = { first_text_ms: firstText, saved_ms: saved?.ms ?? null, rendered_ms: rendered }
+  turn.timings = { first_step_ms: firstStep, first_text_ms: firstText, saved_ms: saved?.ms ?? null, rendered_ms: rendered }
   if (saved !== null) {
     const { row } = saved
     knownIds.push(row.message_id)
@@ -262,7 +279,7 @@ function summarize(report) {
         return used.length === 0 ? null : used.reduce((total, llm) => total + llm[key], 0)
       }))
     const passedRuns = kase.runs.filter((run) => runFailures(run).length === 0).length
-    return `| ${kase.id} | ${kase.passed ? 'pass' : 'FAIL'} | ${passedRuns}/${kase.runs.length} | ${timing('first_text_ms')} | ${timing('saved_ms')} | ${timing('rendered_ms')} | ${show(perRun('calls'))} | ${show(perRun('tokens_in'))}/${show(perRun('tokens_out'))} |`
+    return `| ${kase.id} | ${kase.passed ? 'pass' : 'FAIL'} | ${passedRuns}/${kase.runs.length} | ${timing('first_step_ms')} | ${timing('first_text_ms')} | ${timing('saved_ms')} | ${timing('rendered_ms')} | ${show(perRun('calls'))} | ${show(perRun('tokens_in'))}/${show(perRun('tokens_out'))} |`
   })
   const failures = report.cases.flatMap((kase) => failuresOf(kase).map((failure) => `- ${kase.id} ${failure}`))
   return [
@@ -270,8 +287,8 @@ function summarize(report) {
     '',
     `${report.cases.filter((kase) => kase.passed).length}/${report.cases.length} cases passed, ${report.runs} run(s) each. Timings are medians per turn in ms; llm is the median per run.`,
     '',
-    '| case | result | runs passed | first text | saved | rendered | llm calls | tokens in/out |',
-    '|---|---|---|---|---|---|---|---|',
+    '| case | result | runs passed | first step | first text | saved | rendered | llm calls | tokens in/out |',
+    '|---|---|---|---|---|---|---|---|---|',
     ...rows,
     '',
     ...(failures.length === 0 ? ['No failures.'] : ['## Failures', '', ...failures]),

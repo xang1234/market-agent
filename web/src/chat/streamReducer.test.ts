@@ -458,6 +458,21 @@ test('a tool step the server labels shows that label, live and in the saved work
   })
 })
 
+test("the server's answer-writing step is the plan's composer row, not a second one beside it", () => {
+  const writing = { tool_call_id: 'write-1', tool_name: 'write_answer', label: 'Writing the answer' }
+  let state: StreamState = applyChatStreamEvent(INITIAL_STREAM_STATE, event('turn.started', 1, { bundle_id: 'analyst_agent' }))
+  state = applyChatStreamEvent(state, event('tool.started', 2, writing))
+  assert.deepEqual(state.plan_steps.map((step) => [step.step_id, step.label, step.status]), [
+    ['planner', 'Planner', 'running'],
+    ['composer', 'Writing the answer', 'running'],
+  ])
+  state = applyChatStreamEvent(state, event('tool.completed', 3, { ...writing, status: 'ok' }))
+  assert.deepEqual(state.plan_steps.map((step) => [step.step_id, step.label, step.status]), [
+    ['planner', 'Planner', 'running'],
+    ['composer', 'Writing the answer', 'done'],
+  ])
+})
+
 test('the sealed snapshot id outlives the deltas that follow it, and the next turn starts without one', () => {
   let state: StreamState = applyChatStreamEvent(INITIAL_STREAM_STATE, event('turn.started', 1))
   state = applyChatStreamEvent(state, event('snapshot.sealed', 2, { snapshot_id: '72fe1508-c2ab-4176-83d7-6ffe178f7a8b' }))

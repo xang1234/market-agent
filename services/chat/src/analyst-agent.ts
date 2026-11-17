@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { FinancialRuntimeAuthority, FinancialSubjectRef } from "../../financial-core/src/index.ts";
-import { planningModelFromRouter, type Clarification, type PlanningModel, type RequestedSubject } from "../../financial-engine/src/planner.ts";
+import { CLARIFICATION_FIGURES, planningModelFromRouter, type Clarification, type PlanningModel, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import { createDefaultPiLlmChatClient, createLlmRouterFromEnv, LlmClientError, LlmProviderError, LlmRouterError, withLlmAbortSignal, type LlmChatClient, type LlmPurpose, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import type { ControlledRouter, LlmToolCall } from "../../llm/src/router.ts";
@@ -15,7 +15,7 @@ import { answerPath, answerTurn, type AnsweredTurn, type AnswerTraceInput, type 
 import { isUuid, noteBlock } from "./chat-ids.ts";
 import { COMMENTARY_UNAVAILABLE } from "./engine-commentary.ts";
 import { ANALYST_AGENT_BUNDLE_ID } from "./bundle-routing.ts";
-import { labelList, type ChatAnalystAgent, type ChatAnalystToolRuntimeResult, type ChatAnalystToolRuntimeToolCall, type ChatTurnRunContext } from "./coordinator.ts";
+import { labelList, type ChatAnalystAgent, type ChatAnalystToolRuntimeResult, type ChatAnalystToolRuntimeToolCall, type ChatTurnEmit, type ChatTurnRunContext } from "./coordinator.ts";
 import { mergePackets, type EvidencePacket } from "./evidence-packet.ts";
 import {
   certifiedFinancials,
@@ -162,6 +162,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
     const named = companies.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject] : []);
     if (companies.clarify || companies.subjects.some((subject) => subject.resolution.status === "ambiguous")) return "pick_company";
     if (named.length === 0) return null;
+    context.emit("turn.started", { bundle_id: ANALYST_AGENT_BUNDLE_ID });
     const read = await reading;
     const turnId = context.turnId ?? context.runId;
     const unmatched = companies.subjects.flatMap((subject) => (subject.resolution.status === "not_found" ? [subject.mention] : []));
@@ -319,7 +320,7 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
   const fetched = new Map<string, Promise<boolean>>();
   const stillLoading = (issuers: ReadonlyArray<string>) => Promise.all(issuers.map((issuer) => {
     const pending = fetched.get(issuer) ?? (deps.financial.hydrate
-      ? deps.financial.hydrate([{ issuer_id: issuer, label: labelOf(issuer) }], { emit: QUIET, turnId })
+      ? deps.financial.hydrate([{ issuer_id: issuer, label: labelOf(issuer) }], { emit: context.emit, turnId: `${turnId}:${issuer}` })
         .then((loading) => loading.has(issuer))
         .catch((reason: unknown) => {
           console.warn("[chat] fetching a company's filings failed; the analyst agent answers from what is on file", reason);
@@ -390,20 +391,24 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
 
   const inFlight = new Set<Promise<ToolLoopOutput>>();
   const execute = async (call: LlmToolCall): Promise<ToolLoopOutput> => {
-    const work = call.name === "certified_financials"
-      ? certify(call.arguments)
-      : isAnalystToolName(call.name) ? readStored(call.name, call.arguments) : Promise.resolve(invalid(call.name, "no such tool"));
-    inFlight.add(work);
-    const output = await work.finally(() => inFlight.delete(work));
-    toolCalls.push({
-      tool_call_id: randomUUID(),
-      tool_name: call.name,
-      status: output.isError ? "error" : "ok",
-      bundle_id: ANALYST_AGENT_BUNDLE_ID,
-      arguments: call.arguments,
-      result: { status: statusOf(output.content) },
-    });
-    return output;
+    const name = call.name;
+    if (name !== "certified_financials" && !isAnalystToolName(name)) return invalid(name, "no such tool");
+    const shown = { tool_call_id: randomUUID(), tool_name: name, label: stepLabel(name, call.arguments, whoOf(call.arguments)) };
+    // In flight until its step is closed and logged, so a reading that stops early waits for both.
+    const step = inStep(context.emit, shown, () => (name === "certified_financials" ? certify(call.arguments) : readStored(name, call.arguments)), (done) => !done.isError)
+      .then((output) => {
+        toolCalls.push({
+          tool_call_id: shown.tool_call_id,
+          tool_name: name,
+          status: output.isError ? "error" : "ok",
+          bundle_id: ANALYST_AGENT_BUNDLE_ID,
+          arguments: call.arguments,
+          result: { status: statusOf(output.content) },
+        });
+        return output;
+      });
+    inFlight.add(step);
+    return step.finally(() => inFlight.delete(step));
   };
 
   const template = policy.selection.prompt_template;
@@ -471,13 +476,18 @@ async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promis
     packet,
     ...WRITING[job.writing](certified.length > 0),
   };
+  const { emit } = job.planningContext;
   try {
-    written = await deps.compose(input, { ...job.trace, question }, (deployment) => {
+    written = await inStep(emit, { tool_call_id: randomUUID(), tool_name: "write_answer", label: "Writing the answer" }, () => deps.compose(input, { ...job.trace, question }, (deployment) => {
       answeredBy = deployment;
     }, job.meter(0, () => {
       answerRefused = true;
-    }));
-    if (written.judging) written = { ...written, assertions: (await written.judging.done).assertions };
+    })));
+    const { judging } = written;
+    if (judging) {
+      const judged = await inStep(emit, { tool_call_id: randomUUID(), tool_name: "judge_answer", label: "Checking the answer's inferences" }, () => judging.done);
+      written = { ...written, assertions: judged.assertions };
+    }
     if (written.assertions) written = withoutStance(input, packet, written.assertions) ?? written;
   } catch (reason) {
     if (!isModelFailure(reason)) throw reason;
@@ -643,6 +653,59 @@ const TOPIC: Readonly<Record<string, string>> = {
   get_peer_set: "Industry peers",
   get_analyst_consensus: "Analyst consensus",
 };
+
+type AgentTool = AnalystToolName | "certified_financials";
+type PlanStep = Readonly<{ tool_call_id: string; tool_name: string; label: string }>;
+
+const PREDICATE_WORDS: Readonly<Record<(typeof CLAIM_PREDICATES)[number], string>> = {
+  "business.description": "business",
+  "business.products": "products",
+  "business.customers": "customers",
+  "business.competition": "competition",
+  "risk.factor": "risk factors",
+};
+
+// Labels stream to the reader before anything is judged, so they read only the tool, enum arguments and the server's company labels.
+const STEP_LABELS: Readonly<Record<AgentTool, (args: JsonObject, who: string) => string>> = {
+  certified_financials: (args, who) => {
+    const period = readPeriod(args.period);
+    const when = period && periodWords(period);
+    return `Certifying ${labelList(keysOf(args.metrics, ASKABLE_FIGURES).map(metricWords)) || "figures"} for ${who}${when ? ` in ${when}` : ""}`;
+  },
+  get_company_profile: (_args, who) => `Reading ${who}'s 10-K`,
+  get_claims: (args, who) => {
+    if (args.role === "competitor") return `Finding 10-Ks that name ${who} as a competitor`;
+    const topic = labelList(keysOf(args.predicates, PREDICATE_WORDS).map((predicate) => PREDICATE_WORDS[predicate]));
+    return `Reading ${who}'s 10-K${topic ? ` ${topic}` : ""}`;
+  },
+  get_peer_set: (_args, who) => `Finding ${who}'s industry peers`,
+  get_analyst_consensus: (_args, who) => `Reading analyst consensus for ${who}`,
+};
+
+// The catalog's name for a figure as a sentence reads it ("diluted EPS"); a statement, which it does not name, keeps its key's words.
+const metricWords = (metric: string): string =>
+  Object.hasOwn(CLARIFICATION_FIGURES, metric) ? CLARIFICATION_FIGURES[metric]!.label.replace(/^[A-Z](?=[a-z])/, (letter) => letter.toLowerCase()) : metric.replaceAll("_", " ");
+
+export function stepLabel(name: AgentTool, args: JsonObject, who: string): string {
+  return STEP_LABELS[name](args, who || "a company");
+}
+
+function keysOf<K extends string>(value: JsonValue | undefined, table: Readonly<Record<K, unknown>>): K[] {
+  return Array.isArray(value) ? [...new Set(value.filter((key): key is K => typeof key === "string" && Object.hasOwn(table, key)))] : [];
+}
+
+async function inStep<T>(emit: ChatTurnEmit, step: PlanStep, run: () => Promise<T>, ok: (done: T) => boolean = () => true): Promise<T> {
+  emit("tool.started", step);
+  let done: T;
+  try {
+    done = await run();
+  } catch (reason) {
+    emit("tool.completed", { ...step, status: "error" });
+    throw reason;
+  }
+  emit("tool.completed", { ...step, status: ok(done) ? "ok" : "error" });
+  return done;
+}
 
 export function stopNotes(loop: Pick<ToolLoopResult, "stop" | "steps">, who: (args: JsonObject) => string): string[] {
   const unread = (calls: ReadonlyArray<LlmToolCall>, why: string) => calls.map((call) => {

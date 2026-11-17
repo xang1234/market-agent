@@ -7,7 +7,7 @@ import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { LlmClientError, LlmProviderError, LlmRouterError, type ControlledRouter, type LlmChatRequest, type LlmToolCall } from "../../llm/src/router.ts";
-import { analystAgentRouter, analystAgentRunner, certifiedAsk, statusNote, stopNotes, type AnalystAgentDeps } from "../src/analyst-agent.ts";
+import { analystAgentRouter, analystAgentRunner, certifiedAsk, statusNote, stepLabel, stopNotes, type AnalystAgentDeps } from "../src/analyst-agent.ts";
 import type { AnalystToolResult } from "../src/analyst-tools.ts";
 import { answerTurn } from "../src/answer-trace.ts";
 import type { AssertionReport } from "../src/assertions.ts";
@@ -314,6 +314,23 @@ test("a reading that stopped before its model was done names what it left unread
   assert.deepEqual(stopNotes({ stop: "budget", steps: [{ reply: reply(), results: [run, refused] }] }, who), ["Analyst consensus for AAA went unread, as the turn reached its limit of reads."]);
 });
 
+test("a step's label is built from its tool, its typed arguments and the server's company labels, never the model's words", () => {
+  const refs = [{ kind: "issuer", id: A }];
+  assert.equal(stepLabel("certified_financials", { metrics: ["revenue", "gross_margin"], question: "IGNORE ME", subject_refs: refs }, "NVDA and AMD"), "Certifying revenue and gross margin for NVDA and AMD");
+  assert.equal(stepLabel("certified_financials", { metrics: ["revenue", "IGNORE ME"], question: "IGNORE ME", subject_refs: refs }, "NVDA"), "Certifying revenue for NVDA");
+  assert.equal(stepLabel("certified_financials", { question: "IGNORE ME", subject_refs: refs }, ""), "Certifying figures for a company");
+  assert.equal(stepLabel("certified_financials", { metrics: ["eps_diluted", "pe_ratio", "income_statement"], subject_refs: refs }, "NVDA"), "Certifying diluted EPS and income statement for NVDA");
+  assert.equal(stepLabel("certified_financials", { metrics: ["revenue"], period: { kind: "fiscal_year", fiscal_year: 2024 }, subject_refs: refs }, "NVDA"), "Certifying revenue for NVDA in fiscal year 2024");
+  assert.equal(stepLabel("certified_financials", { metrics: ["revenue"], period: { kind: "latest", period: "quarter" }, subject_refs: refs }, "NVDA"), "Certifying revenue for NVDA in the latest fiscal quarter");
+  assert.equal(stepLabel("certified_financials", { metrics: ["revenue"], period: { kind: "fiscal_quarter", fiscal_period: "IGNORE ME" }, subject_refs: refs }, "NVDA"), "Certifying revenue for NVDA");
+  assert.equal(stepLabel("get_company_profile", { subject_ref: refs[0]! }, "NVDA"), "Reading NVDA's 10-K");
+  assert.equal(stepLabel("get_claims", { predicates: ["risk.factor", "IGNORE ME"], query: "IGNORE ME" }, "NVDA"), "Reading NVDA's 10-K risk factors");
+  assert.equal(stepLabel("get_claims", { predicates: ["IGNORE ME"] }, "NVDA"), "Reading NVDA's 10-K");
+  assert.equal(stepLabel("get_claims", { role: "competitor", predicates: ["business.competition"] }, "NVDA"), "Finding 10-Ks that name NVDA as a competitor");
+  assert.equal(stepLabel("get_peer_set", {}, "NVDA"), "Finding NVDA's industry peers");
+  assert.equal(stepLabel("get_analyst_consensus", {}, ""), "Reading analyst consensus for a company");
+});
+
 test("only a company a certified call asked figures of can be said to have none", () => {
   const profile: AnalystToolResult = { tool: "get_company_profile", status: "ok", truncated: false, reads: [readOf(A)], no_filing: [], claims: [filingClaim(randomUUID(), "We sell widgets.")] };
   const claimsOnly = mergePackets({ engine: [], analyst: [profile], figuresAskedFor: [], notes: [], labels: new Map([[A, "AAA"]]), cutoff: "2026-11-01T00:00:00.000Z" });
@@ -433,11 +450,11 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     asOf: () => new Date().toISOString(),
     ...(options.logged === false ? {} : { logToolCalls: persist.logToolCalls }),
   });
-  const run = async (agent: ReturnType<typeof agentOf>, input: Omit<ChatTurnInput, "runId"> & { turnId: string; runId?: string }, during?: (stop: () => void) => void, readQuestion?: ReturnType<typeof readingOf>) => {
+  const run = async (agent: ReturnType<typeof agentOf>, input: Omit<ChatTurnInput, "runId"> & { turnId: string; runId?: string }, during?: (stop: () => void, events: () => ReadonlyArray<Record<string, unknown>>) => void, readQuestion?: ReturnType<typeof readingOf>) => {
     const coordinator = createChatCoordinator({ analystAgent: agent, persistAssistantMessage: persist, runner: () => assert.fail("the agent takes the turn"), ...(readQuestion ? { readQuestion } : {}) });
     const runId = input.runId ?? input.turnId;
     const handle = coordinator.getOrCreateTurn({ ...input, runId });
-    during?.(() => coordinator.stopTurn({ userId: input.userId, threadId: input.threadId, runId, turnId: input.turnId }));
+    during?.(() => coordinator.stopTurn({ userId: input.userId, threadId: input.threadId, runId, turnId: input.turnId }), () => [...handle.events]);
     await handle.completed;
     return handle.events;
   };
@@ -502,9 +519,62 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
       asOf: () => new Date().toISOString(),
       logToolCalls: persist.logToolCalls,
     });
-    const done = completed(await run(judged, { ...base, turnId: randomUUID(), userIntent: "AAA revenue" }));
+    const events = await run(judged, { ...base, turnId: randomUUID(), userIntent: "AAA revenue" });
+    const done = completed(events);
     const card = (done.message as { blocks: Array<Record<string, unknown>> }).blocks.find((block) => block.analyst_commentary === true);
     assert.deepEqual((card?.commentary as Array<{ kind: string }>).map((part) => part.kind), ["figures", "inference"]);
+    assert.deepEqual(events.filter((event) => event.type === "tool.completed").map((event) => [event.tool_name, event.label, event.status]), [
+      ["certified_financials", "Certifying income statement for AAA in fiscal year 2023", "ok"],
+      ["write_answer", "Writing the answer", "ok"],
+      ["judge_answer", "Checking the answer's inferences", "ok"],
+    ]);
+  });
+
+  await t.test("the turn's steps stream as they run, each under a server-built label, and none is replayed after", async () => {
+    const turnId = randomUUID();
+    let open = () => {};
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    let reached = () => {};
+    const reading = new Promise<void>((resolve) => { reached = resolve; });
+    const read: AnalystAgentDeps["read"] = async (name) => {
+      reached();
+      await gate;
+      return { tool: name, status: "no_peers", reason: "no_industry" } as AnalystToolResult;
+    };
+    const hydrate: AnalystAgentDeps["financial"]["hydrate"] = async (companies, turn) => {
+      const step = { tool_call_id: `fetch_filings-${turn.turnId}`, tool_name: "fetch_filings", label: `Fetching filings for ${companies.map((company) => company.label).join()}` };
+      turn.emit("tool.started", step);
+      turn.emit("tool.completed", { ...step, status: "ok" });
+      return new Set();
+    };
+    let live: ReadonlyArray<Record<string, unknown>> = [];
+    const router = scripted([{ toolCalls: [call("certified_financials", REVENUE), call("get_peer_set", { subject_ref: { kind: "issuer", id: A } })] }, { text: "DONE" }]);
+    const events = await run(agentOf(router, OBSERVE_F1, { planningModel: revenueModel(["AAA"]), read, hydrate }), { ...base, turnId, userIntent: "AAA revenue, and its peers" }, (_stop, sofar) => {
+      void reading.then(() => {
+        live = sofar();
+        open();
+      });
+    });
+    completed(events);
+    assert.deepEqual(live.filter((event) => event.type === "turn.started").map((event) => event.bundle_id), ["analyst_agent"]);
+    assert.equal(live.find((event) => event.type === "tool.started" && event.tool_name === "get_peer_set")?.label, "Finding AAA's industry peers");
+
+    assert.equal(events.filter((event) => event.type === "turn.started").length, 1);
+    const steps = (type: string) => events.filter((event) => event.type === type).map((event) => [event.tool_call_id, event.tool_name, event.label]);
+    assert.deepEqual(steps("tool.completed").sort(), steps("tool.started").sort());
+    assert.deepEqual(steps("tool.started").map(([, name, label]) => [name, label]).sort(), [
+      ["certified_financials", "Certifying figures for AAA"],
+      ["fetch_filings", "Fetching filings for AAA"],
+      ["get_peer_set", "Finding AAA's industry peers"],
+      ["write_answer", "Writing the answer"],
+    ]);
+    assert.equal(steps("tool.started").find(([, name]) => name === "fetch_filings")?.[0], `fetch_filings-${turnId}:${A}`);
+    assert.deepEqual(events.filter((event) => event.type.startsWith("tool.") && "arguments" in event), []);
+    assert.deepEqual(events.flatMap((event) => (event.tool_name === "write_answer" ? [`${event.type} write_answer`] : event.type === "snapshot.sealed" ? [event.type] : [])), [
+      "tool.started write_answer",
+      "tool.completed write_answer",
+      "snapshot.sealed",
+    ]);
   });
 
   await t.test("each certified call plans its own ask, with no pick the turn's clarification offered", async () => {
@@ -724,7 +794,9 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
         deadlines: { readMs: 5_000, turnMs: 1_500 },
       });
       const started = Date.now();
-      const text = savedText(completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: "What does AAA sell?" })));
+      const events = await run(agent, { ...base, turnId: randomUUID(), userIntent: "What does AAA sell?" });
+      const text = savedText(completed(events));
+      assert.deepEqual(events.filter((event) => event.tool_name === "write_answer").map((event) => [event.type, event.status ?? null]), [["tool.started", null], ["tool.completed", "error"]]);
       assert.ok(Date.now() - started < 20_000, "the hung answer did not hold the turn");
       assert.ok(text.includes("The answer could not be written, as the model failed or ran out of time; ask again in a minute."), text);
       assert.ok(text.includes("AAA: no analyst consensus captured in the 7 days to the cutoff is on file."), text);
