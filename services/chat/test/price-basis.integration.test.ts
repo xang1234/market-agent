@@ -51,13 +51,14 @@ test("Polygon ranges cached under the old dividend-adjusted label are never reus
   const used = (drawn.provenance_series_specs as Array<{ bar_range_id: string }>).map((spec) => spec.bar_range_id);
   assert.ok(used.every((id) => !Object.values(legacy).includes(id)), "a legacy range was charted");
 
-  // With only a legacy range left for AMD, there is no chart rather than one built on it.
+  // With only a legacy range left for AMD, there is no chart rather than one
+  // built on it, and no usable prices are on file.
   await client.query(
     `delete from market_bar_ranges where listing_id = $1::uuid and adjustment_basis = 'split_adjusted'`,
     [AMD.listing_id],
   );
   const gap = await chart();
-  assert.deepEqual([gap?.kind, (gap?.segments as Array<{ text: string }>)[0]!.text], ["rich_text", "Year-to-date price performance is not shown: AMD has no prices from before 2026."]);
+  assert.deepEqual([gap?.kind, (gap?.segments as Array<{ text: string }>)[0]!.text], ["rich_text", "Year-to-date price performance is not shown: AMD has no daily prices on file."]);
 
   // The cache never serves the legacy range; a refetch under the correct basis is served.
   // A pool: storing bars takes a transaction on its own connection. Closed

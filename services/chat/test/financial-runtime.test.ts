@@ -16,7 +16,8 @@ import { parseProposal } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
-import { changing, chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, METRIC_READING, MISSING_ISSUER, NO_ASKS, resolveMention, revenueModel, SEC_ISSUER, SEC_ISSUER_B, SEC_ISSUER_C, SEC_ISSUER_D } from "./financial-fixtures.ts";
+import { changing, chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, METRIC_READING, MISSING_ISSUER, NO_ASKS, resolveMention, resolveNamedListing, revenueModel, SEC_ISSUER, SEC_ISSUER_B, SEC_ISSUER_C, SEC_ISSUER_D, seedListingA } from "./financial-fixtures.ts";
+import type { TurnHydrator } from "../src/turn-hydration.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 
 test("an unready engine stops the server instead of leaving metric questions on legacy numbers", async () => {
@@ -687,6 +688,17 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const once = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(sameCompany.events).message_id])).rows[0];
     assert.ok(once, `expected a published answer; got ${JSON.stringify(completed(sameCompany.events))}`);
     assert.deepEqual(once.blocks[0].financial.results.map((result: { disposition: string }) => result.disposition), ["verified"], "the explicit issuer and its listing are planned once");
+  });
+
+  await t.test("a company named by one of its listings has that listing's prices fetched (#678)", async () => {
+    await seedListingA(db);
+    const fetchedFor: Array<string | undefined> = [];
+    const hydrate: TurnHydrator = async (companies) => {
+      fetchedFor.push(...companies.map((company) => company.listing_id));
+      return new Set();
+    };
+    await chatHarness(pool, { model: revenueModel(["ALPX"]), resolveMention: resolveNamedListing, hydrate }).run({ ...base, userIntent: "Revenue for ALPX" });
+    assert.deepEqual(fetchedFor, [LISTING_A]);
   });
 
   await t.test("a listing that no longer exists is asked about, not answered as a gap", async () => {

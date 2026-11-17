@@ -222,10 +222,12 @@ test("a YTD request charts from the last close before January 1 to the latest co
   assert.equal(rangesQuery.values?.[4], "2025-12-25T00:00:00.000Z");
 });
 
+// AMD's only stored range starts after the year-end.
+const amdSince = (month: string) => ({ ...ytdRow(AMD, [ytdBar(`2026-${month}-02`, 50), ytdBar("2026-08-31", 55)]), range_start: `2026-${month}-01T04:00:00.000Z` });
+
 test("a YTD request that can't be met is a named gap, not a shorter window (#192)", async () => {
-  // AMD has no stored range reaching back over the year-end.
   const blocks = await loadPerfComparisonBlocks(
-    ytdDb([ytdRow(NVDA, [ytdBar("2025-12-31", 100), ytdBar("2026-08-31", 120)])]),
+    ytdDb([ytdRow(NVDA, [ytdBar("2025-12-31", 100), ytdBar("2026-08-31", 120)]), amdSince("03")]),
     { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: AS_OF },
   );
   assert.deepEqual(blocks.map((block) => block.kind), ["rich_text"]);
@@ -236,9 +238,9 @@ test("a YTD request that can't be met is a named gap, not a shorter window (#192
 });
 
 test("the YTD gap names the company without pre-year prices, whatever basis the others have (#192)", async () => {
-  // NVDA's only range is dividend-adjusted; AMD has none.
+  // NVDA's only range is dividend-adjusted; AMD has none from before the year.
   const nvda = { ...ytdRow(NVDA, [ytdBar("2025-12-31", 100), ytdBar("2026-08-31", 120)]), adjustment_basis: "split_and_div_adjusted" };
-  const blocks = await loadPerfComparisonBlocks(ytdDb([nvda]), { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: AS_OF });
+  const blocks = await loadPerfComparisonBlocks(ytdDb([nvda, amdSince("03")]), { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: AS_OF });
   assert.equal(
     (blocks[0].segments as Array<{ text: string }>)[0].text,
     "Year-to-date price performance is not shown: AMD has no prices from before 2026.",
@@ -335,9 +337,12 @@ test("a company with no prices before the period, or none at all, is a note sayi
     const block = await loadPricePerformance(ytdDb(rows), { listings: LISTINGS.slice(0, 1), snapshotId: SNAPSHOT_ID, asOf: "2026-11-17T05:51:00.000Z", period: "week", scope: "w:" });
     return [[block.kind, (block.segments as Array<{ text: string }>)[0]!.text]];
   };
-  assert.deepEqual(await noteOf([]), [["rich_text", "Week-to-date price performance is not shown: NVDA has no prices from before 2026-11-16."]]);
+  const onFile = "Week-to-date price performance is not shown: NVDA has no daily prices on file.";
+  assert.deepEqual(await noteOf([]), [["rich_text", onFile]], "no range stored");
   // The provider answered with no bars: the range is stored empty.
-  assert.deepEqual(await noteOf([ytdRow(NVDA, [])]), [["rich_text", "Week-to-date price performance is not shown: NVDA has no daily prices on file."]]);
+  assert.deepEqual(await noteOf([ytdRow(NVDA, [])]), [["rich_text", onFile]]);
+  const sinceMonday = { ...ytdRow(NVDA, [{ ts: "2026-11-16T05:00:00.000Z", close: 103.5 }]), range_start: "2026-11-16T05:00:00.000Z" };
+  assert.deepEqual(await noteOf([sinceMonday]), [["rich_text", "Week-to-date price performance is not shown: NVDA has no prices from before 2026-11-16."]]);
 });
 
 test("a week to date that stops days before the last completed session is a gap, never a shorter week (#678)", async () => {

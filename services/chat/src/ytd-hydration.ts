@@ -55,13 +55,23 @@ function selfHost(bindHost: string): string {
   return host.includes(":") ? `[${host}]` : host;
 }
 
+// A hydration the market failed for some listing in, carrying the listings it
+// did answer have no bars, so their hold is kept though the step reads failed.
+export class MarketFailure extends Error {
+  readonly noBars: ReadonlyArray<string>;
+  constructor(message: string, noBars: ReadonlyArray<string>) {
+    super(message);
+    this.noBars = noBars;
+  }
+}
+
 // Resolves to the listings the market has no bars for on any basis (#665):
 // their split-adjusted request was answered with none, or with no coverage.
 // That request alone says so, as the dividend-adjusted one is a fallback some
-// providers never serve (Polygon answers it with no coverage). It rejects when
-// a listing has no bars because the market failed for its split-adjusted
-// request (a rate limit, an outage, a refused request), so the step reads
-// failed, not empty.
+// providers never serve (Polygon answers it with no coverage, and may refuse
+// it outright). It rejects with a MarketFailure when a listing has no bars
+// because the market failed for its split-adjusted request (a rate limit, an
+// outage, a refused request), so the step reads failed, not empty.
 export async function hydrateYtdBars(input: {
   origin: string;
   listings: ReadonlyArray<HydrationListing>;
@@ -90,8 +100,13 @@ export async function hydrateYtdBars(input: {
     if (window.ok && input.listings.every((listing) => isCurrentEnd(window.endDate, input.now, listing.timeZone))) return [];
   }
   const unpriced = input.listings.map((listing) => listing.id).filter((id) => !priced.has(id));
-  const failed = unpriced.flatMap((id) => (failures.has(id) ? [`${id} (${failures.get(id)})`] : []));
-  if (failed.length > 0) throw new Error(`the market could not answer for ${failed.join(", ")} just now`);
+  const failed = unpriced.filter((id) => failures.has(id));
+  if (failed.length > 0) {
+    throw new MarketFailure(
+      `the market could not answer for ${failed.map((id) => `${id} (${failures.get(id)})`).join(", ")} just now`,
+      unpriced.filter((id) => !failures.has(id)),
+    );
+  }
   return unpriced;
 }
 
@@ -106,7 +121,8 @@ export function ytdRequestRange(now: string, timeZone: string): { start: string;
 }
 
 // One series request per range: each listing's bars, and the reason for each
-// the market failed for. Only missing coverage says it has no bars.
+// the market failed for, a refused request included. Only missing coverage
+// says it has no bars.
 async function fetchWindows(
   fetchImpl: typeof fetch,
   origin: string,
@@ -138,7 +154,8 @@ async function fetchWindows(
     });
     if (!response.ok) {
       void response.body?.cancel();
-      throw new Error(`market series request answered ${response.status}`);
+      for (const listing of group) failed.set(listing.id, `answered ${response.status}`);
+      continue;
     }
     const body = (await response.json()) as {
       results?: Array<{ listing?: { id?: string }; outcome?: { outcome?: string; reason?: string; data?: { bars?: DailyClose[] } } }>;

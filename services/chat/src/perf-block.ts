@@ -171,7 +171,8 @@ export async function loadPricePerformance(
   // One statement, so the range and its bars come from one consistent view: a
   // cache refresh upserts the same bar_range_id and replaces its bars, and two
   // reads could pair old metadata with new prices.
-  const { rows: ranges } = await db.query<{
+  const lookback = new Date(Date.parse(`${start}T00:00:00.000Z`) - LOOKBACK_DAYS * 86_400_000).toISOString();
+  const { rows: stored } = await db.query<{
     bar_range_id: string;
     listing_id: string;
     ticker: string;
@@ -201,9 +202,9 @@ export async function loadPricePerformance(
           -- compare the database's clock with the app's and let a concurrent
           -- refresh of the same range hide one this turn just fetched.
           and as_of <= $4::timestamptz
-          -- Only ranges that reach back over the close before the window.
-          and range_start <= $5::timestamptz
-        order by listing_id, adjustment_basis, range_end desc, fetched_at desc
+        -- A range that reaches back over the close before the window first;
+        -- one that does not only says the listing has prices on file.
+        order by listing_id, adjustment_basis, range_start <= $5::timestamptz desc, range_end desc, fetched_at desc
      )
      select picked.bar_range_id::text as bar_range_id,
             picked.listing_id::text as listing_id,
@@ -224,9 +225,10 @@ export async function loadPricePerformance(
       INTERVAL,
       COMPARABLE_BASES,
       input.asOf,
-      new Date(Date.parse(`${start}T00:00:00.000Z`) - LOOKBACK_DAYS * 86_400_000).toISOString(),
+      lookback,
     ],
   );
+  const ranges = stored.filter((range) => Date.parse(iso(range.range_start)) <= Date.parse(lookback));
   const rangeOf = (listingId: string, basis: ComparableBasis) =>
     ranges.find((range) => range.listing_id === listingId && range.adjustment_basis === basis);
   const sealedOf = (listing: { id: string; label: string }, basis: ComparableBasis): SealedPriceRange | undefined => {
@@ -247,13 +249,13 @@ export async function loadPricePerformance(
       bars: range.bars.map((bar) => ({ ts: iso(bar.ts), close: bar.close })),
     };
   };
-  const hasRange = (listing: { id: string }) => ranges.some((range) => range.listing_id === listing.id);
+  const priced = (listing: { id: string }, among: typeof stored) => among.some((range) => range.listing_id === listing.id && range.bars.length > 0);
   const shared = COMPARABLE_BASES.filter((basis) => input.listings.every((listing) => rangeOf(listing.id, basis)));
-  const uncovered = input.listings.find((listing) => !hasRange(listing));
-  if (uncovered) return gapBlock(input, `${uncovered.label} has no prices from before ${since}`);
-  // A provider can answer with no bars at all (#678).
-  const unpriced = input.listings.find((listing) => !ranges.some((range) => range.listing_id === listing.id && range.bars.length > 0));
+  // No range stored, or one the provider answered with no bars (#678).
+  const unpriced = input.listings.find((listing) => !priced(listing, stored));
   if (unpriced) return gapBlock(input, `${unpriced.label} has no daily prices on file`);
+  const uncovered = input.listings.find((listing) => !priced(listing, ranges));
+  if (uncovered) return gapBlock(input, `${uncovered.label} has no prices from before ${since}`);
   if (shared.length === 0) return basisGapBlock(input, ranges);
   return windowBlock(input, start!, shared, sealedOf, zoneOf);
 }

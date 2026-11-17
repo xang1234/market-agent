@@ -64,7 +64,7 @@ export async function readPrices(
       { emit: turn.emit, turnId: turn.turnId, ytdCutoff: turn.asOf, pricesOnly: true },
     ).catch((reason: unknown) => {
       console.warn("[chat] fetching the companies' prices failed; the analyst agent reads the prices on file", reason);
-      return undefined;
+      return new Set(listings.map((listing) => listing.issuer));
     })) ?? new Set<string>();
     const chart = await loadPricePerformance(deps.pool, { listings, snapshotId: turn.snapshotId, asOf: turn.clock(), period: ask.period, scope: turn.scope, frozenPrices: turn.frozen });
     if (chart.kind !== "perf_comparison") {

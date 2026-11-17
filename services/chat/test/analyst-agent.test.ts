@@ -18,8 +18,9 @@ import { ANSWER_DEADLINES, composeAnalystBlocksWithLlm } from "../src/llm-runtim
 import { proposedMetric, resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS } from "../src/scope-figures.ts";
 import { loadPriorSubjects } from "../src/thread-context.ts";
+import type { TurnHydrator } from "../src/turn-hydration.ts";
 import { loadToolRegistry } from "../../tools/src/registry.ts";
-import { chatDatabase, comparing, FY2023_REVENUE, GONE_LISTING, NO_ASKS, readingOf, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { chatDatabase, comparing, FY2023_REVENUE, GONE_LISTING, LISTING_A, NO_ASKS, readingOf, resolveMention, resolveNamedListing, revenueModel, seedListingA } from "./financial-fixtures.ts";
 
 const LLM_ENV = {
   LLM_CHANNELS: "openai",
@@ -463,12 +464,13 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     hydrate?: AnalystAgentDeps["financial"]["hydrate"];
     evidence?: AnalystAgentDeps["financial"]["evidence"];
     researchScope?: AnalystAgentDeps["financial"]["researchScope"];
+    resolveMention?: AnalystAgentDeps["financial"]["resolveMention"];
   };
   const agentOf = (router: ControlledRouter, answer: string, options: AgentOptions = {}) => analystAgentRunner({
     financial: {
       pool,
       evidence: options.evidence ?? createEvidenceFinancialPort,
-      resolveMention,
+      resolveMention: options.resolveMention ?? resolveMention,
       ...(options.hydrate ? { hydrate: options.hydrate } : {}),
       ...(options.researchScope ? { researchScope: options.researchScope } : {}),
     },
@@ -632,6 +634,18 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     const done = completed(await run(agentOf(router, OBSERVE_F1, { planningModel: revenueModel(["AAA"]), hydrate }), { ...base, turnId: randomUUID(), userIntent: "AAA revenue" }));
     assert.deepEqual(fetchedFor, [A]);
     assert.ok(JSON.stringify((done.message as { blocks: unknown }).blocks).includes("Filings for AAA are still loading; ask again in a minute."));
+  });
+
+  await t.test("a company named by one of its listings has that listing fetched with its filings (#678)", async () => {
+    await seedListingA(db);
+    const fetchedFor: Array<string | undefined> = [];
+    const hydrate: TurnHydrator = async (companies) => {
+      fetchedFor.push(...companies.map((company) => company.listing_id));
+      return new Set();
+    };
+    const router = scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }, { text: "DONE" }]);
+    completed(await run(agentOf(router, OBSERVE_F1, { planningModel: revenueModel(["ALPX"]), hydrate, resolveMention: resolveNamedListing }), { ...base, turnId: randomUUID(), userIntent: "ALPX revenue" }));
+    assert.deepEqual(fetchedFor, [LISTING_A]);
   });
 
   await t.test("a free-text final reply is rejected, and the turn answers with its certified blocks alone", async () => {
@@ -1503,16 +1517,12 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     );
     try {
       const hydrated: Array<{ companies: ReadonlyArray<Record<string, unknown>>; pricesOnly?: boolean }> = [];
-      const priceAgent = (router: ControlledRouter, answer: string) => analystAgentRunner({
-        financial: {
-          pool,
-          evidence: createEvidenceFinancialPort,
-          resolveMention,
-          hydrate: async (companies, turn) => {
-            hydrated.push({ companies, pricesOnly: turn.pricesOnly });
-            return new Set();
-          },
-        },
+      const recorded: TurnHydrator = async (companies, turn) => {
+        hydrated.push({ companies, pricesOnly: turn.pricesOnly });
+        return new Set();
+      };
+      const priceAgent = (router: ControlledRouter, answer: string, hydrate = recorded) => analystAgentRunner({
+        financial: { pool, evidence: createEvidenceFinancialPort, resolveMention, hydrate },
         router: async (beforeModelCall) => metered(router, beforeModelCall),
         read: noRead,
         compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: answer }), onAnswered }),
@@ -1550,7 +1560,14 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
       const none = completed(await run(priceAgent(week(B), "```assertions\n[]\n```"), { ...base, turnId: randomUUID(), userIntent: "How has BBB done this week?" }));
       const noneBlocks = (none.message as { blocks: Array<Record<string, unknown>> }).blocks;
       assert.ok(!noneBlocks.some((block) => block.kind === "perf_comparison"), "no prices is never an empty chart");
-      assert.ok(savedText(none).includes("Week-to-date price performance is not shown: BBB has no prices from before 2026-11-16."), savedText(none));
+      assert.ok(savedText(none).includes("Week-to-date price performance is not shown: BBB has no daily prices on file."), savedText(none));
+
+      // A fetch still running, or one that failed, explains the gap rather than what is on file.
+      const unloaded = "BBB: prices could not be loaded just now; ask again in a minute.";
+      for (const hydrate of [async () => new Set([B.toLowerCase()]), async () => { throw new Error("market down"); }] satisfies TurnHydrator[]) {
+        const failed = completed(await run(priceAgent(week(B), "```assertions\n[]\n```", hydrate), { ...base, turnId: randomUUID(), userIntent: "How has BBB done this week?" }));
+        assert.ok(savedText(failed).includes(unloaded) && !savedText(failed).includes("no daily prices"), savedText(failed));
+      }
     } finally {
       await db.query(`delete from market_bar_ranges where listing_id = $1`, [listingA]);
       await db.query(`delete from listings where listing_id = any($1::uuid[])`, [[listingA, listingB]]);

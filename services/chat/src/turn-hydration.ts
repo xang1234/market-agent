@@ -12,7 +12,7 @@ import type { QueryExecutor } from "../../shared/src/http.ts";
 import { labelList, MAX_TURN_SUBJECTS, type ChatTurnEmit } from "./coordinator.ts";
 import { issuersWithoutFilings } from "./financial-runtime.ts";
 import { companyListings, listingsForComparison, listingTimeZones } from "./perf-block.ts";
-import { frozenDataMode, marketHydrationOrigin, ytdRequestRange, type HydrationListing } from "./ytd-hydration.ts";
+import { frozenDataMode, MarketFailure, marketHydrationOrigin, ytdRequestRange, type HydrationListing } from "./ytd-hydration.ts";
 
 // `listing_id` is the listing the turn named the company by, when it named
 // one. A company with no label (an auto-selected peer) is named by its listing.
@@ -101,6 +101,7 @@ export function createTurnHydrator(deps: {
       const range = ytdRequestRange(cutoff, listing.timeZone);
       return `${listing.id}@${range.start}/${range.end}`;
     };
+    const ytdKey = (listings: ReadonlyArray<HydrationListing>) => `ytd:${listings.map(rangeKey).sort().join(",")}`;
     const unpriced = listed.filter((listing) => !(now() - (noBarsAt.get(rangeKey(listing)) ?? -Infinity) < NO_BARS_COOLDOWN_MS));
 
     // A company is fetched when it has no filings on file, or its last fetch
@@ -120,7 +121,7 @@ export function createTurnHydrator(deps: {
     // only for the listings it is given. Otherwise each bare listing is its own.
     const units = turn.ytdCutoff === undefined
       ? unpriced.map((listing) => ({ key: `bars:${listing.id}`, listings: [listing] }))
-      : unpriced.length === 0 ? [] : [{ key: `ytd:${unpriced.map(rangeKey).sort().join(",")}`, listings: unpriced }];
+      : unpriced.length === 0 ? [] : [{ key: ytdKey(unpriced), listings: unpriced }];
     const priced = units.flatMap((unit) => {
       const entry = current(unit.key);
       return entry?.outcome === undefined ? [{ ...unit, entry }] : [];
@@ -128,7 +129,16 @@ export function createTurnHydrator(deps: {
     const due = priced.filter(({ entry }) => !entry);
     const batch = due.length === 0 ? [] : [start(due.map(({ key }) => key), async () => {
       const listings = due.flatMap((unit) => unit.listings);
-      const noBars = await deps.fetchBars(origin!, listings.map(({ id, timeZone }) => ({ id, timeZone })), cutoff);
+      const noBars = await deps.fetchBars(origin!, listings.map(({ id, timeZone }) => ({ id, timeZone })), cutoff).catch((error: unknown) => {
+        if (!(error instanceof MarketFailure)) throw error;
+        // The listings answered empty are held though another failed. The
+        // comparison's next turn leaves them out, so it is the failed rest's
+        // key that must still cool down for the minute.
+        for (const listing of listings) if (error.noBars.includes(listing.id)) noBarsAt.set(rangeKey(listing), now());
+        const rest = listings.filter((listing) => !error.noBars.includes(listing.id));
+        if (turn.ytdCutoff !== undefined && rest.length < listings.length) fetches.set(ytdKey(rest), fetches.get(due[0]!.key)!);
+        throw error;
+      });
       for (const listing of listings) {
         if (noBars.includes(listing.id)) noBarsAt.set(rangeKey(listing), now());
         else noBarsAt.delete(rangeKey(listing));

@@ -125,6 +125,23 @@ test("a listing the market failed for rejects, so the step reads failed and is r
   await assert.rejects(hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: refused.fetchImpl }), /provider_error/);
 });
 
+test("a listing the market failed for rejects with the listings it did answer have no bars, so their hold is kept (#689)", async () => {
+  const mixed = fakeMarket({ split_adjusted: ["empty", "rate_limited"], split_and_div_adjusted: ["unavailable", "unavailable"] });
+  await assert.rejects(
+    hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: mixed.fetchImpl }),
+    (error: Error & { noBars?: ReadonlyArray<string> }) => /rate_limited/.test(error.message) && error.noBars?.join() === LISTINGS[0].id,
+  );
+});
+
+test("a refused or rate-limited dividend-adjusted fallback request changes nothing, as its outcome would not (#689)", async () => {
+  for (const status of [500, 429]) {
+    const split = fakeMarket({ split_adjusted: ["full", "unavailable"] });
+    const fetchImpl = (async (url: URL | string, init?: RequestInit) =>
+      (JSON.parse(String(init?.body)) as { basis: string }).basis === "split_adjusted" ? split.fetchImpl(url, init) : new Response("no", { status })) as typeof fetch;
+    assert.deepEqual(await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl }), [LISTINGS[1].id], String(status));
+  }
+});
+
 test("a market failure or a hung market rejects, so the turn's step reads failed", async (t) => {
   const failing = (async () => new Response("down", { status: 502 })) as typeof fetch;
   await assert.rejects(hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: failing }), /answered 502/);
