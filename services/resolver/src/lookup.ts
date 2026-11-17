@@ -4,6 +4,7 @@ import {
   CONFIDENCE_NAME_ALIAS_LISTING,
   CONFIDENCE_NAME_FORMER,
   CONFIDENCE_NAME_LEGAL,
+  CONFIDENCE_NAME_SHORT,
   CONFIDENCE_TICKER_AMBIGUOUS,
   CONFIDENCE_TICKER_SINGLE,
   CONFIDENCE_UNIQUE_IDENTIFIER,
@@ -133,6 +134,44 @@ export async function resolveByNameCandidate(
   }
 
   return ambiguous({ candidates, ambiguity_axis: inferNameAmbiguityAxis(candidates) });
+}
+
+/**
+ * A name no legal or former name equals, matched by the names a company goes
+ * by (namesGoneBy), the most specific first. "Apple" is Apple Inc., never
+ * Apple Hospitality REIT Inc, "Graham Holdings" is Graham Holdings Co, and
+ * "Graham", which both Graham companies go by, asks which one. A SEC
+ * registrant outranks issuers with no CIK that go by its name.
+ */
+export async function resolveByShortName(
+  db: QueryExecutor,
+  name: string,
+): Promise<ResolverEnvelope> {
+  const normalized = normalizeNameForLookup(name);
+  const first = normalized.replace(/^the /, "").charAt(0);
+  if (!first) return notFound({ normalized_input: normalized, reason: "no_candidates" });
+  // ponytail: a sequential scan for the names with the input's first letter, 2 to 5 ms over 10k aliases; index normalized_name with text_pattern_ops if that grows tenfold.
+  const result: QueryResult<IssuerRow & { cik: string | null; normalized_name: string }> = await db.query(
+    `select iss.issuer_id, iss.legal_name, iss.cik, ia.normalized_name
+       from issuer_aliases ia
+       join issuers iss on iss.issuer_id = ia.issuer_id
+      where starts_with(ia.normalized_name, $1) or starts_with(ia.normalized_name, 'the ' || $1)
+      order by iss.legal_name, iss.issuer_id`,
+    [first],
+  );
+  const aliases = result.rows.map((row) => ({ row, names: namesGoneBy(row.normalized_name) }));
+  const goneBy = namesGoneBy(normalized).map((level) => aliases.filter(({ names }) => names.includes(level))).find((found) => found.length > 0) ?? [];
+  const matches = [...new Map(goneBy.map(({ row }) => [row.issuer_id, row])).values()];
+  const registrants = matches.filter((row) => row.cik !== null);
+  const candidates = (registrants.length > 0 ? registrants : matches).map((row) => ({
+    subject_ref: { kind: "issuer" as const, id: row.issuer_id },
+    display_name: row.legal_name,
+    confidence: CONFIDENCE_NAME_SHORT,
+    match_reason: "short_name",
+  }));
+  if (candidates.length === 0) return notFound({ normalized_input: normalized, reason: "no_candidates" });
+  if (candidates.length === 1) return resolved({ ...candidates[0]!, canonical_kind: "issuer" });
+  return ambiguous({ candidates, ambiguity_axis: "multiple_issuers" });
 }
 
 export async function resolveByCik(
@@ -375,6 +414,17 @@ export function normalizeNameForLookup(value: string): string {
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+const LEGAL_FORMS: Readonly<Record<string, string>> = { corporation: "corp", company: "co", incorporated: "inc", limited: "ltd" };
+const DESIGNATION = / (?:(?:class|series) [a-z]|(?:common |capital |ordinary )?(?:stock|shares)|inc|corp|co|ltd|plc|llc|lp|sa|ag|nv|se|as|asa|spa|ab|oyj|na|bv|sab de cv|holdings?|group|adrs?|ads|com)$/;
+
+// ponytail: a brand that is no legal name ("Google", "AMD") stays unresolved; a sourced alias feed would cover it.
+function namesGoneBy(normalized: string): string[] {
+  const joined = normalized.replace(/^the /, "").replace(/\b([a-z]) (?=[a-z]\b)/g, "$1");
+  const names = [joined.split(" ").map((word) => LEGAL_FORMS[word] ?? word).join(" ")];
+  while (DESIGNATION.test(names.at(-1)!)) names.push(names.at(-1)!.replace(DESIGNATION, ""));
+  return names;
 }
 
 function dedupeIssuerNameRows(rows: IssuerNameRow[]): IssuerNameRow[] {

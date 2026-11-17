@@ -1258,9 +1258,9 @@ export function labelList(labels: ReadonlyArray<string>): string {
 
 // The resolver upper-cases any one word into a ticker, so a lowercase word
 // that matched only as a ticker ("all" is ALL, "it" is IT) names a company
-// only as the thread's first: after one, it is a reply to it (#623). A name
-// match ("nvidia") or a word typed in capitals ("MSFT", "All") still names a
-// company, and adding it to the thread's is asked as before.
+// only as the thread's first: after one, it is a reply to it (#623). A whole
+// legal name ("nvidia corporation") or a word typed in capitals ("MSFT",
+// "All") still names a company, and adding it to the thread's is asked as before.
 async function isReplyAfterCompany(
   text: string,
   whole: ChatResolvedSubjectPreResolution,
@@ -1277,10 +1277,10 @@ async function resolveNamedSubjects(
   // The whole message first, so a bare ticker, a company name, or a theme
   // resolves exactly as before; otherwise every ticker it mentions, in order,
   // but one written only inside a metric's or facet's name ("FREE CASH FLOW").
-  const whole = await preResolve({ text });
+  const whole = await preResolve({ text, exactOnly: true });
   if (whole.status === "resolved" && !(await isReplyAfterCompany(text, whole, prior))) return namesOf([whole]);
   const named = companyNameIn(text);
-  return namesOf(await Promise.all(extractSubjectMentions(text).filter((mention) => named(mention)).map((mention) => preResolve({ text: mention }))));
+  return namesOf(await Promise.all(extractSubjectMentions(text).filter((mention) => named(mention)).map((mention) => preResolve({ text: mention, exactOnly: true }))));
 }
 
 // One entry per company: two listings of the same issuer collapse.
