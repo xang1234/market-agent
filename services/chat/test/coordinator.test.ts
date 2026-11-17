@@ -629,6 +629,39 @@ test("with the analyst agent it takes the financial lane's seat, and a turn it r
   assert.deepEqual(calls, ["offered", "agent:analyst_agent", `base:${DEFAULT_BUNDLE_ID}`]);
 });
 
+test("a turn the analyst agent gives back after streaming steps starts the plan over, even for a lane whose own start is empty", async () => {
+  const step = { tool_call_id: "agent-call-1", tool_name: "get_claims", label: "Reading AAPL's 10-K" };
+  const run = async (analystAgent: (context: ChatTurnRunContext) => Promise<null>) => {
+    const coordinator = createChatCoordinator({
+      analystAgent,
+      runner: async (context) => {
+        context.emit("turn.started", {});
+        context.emit("turn.completed", {});
+      },
+    });
+    const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "AAPL revenue" });
+    await turn.completed;
+    return turn.events.map((event) => [event.type, event.bundle_id ?? null, event.label ?? null]);
+  };
+
+  assert.deepEqual(await run(async (context) => {
+    context.emit("turn.started", { bundle_id: context.bundleId });
+    context.emit("tool.started", step);
+    context.emit("tool.completed", { ...step, status: "error" });
+    return null;
+  }), [
+    ["turn.started", "analyst_agent", null],
+    ["tool.started", null, step.label],
+    ["tool.completed", null, step.label],
+    ["turn.started", DEFAULT_BUNDLE_ID, null],
+    ["turn.completed", null, null],
+  ]);
+  assert.deepEqual(await run(async () => null), [
+    ["turn.started", null, null],
+    ["turn.completed", null, null],
+  ], "an agent that started nothing leaves the next lane's start as it is");
+});
+
 test("the analyst agent's answer is sealed, saved and streamed as an analyst turn, under its own bundle, with the steps it streamed and none replayed", async () => {
   const saved: string[] = [];
   const summaries: Array<{ work_summary: { events: Array<Record<string, unknown>> } }> = [];

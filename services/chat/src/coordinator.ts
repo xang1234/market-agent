@@ -1438,7 +1438,15 @@ function analystAgentSeat(
   options: { persistAssistantMessage?: ChatAssistantMessageCommit; verificationMode: ChatVerificationMode },
 ): ChatTurnRunner {
   return async (context) => {
-    const turn = { ...context, bundleId: ANALYST_AGENT_BUNDLE_ID };
+    let started = false;
+    const turn = {
+      ...context,
+      bundleId: ANALYST_AGENT_BUNDLE_ID,
+      emit: ((type, payload) => {
+        started ||= type === "turn.started";
+        return context.emit(type, payload);
+      }) satisfies ChatTurnEmit,
+    };
     let answer: Awaited<ReturnType<ChatAnalystAgent>>;
     try {
       answer = await agent(turn);
@@ -1449,38 +1457,33 @@ function analystAgentSeat(
       context.emit("turn.error", { error_code: "analyst_agent_failed", message: "The answer could not be completed." });
       return;
     }
-    if (answer === null) return next(context);
+    if (answer === null) {
+      // The agent streamed steps for a turn it gives back: the plan starts over, even
+      // for a lane whose own turn.started is empty and would be dropped as a repeat.
+      if (started) context.emit("turn.started", { bundle_id: context.bundleId });
+      return next(context);
+    }
     if (answer === "pick_company") return picking({ ...context, companiesByReading: true });
-    const result = answer;
-    await toolBackedAnalystTurnRunner(turn, { ...options, runtime: () => result, stepsStreamed: true });
+    await emitAnalystAnswer(turn, answer, options);
   };
 }
 
+// The tool runtime answers whole, so its steps are shown once it returns.
 async function toolBackedAnalystTurnRunner(
   context: ChatTurnRunContext,
   options: {
     persistAssistantMessage?: ChatAssistantMessageCommit;
     runtime: ChatAnalystToolRuntime;
     verificationMode: ChatVerificationMode;
-    // The runtime emitted turn.started and each step's events as they ran, so none is replayed.
-    stepsStreamed?: true;
   },
 ) {
   const { emit } = context;
-  const preResolution = context.subjectPreResolution ?? null;
-  const coveredRefs = context.subjectPreResolutions?.map((subject) => subject.subject_ref) ?? [];
-  const subjectRef = {
-    ...(preResolution?.status === "resolved" ? { subject_ref: preResolution.subject_ref } : {}),
-    ...(coveredRefs.length > 0 ? { subject_refs: coveredRefs } : {}),
-  };
-  const turnId = context.turnId ?? context.runId;
-  if (!preResolution && !options.stepsStreamed) {
+  if (!context.subjectPreResolution) {
     emit("turn.started", { bundle_id: context.bundleId });
   }
 
   const result = await options.runtime(context);
-  const toolCalls = options.stepsStreamed ? [] : result.tool_calls ?? [];
-  for (const toolCall of toolCalls) {
+  for (const toolCall of result.tool_calls ?? []) {
     emit("tool.started", {
       tool_call_id: toolCall.tool_call_id,
       tool_name: toolCall.tool_name,
@@ -1491,6 +1494,22 @@ async function toolBackedAnalystTurnRunner(
       ...toolCall,
     });
   }
+  await emitAnalystAnswer(context, result, options);
+}
+
+async function emitAnalystAnswer(
+  context: ChatTurnRunContext,
+  result: ChatAnalystToolRuntimeResult,
+  options: { persistAssistantMessage?: ChatAssistantMessageCommit; verificationMode: ChatVerificationMode },
+) {
+  const { emit } = context;
+  const preResolution = context.subjectPreResolution ?? null;
+  const coveredRefs = context.subjectPreResolutions?.map((subject) => subject.subject_ref) ?? [];
+  const subjectRef = {
+    ...(preResolution?.status === "resolved" ? { subject_ref: preResolution.subject_ref } : {}),
+    ...(coveredRefs.length > 0 ? { subject_refs: coveredRefs } : {}),
+  };
+  const turnId = context.turnId ?? context.runId;
 
   const freeze = (blocks: ReadonlyArray<Record<string, unknown>>) => Object.freeze(
     withUnresolvedNote(blocks, context.unresolvedMentions ?? []).map((block) => Object.freeze({ ...block })),
