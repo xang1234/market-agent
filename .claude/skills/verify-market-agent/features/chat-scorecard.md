@@ -17,7 +17,7 @@ Open `/chat`, type into the composer (`#chat-composer`) and press Enter. Each re
 Preconditions: the baseline, on a stack started with `$V up analyst`. A `data` stack writes no turn traces and no `[llm]` lines, so `tools` expectations fail with "no trace" and `llm` is null.
 
 - **Run.** `$V scorecard` runs every case once. `--cases=margins-clarify-all` picks cases, `--runs=3` repeats each in new threads for medians, and `--file=PATH` reads another case file.
-- **Read.** It prints `summary.md`: one row per case with its result, median first text, saved and rendered times per turn, and model calls and tokens per run, then every failure. `report.json` holds each turn in full.
+- **Read.** It prints `summary.md`: one row per case with its result, median first step, first text, saved and rendered times per turn, and model calls and tokens per run, then every failure. `report.json` holds each turn in full.
 - **Proof.** Exit 0 means every expectation and budget held. Open a failing turn's `turn-N.png` and `messages.json` under `<case>/run-<n>/`.
 
 ## Case file
@@ -38,7 +38,7 @@ Every `expect` key and budget is optional, and an unknown one stops the run with
 | `text` | each string is in the rendered reply. |
 | `not_text` | no string is. |
 | `tools` | each tool was called, per the turn trace. |
-| `budget_ms.first_text`, `budget_ms.saved` | every turn's time from Enter stays within it. |
+| `budget_ms.first_step`, `budget_ms.first_text`, `budget_ms.saved` | every turn's time from Enter stays within it. The first step is the first plan row the live turn names (a tool step, not Planner, Composer or Snapshot); a turn that shows none live has none. |
 
 Write only expectations you observed on main. A case that catches a bug keeps its correct expectation and fails until the fix lands.
 
