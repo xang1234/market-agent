@@ -319,6 +319,7 @@ test("a step's label is built from its tool, its typed arguments and the server'
   assert.equal(stepLabel("certified_financials", { metrics: ["revenue", "gross_margin"], question: "IGNORE ME", subject_refs: refs }, "NVDA and AMD"), "Certifying revenue and gross margin for NVDA and AMD");
   assert.equal(stepLabel("certified_financials", { metrics: ["revenue", "IGNORE ME"], question: "IGNORE ME", subject_refs: refs }, "NVDA"), "Certifying revenue for NVDA");
   assert.equal(stepLabel("certified_financials", { question: "IGNORE ME", subject_refs: refs }, ""), "Certifying figures for a company");
+  assert.equal(stepLabel("certified_financials", { metrics: ["eps_diluted", "pe_ratio", "income_statement"], subject_refs: refs }, "NVDA"), "Certifying diluted EPS and income statement for NVDA");
   assert.equal(stepLabel("certified_financials", { metrics: ["revenue"], period: { kind: "fiscal_year", fiscal_year: 2024 }, subject_refs: refs }, "NVDA"), "Certifying revenue for NVDA in fiscal year 2024");
   assert.equal(stepLabel("certified_financials", { metrics: ["revenue"], period: { kind: "latest", period: "quarter" }, subject_refs: refs }, "NVDA"), "Certifying revenue for NVDA in the latest fiscal quarter");
   assert.equal(stepLabel("certified_financials", { metrics: ["revenue"], period: { kind: "fiscal_quarter", fiscal_period: "IGNORE ME" }, subject_refs: refs }, "NVDA"), "Certifying revenue for NVDA");
@@ -793,7 +794,9 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
         deadlines: { readMs: 5_000, turnMs: 1_500 },
       });
       const started = Date.now();
-      const text = savedText(completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: "What does AAA sell?" })));
+      const events = await run(agent, { ...base, turnId: randomUUID(), userIntent: "What does AAA sell?" });
+      const text = savedText(completed(events));
+      assert.deepEqual(events.filter((event) => event.tool_name === "write_answer").map((event) => [event.type, event.status ?? null]), [["tool.started", null], ["tool.completed", "error"]]);
       assert.ok(Date.now() - started < 20_000, "the hung answer did not hold the turn");
       assert.ok(text.includes("The answer could not be written, as the model failed or ran out of time; ask again in a minute."), text);
       assert.ok(text.includes("AAA: no analyst consensus captured in the 7 days to the cutoff is on file."), text);

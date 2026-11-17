@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { FinancialRuntimeAuthority, FinancialSubjectRef } from "../../financial-core/src/index.ts";
-import { planningModelFromRouter, type Clarification, type PlanningModel, type RequestedSubject } from "../../financial-engine/src/planner.ts";
+import { CLARIFICATION_FIGURES, planningModelFromRouter, type Clarification, type PlanningModel, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import { createDefaultPiLlmChatClient, createLlmRouterFromEnv, LlmClientError, LlmProviderError, LlmRouterError, withLlmAbortSignal, type LlmChatClient, type LlmPurpose, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import type { ControlledRouter, LlmToolCall } from "../../llm/src/router.ts";
@@ -394,20 +394,21 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
     const name = call.name;
     if (name !== "certified_financials" && !isAnalystToolName(name)) return invalid(name, "no such tool");
     const shown = { tool_call_id: randomUUID(), tool_name: name, label: stepLabel(name, call.arguments, whoOf(call.arguments)) };
-    const output = await inStep(context.emit, shown, () => {
-      const work = name === "certified_financials" ? certify(call.arguments) : readStored(name, call.arguments);
-      inFlight.add(work);
-      return work.finally(() => inFlight.delete(work));
-    }, (done) => !done.isError);
-    toolCalls.push({
-      tool_call_id: shown.tool_call_id,
-      tool_name: name,
-      status: output.isError ? "error" : "ok",
-      bundle_id: ANALYST_AGENT_BUNDLE_ID,
-      arguments: call.arguments,
-      result: { status: statusOf(output.content) },
-    });
-    return output;
+    // In flight until its step is closed and logged, so a reading that stops early waits for both.
+    const step = inStep(context.emit, shown, () => (name === "certified_financials" ? certify(call.arguments) : readStored(name, call.arguments)), (done) => !done.isError)
+      .then((output) => {
+        toolCalls.push({
+          tool_call_id: shown.tool_call_id,
+          tool_name: name,
+          status: output.isError ? "error" : "ok",
+          bundle_id: ANALYST_AGENT_BUNDLE_ID,
+          arguments: call.arguments,
+          result: { status: statusOf(output.content) },
+        });
+        return output;
+      });
+    inFlight.add(step);
+    return step.finally(() => inFlight.delete(step));
   };
 
   const template = policy.selection.prompt_template;
@@ -669,7 +670,7 @@ const STEP_LABELS: Readonly<Record<AgentTool, (args: JsonObject, who: string) =>
   certified_financials: (args, who) => {
     const period = readPeriod(args.period);
     const when = period && periodWords(period);
-    return `Certifying ${labelList(keysOf(args.metrics, ASKABLE_FIGURES).map((metric) => metric.replaceAll("_", " "))) || "figures"} for ${who}${when ? ` in ${when}` : ""}`;
+    return `Certifying ${labelList(keysOf(args.metrics, ASKABLE_FIGURES).map(metricWords)) || "figures"} for ${who}${when ? ` in ${when}` : ""}`;
   },
   get_company_profile: (_args, who) => `Reading ${who}'s 10-K`,
   get_claims: (args, who) => {
@@ -680,6 +681,10 @@ const STEP_LABELS: Readonly<Record<AgentTool, (args: JsonObject, who: string) =>
   get_peer_set: (_args, who) => `Finding ${who}'s industry peers`,
   get_analyst_consensus: (_args, who) => `Reading analyst consensus for ${who}`,
 };
+
+// The catalog's name for a figure as a sentence reads it ("diluted EPS"); a statement, which it does not name, keeps its key's words.
+const metricWords = (metric: string): string =>
+  Object.hasOwn(CLARIFICATION_FIGURES, metric) ? CLARIFICATION_FIGURES[metric]!.label.replace(/^[A-Z](?=[a-z])/, (letter) => letter.toLowerCase()) : metric.replaceAll("_", " ");
 
 export function stepLabel(name: AgentTool, args: JsonObject, who: string): string {
   return STEP_LABELS[name](args, who || "a company");
