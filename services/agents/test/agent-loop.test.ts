@@ -33,7 +33,7 @@ function fakePool(): { pool: { connect(): Promise<TxClient> }; queries: Captured
       values?: unknown[],
     ): Promise<QueryResult<R>> {
       queries.push({ text, values });
-      const rowCount = /update agents/.test(text) ? 1 : 0;
+      const rowCount = /update agents|update agent_run_logs/.test(text) ? 1 : 0;
       return { rows: [], rowCount, command: "", oid: 0, fields: [] };
     },
     release(error?: Error): void {
@@ -65,6 +65,7 @@ test("runAgentLoop executes injectable stages in order and advances watermarks a
   >({
     pool,
     agent_id: AGENT_ID,
+    run_id: RUN_ID,
     current_watermarks: { source_cursor: "old" },
     stages: {
       readDeltas: async () => {
@@ -115,6 +116,12 @@ test("runAgentLoop executes injectable stages in order and advances watermarks a
           set watermarks = $2::jsonb,
               updated_at = now()
         where agent_id = $1::uuid`,
+    `update agent_run_logs
+        set claim_expires_at = greatest(claim_expires_at, now() + make_interval(mins => $3::int))
+      where agent_run_log_id = $1::uuid
+        and agent_id = $2::uuid
+        and status = 'running'
+        and ended_at is null`,
     "commit",
   ]);
   assert.equal(released.length, 1);
@@ -128,6 +135,7 @@ test("runAgentLoop rolls back and does not advance watermarks when side effects 
     runAgentLoop({
       pool,
       agent_id: AGENT_ID,
+      run_id: RUN_ID,
       current_watermarks: {},
       stages: {
         readDeltas: async () => ({}),
@@ -178,7 +186,7 @@ test("runAgentLoop evaluates alert rules inside the side-effect transaction afte
           fields: [],
         };
       }
-      const rowCount = /update agents/.test(text) ? 1 : 0;
+      const rowCount = /update agents|update agent_run_logs/.test(text) ? 1 : 0;
       return { rows: [], rowCount, command: "", oid: 0, fields: [] };
     },
     release(error?: Error): void {

@@ -45,6 +45,16 @@ export class AgentRunStateError extends Error {
   }
 }
 
+/** Another claim ended the run, so it may commit nothing more. */
+export class AgentRunSupersededError extends AgentRunStateError {
+  constructor(message: string) {
+    super(message);
+    this.name = "AgentRunSupersededError";
+  }
+}
+
+const LEASE_MINUTES = 15;
+
 const SELECT_COLUMNS = `agent_run_log_id::text as agent_run_log_id,
        agent_id::text as agent_id,
        started_at,
@@ -147,7 +157,7 @@ async function expireStaleAgentRuns(db: QueryExecutor, agentId: string): Promise
   );
 }
 
-async function getAgentRun(db: QueryExecutor, runId: string): Promise<AgentRunRow | null> {
+export async function getAgentRun(db: QueryExecutor, runId: string): Promise<AgentRunRow | null> {
   const { rows } = await db.query<AgentRunDbRow>(
     `select ${SELECT_COLUMNS}
        from agent_run_logs
@@ -175,6 +185,26 @@ async function findActiveAgentRun(
   return rows[0] === undefined ? null : rowFromDb(rows[0]);
 }
 
+/**
+ * Run inside the transaction that commits a run's effects, as its last statement. It holds the
+ * run's row until that commit, so no claim can end the run first, and renews the lease so the
+ * run's completion still finds it running.
+ */
+export async function fenceAgentRun(tx: QueryExecutor, run: { run_id: string; agent_id: string }): Promise<void> {
+  const { rowCount } = await tx.query(
+    `update agent_run_logs
+        set claim_expires_at = greatest(claim_expires_at, now() + make_interval(mins => $3::int))
+      where agent_run_log_id = $1::uuid
+        and agent_id = $2::uuid
+        and status = 'running'
+        and ended_at is null`,
+    [run.run_id, run.agent_id, LEASE_MINUTES],
+  );
+  if ((rowCount ?? 0) === 0) {
+    throw new AgentRunSupersededError("agent run lost its claim before it could commit");
+  }
+}
+
 export async function completeAgentRun(
   db: QueryExecutor,
   input: { run_id: string; outputs_summary: JsonValue },
@@ -193,7 +223,7 @@ export async function completeAgentRun(
     [input.run_id, JSON.stringify(input.outputs_summary)],
   );
   if (rows[0] === undefined) {
-    throw new AgentRunStateError("agent run is not running and cannot be completed");
+    throw new AgentRunSupersededError("agent run is not running and cannot be completed");
   }
   return rowFromDb(rows[0]);
 }
@@ -216,7 +246,7 @@ export async function failAgentRun(
     [input.run_id, JSON.stringify(input.outputs_summary ?? {}), input.error],
   );
   if (rows[0] === undefined) {
-    throw new AgentRunStateError("agent run is not running and cannot be failed");
+    throw new AgentRunSupersededError("agent run is not running and cannot be failed");
   }
   return rowFromDb(rows[0]);
 }
@@ -243,7 +273,7 @@ function toIso(value: Date | string): string {
 }
 
 function defaultLeaseExpiresAt(): string {
-  return new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  return new Date(Date.now() + LEASE_MINUTES * 60 * 1000).toISOString();
 }
 
 function isUniqueViolation(error: unknown): boolean {

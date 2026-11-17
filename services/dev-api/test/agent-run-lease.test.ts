@@ -48,20 +48,21 @@ async function lastRunTwoHoursAgo(pool: Pool, agentId: string): Promise<void> {
   );
 }
 
-// Stages whose effect and watermark name the run, the first run held at `analyze` until its gate opens.
-function markingRuns() {
+// Stages whose effect and watermark name the run, the first run held at `holdAt` until its gate opens.
+function markingRuns(holdAt: "analyze" | "applySideEffects" = "analyze") {
   const first = gate();
   const runIds: string[] = [];
   const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId }) => {
     runIds.push(runId);
-    const hold = runIds.length === 1 ? first.hold : async () => {};
+    const hold = (stage: typeof holdAt) => (runIds.length === 1 && stage === holdAt ? first.hold() : Promise.resolve());
     return {
       readDeltas: async () => ({}),
       extractEvidence: async () => ({}),
       clusterEvidence: async () => ({}),
-      analyze: async () => { await hold(); return {}; },
+      analyze: async () => { await hold("analyze"); return {}; },
       nextWatermarks: async () => ({ last_run_id: runId }),
       applySideEffects: async ({ tx, agent_id }) => {
+        await hold("applySideEffects");
         await writeRunActivity(tx, { user_id: userId, agent_id, stage: "found", subject_refs: [], summary: `effect of ${runId}` });
         return { findings: 1 };
       },
@@ -131,8 +132,22 @@ async function effects(pool: Pool, agentId: string): Promise<string[]> {
   return rows.map((row) => row.summary);
 }
 
-const runView = (run: { status: string; error: string | null } | null | string) =>
-  typeof run === "string" || run === null ? run : { status: run.status, error: run.error };
+const runView = (run: { agent_run_log_id: string; status: string; error: string | null } | null | string) =>
+  typeof run === "string" || run === null ? run : { id: run.agent_run_log_id, status: run.status, error: run.error };
+
+// Whether `change` settles before any backend waits on a lock.
+async function landsWithoutWaiting(pool: Pool, change: Promise<unknown>): Promise<boolean> {
+  let landed = false;
+  change.then(() => { landed = true; }, () => {});
+  while (!landed) {
+    const { rows: [{ waiting }] } = await pool.query<{ waiting: number }>(
+      `select count(*)::int as waiting from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`,
+    );
+    if (waiting > 0) return false;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return true;
+}
 
 test("a scheduled run that lost its lease to a newer run commits nothing and ends superseded", docker, async (t) => {
   const { pool, agentId } = await plainAgent(t, "dev-api-agent-lease-scheduled");
@@ -181,10 +196,37 @@ test("a run-now that lost its lease to a newer run commits nothing and returns i
     watermarks: (await getAgent(pool, agentId))?.watermarks,
     effects: await effects(pool, agentId),
   }, { [runs.runIds[0]]: "stale", [runs.runIds[1]]: "newer" }), {
-    stale: { status: "failed", error: "agent run claim expired" },
-    newer: { status: "completed", error: null },
+    stale: { id: "stale", status: "failed", error: "agent run claim expired" },
+    newer: { id: "newer", status: "completed", error: null },
     watermarks: { last_run_id: "newer" },
     effects: ["effect of newer"],
+  });
+});
+
+test("a run-now that arrives while a live run commits waits on no lock and leaves that run to finish", docker, async (t) => {
+  const { pool, agentId } = await plainAgent(t, "dev-api-agent-lease-commit-race");
+  const runs = markingRuns("applySideEffects");
+  const adapters = createServiceDevApiAdapters({ db: pool, createAgentLoopStages: runs.createAgentLoopStages } as never);
+
+  const liveRun = adapters.agents.run({ userId: USER_ID, agentId });
+  await runs.first.reached;
+  const secondRun = adapters.agents.run({ userId: USER_ID, agentId });
+  const landedFirst = await landsWithoutWaiting(pool, secondRun);
+  runs.first.open();
+  const [live, second] = await Promise.all([liveRun, secondRun]);
+
+  assert.deepEqual(byRole({
+    landedFirst,
+    live: runView(live),
+    second: runView(second),
+    watermarks: (await getAgent(pool, agentId))?.watermarks,
+    effects: await effects(pool, agentId),
+  }, { [runs.runIds[0]]: "live" }), {
+    landedFirst: true,
+    live: { id: "live", status: "completed", error: null },
+    second: { id: "live", status: "running", error: null },
+    watermarks: { last_run_id: "live" },
+    effects: ["effect of live"],
   });
 });
 
@@ -214,8 +256,8 @@ test("a thesis run that lost its lease records no stale assessment while the new
     assessments: history.assessments.map((assessment) => ({ run: assessment.run_id, status: assessment.results[0].status })),
     watermark: watermarks.thesis_monitor?.input_hash.split("/")[1],
   }, { [runs.runIds[0]]: "stale", [runs.runIds[1]]: "newer" }), {
-    stale: { status: "failed", error: "agent run claim expired" },
-    newer: { status: "completed", error: null },
+    stale: { id: "stale", status: "failed", error: "agent run claim expired" },
+    newer: { id: "newer", status: "completed", error: null },
     assessments: [{ run: "newer", status: "challenged" }],
     watermark: "newer",
   });

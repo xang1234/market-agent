@@ -1866,6 +1866,9 @@ function fakeAgentLoopDb(input: {
       if (text.includes("update agents") && text.includes("watermarks")) {
         return { rows: [], rowCount: 1 };
       }
+      if (text.includes("update agent_run_logs") && text.includes("set claim_expires_at = greatest")) {
+        return { rows: [], rowCount: 1 };
+      }
       if (text.includes("update agent_run_logs") && text.includes("status = 'completed'")) {
         return {
           rows: [

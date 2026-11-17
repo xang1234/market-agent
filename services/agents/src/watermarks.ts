@@ -1,5 +1,6 @@
 import type { JsonValue } from "../../observability/src/types.ts";
 import { AgentNotFoundError, type QueryExecutor } from "./agent-repo.ts";
+import { fenceAgentRun } from "./agent-run-repo.ts";
 import { destroyAfterFailedRollback, withPoolClient } from "../../shared/src/pool-client.ts";
 
 const AGENT_WATERMARK_TRANSACTION_CLIENT: unique symbol = Symbol("agents.watermarkTransactionClient");
@@ -28,6 +29,8 @@ export class WatermarkValidationError extends Error {
 
 export type AdvanceWatermarksInput = {
   agent_id: string;
+  /** The claimed run committing these effects; the commit happens only while the run still holds its claim. */
+  run_id: string;
   next_watermarks: JsonValue;
   applySideEffects(tx: QueryExecutor): Promise<void>;
 };
@@ -60,6 +63,7 @@ export async function advanceWatermarksWithSideEffects(
 ): Promise<void> {
   assertAgentWatermarkTransactionClient(db);
   assertUuidString(input.agent_id, "agent_id");
+  assertUuidString(input.run_id, "run_id");
   assertJsonObject(input.next_watermarks, "next_watermarks");
 
   await db.query("begin");
@@ -75,6 +79,8 @@ export async function advanceWatermarksWithSideEffects(
     if ((update.rowCount ?? 0) !== 1) {
       throw new AgentNotFoundError("agent not found while advancing watermarks");
     }
+    // After the agent row lock: a claim takes that lock before it inserts, so it never waits on this run's row while holding it.
+    await fenceAgentRun(db, input);
     await db.query("commit");
   } catch (error) {
     try {

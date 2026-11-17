@@ -52,7 +52,7 @@ export type RunAgentLoopInput<
 > = {
   pool: AgentWatermarkClientPool;
   agent_id: string;
-  run_id?: string;
+  run_id: string;
   alert_rules?: ReadonlyArray<unknown>;
   current_watermarks: JsonValue;
   stages: AgentLoopStages<Deltas, Evidence, Clusters, Analysis>;
@@ -106,10 +106,11 @@ export async function runAgentLoop<
 
   await advanceWatermarksWithSideEffectsWithPool(input.pool, {
     agent_id: input.agent_id,
+    run_id: input.run_id,
     next_watermarks: nextWatermarks,
     applySideEffects: async (tx) => {
       outputsSummary = await input.stages.applySideEffects({ ...context, tx });
-      if (input.run_id && input.alert_rules && input.alert_rules.length > 0 && input.stages.alertFindings) {
+      if (input.alert_rules && input.alert_rules.length > 0 && input.stages.alertFindings) {
         const alertResult = await evaluateAgentAlerts(tx, {
           agent_id: input.agent_id,
           run_id: input.run_id,

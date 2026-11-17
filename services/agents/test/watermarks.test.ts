@@ -9,8 +9,11 @@ import {
   advanceWatermarksWithSideEffectsWithPool,
 } from "../src/watermarks.ts";
 import type { QueryExecutor } from "../src/agent-repo.ts";
+import { AgentRunSupersededError } from "../src/agent-run-repo.ts";
 
 const AGENT_ID = "11111111-1111-4111-8111-111111111111";
+const RUN_ID = "33333333-3333-4333-8333-333333333333";
+const FENCE = "update agent_run_logs set claim_expires_at = greatest(claim_expires_at, now() + make_interval(mins => $3::int)) where agent_run_log_id = $1::uuid and agent_id = $2::uuid and status = 'running' and ended_at is null";
 
 type Captured = { text: string; values?: unknown[] };
 
@@ -35,6 +38,7 @@ test("advanceWatermarksWithSideEffects commits side effects and watermark update
 
   await advanceWatermarksWithSideEffects(advanceWatermarksTransactionClient(withRelease(db)), {
     agent_id: AGENT_ID,
+    run_id: RUN_ID,
     next_watermarks: { documents: { since: "2026-05-04T00:00:00.000Z" } },
     async applySideEffects(tx) {
       await tx.query("insert into findings (agent_id, headline) values ($1, $2)", [
@@ -50,9 +54,11 @@ test("advanceWatermarksWithSideEffects commits side effects and watermark update
       "begin",
       "insert into findings (agent_id, headline) values ($1, $2)",
       "update agents set watermarks = $2::jsonb, updated_at = now() where agent_id = $1::uuid",
+      FENCE,
       "commit",
     ],
   );
+  assert.deepEqual(queries[3].values, [RUN_ID, AGENT_ID, 15]);
   assert.equal(queries[2].values?.[0], AGENT_ID);
   assert.equal(
     queries[2].values?.[1],
@@ -66,6 +72,7 @@ test("advanceWatermarksWithSideEffects rolls back and skips watermark update whe
   await assert.rejects(
     advanceWatermarksWithSideEffects(advanceWatermarksTransactionClient(withRelease(db)), {
       agent_id: AGENT_ID,
+      run_id: RUN_ID,
       next_watermarks: { documents: { since: "2026-05-04T00:00:00.000Z" } },
       async applySideEffects(tx) {
         await tx.query("insert into findings (agent_id, headline) values ($1, $2)", [
@@ -95,6 +102,7 @@ test("advanceWatermarksWithSideEffects validates agent id and watermarks before 
   await assert.rejects(
     advanceWatermarksWithSideEffects(tx, {
       agent_id: "not-a-uuid",
+      run_id: RUN_ID,
       next_watermarks: {},
       async applySideEffects() {},
     }),
@@ -103,7 +111,17 @@ test("advanceWatermarksWithSideEffects validates agent id and watermarks before 
   await assert.rejects(
     advanceWatermarksWithSideEffects(tx, {
       agent_id: AGENT_ID,
+      run_id: RUN_ID,
       next_watermarks: null,
+      async applySideEffects() {},
+    }),
+    WatermarkValidationError,
+  );
+  await assert.rejects(
+    advanceWatermarksWithSideEffects(tx, {
+      agent_id: AGENT_ID,
+      run_id: "not-a-uuid",
+      next_watermarks: {},
       async applySideEffects() {},
     }),
     WatermarkValidationError,
@@ -119,6 +137,7 @@ test("advanceWatermarksWithSideEffects rejects unbranded query executors before 
     // @ts-expect-error: an unbranded executor on purpose; it must be rejected.
     advanceWatermarksWithSideEffects(db, {
       agent_id: AGENT_ID,
+      run_id: RUN_ID,
       next_watermarks: {},
       async applySideEffects() {},
     }),
@@ -162,6 +181,7 @@ test("advanceWatermarksWithSideEffectsWithPool pins transaction statements to on
 
   await advanceWatermarksWithSideEffectsWithPool(pool, {
     agent_id: AGENT_ID,
+    run_id: RUN_ID,
     next_watermarks: { documents: { since: "2026-05-04T00:00:00.000Z" } },
     async applySideEffects(tx) {
       await tx.query("insert into findings (agent_id, headline) values ($1, $2)", [
@@ -179,6 +199,7 @@ test("advanceWatermarksWithSideEffectsWithPool pins transaction statements to on
       "begin",
       "insert into findings (agent_id, headline) values ($1, $2)",
       "update agents set watermarks = $2::jsonb, updated_at = now() where agent_id = $1::uuid",
+      FENCE,
       "commit",
     ],
   );
@@ -207,6 +228,7 @@ test("advanceWatermarksWithSideEffects rolls back when the watermark update touc
   await assert.rejects(
     advanceWatermarksWithSideEffects(advanceWatermarksTransactionClient(db), {
       agent_id: AGENT_ID,
+      run_id: RUN_ID,
       next_watermarks: { documents: { since: "2026-05-04T00:00:00.000Z" } },
       async applySideEffects(tx) {
         await tx.query("insert into findings (agent_id, headline) values ($1, $2)", [
@@ -224,6 +246,44 @@ test("advanceWatermarksWithSideEffects rolls back when the watermark update touc
       "begin",
       "insert into findings (agent_id, headline) values ($1, $2)",
       "update agents set watermarks = $2::jsonb, updated_at = now() where agent_id = $1::uuid",
+      "rollback",
+    ],
+  );
+});
+
+test("advanceWatermarksWithSideEffects rolls back every effect when the run no longer holds its claim", async () => {
+  const queries: Captured[] = [];
+  const db: QueryExecutor & { release(error?: Error): void } = {
+    async query<R extends Record<string, unknown> = Record<string, unknown>>(
+      text: string,
+      values?: unknown[],
+    ): Promise<QueryResult<R>> {
+      queries.push({ text, values });
+      const normalized = text.replace(/\s+/g, " ").trim();
+      return { rows: [], rowCount: normalized === FENCE ? 0 : 1, command: "", oid: 0, fields: [] };
+    },
+    release() {},
+  };
+
+  await assert.rejects(
+    advanceWatermarksWithSideEffects(advanceWatermarksTransactionClient(db), {
+      agent_id: AGENT_ID,
+      run_id: RUN_ID,
+      next_watermarks: { documents: { since: "2026-05-04T00:00:00.000Z" } },
+      async applySideEffects(tx) {
+        await tx.query("insert into findings (agent_id, headline) values ($1, $2)", [AGENT_ID, "Guidance raised"]);
+      },
+    }),
+    AgentRunSupersededError,
+  );
+
+  assert.deepEqual(
+    queries.map((query) => query.text.replace(/\s+/g, " ").trim()),
+    [
+      "begin",
+      "insert into findings (agent_id, headline) values ($1, $2)",
+      "update agents set watermarks = $2::jsonb, updated_at = now() where agent_id = $1::uuid",
+      FENCE,
       "rollback",
     ],
   );

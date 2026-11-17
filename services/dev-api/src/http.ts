@@ -5,9 +5,8 @@ import { randomUUID } from "node:crypto";
 import { ANALYZE_PLAYBOOKS } from "../../analyze/src/index.ts";
 import {
   claimAgentRun,
-  completeAgentRun,
   createAgent,
-  failAgentRun,
+  finishClaimedAgentRun,
   getAgent,
   listAgentsByUser,
   runAgentLoop,
@@ -752,38 +751,33 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           },
         });
         if (!claimed.claimed) return claimed.reason === "not_admitted" ? null : toDevAgentRun(claimed.row);
-        try {
-          if (loopAgent === null) throw new Error("an admitted run claim read no agent");
-          const loopResult = await runAgentLoop({
-            pool: deps.db,
-            agent_id: agentId,
-            run_id: runId,
-            current_watermarks: loopAgent.watermarks,
-            alert_rules: Array.isArray(loopAgent.alert_rules) ? loopAgent.alert_rules : [],
-            stages: await deps.createAgentLoopStages({
-              userId,
-              runId,
-              agent: loopAgent,
-              trigger: "manual",
-            }),
-          });
-          return toDevAgentRun(await completeAgentRun(deps.db, {
-            run_id: runId,
-            outputs_summary: {
+        const createAgentLoopStages = deps.createAgentLoopStages;
+        const finished = await finishClaimedAgentRun(deps.db, runId, {
+          async execute() {
+            if (loopAgent === null) throw new Error("an admitted run claim read no agent");
+            const loopResult = await runAgentLoop({
+              pool: deps.db,
+              agent_id: agentId,
+              run_id: runId,
+              current_watermarks: loopAgent.watermarks,
+              alert_rules: Array.isArray(loopAgent.alert_rules) ? loopAgent.alert_rules : [],
+              stages: await createAgentLoopStages({
+                userId,
+                runId,
+                agent: loopAgent,
+                trigger: "manual",
+              }),
+            });
+            return {
               trigger: "manual",
               status: "completed",
               ...jsonObjectOrEmpty(loopResult.outputs_summary),
               next_watermarks: loopResult.next_watermarks,
-            },
-          }));
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          return toDevAgentRun(await failAgentRun(deps.db, {
-            run_id: runId,
-            error: message,
-            outputs_summary: { trigger: "manual", status: "failed" },
-          }));
-        }
+            };
+          },
+          failed_outputs_summary: { trigger: "manual", status: "failed" },
+        });
+        return toDevAgentRun(finished.run);
       },
     },
     themes: {
