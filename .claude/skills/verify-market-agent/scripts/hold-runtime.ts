@@ -1,7 +1,7 @@
-// dev-api's runtime module for `verify lease-race`: local-runtime.ts, except that the
-// first agent run to finish analyze while .dev/lease-hold/hold exists renames it to
-// held-<run id> and waits there until .dev/lease-hold/release appears.
-import { existsSync, renameSync } from "node:fs";
+// dev-api's runtime module for `verify lease-race`: local-runtime.ts, except that the first
+// run of the agent named in .dev/lease-hold/hold to finish analyze renames that file to
+// held-<run id> and waits until .dev/lease-hold/release appears, for at most five minutes.
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -11,6 +11,7 @@ import { createAgentLoopStages as localAgentLoopStages } from "../../../../servi
 export * from "../../../../services/dev-api/src/local-runtime.ts";
 
 const HOLD_DIR = join(import.meta.dirname, "../../../../.dev/lease-hold");
+const HOLD_LIMIT_MS = 5 * 60_000;
 
 export const createAgentLoopStages: DevApiAgentLoopStageFactory = async (input) => {
   const stages = await localAgentLoopStages(input);
@@ -19,16 +20,17 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = async (input) 
     ...stages,
     async analyze(context) {
       const analysis = await analyze(context);
-      if (takeHold(input.runId)) {
-        while (!existsSync(join(HOLD_DIR, "release"))) await sleep(100);
+      if (takeHold(input.agent.agent_id, input.runId)) {
+        for (const deadline = Date.now() + HOLD_LIMIT_MS; Date.now() < deadline && !existsSync(join(HOLD_DIR, "release"));) await sleep(100);
       }
       return analysis;
     },
   };
 };
 
-function takeHold(runId: string): boolean {
+function takeHold(agentId: string, runId: string): boolean {
   try {
+    if (readFileSync(join(HOLD_DIR, "hold"), "utf8") !== agentId) return false;
     renameSync(join(HOLD_DIR, "hold"), join(HOLD_DIR, `held-${runId}`));
     return true;
   } catch (error) {

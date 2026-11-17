@@ -68,6 +68,7 @@ export async function advanceWatermarksWithSideEffects(
 
   await db.query("begin");
   try {
+    await fenceAgentRun(db, input);
     await input.applySideEffects(db);
     const update = await db.query(
       `update agents
@@ -79,8 +80,6 @@ export async function advanceWatermarksWithSideEffects(
     if ((update.rowCount ?? 0) !== 1) {
       throw new AgentNotFoundError("agent not found while advancing watermarks");
     }
-    // After the agent row lock: a claim takes that lock before it inserts, so it never waits on this run's row while holding it.
-    await fenceAgentRun(db, input);
     await db.query("commit");
   } catch (error) {
     try {

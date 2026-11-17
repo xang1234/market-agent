@@ -777,6 +777,9 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           },
           failed_outputs_summary: { trigger: "manual", status: "failed" },
         });
+        if (finished.status === "superseded" && finished.error !== null) {
+          console.warn(`agents: agent ${agentId} run ${runId} superseded after it failed: ${finished.error}`);
+        }
         return toDevAgentRun(finished.run);
       },
     },

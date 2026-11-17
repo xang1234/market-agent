@@ -111,17 +111,18 @@ test("runAgentLoop executes injectable stages in order and advances watermarks a
   assert.deepEqual(result.next_watermarks, { source_cursor: "new" });
   assert.deepEqual(queries.map((query) => query.text), [
     "begin",
-    "insert into findings (agent_id, headline) values ($1, $2)",
-    `update agents
-          set watermarks = $2::jsonb,
-              updated_at = now()
-        where agent_id = $1::uuid`,
+    "select 1 from agents where agent_id = $1::uuid for update",
     `update agent_run_logs
         set claim_expires_at = greatest(claim_expires_at, now() + make_interval(mins => $3::int))
       where agent_run_log_id = $1::uuid
         and agent_id = $2::uuid
         and status = 'running'
         and ended_at is null`,
+    "insert into findings (agent_id, headline) values ($1, $2)",
+    `update agents
+          set watermarks = $2::jsonb,
+              updated_at = now()
+        where agent_id = $1::uuid`,
     "commit",
   ]);
   assert.equal(released.length, 1);
@@ -151,7 +152,12 @@ test("runAgentLoop rolls back and does not advance watermarks when side effects 
     /finding insert failed/,
   );
 
-  assert.deepEqual(queries.map((query) => query.text), ["begin", "rollback"]);
+  assert.deepEqual(queries.map((query) => query.text.split("\n")[0].trim()), [
+    "begin",
+    "select 1 from agents where agent_id = $1::uuid for update",
+    "update agent_run_logs",
+    "rollback",
+  ]);
   assert.equal(released.length, 1, "client must be released after rollback");
   assert.equal(released[0], undefined);
 });

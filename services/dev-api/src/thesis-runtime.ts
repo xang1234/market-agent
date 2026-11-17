@@ -47,7 +47,7 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
     async readDeltas() {
       // By default the cutoff comes from the database clock, the one that stamps
       // facts (now()) and assessments (assessed_at). Taking it from the app clock
-      // let skew hide a just-ingested fact or fake a newer-assessment conflict (#143).
+      // let skew hide a just-ingested fact (#143).
       const asOf = input.now ? new Date(await input.now()).toISOString() : await databaseNow(input.db);
       return { thesis_version_id: input.thesis.thesis_version_id, as_of: asOf };
     },

@@ -35,7 +35,7 @@ Symbol page, Analyze, Investment memo, Generate memo (or Open), Monitor this the
 
 ## Lease takeover
 
-A run whose lease expired and was taken over must commit nothing (#661). Start the stack with the hold runtime, which holds the first run to finish analyze while `.dev/lease-hold/hold` exists:
+A run whose lease expired and was taken over must commit nothing (#661). Start the stack with the hold runtime, which holds the first run of the agent named in `.dev/lease-hold/hold` to finish analyze, for at most five minutes:
 
 ```bash
 echo "DEV_API_RUNTIME_MODULE=$PWD/.claude/skills/verify-market-agent/scripts/hold-runtime.ts" >> .env.dev
@@ -46,7 +46,7 @@ $V lease-race scheduled           # a held scheduled run
 $V lease-race run-now --thesis    # a held thesis run
 ```
 
-Each passes when the newer run completes, the held run's row reads failed with "agent run claim expired", the held run-now answers with that row (or the scheduler logs the held run `superseded`), the watermark names the newer run, and only the newer run's activity or assessment is stored. Remove both lines from `.env.dev` afterwards. `report.json` for each run is in `.dev/verify/lease-race-<mode>-<stamp>/`.
+Each passes when the newer run completes, the held run's row reads failed with "agent run claim expired", the held run-now answers with that row (or the scheduler logs the held run `superseded`), the watermark names the newer run, and only the newer run's activity or assessment is stored. Remove both lines from `.env.dev` afterwards. `report.json` for each run is in `.dev/verify/lease-race-<mode>[-thesis]-<stamp>/`.
 
 ## Evidence
 

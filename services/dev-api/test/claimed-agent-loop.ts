@@ -4,7 +4,6 @@ import type { Pool } from "pg";
 import { runAgentLoop, type RunAgentLoopInput } from "../../agents/src/agent-loop.ts";
 import { claimAgentRun, completeAgentRun, failAgentRun } from "../../agents/src/agent-run-repo.ts";
 
-// Only a claimed run may commit its effects, so a test that drives the loop directly claims and ends the run as run-now does.
 export async function runClaimedAgentLoop<Deltas, Evidence, Clusters, Analysis>(
   input: RunAgentLoopInput<Deltas, Evidence, Clusters, Analysis> & { pool: Pool },
 ) {

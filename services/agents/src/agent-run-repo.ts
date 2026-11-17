@@ -108,7 +108,7 @@ async function attemptAgentRunClaim(
     const admit = input.admit;
     // The agent row lock orders this check against a disable, a delete, and every other admitted claim.
     const outcome = await withTransaction(db, async ({ db: tx }) => {
-      await tx.query("select 1 from agents where agent_id = $1::uuid for update", [input.agent_id]);
+      await lockAgentRow(tx, input.agent_id);
       if (!(await admit(tx))) return "not_admitted" as const;
       const { rows } = await tx.query<AgentRunDbRow>(`${INSERT_RUNNING} on conflict do nothing returning ${SELECT_COLUMNS}`, values);
       return rows[0] ?? null;
@@ -185,12 +185,18 @@ async function findActiveAgentRun(
   return rows[0] === undefined ? null : rowFromDb(rows[0]);
 }
 
+/** A claim and a run's commit both take this lock before they touch the agent's run rows, so neither waits on a run row while holding the other's lock. */
+async function lockAgentRow(tx: QueryExecutor, agentId: string): Promise<void> {
+  await tx.query("select 1 from agents where agent_id = $1::uuid for update", [agentId]);
+}
+
 /**
- * Run inside the transaction that commits a run's effects, as its last statement. It holds the
- * run's row until that commit, so no claim can end the run first, and renews the lease so the
- * run's completion still finds it running.
+ * Run first in the transaction that commits a run's effects. It holds the agent's row and the
+ * run's own row until commit, so no claim can end the run first, and the renewed lease lets the
+ * run's completion still find it running.
  */
 export async function fenceAgentRun(tx: QueryExecutor, run: { run_id: string; agent_id: string }): Promise<void> {
+  await lockAgentRow(tx, run.agent_id);
   const { rowCount } = await tx.query(
     `update agent_run_logs
         set claim_expires_at = greatest(claim_expires_at, now() + make_interval(mins => $3::int))

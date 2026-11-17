@@ -29,7 +29,7 @@ function gate(): Gate {
   return { open, reached, hold: async () => { arrive(); await opened; } };
 }
 
-// Ages a run past its lease, and its start by `hours`, so the next claim may take it over.
+// Moving started_at back by `hours` makes the scheduler find the agent due again.
 async function expireLease(pool: Pool, runId: string, hours = 0): Promise<void> {
   await pool.query(
     `update agent_run_logs
@@ -48,18 +48,24 @@ async function lastRunTwoHoursAgo(pool: Pool, agentId: string): Promise<void> {
   );
 }
 
-// Stages whose effect and watermark name the run, the first run held at `holdAt` until its gate opens.
-function markingRuns(holdAt: "analyze" | "applySideEffects" = "analyze") {
-  const first = gate();
+type HeldStage = "analyze" | "applySideEffects";
+
+function signedRuns(holdAt: ReadonlyArray<HeldStage> = ["analyze"], { failHeld = false } = {}) {
+  const gates: Record<HeldStage, Gate> = { analyze: gate(), applySideEffects: gate() };
   const runIds: string[] = [];
   const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId }) => {
     runIds.push(runId);
-    const hold = (stage: typeof holdAt) => (runIds.length === 1 && stage === holdAt ? first.hold() : Promise.resolve());
+    const first = runIds.length === 1;
+    const hold = (stage: HeldStage) => (first && holdAt.includes(stage) ? gates[stage].hold() : Promise.resolve());
     return {
       readDeltas: async () => ({}),
       extractEvidence: async () => ({}),
       clusterEvidence: async () => ({}),
-      analyze: async () => { await hold("analyze"); return {}; },
+      analyze: async () => {
+        await hold("analyze");
+        if (first && failHeld) throw new Error("analyze failed");
+        return {};
+      },
       nextWatermarks: async () => ({ last_run_id: runId }),
       applySideEffects: async ({ tx, agent_id }) => {
         await hold("applySideEffects");
@@ -68,11 +74,10 @@ function markingRuns(holdAt: "analyze" | "applySideEffects" = "analyze") {
       },
     } satisfies AgentLoopStages;
   };
-  return { first, runIds, createAgentLoopStages };
+  return { gates, runIds, createAgentLoopStages };
 }
 
-// The real thesis stages, each run held after `analyze` at its gate, in claim order.
-function thesisRuns(pool: Pool, gates: Gate[]) {
+function heldThesisRuns(pool: Pool, gates: Gate[]) {
   const runIds: string[] = [];
   const createAgentLoopStages: DevApiAgentLoopStageFactory = async ({ userId, runId, agent }) => {
     const held = gates[runIds.length];
@@ -112,7 +117,6 @@ async function thesisAgent(t: TestContext, prefix: string) {
   return { db, pool, agentId: agent.agent_id, fact };
 }
 
-// Names each run by its role, so expectations stay literal.
 function byRole<T>(value: T, roles: Record<string, string>): T {
   let text = JSON.stringify(value);
   for (const [runId, role] of Object.entries(roles)) text = text.replaceAll(runId, role);
@@ -135,7 +139,6 @@ async function effects(pool: Pool, agentId: string): Promise<string[]> {
 const runView = (run: { agent_run_log_id: string; status: string; error: string | null } | null | string) =>
   typeof run === "string" || run === null ? run : { id: run.agent_run_log_id, status: run.status, error: run.error };
 
-// Whether `change` settles before any backend waits on a lock.
 async function landsWithoutWaiting(pool: Pool, change: Promise<unknown>): Promise<boolean> {
   let landed = false;
   change.then(() => { landed = true; }, () => {});
@@ -151,16 +154,16 @@ async function landsWithoutWaiting(pool: Pool, change: Promise<unknown>): Promis
 
 test("a scheduled run that lost its lease to a newer run commits nothing and ends superseded", docker, async (t) => {
   const { pool, agentId } = await plainAgent(t, "dev-api-agent-lease-scheduled");
-  const runs = markingRuns();
+  const runs = signedRuns();
   const stale = startAgentScheduler({ db: pool, createAgentLoopStages: runs.createAgentLoopStages, log: () => {} }, 3_600_000);
   const fresh = startAgentScheduler({ db: pool, createAgentLoopStages: runs.createAgentLoopStages, log: () => {} }, 3_600_000);
   t.after(() => Promise.all([stale.stop(), fresh.stop()]));
 
   const staleTick = stale.tick();
-  await runs.first.reached;
+  await runs.gates.analyze.reached;
   await expireLease(pool, runs.runIds[0], 2);
   const newer = await fresh.tick();
-  runs.first.open();
+  runs.gates.analyze.open();
   const staleResults = await staleTick;
 
   assert.deepEqual(byRole({
@@ -178,16 +181,37 @@ test("a scheduled run that lost its lease to a newer run commits nothing and end
   });
 });
 
+test("a scheduled run that fails after losing its lease logs its own error beside superseded", docker, async (t) => {
+  const { pool, agentId } = await plainAgent(t, "dev-api-agent-lease-scheduled-failure");
+  const runs = signedRuns(["analyze"], { failHeld: true });
+  const lines: string[] = [];
+  const stale = startAgentScheduler({ db: pool, createAgentLoopStages: runs.createAgentLoopStages, log: (line) => lines.push(line) }, 3_600_000);
+  const fresh = startAgentScheduler({ db: pool, createAgentLoopStages: runs.createAgentLoopStages, log: () => {} }, 3_600_000);
+  t.after(() => Promise.all([stale.stop(), fresh.stop()]));
+
+  const staleTick = stale.tick();
+  await runs.gates.analyze.reached;
+  await expireLease(pool, runs.runIds[0], 2);
+  await fresh.tick();
+  runs.gates.analyze.open();
+  await staleTick;
+
+  assert.deepEqual(
+    byRole(lines.filter((line) => line.includes(runs.runIds[0])), { [runs.runIds[0]]: "stale", [agentId]: "agent" }),
+    ["agent-scheduler: agent agent run stale superseded after it failed: analyze failed"],
+  );
+});
+
 test("a run-now that lost its lease to a newer run commits nothing and returns its superseded run", docker, async (t) => {
   const { pool, agentId } = await plainAgent(t, "dev-api-agent-lease-run-now");
-  const runs = markingRuns();
+  const runs = signedRuns();
   const adapters = createServiceDevApiAdapters({ db: pool, createAgentLoopStages: runs.createAgentLoopStages } as never);
 
   const staleRun = adapters.agents.run({ userId: USER_ID, agentId });
-  await runs.first.reached;
+  await runs.gates.analyze.reached;
   await expireLease(pool, runs.runIds[0]);
   const newer = await adapters.agents.run({ userId: USER_ID, agentId });
-  runs.first.open();
+  runs.gates.analyze.open();
   const stale = await staleRun.catch((error: Error) => error.message);
 
   assert.deepEqual(byRole({
@@ -203,37 +227,41 @@ test("a run-now that lost its lease to a newer run commits nothing and returns i
   });
 });
 
-test("a run-now that arrives while a live run commits waits on no lock and leaves that run to finish", docker, async (t) => {
-  const { pool, agentId } = await plainAgent(t, "dev-api-agent-lease-commit-race");
-  const runs = markingRuns("applySideEffects");
-  const adapters = createServiceDevApiAdapters({ db: pool, createAgentLoopStages: runs.createAgentLoopStages } as never);
+for (const [committer, expire] of [["a live run", false], ["a run whose lease had expired", true]] as const) {
+  test(`a run-now that arrives mid-commit of ${committer} waits for that commit and leaves the run completed`, docker, async (t) => {
+    const { pool, agentId } = await plainAgent(t, `dev-api-agent-lease-commit-${expire ? "expired" : "live"}`);
+    const runs = signedRuns(["analyze", "applySideEffects"]);
+    const adapters = createServiceDevApiAdapters({ db: pool, createAgentLoopStages: runs.createAgentLoopStages } as never);
 
-  const liveRun = adapters.agents.run({ userId: USER_ID, agentId });
-  await runs.first.reached;
-  const secondRun = adapters.agents.run({ userId: USER_ID, agentId });
-  const landedFirst = await landsWithoutWaiting(pool, secondRun);
-  runs.first.open();
-  const [live, second] = await Promise.all([liveRun, secondRun]);
+    const committingRun = adapters.agents.run({ userId: USER_ID, agentId });
+    await runs.gates.analyze.reached;
+    if (expire) await expireLease(pool, runs.runIds[0]);
+    runs.gates.analyze.open();
+    await runs.gates.applySideEffects.reached;
+    const otherRun = adapters.agents.run({ userId: USER_ID, agentId });
+    const otherLandedFirst = await landsWithoutWaiting(pool, otherRun);
+    runs.gates.applySideEffects.open();
+    const [committing, other] = await Promise.all([committingRun, otherRun]);
+    const otherRanItsOwn = other?.agent_run_log_id !== runs.runIds[0];
 
-  assert.deepEqual(byRole({
-    landedFirst,
-    live: runView(live),
-    second: runView(second),
-    watermarks: (await getAgent(pool, agentId))?.watermarks,
-    effects: await effects(pool, agentId),
-  }, { [runs.runIds[0]]: "live" }), {
-    landedFirst: true,
-    live: { id: "live", status: "completed", error: null },
-    second: { id: "live", status: "running", error: null },
-    watermarks: { last_run_id: "live" },
-    effects: ["effect of live"],
+    assert.deepEqual(byRole({
+      otherLandedFirst,
+      committing: runView(committing),
+      watermarks: (await getAgent(pool, agentId))?.watermarks,
+      effects: await effects(pool, agentId),
+    }, { [runs.runIds[0]]: "committing", ...(runs.runIds[1] === undefined ? {} : { [runs.runIds[1]]: "other" }) }), {
+      otherLandedFirst: false,
+      committing: { id: "committing", status: "completed", error: null },
+      watermarks: { last_run_id: otherRanItsOwn ? "other" : "committing" },
+      effects: otherRanItsOwn ? ["effect of committing", "effect of other"] : ["effect of committing"],
+    });
   });
-});
+}
 
 test("a thesis run that lost its lease records no stale assessment while the newer run is in flight", docker, async (t) => {
   const { db, pool, agentId, fact } = await thesisAgent(t, "dev-api-agent-lease-thesis-in-flight");
   const gates = [gate(), gate()];
-  const runs = thesisRuns(pool, gates);
+  const runs = heldThesisRuns(pool, gates);
   const adapters = createServiceDevApiAdapters({ db: pool, createAgentLoopStages: runs.createAgentLoopStages } as never);
 
   const staleRun = adapters.agents.run({ userId: USER_ID, agentId });
@@ -266,7 +294,7 @@ test("a thesis run that lost its lease records no stale assessment while the new
 test("a scheduled thesis run that lost its lease leaves the newer assessment's watermark in place", docker, async (t) => {
   const { pool, agentId } = await thesisAgent(t, "dev-api-agent-lease-thesis-after");
   const gates = [gate()];
-  const runs = thesisRuns(pool, gates);
+  const runs = heldThesisRuns(pool, gates);
   const stale = startAgentScheduler({ db: pool, createAgentLoopStages: runs.createAgentLoopStages, log: () => {} }, 3_600_000);
   const fresh = startAgentScheduler({ db: pool, createAgentLoopStages: runs.createAgentLoopStages, log: () => {} }, 3_600_000);
   t.after(() => Promise.all([stale.stop(), fresh.stop()]));

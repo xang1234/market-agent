@@ -59,7 +59,7 @@ try {
     if (saved.status !== 200) throw new Error(`saving the thesis answered ${saved.status}: ${JSON.stringify(saved.body)}`)
   }
 
-  writeFileSync(join(HOLD_DIR, 'hold'), '')
+  writeFileSync(join(HOLD_DIR, 'hold'), agentId)
   const heldRequest = MODE === 'run-now' ? api('POST', `/v1/agents/${agentId}/runs`) : null
   if (MODE === 'scheduled') {
     await db.query(

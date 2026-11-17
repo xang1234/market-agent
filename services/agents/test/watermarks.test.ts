@@ -13,6 +13,7 @@ import { AgentRunSupersededError } from "../src/agent-run-repo.ts";
 
 const AGENT_ID = "11111111-1111-4111-8111-111111111111";
 const RUN_ID = "33333333-3333-4333-8333-333333333333";
+const LOCK = "select 1 from agents where agent_id = $1::uuid for update";
 const FENCE = "update agent_run_logs set claim_expires_at = greatest(claim_expires_at, now() + make_interval(mins => $3::int)) where agent_run_log_id = $1::uuid and agent_id = $2::uuid and status = 'running' and ended_at is null";
 
 type Captured = { text: string; values?: unknown[] };
@@ -52,16 +53,18 @@ test("advanceWatermarksWithSideEffects commits side effects and watermark update
     queries.map((query) => query.text.replace(/\s+/g, " ").trim()),
     [
       "begin",
+      LOCK,
+      FENCE,
       "insert into findings (agent_id, headline) values ($1, $2)",
       "update agents set watermarks = $2::jsonb, updated_at = now() where agent_id = $1::uuid",
-      FENCE,
       "commit",
     ],
   );
-  assert.deepEqual(queries[3].values, [RUN_ID, AGENT_ID, 15]);
-  assert.equal(queries[2].values?.[0], AGENT_ID);
+  assert.deepEqual(queries[1].values, [AGENT_ID]);
+  assert.deepEqual(queries[2].values, [RUN_ID, AGENT_ID, 15]);
+  assert.equal(queries[4].values?.[0], AGENT_ID);
   assert.equal(
-    queries[2].values?.[1],
+    queries[4].values?.[1],
     JSON.stringify({ documents: { since: "2026-05-04T00:00:00.000Z" } }),
   );
 });
@@ -89,6 +92,8 @@ test("advanceWatermarksWithSideEffects rolls back and skips watermark update whe
     queries.map((query) => query.text.replace(/\s+/g, " ").trim()),
     [
       "begin",
+      LOCK,
+      FENCE,
       "insert into findings (agent_id, headline) values ($1, $2)",
       "rollback",
     ],
@@ -197,9 +202,10 @@ test("advanceWatermarksWithSideEffectsWithPool pins transaction statements to on
     queries.map((query) => query.text.replace(/\s+/g, " ").trim()),
     [
       "begin",
+      LOCK,
+      FENCE,
       "insert into findings (agent_id, headline) values ($1, $2)",
       "update agents set watermarks = $2::jsonb, updated_at = now() where agent_id = $1::uuid",
-      FENCE,
       "commit",
     ],
   );
@@ -244,6 +250,8 @@ test("advanceWatermarksWithSideEffects rolls back when the watermark update touc
     queries.map((query) => query.text.replace(/\s+/g, " ").trim()),
     [
       "begin",
+      LOCK,
+      FENCE,
       "insert into findings (agent_id, headline) values ($1, $2)",
       "update agents set watermarks = $2::jsonb, updated_at = now() where agent_id = $1::uuid",
       "rollback",
@@ -251,7 +259,7 @@ test("advanceWatermarksWithSideEffects rolls back when the watermark update touc
   );
 });
 
-test("advanceWatermarksWithSideEffects rolls back every effect when the run no longer holds its claim", async () => {
+test("advanceWatermarksWithSideEffects writes nothing when the run no longer holds its claim", async () => {
   const queries: Captured[] = [];
   const db: QueryExecutor & { release(error?: Error): void } = {
     async query<R extends Record<string, unknown> = Record<string, unknown>>(
@@ -281,8 +289,7 @@ test("advanceWatermarksWithSideEffects rolls back every effect when the run no l
     queries.map((query) => query.text.replace(/\s+/g, " ").trim()),
     [
       "begin",
-      "insert into findings (agent_id, headline) values ($1, $2)",
-      "update agents set watermarks = $2::jsonb, updated_at = now() where agent_id = $1::uuid",
+      LOCK,
       FENCE,
       "rollback",
     ],

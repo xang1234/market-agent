@@ -29,7 +29,8 @@ export type AgentRunMessageResult =
   | { status: "skipped_concurrency_limit"; run_id: string; active_run: AgentRunRow }
   | { status: "not_admitted"; run_id: string }
   | { status: "failed"; run_id: string; run: AgentRunRow; error: string }
-  | { status: "superseded"; run_id: string; run: AgentRunRow };
+  /** `error` is the run's own failure, when it failed before it found the takeover. */
+  | { status: "superseded"; run_id: string; run: AgentRunRow; error: string | null };
 
 export type FinishedAgentRun = Extract<AgentRunMessageResult, { status: "completed" | "failed" | "superseded" }>;
 
@@ -85,47 +86,40 @@ export async function finishClaimedAgentRun(
   runId: string,
   input: Pick<HandleAgentRunMessageInput, "execute" | "failed_outputs_summary">,
 ): Promise<FinishedAgentRun> {
+  let failure: string | null = null;
   try {
-    return await completeOrFailAgentRun(db, runId, input);
+    try {
+      const outputsSummary = await input.execute();
+      const run = await completeAgentRun(db, {
+        run_id: runId,
+        outputs_summary: outputsSummary,
+      });
+      return Object.freeze({
+        status: "completed",
+        run_id: runId,
+        run,
+        outputs_summary: outputsSummary,
+      });
+    } catch (error) {
+      if (error instanceof AgentRunSupersededError) throw error;
+      failure = error instanceof Error ? error.message : String(error);
+      const run = await failAgentRun(db, {
+        run_id: runId,
+        error: failure,
+        outputs_summary: input.failed_outputs_summary,
+      });
+      return Object.freeze({
+        status: "failed",
+        run_id: runId,
+        run,
+        error: failure,
+      });
+    }
   } catch (error) {
     if (!(error instanceof AgentRunSupersededError)) throw error;
     const run = await getAgentRun(db, runId);
     if (run === null) throw error;
-    return Object.freeze({ status: "superseded", run_id: runId, run });
-  }
-}
-
-async function completeOrFailAgentRun(
-  db: QueryExecutor,
-  runId: string,
-  input: Pick<HandleAgentRunMessageInput, "execute" | "failed_outputs_summary">,
-): Promise<FinishedAgentRun> {
-  try {
-    const outputsSummary = await input.execute();
-    const run = await completeAgentRun(db, {
-      run_id: runId,
-      outputs_summary: outputsSummary,
-    });
-    return Object.freeze({
-      status: "completed",
-      run_id: runId,
-      run,
-      outputs_summary: outputsSummary,
-    });
-  } catch (error) {
-    if (error instanceof AgentRunSupersededError) throw error;
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const run = await failAgentRun(db, {
-      run_id: runId,
-      error: errorMessage,
-      outputs_summary: input.failed_outputs_summary,
-    });
-    return Object.freeze({
-      status: "failed",
-      run_id: runId,
-      run,
-      error: errorMessage,
-    });
+    return Object.freeze({ status: "superseded", run_id: runId, run, error: failure });
   }
 }
 
