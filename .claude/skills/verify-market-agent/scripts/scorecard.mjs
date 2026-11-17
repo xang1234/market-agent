@@ -174,7 +174,12 @@ async function runTurn({ db, page, kase, index, thread, knownIds, consoleErrors,
   const waitInPage = (fn) => page.waitForFunction(fn, knownIds, { polling: 100, timeout: TURN_TIMEOUT_MS }).then(elapsed, nullOnTimeout)
   const [firstStep, firstText, saved, rendered] = await Promise.all([
     page.waitForFunction(workStepShown, knownIds, { polling: 100, timeout: TURN_TIMEOUT_MS })
-      .then(async (shown) => ((await shown.jsonValue()) === 'step' ? elapsed() : null), nullOnTimeout),
+      .then(async (shown) => {
+        const ms = elapsed()
+        const seen = await shown.jsonValue()
+        await shown.dispose()
+        return seen === 'step' ? ms : null
+      }, nullOnTimeout),
     waitInPage(answerTextShown),
     savedReply(db, page, () => thread.id, submitted, started),
     waitInPage(replyRendered),
