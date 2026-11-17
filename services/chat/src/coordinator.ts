@@ -1452,7 +1452,7 @@ function analystAgentSeat(
     if (answer === null) return next(context);
     if (answer === "pick_company") return picking({ ...context, companiesByReading: true });
     const result = answer;
-    await toolBackedAnalystTurnRunner(turn, { ...options, runtime: () => result });
+    await toolBackedAnalystTurnRunner(turn, { ...options, runtime: () => result, stepsStreamed: true });
   };
 }
 
@@ -1462,6 +1462,8 @@ async function toolBackedAnalystTurnRunner(
     persistAssistantMessage?: ChatAssistantMessageCommit;
     runtime: ChatAnalystToolRuntime;
     verificationMode: ChatVerificationMode;
+    // The runtime emitted turn.started and each step's events as they ran, so none is replayed.
+    stepsStreamed?: true;
   },
 ) {
   const { emit } = context;
@@ -1472,12 +1474,12 @@ async function toolBackedAnalystTurnRunner(
     ...(coveredRefs.length > 0 ? { subject_refs: coveredRefs } : {}),
   };
   const turnId = context.turnId ?? context.runId;
-  if (!preResolution) {
+  if (!preResolution && !options.stepsStreamed) {
     emit("turn.started", { bundle_id: context.bundleId });
   }
 
   const result = await options.runtime(context);
-  const toolCalls = result.tool_calls ?? [];
+  const toolCalls = options.stepsStreamed ? [] : result.tool_calls ?? [];
   for (const toolCall of toolCalls) {
     emit("tool.started", {
       tool_call_id: toolCall.tool_call_id,

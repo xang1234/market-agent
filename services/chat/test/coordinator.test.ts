@@ -629,22 +629,34 @@ test("with the analyst agent it takes the financial lane's seat, and a turn it r
   assert.deepEqual(calls, ["offered", "agent:analyst_agent", `base:${DEFAULT_BUNDLE_ID}`]);
 });
 
-test("the analyst agent's answer is sealed, saved and streamed as an analyst turn, under its own bundle", async () => {
+test("the analyst agent's answer is sealed, saved and streamed as an analyst turn, under its own bundle, with the steps it streamed and none replayed", async () => {
   const saved: string[] = [];
+  const summaries: Array<{ work_summary: { events: Array<Record<string, unknown>> } }> = [];
+  const profile = { tool_call_id: "agent-call-1", tool_name: "get_company_profile", label: "Reading AAPL's 10-K" };
+  const writing = { tool_call_id: "agent-write-1", tool_name: "write_answer", label: "Writing the answer" };
   const coordinator = createChatCoordinator({
-    analystAgent: async (context) => ({
-      snapshot_id: "11111111-1111-4111-a111-111111111111",
-      verification: { ok: true },
-      tool_calls: [{ tool_call_id: "agent-call-1", tool_name: "get_company_profile", status: "ok", bundle_id: context.bundleId }],
-      blocks: [{
-        id: "agent-card", kind: "rich_text", snapshot_id: "11111111-1111-4111-a111-111111111111", data_ref: { kind: "rich_text", id: "agent-card" },
-        source_refs: [], as_of: "2026-11-01T00:00:00.000Z", segments: [{ type: "text", text: "According to a source on AAPL: it sells phones." }],
-      }],
-    }),
+    now: () => 0,
+    analystAgent: async (context) => {
+      context.emit("turn.started", { bundle_id: context.bundleId });
+      context.emit("tool.started", profile);
+      context.emit("tool.completed", { ...profile, status: "ok" });
+      context.emit("tool.started", writing);
+      context.emit("tool.completed", { ...writing, status: "ok" });
+      return {
+        snapshot_id: "11111111-1111-4111-a111-111111111111",
+        verification: { ok: true },
+        tool_calls: [{ tool_call_id: "agent-call-1", tool_name: "get_company_profile", status: "ok", bundle_id: context.bundleId, arguments: { subject_ref: { kind: "issuer", id: "aapl" } } }],
+        blocks: [{
+          id: "agent-card", kind: "rich_text", snapshot_id: "11111111-1111-4111-a111-111111111111", data_ref: { kind: "rich_text", id: "agent-card" },
+          source_refs: [], as_of: "2026-11-01T00:00:00.000Z", segments: [{ type: "text", text: "According to a source on AAPL: it sells phones." }],
+        }],
+      };
+    },
     persistAssistantMessage: async ({ blocks }) => {
       saved.push(blocks.map((block) => block.id).join());
       return readMessage({ snapshot_id: "22222222-2222-4222-a222-222222222222", message_id: "33333333-3333-4333-a333-333333333333" });
     },
+    saveWorkSummary: async (input) => { summaries.push(input as never); },
     runner: () => assert.fail("the agent answered the turn"),
   });
   const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "What does AAPL sell?" });
@@ -652,14 +664,23 @@ test("the analyst agent's answer is sealed, saved and streamed as an analyst tur
   assert.deepEqual(saved, ["agent-card"]);
   assert.deepEqual(turn.events.map((event) => [event.type, event.bundle_id ?? null]), [
     ["turn.started", "analyst_agent"],
-    ["tool.started", "analyst_agent"],
-    ["tool.completed", "analyst_agent"],
+    ["tool.started", null],
+    ["tool.completed", null],
+    ["tool.started", null],
+    ["tool.completed", null],
     ["snapshot.staged", null],
     ["snapshot.sealed", null],
     ["block.began", null],
     ["block.delta", null],
     ["block.completed", null],
     ["turn.completed", "analyst_agent"],
+  ]);
+  assert.deepEqual(summaries[0]!.work_summary.events.slice(0, 5), [
+    { type: "turn.started", at_ms: 0, bundle_id: "analyst_agent" },
+    { type: "tool.started", at_ms: 0, ...profile },
+    { type: "tool.completed", at_ms: 0, ...profile, status: "ok" },
+    { type: "tool.started", at_ms: 0, ...writing },
+    { type: "tool.completed", at_ms: 0, ...writing, status: "ok" },
   ]);
 });
 
