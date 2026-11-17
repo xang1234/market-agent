@@ -5,7 +5,7 @@
 
 import { createHash } from "node:crypto";
 
-import { selectYtdWindow, ytdReturns, type DailyClose, type YtdGap, type YtdSeriesInput, type YtdWindow } from "./ytd-window.ts";
+import { selectWindow, selectYtdWindow, ytdReturns, type DailyClose, type YtdGap, type YtdSeriesInput, type YtdWindow } from "./ytd-window.ts";
 
 // Names how a sealed series' points were drawn: a series spec carrying it was
 // checked point for point at seal (#236); one sealed before has no such check.
@@ -19,6 +19,13 @@ export function returnLabel(y: number): string {
   return `${y.toLocaleString("en-US", { maximumFractionDigits: Math.abs(y) >= 1000 ? 0 : 2 })}%`;
 }
 
+// A close as a price chip shows it: the answer quotes it and the seal checks
+// it against the close the line ends on (#678).
+export function closeLabel(close: number, currency: string): string {
+  const amount = close.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return currency === "USD" ? `$${amount}` : `${amount} ${currency}`;
+}
+
 // A line's points, and the digest of the bars it pins. The cache reuses
 // bar_range_id when it refreshes a range, so the ID alone does not pin prices.
 export type PerfLine = { points: ReadonlyArray<PerfPoint>; bars_sha256: string };
@@ -28,16 +35,18 @@ export type PerfLine = { points: ReadonlyArray<PerfPoint>; bars_sha256: string }
 export type LatestPerfInput = { kind: "latest"; bars: ReadonlyArray<ReadonlyArray<DailyClose>> };
 // A year-to-date window (ytd-window.ts), each digest over exactly the window's bars.
 export type YtdPerfInput = { kind: "ytd"; series: ReadonlyArray<YtdSeriesInput>; cutoff: string };
+// A window from `start`, an exchange-local date, measured as YTD's (#678).
+export type WindowPerfInput = { kind: "window"; start: string; series: ReadonlyArray<YtdSeriesInput>; cutoff: string };
 
 export type PerfGap = { ok: false; gap: string };
 
 type Drawn = { ok: true; lines: ReadonlyArray<PerfLine> };
 
 export function perfLines(input: LatestPerfInput): Drawn | PerfGap;
-export function perfLines(input: YtdPerfInput): (Drawn & { window: YtdWindow }) | YtdGap;
-export function perfLines(input: LatestPerfInput | YtdPerfInput): (Drawn & { window?: YtdWindow }) | PerfGap {
-  if (input.kind === "ytd") {
-    const window = selectYtdWindow(input.series, input.cutoff);
+export function perfLines(input: YtdPerfInput | WindowPerfInput): (Drawn & { window: YtdWindow }) | YtdGap;
+export function perfLines(input: LatestPerfInput | YtdPerfInput | WindowPerfInput): (Drawn & { window?: YtdWindow }) | PerfGap {
+  if (input.kind !== "latest") {
+    const window = input.kind === "ytd" ? selectYtdWindow(input.series, input.cutoff) : selectWindow(input.series, input.cutoff, input.start);
     if (!window.ok) return window;
     const lines = window.bars.map((bars) => {
       const returns = ytdReturns(bars);

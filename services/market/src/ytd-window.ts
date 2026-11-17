@@ -1,4 +1,5 @@
-// Year-to-date window semantics for daily closes (#192), shared server-side.
+// Year-to-date window semantics for daily closes (#192), shared server-side;
+// a week or month to date is measured the same way from its own start (#678).
 //
 // A YTD return is measured from the final completed close before January 1 of
 // the cutoff's year (exchange-local), not from the first January close, to the
@@ -29,6 +30,8 @@ export type YtdSeriesInput = {
 export type YtdWindow = {
   ok: true;
   year: number;
+  // The period's first exchange-local date: January 1 for YTD.
+  start: string;
   baselineDate: string;
   endDate: string;
   // Baseline first, then every session in the year that all companies traded.
@@ -73,13 +76,14 @@ export function lastRegularSessionDate(cutoff: string, timeZone: string): string
 // an exchange calendar; a longer closure reads as stale until one is added.
 const CURRENT_WITHIN_DAYS = 7;
 
-// Whether a window ending on `endDate` is current at `cutoff` (#232, #256).
+// Whether a window ending on `endDate` is current at `cutoff` (#232, #256):
+// within `withinDays` of the last completed session, a week by default.
 // Judged at the cutoff, never at today, so a historical cutoff keeps its window.
-export function isCurrentEnd(endDate: string, cutoff: string, timeZone: string): boolean {
+export function isCurrentEnd(endDate: string, cutoff: string, timeZone: string, withinDays = CURRENT_WITHIN_DAYS): boolean {
   // The last completed session's date (a weekend or holiday when none ran).
   const lastCompleted = sessionDate(new Date(Date.parse(completedSessionsEnd(cutoff, timeZone)) - 1).toISOString(), timeZone);
   const from = new Date(`${lastCompleted}T00:00:00.000Z`);
-  from.setUTCDate(from.getUTCDate() - CURRENT_WITHIN_DAYS);
+  from.setUTCDate(from.getUTCDate() - withinDays);
   return endDate >= from.toISOString().slice(0, 10);
 }
 
@@ -106,12 +110,35 @@ export function ytdYear(cutoff: string, timeZone: string): number {
   return Number(localParts(cutoff, timeZone).date.slice(0, 4));
 }
 
+// The periods a price return is read over, each to date at a cutoff (#678).
+export const PRICE_PERIODS = ["week", "month", "ytd"] as const;
+export type PricePeriod = (typeof PRICE_PERIODS)[number];
+
+// A period's first date on the exchange's calendar at the cutoff: its week's
+// Monday, its month's first, or January 1.
+export function periodStart(period: PricePeriod, cutoff: string, timeZone: string): string {
+  const today = localParts(cutoff, timeZone).date;
+  if (period === "ytd") return `${today.slice(0, 4)}-01-01`;
+  if (period === "month") return `${today.slice(0, 8)}01`;
+  return shiftDate(today, -((new Date(`${today}T00:00:00.000Z`).getUTCDay() + 6) % 7));
+}
+
 export function selectYtdWindow(series: ReadonlyArray<YtdSeriesInput>, cutoff: string): YtdWindow | YtdGap {
   const years = new Set(series.map((item) => ytdYear(cutoff, item.timeZone)));
   if (years.size !== 1) return { ok: false, gap: "the companies' exchanges are in different calendar years at the cutoff" };
   const [year] = years;
-  const yearStart = `${year}-01-01`;
-  const lookbackStart = `${year - 1}-12-24`;
+  return selectWindow(series, cutoff, `${year}-01-01`);
+}
+
+// A window as YTD's (#192), from the last close in the eight days before
+// `start`, an exchange-local date, to the latest session since that every
+// company has.
+export function selectWindow(series: ReadonlyArray<YtdSeriesInput>, cutoff: string, start: string): YtdWindow | YtdGap {
+  const year = Number(start.slice(0, 4));
+  // A period that starts with the year names it as YTD does.
+  const yearly = start.endsWith("-01-01");
+  const before = yearly ? String(year) : start;
+  const lookbackStart = shiftDate(start, -8);
 
   const dated = series.map((item) => {
     const byDate = new Map<string, DailyClose>();
@@ -124,11 +151,11 @@ export function selectYtdWindow(series: ReadonlyArray<YtdSeriesInput>, cutoff: s
   const baselines: Array<{ date: string; bar: DailyClose }> = [];
   for (const [index, item] of series.entries()) {
     const dates = [...dated[index].keys()].sort();
-    if (!dates.some((date) => date < yearStart)) {
-      return { ok: false, gap: `${item.label} has no prices from before ${year}` };
+    if (!dates.some((date) => date < start)) {
+      return { ok: false, gap: `${item.label} has no prices from before ${before}` };
     }
-    const date = dates.filter((candidate) => candidate >= lookbackStart && candidate < yearStart).at(-1);
-    if (date === undefined) return { ok: false, gap: `${item.label} has no close in the last week of ${year - 1}` };
+    const date = dates.filter((candidate) => candidate >= lookbackStart && candidate < start).at(-1);
+    if (date === undefined) return { ok: false, gap: `${item.label} has no close in the ${yearly ? `last week of ${year - 1}` : `week before ${start}`}` };
     const bar = dated[index].get(date)!;
     if (!(bar.close > 0)) return { ok: false, gap: `${item.label}'s ${date} close is not a usable baseline` };
     baselines.push({ date, bar });
@@ -136,21 +163,22 @@ export function selectYtdWindow(series: ReadonlyArray<YtdSeriesInput>, cutoff: s
   const baselineDate = baselines[0].date;
   if (baselines.some((baseline) => baseline.date !== baselineDate)) {
     const each = series.map((item, index) => `${item.label} ${baselines[index].date}`).join(", ");
-    return { ok: false, gap: `the companies' last closes before ${year} fall on different sessions (${each})` };
+    return { ok: false, gap: `the companies' last closes before ${before} fall on different sessions (${each})` };
   }
 
-  const inYear = dated.map((byDate) => [...byDate.keys()].filter((date) => date >= yearStart));
-  const endDate = inYear.flat().sort().at(-1);
-  if (endDate === undefined) return { ok: false, gap: `no session in ${year} has closed yet` };
+  const inPeriod = dated.map((byDate) => [...byDate.keys()].filter((date) => date >= start));
+  const endDate = inPeriod.flat().sort().at(-1);
+  if (endDate === undefined) return { ok: false, gap: `no session ${yearly ? `in ${year}` : `since ${start}`} has closed yet` };
   const missingEnd = series.find((_, index) => !dated[index].has(endDate));
   if (missingEnd) return { ok: false, gap: `${missingEnd.label} has no close for ${endDate}` };
 
-  const sessions = [...new Set(inYear.flat())].filter((date) => date <= endDate).sort();
+  const sessions = [...new Set(inPeriod.flat())].filter((date) => date <= endDate).sort();
   const shared = sessions.filter((date) => dated.every((byDate) => byDate.has(date)));
   const dates = [baselineDate, ...shared];
   return {
     ok: true,
     year,
+    start,
     baselineDate,
     endDate,
     dates,
@@ -164,6 +192,12 @@ export function selectYtdWindow(series: ReadonlyArray<YtdSeriesInput>, cutoff: s
 export function ytdReturns(bars: ReadonlyArray<DailyClose>): number[] {
   const base = bars[0].close;
   return bars.map((bar) => ((bar.close - base) / base) * 100);
+}
+
+function shiftDate(date: string, days: number): string {
+  const day = new Date(`${date}T00:00:00.000Z`);
+  day.setUTCDate(day.getUTCDate() + days);
+  return day.toISOString().slice(0, 10);
 }
 
 export function sessionDate(ts: string, timeZone: string): string {
