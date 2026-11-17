@@ -592,6 +592,20 @@ test("a company named by name, or a word in capitals, after a company is still a
   assert.match(await askedFor("All", aapl), /Add ALL to AAPL, or look at ALL alone\?/u, "All");
 });
 
+// The resolver matches a name by the name a company goes by ("hello" is
+// Hello Group Inc) unless the text is a message's own words (#668).
+const goesBy = {
+  preResolveSubject: async ({ text, exactOnly }: { text: string; exactOnly?: true }) =>
+    text.toLowerCase() === "hello" && !exactOnly ? { ...resolved("NOW"), input_text: text } : preResolveSubject({ text }),
+};
+
+test("a message's own words name a company only as written, never by the name it goes by (#668)", async () => {
+  for (const message of ["hello", "HELLO"]) {
+    assert.deepEqual((await subjectsForTurn(message, { ...goesBy, loadPriorSubjects: priorOf() })).tickers, [], message);
+  }
+  assert.deepEqual((await subjectsForTurn("and Hello?", { ...goesBy, ...asNamed("Hello"), loadPriorSubjects: priorOf("AAPL") })).tickers, ["Hello"], "a name the reading gives");
+});
+
 test("a capitalized ticker after a company is still asked about (#623)", async () => {
   const aapl = { ...asTheResolverReads, loadPriorSubjects: priorOf("AAPL") };
   for (const question of ["and MSFT?", "MSFT"]) {

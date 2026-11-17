@@ -139,7 +139,8 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   pool: FinancialPool;
   /** Null when no planning model is configured: financial turns then get a gap, never a guess. */
   planningModel: PlanningModel | null;
-  resolveMention(mention: string): Promise<ChatSubjectPreResolution>;
+  /** With exactOnly the mention is a message's own word, so only a ticker or whole name matches it, never the name a company goes by. */
+  resolveMention(mention: string, exactOnly?: true): Promise<ChatSubjectPreResolution>;
   /** The companies the thread's previous answer covered, for a question that names none. */
   priorSubjects?: (threadId: string) => Promise<ReadonlyArray<ChatResolvedSubjectPreResolution>>;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
@@ -552,8 +553,13 @@ export async function requestedSubjects(
 ): Promise<TurnCompanies> {
   // Each name is resolved once, though the analyst path's rules read the message again.
   const resolutions = new Map<string, Promise<ChatSubjectPreResolution>>();
-  const resolve = (mention: string) => resolutions.get(mention) ?? resolutions.set(mention, deps.resolveMention(mention)).get(mention)!;
-  const mentioned = await Promise.all((await requestedMentions(context, text)).map(async (mention) => ({ mention, resolution: await resolve(mention) })));
+  const resolve = (mention: string, exactOnly?: true) => {
+    const key = `${exactOnly ? "exact" : "name"}:${mention}`;
+    return resolutions.get(key) ?? resolutions.set(key, deps.resolveMention(mention, exactOnly)).get(key)!;
+  };
+  const explicit = Boolean(context.subjectText?.trim());
+  // Without the page's company, the mentions are the message's own words.
+  const mentioned = await Promise.all((await requestedMentions(context, text)).map(async (mention) => ({ mention, resolution: await resolve(mention, explicit ? undefined : true) })));
   // A carried company is named to the planner by its ticker, unless the
   // message gives that name to another company ("the other AMB"): then by its
   // legal name, so the two stay apart.
@@ -562,7 +568,6 @@ export async function requestedSubjects(
   let entries: ReadonlyArray<Readonly<{ mention: string; resolution: ChatSubjectPreResolution }>> = mentioned;
   let turn: TurnSubjects | null = null;
   let notFound: ReadonlyArray<string> = [];
-  const explicit = Boolean(context.subjectText?.trim());
   if (explicit) {
     // The page's company first; a compared name that matches no company is named in the answer.
     const [page, ...compared] = mentioned;
@@ -571,7 +576,7 @@ export async function requestedSubjects(
   } else {
     turn = await resolveTurnSubjects(
       context,
-      (request) => resolve(request.text),
+      (request) => resolve(request.text, request.exactOnly),
       deps.priorSubjects && ((input) => deps.priorSubjects!(input.threadId)),
       byReading,
     );

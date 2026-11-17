@@ -21,6 +21,7 @@ import {
   closeLocalRuntimePoolForTests,
   explainedEvidence,
   persistAssistantMessage,
+  resolveMention,
 } from "../src/local-runtime.ts";
 import type { Explained } from "../src/filed-cause.ts";
 import { ChatSnapshotSealError } from "../src/messages.ts";
@@ -370,6 +371,24 @@ test("an evidence follow-up to an engine answer reads each company it explained 
   await t.test("a company whose explanations are bound to no quarter, or to another, gets none of them in the quarter's place", async () => {
     assert.deepEqual(await read([gamma], [figures(gamma)]), []);
   });
+});
+
+test("a message's own word reaches the resolver as written, so \"hello\" is no Hello Group Inc (#668)", {
+  skip: !dockerAvailable(),
+  timeout: 120_000,
+}, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-exact-only");
+  const previousChatUrl = process.env.CHAT_DATABASE_URL;
+  process.env.CHAT_DATABASE_URL = databaseUrl;
+  registerLifoCleanup(t, async () => {
+    await closeLocalRuntimePoolForTests();
+    restoreEnv("CHAT_DATABASE_URL", previousChatUrl);
+  });
+  const client = await connectedClient(t, databaseUrl);
+  await client.query(`insert into issuers (legal_name, cik) values ('Hello Group Inc ADR', '1610601')`);
+
+  assert.equal((await resolveMention("hello")).status, "resolved", "a name the reading gives matches the name a company goes by");
+  assert.equal((await resolveMention("hello", true)).status, "not_found");
 });
 
 function restoreEnv(key: string, value: string | undefined): void {

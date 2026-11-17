@@ -27,6 +27,7 @@ export const CONFIDENCE_TICKER_AMBIGUOUS = 0.5;
 export const CONFIDENCE_NAME_LEGAL = 0.9;
 export const CONFIDENCE_NAME_FORMER = 0.85;
 export const CONFIDENCE_NAME_ALIAS_LISTING = 0.8;
+export const CONFIDENCE_NAME_SHORT = 0.8;
 
 export type ResolverDisplayLabels = {
   primary: string;

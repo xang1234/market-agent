@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { normalizeNameForLookup, resolveByNameCandidate } from "../../resolver/src/lookup.ts";
+import { resolveByNameCandidate, resolveByShortName } from "../../resolver/src/lookup.ts";
 import type { LlmChatMessage } from "../../llm/src/router.ts";
 import { writeToolCallLog } from "../../observability/src/tool-call.ts";
 import { createClaimArgument } from "./claim-argument-repo.ts";
@@ -325,27 +325,12 @@ export async function extract10kClaims(deps: Extract10kDeps, doc: TenKDocument):
   });
 }
 
-// normalizeNameForLookup keeps corporate suffixes, so a 10-K's "Intel
-// Corporation" misses the issuer "Intel Corp": strip the written suffix, then
-// try each short form issuers are named with. ponytail: a brand that is not
-// the legal name ("Google", "AMD") stays unresolved.
-const WRITTEN_SUFFIX = / (?:inc|incorporated|corp|corporation|co|company|ltd|limited|plc)$/;
-const ISSUER_SUFFIXES = [" inc", " corp", " corporation", " co", " ltd", " plc"];
 export async function resolveCompetitorByName(db: QueryExecutor, name: string): Promise<string | null> {
-  const written = normalizeNameForLookup(name);
-  const stem = written.replace(WRITTEN_SUFFIX, "");
-  if (stem === "") return null;
-  const exact = await resolveByNameCandidate(db, written);
-  if (exact.outcome !== "not_found") return exact.outcome === "resolved" && exact.subject_ref.kind === "issuer" ? exact.subject_ref.id : null;
-  // One issuer across every short form: "Acme" names neither of "Acme Inc"
-  // and "Acme Corp".
-  const ids = new Set<string>();
-  for (const candidate of new Set(ISSUER_SUFFIXES.map((suffix) => stem + suffix))) {
-    const envelope = await resolveByNameCandidate(db, candidate);
-    if (envelope.outcome === "ambiguous") return null;
-    if (envelope.outcome === "resolved" && envelope.subject_ref.kind === "issuer") ids.add(envelope.subject_ref.id);
+  for (const lookup of [resolveByNameCandidate, resolveByShortName]) {
+    const envelope = await lookup(db, name);
+    if (envelope.outcome !== "not_found") return envelope.outcome === "resolved" && envelope.subject_ref.kind === "issuer" ? envelope.subject_ref.id : null;
   }
-  return ids.size === 1 ? [...ids][0]! : null;
+  return null;
 }
 
 export async function storeTenK(

@@ -505,10 +505,12 @@ const planningModelWith = (options?: Parameters<typeof createLlmRouterFromEnv>[1
   return planningModelFromRouter(router)(request);
 };
 
+export const resolveMention = (mention: string, exactOnly?: true) => preResolveSubject({ text: mention, ...(exactOnly ? { exactOnly } : {}) });
+
 const financialDeps = {
   pool: { query: (text: string, values?: unknown[]) => pool().query(text, values), connect: () => pool().connect() },
   planningModel: planningModelWith(),
-  resolveMention: (mention: string) => preResolveSubject({ text: mention }),
+  resolveMention,
   priorSubjects: (threadId: string) => loadPriorSubjects({ threadId }),
   evidence: createEvidenceFinancialPort,
   researchScope: financialResearchScope,

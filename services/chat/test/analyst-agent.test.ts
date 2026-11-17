@@ -13,7 +13,7 @@ import { answerTurn } from "../src/answer-trace.ts";
 import type { AssertionReport } from "../src/assertions.ts";
 import { createChatCoordinator, resolveTurnSubjects, type ChatAssistantMessagePersistence, type ChatTurnInput } from "../src/coordinator.ts";
 import { figureCompanies, mergePackets, type EvidencePacket, type PacketClaim } from "../src/evidence-packet.ts";
-import { chatAuthority, chatGapText, createChatFinancialRuntime } from "../src/financial-runtime.ts";
+import { chatAuthority, chatGapText, createChatFinancialRuntime, requestedSubjects } from "../src/financial-runtime.ts";
 import { ANSWER_DEADLINES, composeAnalystBlocksWithLlm } from "../src/llm-runtime.ts";
 import { proposedMetric, resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS } from "../src/scope-figures.ts";
@@ -290,6 +290,28 @@ test("a turn's companies by its reading keep each company a fresh question write
   assert.deepEqual(await companies("AAA/BBB revenue", { kind: "as_named", names: ["BBB"] }, []), [A, B], "tickers joined by a slash are each written");
   assert.deepEqual(await companies("Switch from AAA to BBB", { kind: "only", names: ["BBB"] }, [aaa]), [B], "a company switched away from");
   assert.deepEqual(await companies("Compare BBB with AAA", { kind: "compare", add: ["BBB"] }, [aaa]), [A, B], "the earlier company stays first");
+});
+
+test("a turn's companies match a message's own words as written, and a reading's names by the names companies go by (#668)", async () => {
+  const subjectRef = { kind: "issuer" as const, id: randomUUID() };
+  const hello = {
+    status: "resolved" as const, input_text: "hello", normalized_input: "hello", subject_ref: subjectRef, identity_level: "issuer" as const,
+    display_label: "Hello Group Inc ADR", resolution_path: "auto_advanced" as const, confidence: 0.8,
+    handoff: { subject_ref: subjectRef, identity_level: "issuer" as const, display_label: "Hello Group Inc ADR", display_labels: { primary: "Hello Group Inc ADR" }, normalized_input: "hello", resolution_path: "auto_advanced" as const, confidence: 0.8, context: {} },
+  };
+  const deps = {
+    pool: {} as never,
+    resolveMention: async (mention: string, exactOnly?: true) =>
+      mention.toLowerCase() === "hello" && !exactOnly ? hello : { status: "not_found" as const, input_text: mention, normalized_input: mention, message: `no ${mention}` },
+  };
+  const mentions = async (userIntent: string, reading: ScopeProposal | null) => (await requestedSubjects(
+    deps,
+    { threadId: randomUUID(), runId: randomUUID(), userIntent, emit: () => {}, reading: async () => reading } as never,
+    userIntent,
+    true,
+  )).subjects.map((subject) => subject.mention);
+  for (const message of ["hello", "HELLO"]) assert.deepEqual(await mentions(message, null), [], message);
+  assert.deepEqual(await mentions("and Hello?", { ...NO_ASKS, companies: { kind: "as_named", names: ["Hello"] } }), ["Hello Group Inc ADR"], "a name the reading gives");
 });
 
 test("a planner ask says its period, and two that differ only by their year are two asks", () => {

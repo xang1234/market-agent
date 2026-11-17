@@ -16,6 +16,7 @@ import {
   resolveByIsin,
   resolveByLei,
   resolveByNameCandidate,
+  resolveByShortName,
   resolveByTicker,
   type QueryExecutor,
 } from "./lookup.ts";
@@ -50,6 +51,10 @@ export type SubjectChoice = {
 export type SearchToSubjectRequest = {
   text: string;
   choice?: SubjectChoice;
+  // Words of a chat message rather than a name. Only a ticker, identifier or
+  // whole legal name matches them, never the name a company goes by ("hello"
+  // is no Hello Group Inc).
+  exactOnly?: true;
 };
 
 export type SearchToSubjectOptions = {
@@ -197,7 +202,7 @@ export async function runSearchToSubjectFlow(
   request: SearchToSubjectRequest,
   options: SearchToSubjectOptions = {},
 ): Promise<SearchToSubjectFlowResult> {
-  const search = await searchSubjectCandidates(db, request.text, options);
+  const search = await searchSubjectCandidates(db, request, options);
   const { envelope, normalized_input } = search;
 
   if (isNotFound(envelope)) {
@@ -256,7 +261,7 @@ export async function runSearchToSubjectFlow(
 
 export async function searchSubjectCandidates(
   db: QueryExecutor,
-  text: string,
+  { text, exactOnly }: Pick<SearchToSubjectRequest, "text" | "exactOnly">,
   options: SearchToSubjectOptions = {},
 ): Promise<CandidateSearchResult> {
   const n = normalize(text);
@@ -305,6 +310,11 @@ export async function searchSubjectCandidates(
       normalized_input: normalizedInputForFlow(n),
       envelope: mergeCandidateEnvelopes(candidateEnvelopes),
     };
+  }
+
+  if (n.name_candidate && !exactOnly) {
+    const envelope = await resolveByShortName(db, n.name_candidate);
+    if (!isNotFound(envelope)) return { normalized_input: normalizedInputForFlow(n), envelope };
   }
 
   if (identifierEnvelope) {

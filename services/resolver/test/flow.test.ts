@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { toolCallArgsDigest } from "../../observability/src/tool-call.ts";
 import type { QueryExecutor } from "../src/lookup.ts";
 import type { SubjectRef } from "../src/subject-ref.ts";
-import { runSearchToSubjectFlow } from "../src/flow.ts";
+import type { Client } from "pg";
+import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { runSearchToSubjectFlow, type SearchToSubjectFlowResult } from "../src/flow.ts";
 
 const aaplXnas: SubjectRef = {
   kind: "listing",
@@ -529,4 +531,79 @@ test("discovery attempts a cooldown old are dropped, and at most 1000 are held, 
   assert.equal(options.discoveryAttempts.has("NEW"), false);
   assert.equal(options.discoveryAttempts.has("T999"), true);
   assert.equal(seen.length, 1002);
+});
+
+async function seedCompany(client: Client, legalName: string, listing?: { ticker: string; cik?: string }): Promise<string> {
+  const { rows: [issuer] } = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name, cik) values ($1, $2) returning issuer_id`,
+    [legalName, listing?.cik ?? null],
+  );
+  if (listing) {
+    await client.query(
+      `with instrument as (insert into instruments (issuer_id, asset_type) values ($1, 'common_stock') returning instrument_id)
+       insert into listings (instrument_id, mic, ticker, trading_currency, timezone)
+       select instrument_id, 'XNAS', $2, 'USD', 'America/New_York' from instrument`,
+      [issuer!.issuer_id, listing.ticker],
+    );
+  }
+  return issuer!.issuer_id;
+}
+
+const outcomeOf = (result: SearchToSubjectFlowResult) => ({
+  status: result.status,
+  refs: result.status === "hydrated" ? [result.handoff.subject_ref] : result.status === "needs_choice" ? result.candidates.map((candidate) => candidate.subject_ref) : [],
+});
+
+test("a company's common name resolves to the one issuer whose legal name it shortens (#668)", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) return t.skip("Docker is required for name resolution coverage");
+  const { databaseUrl } = await bootstrapDatabase(t, "common-names");
+  const client = await connectedClient(t, databaseUrl);
+  const apple = await seedCompany(client, "Apple Inc.", { ticker: "AAPL", cik: "0000320193" });
+  await seedCompany(client, "Apple Hospitality REIT Inc", { ticker: "APLE", cik: "1418121" });
+  const microsoft = await seedCompany(client, "Microsoft Corp", { ticker: "MSFT", cik: "789019" });
+  const nvidia = await seedCompany(client, "NVIDIA Corporation", { ticker: "NVDA", cik: "0001045810" });
+  const amazon = await seedCompany(client, "Amazon.com Inc", { ticker: "AMZN", cik: "1018724" });
+  const alibaba = await seedCompany(client, "Alibaba Group Holding Ltd ADR", { ticker: "BABA", cik: "1577552" });
+  await seedCompany(client, "Alphabet Inc", { ticker: "GOOG" });
+  const alphabet = await seedCompany(client, "Alphabet Inc. Class A Common Stock", { ticker: "GOOGL", cik: "1652044" });
+  await seedCompany(client, "Google DeepMind AI Lab Ecosystem ETF", { ticker: "DEPW" });
+  const graham = await seedCompany(client, "Graham Corp", { ticker: "GHM", cik: "716314" });
+  const grahamHoldings = await seedCompany(client, "Graham Holdings Co", { ticker: "GHC", cik: "104889" });
+  await seedCompany(client, "Snap Inc", { ticker: "SNAP", cik: "1564408" });
+  const homeDepot = await seedCompany(client, "The Home Depot, Inc.", { ticker: "HD", cik: "354950" });
+  const stellantis = await seedCompany(client, "Stellantis N.V", { ticker: "STLA", cik: "1605484" });
+  const hello = await seedCompany(client, "Hello Group Inc ADR", { ticker: "MOMO", cik: "1610601" });
+  const orion = await seedCompany(client, "Orion S.A", { ticker: "OEC", cik: "1609804" });
+  await seedCompany(client, "Orion Group Holdings Inc", { ticker: "ORN", cik: "1402829" });
+
+  const resolve = async (text: string) => outcomeOf(await runSearchToSubjectFlow(client, { text }));
+  const hydrated = (id: string) => ({ status: "hydrated", refs: [{ kind: "issuer", id }] });
+
+  assert.deepEqual(await resolve("Apple"), hydrated(apple), "Apple is Apple Inc., not Apple Hospitality REIT");
+  assert.deepEqual(await resolve("Microsoft"), hydrated(microsoft));
+  assert.deepEqual(await resolve("Microsoft Corporation"), hydrated(microsoft), "another legal form of the same name");
+  assert.deepEqual(await resolve("Nvidia"), hydrated(nvidia));
+  assert.deepEqual(await resolve("Amazon"), hydrated(amazon));
+  assert.deepEqual(await resolve("Amazon Inc"), hydrated(amazon), "a legal form its legal name lacks");
+  assert.deepEqual(await resolve("Alibaba"), hydrated(alibaba));
+  assert.deepEqual(await resolve("Alphabet"), hydrated(alphabet), "the SEC registrant, not GOOG's issuer that has no CIK");
+  assert.deepEqual(await resolve("Graham"), {
+    status: "needs_choice",
+    refs: [{ kind: "issuer", id: graham }, { kind: "issuer", id: grahamHoldings }],
+  }, "two companies share the name, so it asks");
+  assert.deepEqual(await resolve("Graham Holdings"), hydrated(grahamHoldings), "the name that tells them apart");
+  assert.deepEqual(await resolve("Graham Corporation"), hydrated(graham));
+  assert.deepEqual(await resolve("Home Depot"), hydrated(homeDepot));
+  assert.deepEqual(await resolve("Stellantis"), hydrated(stellantis));
+  assert.deepEqual(await resolve("Orion SA"), hydrated(orion), "a legal form spelled with or without its points");
+  for (const absent of ["Apple Holdings", "Apple Group", "Orion Holdings"]) {
+    assert.deepEqual(await resolve(absent), { status: "not_found", refs: [] }, `${absent} names a company the index lacks, not another one`);
+  }
+  assert.deepEqual(await resolve("Alibaba Group"), hydrated(alibaba), "a name its legal name holds whole");
+  assert.deepEqual(await resolve("Apple stock"), hydrated(apple), "a security of the company names the company");
+  assert.deepEqual(await resolve("Alphabet Class A"), hydrated(alphabet));
+  assert.deepEqual(await resolve("hello"), hydrated(hello));
+  assert.deepEqual(outcomeOf(await runSearchToSubjectFlow(client, { text: "hello", exactOnly: true })), { status: "not_found", refs: [] }, "a chat message's own words match only as written");
+  assert.deepEqual(await resolve("Google"), { status: "not_found", refs: [] }, "a word another name only begins with matches nothing");
+  assert.deepEqual((await resolve("Snap")).refs.map((ref) => ref.kind), ["listing"], "a ticker keeps resolving to its listing");
 });

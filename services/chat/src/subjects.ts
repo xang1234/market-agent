@@ -16,6 +16,7 @@ import type { SubjectKind, SubjectRef } from "../../shared/src/subject-ref.ts";
 export type ChatSubjectPreResolveRequest = {
   text: string;
   choice?: SubjectChoice;
+  exactOnly?: true;
 };
 
 export type ChatSubjectResolver = (
@@ -70,6 +71,7 @@ export async function preResolveChatSubject(
   const flow = await input.resolveSubject({
     text: input.text,
     ...(input.choice ? { choice: input.choice } : {}),
+    ...(input.exactOnly ? { exactOnly: true } : {}),
   });
   return chatSubjectPreResolutionFromFlow(input.text, flow);
 }

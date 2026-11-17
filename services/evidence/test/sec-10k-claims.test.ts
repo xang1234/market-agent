@@ -141,8 +141,15 @@ test("a competitor resolves by the name a 10-K writes, with or without its corpo
   const { client } = await nvdaDatabase(t, "tenk-resolver");
   const amd = await seedIssuer(client, "Advanced Micro Devices, Inc.", 2488);
   const intel = await seedIssuer(client, "Intel Corp", 50863);
+  const amazon = await seedIssuer(client, "Amazon.com, Inc.", 1018724);
   assert.equal(await resolveCompetitorByName(client, "Advanced Micro Devices"), amd);
   assert.equal(await resolveCompetitorByName(client, "Intel Corporation"), intel);
+  assert.equal(await resolveCompetitorByName(client, "Amazon"), amazon);
+  const graham = await seedIssuer(client, "Graham Corp", 716314);
+  const grahamHoldings = await seedIssuer(client, "Graham Holdings Co", 104889);
+  assert.equal(await resolveCompetitorByName(client, "Graham Corporation"), graham);
+  assert.equal(await resolveCompetitorByName(client, "Graham Holdings"), grahamHoldings);
+  assert.equal(await resolveCompetitorByName(client, "Graham"), null, "a name both Graham companies go by resolves to neither");
   assert.equal(await resolveCompetitorByName(client, "Huawei"), null);
   await seedIssuer(client, "Acme Inc", 1);
   await seedIssuer(client, "Acme Corp", 2);
