@@ -101,6 +101,17 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(note.segments, [{ type: "text", text: "No company matched ZZZ." }]);
   });
 
+  await t.test("a fresh thread's companies named by name in a sentence are planned from the reading (#686)", async () => {
+    const byName = (mention: string, exactOnly?: true) => {
+      const ticker = exactOnly ? undefined : ({ Alpha: "AAA", Beta: "BBB" } as Record<string, string>)[mention];
+      return resolveMention(ticker ?? mention);
+    };
+    const { events } = await chatHarness(pool, { model: revenueModel(["AAA", "BBB"]), readQuestion: changing({ kind: "as_named", names: ["Alpha", "Beta"] }), resolveMention: byName })
+      .run({ ...base, userIntent: "compare Alpha and Beta revenue" });
+    const [block] = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0].blocks;
+    assert.deepEqual(block.financial.results.map((result: { disposition: string }) => result.disposition), ["verified", "missing"]);
+  });
+
   await t.test("a company without eligible data stays in the answer as an explicit gap", async () => {
     const model = revenueModel(["AAA", "BBB"]);
     const { events } = await chatHarness(pool, { model }).run({ ...base, userIntent: "Compare revenue for AAA and BBB" });
