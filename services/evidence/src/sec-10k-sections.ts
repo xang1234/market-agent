@@ -76,7 +76,7 @@ function letters(block: string): { key: string; at: number[] } {
 const TITLE_ENDS_BLOCK = /^[\s.:\-–—\])]*$/;
 const SENTENCE_FOLLOWS = /^\s*[.:\-–—]*\s+[\p{Lu}\p{N}]/u;
 const RUN_IN_SENTENCE_FOLLOWS = /^\s*[.:]\s+[\p{Lu}\p{N}]/u;
-const HEADING_NOTE = /^\s*\((?!\s*(?:pages?\s*)?\d)[^)]*\)/i;
+const HEADING_NOTE = /^\s*\((?!\s*(?:pp?\.?\s*|pages?\s*)?\d)[^)]*\)/i;
 function headedItem(block: string): Heading | null {
   const { key, at } = letters(block);
   for (const { item, labeled, bare } of HEADINGS) {
