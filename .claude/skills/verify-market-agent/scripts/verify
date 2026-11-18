@@ -238,6 +238,15 @@ cmd_memo() {
     node "$HERE/memo-flow.mjs"
 }
 
+# analyze-layout [TICKER]: opens the newest stored memo, or generates one when none is stored.
+cmd_analyze_layout() {
+  local ticker="${1:-NVDA}" listing
+  listing="$(resolved_listing "$ticker")" || return 1
+  mkdir -p "$EVIDENCE"
+  PATH="$NODE_APP:$PATH" ROOT="$ROOT" WEB_URL="$WEB_URL" LISTING_ID="$listing" OUT="$EVIDENCE/analyze-layout-$ticker-$(stamp)" \
+    node "$HERE/analyze-layout.mjs"
+}
+
 # agents [TICKER] [--stored] [--conditions=FILE]: --stored opens the subject's newest
 # stored memo instead of generating one; --conditions types the conditions instead
 # of drafting them. Both stand in for a model when none answers.
@@ -363,11 +372,12 @@ case "${1:-}" in
   backfill-8k) cmd_backfill_8k "${2:-}" ;;
   restatements) shift; cmd_restatements "$@" ;;
   memo) shift; cmd_memo "$@" ;;
+  analyze-layout) shift; cmd_analyze_layout "$@" ;;
   agents) shift; cmd_agents "$@" ;;
   lease-race) shift; cmd_lease_race "$@" ;;
   chat) shift; cmd_chat "$@" ;;
   scroll) shift; cmd_scroll "$@" ;;
   scorecard) shift; cmd_scorecard "$@" ;;
   suite) shift; cmd_suite "$@" ;;
-  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|fill-ciks|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|agents [TICKER] [--stored] [--conditions=FILE]|lease-race [run-now|scheduled] [--thesis]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
+  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|fill-ciks|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|analyze-layout [TICKER]|agents [TICKER] [--stored] [--conditions=FILE]|lease-race [run-now|scheduled] [--thesis]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
 esac

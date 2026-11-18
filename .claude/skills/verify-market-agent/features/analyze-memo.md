@@ -20,6 +20,7 @@ Preconditions: a stack with a model configured, listings imported (`$V import`),
 
 - **Generate.** Run `$V memo NVDA`. It exits 0 and prints a report with `generated: true`, the four `sections` each `shown` with their claim predicates, figures and sources or `empty: true`, `competitive_cites_competition: true`, `risks_cite_only_risk_factors: true`, and an empty `stance_words`. Each section also reports `themes_shown` and `judge`, the judge's line for that section (`shown`, `of`, and `reasons` for any call that gave no verdict, such as a refused call at the section's limit).
 - **No 10-K.** Run `$V memo KO` with no KO 10-K loaded. It exits 0 with the business sections `empty`. The competitive section may list KO's industry peers, which cite the industry source on file.
+- **Layout.** Run `$V analyze-layout NVDA`. It exits 0 and its `report.json` gives each view's `memo_px`, the longest paragraph's `chars_per_line`, and whether the controls and memo sit `side_by_side`. A failed model still saves a memo whose sections say so, which is enough to lay out.
 - **Proof.** Open `2-result.png`, a `section-<id>.png` still per section, `page.txt` and `run.json` in the printed `evidence` folder. `memo_ms` is the time from the Generate click to the rendered sections. `llm_calls` counts the `[llm]` lines dev-api logged meanwhile, so it needs `LLM_USAGE_LOG=true` in `.env.dev`.
 
 ## Gotchas
