@@ -134,7 +134,9 @@ export function tenKSections(html: string): Record<TenKItem, TenKSection | Secti
     let best: { start: number; end: number } | null = null;
     for (const [n, heading] of headings.entries()) {
       if (heading.item !== item) continue;
-      const end = headings.slice(n + 1).find((next) => next.item !== item || next.at - heading.at < MIN_ITEM_BODY_CHARS)?.at ?? text.length;
+      let next = n + 1;
+      while (headings[next]?.item === item && headings[next]!.at - heading.at >= MIN_ITEM_BODY_CHARS) next++;
+      const end = headings[next]?.at ?? text.length;
       if (best === null || end - heading.at > best.end - best.start) best = { start: heading.at, end };
     }
     const chars = best === null ? 0 : best.end - best.start;
