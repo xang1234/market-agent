@@ -44,8 +44,20 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     };
   };
 
-  await t.test("fetches filings and prices only for the companies that lack them, and says so on the stream", async () => {
-    const fetch = fakes();
+  // Files a fiscal-year fact for ZETA, as a fetch that found its filings would; resolves to its removal.
+  const fileZeta = async () => {
+    const { rows } = await db.query(
+      `insert into facts
+       select (jsonb_populate_record(null::facts, to_jsonb(f) || jsonb_build_object('fact_id', gen_random_uuid(), 'subject_id', $1::uuid))).*
+         from facts f where f.fact_id = $2
+       returning fact_id::text`,
+      [ZETA, IDS.grossProfit2023],
+    );
+    return async () => { await db.query(`delete from facts where fact_id = $1`, [rows[0].fact_id]); };
+  };
+
+  await t.test("fetches filings and prices only for the companies that lack them, and says so on the stream", async (st) => {
+    const fetch = fakes({ filings: async () => { st.after(await fileZeta()); } });
     const hydrate = createTurnHydrator({ db: pool, env: LIVE, ...fetch });
     const { events, turn } = recorder();
     const loading = await hydrate([{ issuer_id: IDS.issuerA, label: "AAA" }, { issuer_id: ZETA, label: "ZETA" }], turn);
@@ -93,13 +105,7 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     const fetch = fakes({ filings: () => new Promise<void>((resolve) => { finish = resolve; }) });
     const hydrate = createTurnHydrator({ db: pool, env: { SEC_EDGAR_USER_AGENT: "test-agent" }, ...fetch, budgetMs: 30 });
     assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn)], [ZETA]);
-    const { rows } = await db.query(
-      `insert into facts
-       select (jsonb_populate_record(null::facts, to_jsonb(f) || jsonb_build_object('fact_id', gen_random_uuid(), 'subject_id', $1::uuid))).*
-         from facts f where f.fact_id = $2
-       returning fact_id::text`,
-      [ZETA, IDS.grossProfit2023],
-    );
+    const unfile = await fileZeta();
     try {
       const pending = recorder();
       assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], pending.turn)], [ZETA]);
@@ -109,7 +115,7 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
       assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], settled.turn)], []);
       assert.deepEqual([fetch.sec, settled.events], [[ZETA], []]);
     } finally {
-      await db.query(`delete from facts where fact_id = $1`, [rows[0].fact_id]);
+      await unfile();
     }
   });
 
@@ -143,6 +149,25 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     clock += 30_000;
     await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn);
     assert.deepEqual(fetch.sec, [ZETA], "30s after a failure at 50s, the company is still cooling");
+  });
+
+  await t.test("a filings fetch that stores nothing reads failed and says so, and is not repeated for six hours (#688)", async () => {
+    let clock = 3_000_000;
+    const fetch = fakes();
+    const hydrate = createTurnHydrator({ db: pool, env: { SEC_EDGAR_USER_AGENT: "test-agent" }, ...fetch, now: () => clock });
+    const { events, turn } = recorder();
+    assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], turn)], [], "not still loading: the answer says no filings are on file");
+    assert.deepEqual(events, [
+      { type: "tool.started", tool_call_id: "fetch_filings-t1", tool_name: "fetch_filings", label: "Fetching filings for ZETA" },
+      { type: "tool.completed", tool_call_id: "fetch_filings-t1", tool_name: "fetch_filings", label: "No filings found for ZETA", status: "failed" },
+    ]);
+    clock += 61_000;
+    const later = recorder();
+    assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], later.turn)], []);
+    assert.deepEqual([fetch.sec, later.events], [[ZETA], []], "a minute on, a company SEC had no filings for is not fetched again");
+    clock += 6 * 60 * 60_000;
+    await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn);
+    assert.deepEqual(fetch.sec, [ZETA, ZETA], "six hours on, it is");
   });
 
   await t.test("fetches prices for the listing the turn named, not the company's first by ticker, and the first for a company named without one", async () => {
