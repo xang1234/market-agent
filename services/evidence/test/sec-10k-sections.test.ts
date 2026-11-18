@@ -209,3 +209,74 @@ test("a label split by markup still heads its item", () => {
     assert.equal((sections["1A"] as TenKSection).text.slice(0, opening.length), opening);
   }
 });
+
+test("mcd.htm: a 10-K in its annual report's order heads Risk Factors by title, and labels it only in the cross-reference index", () => {
+  const sections = tenKSections(fixture("mcd"));
+  const item1a = sections["1A"] as TenKSection;
+  assert.equal(item1a.text.slice(0, 70), "RISK FACTORS Cautionary Statement Regarding Forward-Looking Statements");
+  assert.ok(item1a.text.endsWith("McDonald's Corporation 2025 Annual Report 33"), "Item 1A ends where Cybersecurity starts");
+  assert.deepEqual(sections["1"], { type: "1", error: "section_not_found" });
+});
+
+const annualReportOrder = (risks: string, afterRisks: string) => [
+  "<div>Table of Contents</div><table><tr><td>Business</td><td>3</td></tr><tr><td>Risk Factors</td><td>9</td></tr><tr><td>Legal Proceedings</td><td>21</td></tr></table>",
+  `<div>BUSINESS</div>${paragraphs("business", 30)}`,
+  `${risks}${paragraphs("risk", 30)}`,
+  `${afterRisks}${paragraphs("legal", 30)}`,
+  "<div>Form 10-K Cross-Reference Index</div><table><tr><td>Item 1</td><td>Business</td><td>Page 3</td></tr><tr><td>Item 1A</td><td>Risk Factors</td><td>Page 9</td></tr></table>",
+].join("");
+
+test("a 10-K that labels its items only in a cross-reference index is read by their titles", () => {
+  const sections = tenKSections(annualReportOrder("<div>Risk Factors</div>", "<div>LEGAL PROCEEDINGS</div>"));
+  const item1 = sections["1"] as TenKSection;
+  const item1a = sections["1A"] as TenKSection;
+  assert.ok(item1.text.startsWith("BUSINESS business paragraph 0"));
+  assert.ok(item1.text.endsWith("business paragraph 29: we make things that people use every day in many places."));
+  assert.ok(item1a.text.startsWith("Risk Factors risk paragraph 0"));
+  assert.ok(item1a.text.endsWith("risk paragraph 29: we make things that people use every day in many places."));
+});
+
+test("a title in capitals heads its item when a sentence follows it in its block, and a run-in subheading does not", () => {
+  const risks = "<p>RISK FACTORS. The following are certain risk factors that could affect the Company.</p>";
+  const subheadings = "<p>Properties. The Company owns or leases its plants.</p><p>Cybersecurity - Increased cybersecurity requirements could hurt us.</p>";
+  const html = annualReportOrder(risks, "<p>LEGAL PROCEEDINGS. The Company is a party to several lawsuits.</p>")
+    .replace(paragraphs("business", 30), `${paragraphs("business", 3)}${subheadings}${paragraphs("business", 30)}`);
+  const sections = tenKSections(html);
+  assert.ok((sections["1"] as TenKSection).text.includes("Properties. The Company owns"), "Item 1 runs on past its Properties subheading");
+  assert.ok((sections["1"] as TenKSection).text.includes("Cybersecurity - Increased"), "Item 1 runs on past a subheading that runs on");
+  assert.ok((sections["1A"] as TenKSection).text.startsWith("RISK FACTORS. The following are certain risk factors"));
+  assert.ok(!(sections["1A"] as TenKSection).text.includes("legal paragraph"), "Item 1A ends at LEGAL PROCEEDINGS.");
+});
+
+test("a 10-K that labels its items reads no unlabeled title as a heading", () => {
+  const html = `<div>Item 1. Business</div>${paragraphs("business", 30)}<div>Item 1A. Risk Factors</div>${paragraphs("risk", 10)}<div>Legal Proceedings</div>${paragraphs("lawsuit risk", 10)}<div>Item 1B. Unresolved Staff Comments</div>`;
+  assert.ok((tenKSections(html)["1A"] as TenKSection).text.includes("lawsuit risk paragraph 9"));
+});
+
+test("an unlabeled item that runs on through sections no Form 10-K title names is not found", () => {
+  const html = annualReportOrder("<div>RISK FACTORS</div>", `<div>SUSTAINABILITY</div>${paragraphs("sustainability", 3_700)}<div>Legal Proceedings</div>`);
+  assert.deepEqual(tenKSections(html)["1A"], { type: "1A", error: "section_not_found" });
+});
+
+test("a labeled heading may set its label apart from its title, and close with a note", () => {
+  for (const [heading, opening] of [
+    ["<span>ITEM 1A.  </span><span>I  </span><span>Risk Factors</span>", "ITEM 1A. I Risk Factors risk"],
+    ["Item No. 1A - Risk Factors", "Item No. 1A - Risk Factors risk"],
+    ["ITEM 1A. RISK FACTORS (dollars in millions, except per share amounts)", "ITEM 1A. RISK FACTORS (dollars in millions, except per share amounts) risk"],
+  ]) {
+    const sections = tenKSections(tenK(`<div>${heading}</div>`, "<div>Item 1B. Unresolved Staff Comments</div>"));
+    assert.ok(!(sections["1"] as TenKSection).text.includes("risk paragraph"), `Item 1 ends at ${heading}`);
+    assert.equal((sections["1A"] as TenKSection).text.slice(0, opening.length), opening);
+  }
+});
+
+test("a contents entry that closes with its page number in parentheses heads nothing, though a long preface follows it", () => {
+  for (const page of ["(9)", "(page 9)", "(Pages 9-21)", "(p. 9)", "(pp. 9-21)"]) {
+    const html = [
+      `<div>Item 1. Business (3)</div><div>Item 1A. Risk Factors ${page}</div>${paragraphs("preface", 50)}`,
+      `<div>Item 1. Business</div>${paragraphs("business", 30)}<div>Item 1A. Risk Factors</div>${paragraphs("risk", 30)}`,
+      "<div>Item 1B. Unresolved Staff Comments</div>",
+    ].join("");
+    assert.ok((tenKSections(html)["1A"] as TenKSection).text.startsWith("Item 1A. Risk Factors risk paragraph 0"), page);
+  }
+});
