@@ -322,9 +322,11 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
     setOpenedRunDetails((current) => ({ ...current, [run.run_id]: run }))
   }
 
+  // Two columns once the canvas (not the viewport) is wide enough, because the
+  // evidence inspector and the sidebar narrow the canvas on their own.
   return (
-    <div className="flex flex-col gap-6">
-      <section className="grid gap-6 lg:grid-cols-[22rem_minmax(0,1fr)]">
+    <div className="@container flex flex-col gap-6">
+      <section className="grid gap-6 @3xl:grid-cols-[22rem_minmax(0,1fr)]">
         <div className={`flex min-w-0 flex-col gap-4 ${PAGE_PANEL_CLASS}`}>
           <label className={FIELD_LABEL_CLASS}>
             Playbook
