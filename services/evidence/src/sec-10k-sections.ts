@@ -104,10 +104,13 @@ export type TenKSection = ReleaseExhibit & { type: TenKItem };
 export type SectionNotFound = { type: TenKItem; error: "section_not_found" };
 type Heading = { at: number; item: string; labeled: boolean };
 const MIN_ITEM_BODY_CHARS = 1_000;
-// ponytail: an unlabeled item ends only at another item's title, so one that
-// runs on through sections no Form 10-K title names (Citi's Risk Factors into
-// Sustainability) is not found. The longest real one seen is 105,000 characters.
-// Bound it by the table of contents if such a filing's items are needed.
+// ponytail: an unlabeled item ends at another item's title, so a subheading
+// printed as one (Cardinal Health's "Other Information" inside its Business)
+// ends the item early, and an item that runs on through sections no Form 10-K
+// title names (Citi's Risk Factors into Sustainability) is not found. The
+// longest real one seen is 105,000 characters. In the filings seen, neither the
+// Form's order, the contents' order, nor capitals tell such a subheading from an
+// item heading. Its typeset style would, if blockText kept it.
 const MAX_UNLABELED_ITEM_CHARS = 300_000;
 
 // An item runs from its heading to the next heading of another item, so a
