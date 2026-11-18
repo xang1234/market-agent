@@ -65,7 +65,8 @@ function letters(block: string): { key: string; at: number[] } {
 // Unresolved Staff Comments None."). A sentence that cites the item runs on
 // past the title ("Item 1A. Risk Factors, above, describes") or names no
 // title ("Item 7 for details"), so it heads nothing. A note in parentheses
-// may close the heading ("ITEM 1. BUSINESS (dollars in millions)").
+// may close the heading ("ITEM 1. BUSINESS (dollars in millions)"), but a
+// page number is a contents entry's ("Item 1A. Risk Factors (9)").
 // A title with no label heads its item when it ends the block, or when it
 // is in capitals and a full stop ends it ("RISK FACTORS. The following").
 // A run-in subheading is in sentence case ("Properties. The Company owns",
@@ -75,6 +76,7 @@ function letters(block: string): { key: string; at: number[] } {
 const TITLE_ENDS_BLOCK = /^[\s.:\-–—\])]*$/;
 const SENTENCE_FOLLOWS = /^\s*[.:\-–—]*\s+[\p{Lu}\p{N}]/u;
 const RUN_IN_SENTENCE_FOLLOWS = /^\s*[.:]\s+[\p{Lu}\p{N}]/u;
+const HEADING_NOTE = /^\s*\((?!\s*(?:pages?\s*)?\d)[^)]*\)/i;
 function headedItem(block: string): Heading | null {
   const { key, at } = letters(block);
   for (const { item, labeled, bare } of HEADINGS) {
@@ -82,7 +84,7 @@ function headedItem(block: string): Heading | null {
     const heading = label ?? bare.exec(key);
     if (heading === null) continue;
     const titleEnd = at[heading[0].length - 1]! + 1;
-    const after = block.slice(titleEnd).replace(/^\s*\([^)]*\)/, "");
+    const after = block.slice(titleEnd).replace(HEADING_NOTE, "");
     const runIn = label !== null
       ? SENTENCE_FOLLOWS.test(after)
       : !/\p{Ll}/u.test(block.slice(0, titleEnd)) && RUN_IN_SENTENCE_FOLLOWS.test(after);
