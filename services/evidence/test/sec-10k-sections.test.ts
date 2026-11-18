@@ -269,3 +269,14 @@ test("a labeled heading may set its label apart from its title, and close with a
     assert.equal((sections["1A"] as TenKSection).text.slice(0, opening.length), opening);
   }
 });
+
+test("a contents entry that closes with its page number in parentheses heads nothing, though a long preface follows it", () => {
+  for (const page of ["(9)", "(page 9)", "(Pages 9-21)"]) {
+    const html = [
+      `<div>Item 1. Business (3)</div><div>Item 1A. Risk Factors ${page}</div>${paragraphs("preface", 50)}`,
+      `<div>Item 1. Business</div>${paragraphs("business", 30)}<div>Item 1A. Risk Factors</div>${paragraphs("risk", 30)}`,
+      "<div>Item 1B. Unresolved Staff Comments</div>",
+    ].join("");
+    assert.ok((tenKSections(html)["1A"] as TenKSection).text.startsWith("Item 1A. Risk Factors risk paragraph 0"), page);
+  }
+});
