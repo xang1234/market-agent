@@ -103,7 +103,8 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
   await t.test("a fetch still running reads still loading once some of its years are stored, and settles to filed", async () => {
     let finish!: () => void;
     const fetch = fakes({ filings: () => new Promise<void>((resolve) => { finish = resolve; }) });
-    const hydrate = createTurnHydrator({ db: pool, env: { SEC_EDGAR_USER_AGENT: "test-agent" }, ...fetch, budgetMs: 30 });
+    const deps = { db: pool, env: { SEC_EDGAR_USER_AGENT: "test-agent" }, ...fetch, budgetMs: 30 };
+    const hydrate = createTurnHydrator(deps);
     assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn)], [ZETA]);
     const unfile = await fileZeta();
     try {
@@ -111,6 +112,9 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
       assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], pending.turn)], [ZETA]);
       assert.equal(pending.events.at(-1)!.status, "still_loading");
       finish();
+      // The fetch settles once it reads back what it stored; this turn waits for that.
+      deps.budgetMs = 60_000;
+      assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn)], []);
       const settled = recorder();
       assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], settled.turn)], []);
       assert.deepEqual([fetch.sec, settled.events], [[ZETA], []]);

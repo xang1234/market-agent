@@ -33,14 +33,15 @@ export type TurnHydrator = (
 
 const BUDGET_MS = 15_000;
 const COOLDOWN_MS = 60_000;
-// ponytail: the market's answer for a listing changes at a session's close at
-// the earliest; six hours stands in for the next close.
-const NO_BARS_COOLDOWN_MS = 6 * 60 * 60_000;
+// ponytail: an empty answer changes when the market next closes (prices) or
+// the company next files (filings) at the earliest; six hours stands in for either.
+const EMPTY_COOLDOWN_MS = 6 * 60 * 60_000;
 const NONE: ReadonlySet<string> = new Set();
 
 // One fetch, shared by every key it covers. `outcome` is unset while it runs;
-// `noBars` holds the listings a price fetch found no bars for.
-type Fetch = { at: number; settled: Promise<void>; outcome?: "done" | "failed"; noBars?: ReadonlySet<string> };
+// `empty` holds what a done fetch found nothing for, the listings a price
+// fetch found no bars for or the company a filings fetch left with none.
+type Fetch = { at: number; settled: Promise<void>; outcome?: "done" | "failed"; empty?: ReadonlySet<string> };
 
 export function createTurnHydrator(deps: {
   db: QueryExecutor;
@@ -61,16 +62,16 @@ export function createTurnHydrator(deps: {
   // ponytail: per process and never pruned; one entry per company or comparison ever named.
   const fetches = new Map<string, Fetch>();
   // A listing the market had no bars for over a range, and when that answer
-  // came: it is not asked for that range again for NO_BARS_COOLDOWN_MS (#665).
+  // came: it is not asked for that range again for EMPTY_COOLDOWN_MS (#665).
   // ponytail: per process and never pruned, as `fetches` is.
   const noBarsAt = new Map<string, number>();
-  const start = (keys: ReadonlyArray<string>, fetch: () => Promise<ReadonlyArray<string> | void>): Fetch => {
+  const start = (keys: ReadonlyArray<string>, fetch: () => Promise<ReadonlyArray<string>>): Fetch => {
     const entry: Fetch = { at: now(), settled: Promise.resolve() };
     // The minute runs from when a fetch settles, so one that fails late still cools down.
-    entry.settled = fetch().then((noBars) => {
+    entry.settled = fetch().then((empty) => {
       entry.outcome = "done";
       entry.at = now();
-      entry.noBars = new Set(noBars ?? []);
+      entry.empty = new Set(empty);
     }, (error: unknown) => {
       logger.warn("[chat] a fetch for the turn's companies failed; the answer names the gap", error);
       entry.outcome = "failed";
@@ -102,17 +103,23 @@ export function createTurnHydrator(deps: {
       return `${listing.id}@${range.start}/${range.end}`;
     };
     const ytdKey = (listings: ReadonlyArray<HydrationListing>) => `ytd:${listings.map(rangeKey).sort().join(",")}`;
-    const unpriced = listed.filter((listing) => !(now() - (noBarsAt.get(rangeKey(listing)) ?? -Infinity) < NO_BARS_COOLDOWN_MS));
+    const unpriced = listed.filter((listing) => !(now() - (noBarsAt.get(rangeKey(listing)) ?? -Infinity) < EMPTY_COOLDOWN_MS));
 
     // A company is fetched when it has no filings on file, or its last fetch
     // failed (it may have stored only some years); one with a fetch running
-    // is waited on even once some of its years are stored.
+    // is waited on even once some of its years are stored. One a fetch left
+    // with none on file is not fetched again for EMPTY_COOLDOWN_MS (#688).
     const filings = !sec ? [] : capped.flatMap((company) => {
       const key = `sec:${company.issuer_id}`;
       const entry = current(key);
       if (entry) return [{ company, entry }];
-      return unfiled.has(company.issuer_id) || fetches.get(key)?.outcome === "failed"
-        ? [{ company, entry: start([key], () => deps.fetchFilings(company.issuer_id)) }]
+      const last = fetches.get(key);
+      if (last?.empty?.size && now() - last.at < EMPTY_COOLDOWN_MS) return [];
+      return unfiled.has(company.issuer_id) || last?.outcome === "failed"
+        ? [{ company, entry: start([key], async () => {
+          await deps.fetchFilings(company.issuer_id);
+          return [...await issuersWithoutFilings(deps.db, [company.issuer_id])];
+        }) }]
         : [];
     });
     // A charted YTD window is one fetch of the whole comparison, keyed by the
@@ -151,8 +158,8 @@ export function createTurnHydrator(deps: {
 
     const pricedListings = priced.flatMap(({ listings }) => listings);
     const steps = [
-      { tool_name: "fetch_filings", label: `Fetching filings for ${labelList(running.map(({ company }) => labelOf.get(company.issuer_id)!))}`, fetches: running.map(({ entry }) => entry), listings: [] },
-      { tool_name: "load_prices", label: `Loading prices for ${labelList(pricedListings.map((listing) => labelOf.get(listing.issuer_id)!))}`, fetches: [...priced.flatMap(({ entry }) => entry ?? []), ...batch], listings: pricedListings },
+      { tool_name: "fetch_filings", noun: "filings", label: `Fetching filings for ${labelList(running.map(({ company }) => labelOf.get(company.issuer_id)!))}`, fetches: running.map(({ entry }) => entry), subjects: running.map(({ company }) => ({ id: company.issuer_id, issuer_id: company.issuer_id })) },
+      { tool_name: "load_prices", noun: "prices", label: `Loading prices for ${labelList(pricedListings.map((listing) => labelOf.get(listing.issuer_id)!))}`, fetches: [...priced.flatMap(({ entry }) => entry ?? []), ...batch], subjects: pricedListings },
     ].filter((step) => step.fetches.length > 0).map((step) => ({ ...step, tool_call_id: `${step.tool_name}-${turn.turnId}` }));
     for (const { tool_call_id, tool_name, label } of steps) turn.emit("tool.started", { tool_call_id, tool_name, label });
 
@@ -165,11 +172,11 @@ export function createTurnHydrator(deps: {
       clearTimeout(timer);
     }
 
-    for (const { tool_call_id, tool_name, label, fetches: done, listings } of steps) {
-      // A price fetch that stored no bars for a listing failed for it, and says which (#665).
-      const empty = listings.filter((listing) => done.some((fetch) => fetch.noBars?.has(listing.id)));
+    for (const { tool_call_id, tool_name, noun, label, fetches: done, subjects } of steps) {
+      // A fetch that stored nothing for a company failed for it, and says which (#665, #688).
+      const empty = subjects.filter((subject) => done.some((fetch) => fetch.empty?.has(subject.id)));
       const status = done.some((fetch) => fetch.outcome === undefined) ? "still_loading" : done.every((fetch) => fetch.outcome === "done") && empty.length === 0 ? "ok" : "failed";
-      const shown = status !== "still_loading" && empty.length > 0 ? `No prices found for ${labelList(empty.map((listing) => labelOf.get(listing.issuer_id)!))}` : label;
+      const shown = status !== "still_loading" && empty.length > 0 ? `No ${noun} found for ${labelList(empty.map((subject) => labelOf.get(subject.issuer_id)!))}` : label;
       turn.emit("tool.completed", { tool_call_id, tool_name, label: shown, status });
     }
     if (turn.pricesOnly) {
