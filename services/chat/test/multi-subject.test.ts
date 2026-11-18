@@ -606,6 +606,18 @@ test("a message's own words name a company only as written, never by the name it
   assert.deepEqual((await subjectsForTurn("and Hello?", { ...goesBy, ...asNamed("Hello"), loadPriorSubjects: priorOf("AAPL") })).tickers, ["Hello"], "a name the reading gives");
 });
 
+const BY_NAME: Record<string, string> = { Apple: "AAPL", Alphabet: "GOOG", Microsoft: "MSFT" };
+const byName = {
+  preResolveSubject: async ({ text, exactOnly }: { text: string; exactOnly?: true }) =>
+    BY_NAME[text] && !exactOnly ? resolved(BY_NAME[text]) : preResolveSubject({ text }),
+};
+
+test("a fresh thread's message that names a company by name, in a sentence or alone, resolves it from the reading (#686)", async () => {
+  assert.deepEqual((await subjectsForTurn("how is Apple doing", { ...byName, ...asNamed("Apple") })).tickers, ["AAPL"]);
+  assert.deepEqual((await subjectsForTurn("Apple", { ...byName, ...asNamed("Apple") })).tickers, ["AAPL"]);
+  assert.deepEqual((await subjectsForTurn("compare Alphabet and Microsoft revenue", { ...byName, ...asNamed("Alphabet", "Microsoft") })).tickers, ["GOOG", "MSFT"]);
+});
+
 test("a capitalized ticker after a company is still asked about (#623)", async () => {
   const aapl = { ...asTheResolverReads, loadPriorSubjects: priorOf("AAPL") };
   for (const question of ["and MSFT?", "MSFT"]) {
