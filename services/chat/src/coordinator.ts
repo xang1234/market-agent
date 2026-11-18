@@ -1109,7 +1109,10 @@ export async function resolveTurnSubjects(
     text ? resolveNamedSubjects(text, preResolve, loadingPrior) : namesOf([]),
     loadingPrior,
   ]);
-  const readingDecides = byReading || prior.length > 0 || mentioned.ambiguous.length > 0 || mentioned.notFound.length > 0;
+  // A name written in a sentence ("how is Apple doing") is found only by the
+  // reading, which names only a capitalized word (#686).
+  const readingDecides = byReading || prior.length > 0 || mentioned.ambiguous.length > 0 || mentioned.notFound.length > 0
+    || (mentioned.named.length === 0 && companyWordsIn(text ?? "").length > 0);
   const change = readingDecides ? (await context.reading?.())?.companies : undefined;
   if (!change) return unreadChange(mentioned, prior);
   if (change.kind === "drop") return dropped(prior, change, preResolve);
