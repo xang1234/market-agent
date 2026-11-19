@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { bootstrapDatabase, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { fillMissingCiks, loadCompanyTickerCiks } from "../src/cik-fill.ts";
+import { bootstrapDatabase, connectedPool, dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
+import { fillMissingCiks, loadCompanyTickerCiks, type CikFillReport } from "../src/cik-fill.ts";
 import { parseFinancialJson } from "../src/lossless-financial-json.ts";
+import { hydrateSecIssuer } from "../src/sec-facts-repository.ts";
+import { createSecCompanyFactsHttpFetcher } from "../src/sec-edgar-http.ts";
 
 const COMPANY_TICKERS = JSON.stringify({
   0: { cik_str: 990611, ticker: "HELD", title: "Held" },
@@ -282,6 +284,192 @@ test("the issuer that holds a CIK keeps it on a tie, and one that holds another 
     { legal_name: "Tie Resolver Issuer", cik: "990800" },
   ]);
   assert.deepEqual(logged, [`TIE: CIK 990800 goes to TIE's issuer ${id(2)}; not attached`]);
+});
+
+// An ETN issuer holds CIK 990900 with no SEC data yet, and the CIK's first ticker is its parent's (#680).
+const ETN = "39000000-0000-4000-8000-000000001101";
+const PARENT = "39000000-0000-4000-8000-000000001102";
+const FALLBACK_SOURCE_ID = "39000000-0000-4000-8000-000000001103";
+const ETN_CIKS = new Map([["PRNT", "990900"], ["ETNX", "990900"]]);
+const tenK = { accn: "0000990900-26-000001", fy: 2025, fp: "FY", form: "10-K", filed: "2026-02-01", start: "2025-01-01", end: "2025-12-31" };
+const ETN_COMPANY_FACTS = JSON.stringify({
+  cik: 990900,
+  entityName: "Parent Co",
+  facts: {
+    "us-gaap": {
+      Revenues: { label: "", description: "", units: { USD: [{ ...tenK, val: 500 }] } },
+      NetIncomeLoss: { label: "", description: "", units: { USD: [{ ...tenK, val: 70 }] } },
+    },
+  },
+});
+
+async function etnAndParent(t: test.TestContext, name: string) {
+  const { databaseUrl } = await bootstrapDatabase(t, name);
+  const db = await connectedPool(t, databaseUrl);
+  await db.query(await readFile(join(workspaceRoot, "db", "seed", "metrics.sql"), "utf8"));
+  await insertListedIssuer(db, ETN, "Parent Alerian ETN", "990900", "ETNX");
+  await insertListedIssuer(db, PARENT, "Parent Co", null, "PRNT");
+  return db;
+}
+
+// Fundamentals' lookup of the ETN's FY2025 income statement, by its CIK.
+function hydrateEtn(db: Awaited<ReturnType<typeof connectedPool>>, duringDownload: () => Promise<void> = async () => {}) {
+  const clock = () => new Date("2026-03-01T00:00:00.000Z");
+  const fetcher = createSecCompanyFactsHttpFetcher({
+    userAgent: "market-agent-test test@example.invalid",
+    fetchImpl: async (url) => {
+      if (!String(url).includes("companyfacts")) return new Response("", { status: 404 });
+      await duringDownload();
+      return new Response(ETN_COMPANY_FACTS, { status: 200 });
+    },
+    clock,
+  });
+  return hydrateSecIssuer(db, { issuerId: ETN, fiscal_year: 2025, fiscal_period: "FY", fetcher, sourceId: FALLBACK_SOURCE_ID, clock, logger: { warn: () => {} } });
+}
+
+async function secDataByIssuer(db: Queryable) {
+  return (await db.query(
+    `select legal_name, cik,
+            exists (select 1 from facts f where f.subject_id = iss.issuer_id) as facts,
+            exists (select 1 from sec_issuer_downloads d where d.issuer_id = iss.issuer_id) as download
+       from issuers iss order by legal_name`,
+  )).rows;
+}
+
+async function untilWaitingOnLock(db: Queryable): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const { rows: [row] } = await db.query<{ waiting: boolean }>(
+      `select exists (select 1 from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock') as waiting`,
+    );
+    if (row!.waiting) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.fail("nothing waited on a lock");
+}
+
+const NO_FILL: CikFillReport = { filled: 0, reassigned: 0, held_with_data: 0, already_set: 0, skipped_duplicate: 0, unmatched: 0 };
+
+test("a download for an issuer whose CIK the fill moves before it stores stores nothing (#685)", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for CIK fill coverage");
+    return;
+  }
+  const db = await etnAndParent(t, "fin-cik-fill-mid-download");
+  const logged: string[] = [];
+  let fill: CikFillReport | undefined;
+  const sources = async () => (await db.query<{ n: number }>(`select count(*)::int as n from sources`)).rows[0]!.n;
+  const sourcesBefore = await sources();
+
+  const statement = await hydrateEtn(db, async () => {
+    fill = await fillMissingCiks(db, ETN_CIKS, { error: (line: string) => logged.push(line) });
+  });
+
+  assert.deepEqual(fill, { ...NO_FILL, reassigned: 1, already_set: 1 });
+  assert.deepEqual(logged, [`PRNT: CIK 990900 moved from issuer ${ETN} to issuer ${PARENT}`]);
+  assert.deepEqual(await secDataByIssuer(db), [
+    { legal_name: "Parent Alerian ETN", cik: null, facts: false, download: false },
+    { legal_name: "Parent Co", cik: "990900", facts: false, download: false },
+  ]);
+  assert.equal(await sources(), sourcesBefore, "no source row either");
+  assert.equal(statement, null);
+});
+
+test("the fill waits for a download storing under the CIK, then leaves the CIK with its data (#685)", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for CIK fill coverage");
+    return;
+  }
+  const db = await etnAndParent(t, "fin-cik-fill-waits");
+  const logged: string[] = [];
+  let fill: Promise<CikFillReport> | undefined;
+  // The fill starts while the download's facts are written but not committed.
+  const commitAfterFillWaits = {
+    query: db.query.bind(db),
+    connect: async () => {
+      const client = await db.connect();
+      return {
+        query: async (text: string, values?: unknown[]) => {
+          if (text === "commit" && fill === undefined) {
+            fill = fillMissingCiks(db, ETN_CIKS, { error: (line: string) => logged.push(line) });
+            await untilWaitingOnLock(db);
+          }
+          return client.query(text, values);
+        },
+        release: (destroy?: boolean | Error) => client.release(destroy),
+      };
+    },
+  };
+
+  assert.notEqual(await hydrateEtn(commitAfterFillWaits as unknown as typeof db), null);
+
+  assert.deepEqual(await fill, { ...NO_FILL, held_with_data: 1, already_set: 1 });
+  assert.deepEqual(logged, [`PRNT: CIK 990900 stays on issuer ${ETN}, which holds SEC facts, companyfacts downloads; not moved`]);
+  assert.deepEqual(await secDataByIssuer(db), [
+    { legal_name: "Parent Alerian ETN", cik: "990900", facts: true, download: true },
+    { legal_name: "Parent Co", cik: null, facts: false, download: false },
+  ]);
+});
+
+test("the fill waits for a download that has checked the CIK but stored nothing yet (#685)", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for CIK fill coverage");
+    return;
+  }
+  const db = await etnAndParent(t, "fin-cik-fill-waits-on-check");
+  let fill: Promise<CikFillReport> | undefined;
+  // The fill starts right after the download's CIK check, before its first row: only the check's own lock holds it.
+  const fillAfterCheck = {
+    query: db.query.bind(db),
+    connect: async () => {
+      const client = await db.connect();
+      return {
+        query: async (text: string, values?: unknown[]) => {
+          const result = await client.query(text, values);
+          if (text.includes("for share") && fill === undefined) {
+            fill = fillMissingCiks(db, ETN_CIKS, { error: () => undefined });
+            await untilWaitingOnLock(db);
+          }
+          return result;
+        },
+        release: (destroy?: boolean | Error) => client.release(destroy),
+      };
+    },
+  };
+
+  assert.notEqual(await hydrateEtn(fillAfterCheck as unknown as typeof db), null);
+
+  assert.deepEqual(await fill, { ...NO_FILL, held_with_data: 1, already_set: 1 });
+  assert.deepEqual((await secDataByIssuer(db)).map((row) => row.cik), ["990900", null]);
+});
+
+test("a fill that lists an issuer before another fill attaches its CIK leaves the CIK as attached", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for CIK fill coverage");
+    return;
+  }
+  const db = await etnAndParent(t, "fin-cik-fill-concurrent");
+  const logged: string[] = [];
+  const log = { error: (line: string) => logged.push(line) };
+  let first: CikFillReport | undefined;
+  // The second fill lists the issuers, then the first runs to its commit.
+  const listedBeforeFirstFill = {
+    query: async (text: string, values?: unknown[]) => {
+      const listed = await db.query(text, values);
+      first ??= await fillMissingCiks(db, ETN_CIKS, log);
+      return listed;
+    },
+    connect: () => db.connect(),
+  };
+
+  const second = await fillMissingCiks(listedBeforeFirstFill as unknown as typeof db, ETN_CIKS, log);
+
+  assert.deepEqual(first, { ...NO_FILL, reassigned: 1, already_set: 1 });
+  assert.deepEqual(second, { ...NO_FILL, already_set: 2 });
+  assert.deepEqual(logged, [`PRNT: CIK 990900 moved from issuer ${ETN} to issuer ${PARENT}`]);
+  assert.deepEqual((await secDataByIssuer(db)).map(({ legal_name, cik }) => [legal_name, cik]), [
+    ["Parent Alerian ETN", null],
+    ["Parent Co", "990900"],
+  ]);
 });
 
 async function insertFact(db: Queryable, issuerId: string, provider: string): Promise<void> {

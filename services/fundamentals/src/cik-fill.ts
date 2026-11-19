@@ -99,6 +99,13 @@ async function attachCik(db: FundamentalsTransactionalQueryExecutor, owner: CikC
     const { rows: [self] } = await tx.query<{ cik: string | null }>(`select cik from issuers where issuer_id = $1::uuid for update`, [owner.issuer_id]);
     // Another writer (resolver discovery) set it since the read.
     if (self?.cik !== null) return "already_set";
+    // A SEC writer share-locks the issuer it stores on (issuerHoldsCik), so this
+    // waits for a store in flight. The data check is its own statement, read
+    // after the wait, since this one's snapshot predates the store's commit.
+    const { rows: locked } = await tx.query<{ issuer_id: string }>(
+      `select issuer_id::text as issuer_id from issuers where ltrim(cik, '0') = $1 and issuer_id <> $2::uuid order by issuer_id for update`,
+      [owner.claimedCik, owner.issuer_id],
+    );
     const { rows: holders } = await tx.query<{ issuer_id: string; held: string[] }>(
       `select issuer_id::text as issuer_id, array_remove(array[
                 case when exists (
@@ -111,10 +118,9 @@ async function attachCik(db: FundamentalsTransactionalQueryExecutor, owner: CikC
                 case when exists (select 1 from sec_issuer_downloads where issuer_id = iss.issuer_id) then 'companyfacts downloads' end
               ], null) as held
          from issuers iss
-        where ltrim(iss.cik, '0') = $1 and iss.issuer_id <> $2::uuid
-        order by iss.issuer_id
-          for update`,
-      [owner.claimedCik, owner.issuer_id],
+        where iss.issuer_id = any($1::uuid[])
+        order by iss.issuer_id`,
+      [locked.map((holder) => holder.issuer_id)],
     );
     const withData = holders.find((holder) => holder.held.length > 0);
     if (withData !== undefined) {

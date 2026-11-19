@@ -95,9 +95,10 @@ export async function backfillIssuer8k(
       form: candidate.form,
       filedDate: candidate.filedDate,
     };
-    await withTransaction(deps.db, async (tx) => {
-      await persist8kFiling({ tx, objectStore: deps.objectStore }, { issuerId, fetched, entry, items });
-    });
+    const stored = await withTransaction(deps.db, (tx) =>
+      persist8kFiling({ tx, objectStore: deps.objectStore }, { issuerId, fetched, entry, items }));
+    // The issuer lost the CIK since it was resolved, so no later filing is its.
+    if (!stored) break;
     ingested += 1;
   }
   return { ingested, skipped };

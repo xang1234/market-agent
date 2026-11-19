@@ -7,6 +7,7 @@ import type { FilingIndexEntry } from "../src/sec-daily-index.ts";
 import type { FormHandlerDeps } from "../src/sec-daily-crawl.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { cikMovesAfterRead } from "./cik-moves-after-read.ts";
 
 const ACCESSION = "0000320193-26-000011";
 
@@ -86,6 +87,23 @@ test("handle8k records one event per item + a material claim only for claimable 
   assert.equal(args.rows.length, 1);
   assert.equal(args.rows[0]!.subject_kind, "issuer");
   assert.equal(args.rows[0]!.subject_id, issuerId);
+});
+
+test("handle8k stores nothing when the filer's CIK moves to another issuer after it is read (#685)", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "form8k-cik-moved");
+  const client = await connectedClient(t, databaseUrl);
+  const [from, to] = (await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name, cik) values ('Apple ETN', '0000320193'), ('Apple Inc.', null) returning issuer_id::text as issuer_id`,
+  )).rows.map((row) => row.issuer_id);
+  const db = cikMovesAfterRead(client as unknown as QueryExecutor, { cik: "0000320193", from: from!, to: to! });
+  const result = await handle8k(entry(), { db, objectStore: new MemoryObjectStore(), client: fakeClient() } as unknown as FormHandlerDeps);
+  assert.equal(result.ingested, false);
+  const docs = await client.query(`select count(*)::int as n from documents`);
+  assert.equal(docs.rows[0]!.n, 0, "nothing written for the issuer that lost the CIK");
 });
 
 test("handle8k skips an untracked filer CIK without writing", async (t) => {
