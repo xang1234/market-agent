@@ -532,14 +532,14 @@ export function answerContext(input: {
 
 // What an answer with no figure and no claim to write from says, with no
 // model asked: asking again would not help (#498). When the claims read
-// failed, the claims are unknown, not absent (#207). When a model failed
-// before anything was read, nothing is known to be missing (#695).
+// failed, the claims are unknown, not absent (#207). When the analyst agent's
+// model failed first, the answer says so before what this lane found (#695).
 function missingEvidence(packet: EvidencePacket, modelFailed?: true): string {
   const companies = packet.companies.length > 0 ? new Intl.ListFormat("en").format(packet.companies) : "this question";
-  if (modelFailed) return `The model could not be reached, so nothing was read for ${companies}. Try again later.`;
-  return packet.claims_status === "unavailable"
+  const found = packet.claims_status === "unavailable"
     ? `Research claims could not be read for ${companies}, and no figure is shown.`
     : `No research claims are on file for ${companies}.`;
+  return modelFailed ? `The model could not be reached. ${found} Try again later.` : found;
 }
 
 // The turn's evidence packet: its figures, claims and bounds (#207).

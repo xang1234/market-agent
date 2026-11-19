@@ -373,7 +373,7 @@ test("an evidence follow-up to an engine answer reads each company it explained 
   });
 });
 
-test("a turn whose model failed before anything was read says so, never that no claims are on file (#695)", {
+test("a turn whose agent model failed says so before what the lane found (#695)", {
   skip: !dockerAvailable(),
   timeout: 120_000,
 }, async (t) => {
@@ -406,8 +406,7 @@ test("a turn whose model failed before anything was read says so, never that no 
   };
 
   const failed = await answer(true);
-  assert.ok(failed.includes("The model could not be reached, so nothing was read for this question. Try again later."), failed);
-  assert.ok(!failed.includes("No research claims are on file"), failed);
+  assert.ok(failed.includes("The model could not be reached. No research claims are on file for this question. Try again later."), failed);
   assert.ok((await answer(false)).includes("No research claims are on file for this question."), "an empty read with a working model is said as before");
 });
 
