@@ -407,6 +407,38 @@ test("the fill waits for a download storing under the CIK, then leaves the CIK w
   ]);
 });
 
+test("the fill waits for a download that has checked the CIK but stored nothing yet (#685)", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for CIK fill coverage");
+    return;
+  }
+  const db = await etnAndParent(t, "fin-cik-fill-waits-on-check");
+  let fill: Promise<CikFillReport> | undefined;
+  // The fill starts right after the download's CIK check, before its first row: only the check's own lock holds it.
+  const fillAfterCheck = {
+    query: db.query.bind(db),
+    connect: async () => {
+      const client = await db.connect();
+      return {
+        query: async (text: string, values?: unknown[]) => {
+          const result = await client.query(text, values);
+          if (text.includes("for share") && fill === undefined) {
+            fill = fillMissingCiks(db, ETN_CIKS, { error: () => undefined });
+            await untilWaitingOnLock(db);
+          }
+          return result;
+        },
+        release: (destroy?: boolean | Error) => client.release(destroy),
+      };
+    },
+  };
+
+  assert.notEqual(await hydrateEtn(fillAfterCheck as unknown as typeof db), null);
+
+  assert.deepEqual(await fill, { ...NO_FILL, held_with_data: 1, already_set: 1 });
+  assert.deepEqual((await secDataByIssuer(db)).map((row) => row.cik), ["990900", null]);
+});
+
 test("a fill that lists an issuer before another fill attaches its CIK leaves the CIK as attached", { timeout: 180_000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for CIK fill coverage");
