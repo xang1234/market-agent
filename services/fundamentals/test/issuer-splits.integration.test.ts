@@ -178,7 +178,7 @@ test("each split pair merges onto the issuer with the SEC identity, and a rerun 
   assert.deepEqual(await identity(db), merged);
 });
 
-test("a merge moves every row keyed by the merged issuer, and the kept issuer's own row wins a clash", { timeout: 120_000 }, async (t) => {
+test("a merge moves every row keyed by the merged issuer, the kept issuer's own row wins a clash, and the newest download date is kept", { timeout: 120_000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for issuer split coverage");
     return;
@@ -197,7 +197,8 @@ test("a merge moves every row keyed by the merged issuer, and the kept issuer's 
      values ($1, 'industry', 'Internet Content & Information', $3, 'vendor', now()), ($2, 'industry', 'Interactive Media', $3, 'vendor', now())`,
     [id(1), id(2), vendor],
   );
-  await db.query(`insert into sec_issuer_downloads (issuer_id, newest_filed) values ($1, '2026-10-29'), ($2, '2026-07-24')`, [id(1), id(2)]);
+  // The dropped issuer's download is the newer one: its date is the watermark that keeps an older download from re-inferring (#342).
+  await db.query(`insert into sec_issuer_downloads (issuer_id, newest_filed) values ($1, '2026-07-24'), ($2, '2026-10-29')`, [id(1), id(2)]);
   // A certified valuation's snapshot and run play no part in a merge.
   await withoutForeignKeys(
     db,

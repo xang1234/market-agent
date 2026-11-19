@@ -57,7 +57,8 @@ export const ISSUER_KEYED_ROWS: ReadonlyArray<{
   // Each class of a filing's position is a distinct CUSIP, which sec-13f-resolve.ts sums per issuer.
   { table: "institutional_holdings", id: "issuer_id", unique: ["filer_cik", "filing_period"], combine: { shares: "k.shares + d.shares", value_usd: "k.value_usd + d.value_usd" } },
   { table: "screener_certified_valuations", id: "issuer_id", unique: ["valuation"] },
-  { table: "sec_issuer_downloads", id: "issuer_id", unique: [] },
+  // The newest filing either issuer downloaded: an older download must not re-infer what it refuted (#342).
+  { table: "sec_issuer_downloads", id: "issuer_id", unique: [], combine: { newest_filed: "greatest(k.newest_filed, d.newest_filed)" } },
   { table: "consensus_captures", id: "issuer_id", unique: ["source_id", "captured_on", "field_key"], appendOnly: true },
   { table: "facts", id: "subject_id", kind: "subject_kind" },
   // As linkDocumentMentions adds up one subject's mentions in a document.
