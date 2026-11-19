@@ -255,8 +255,9 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     );
     // A former listing in another zone does not move the Call off its active listing's calendar.
     await db.query(
-      `insert into listings (instrument_id, mic, ticker, trading_currency, timezone, active_from, active_to)
-       values ($1, 'XLON', 'AAPL-L', 'GBP', 'Europe/London', '2010-01-01', '2020-01-01')`,
+      `with former as (insert into instruments (issuer_id, asset_type) values ($1, 'common_stock') returning instrument_id)
+       insert into listings (instrument_id, mic, ticker, trading_currency, timezone, active_from, active_to)
+       select instrument_id, 'XLON', 'AAPL-L', 'GBP', 'Europe/London', '2010-01-01', '2020-01-01' from former`,
       [AAPL.issuer],
     );
     const { block } = await ask("Make a Call on AAPL", { clock: "2026-11-10T02:00:00.000Z" });

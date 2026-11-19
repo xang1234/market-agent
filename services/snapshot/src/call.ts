@@ -198,9 +198,11 @@ async function subjectListing(db: QueryExecutor, issuerId: string, cutoff: strin
       where i.issuer_id = $1::uuid`,
     [issuerId, cutoff],
   );
-  const zones = new Set(rows.map((row) => row.timezone));
+  // An instrument with no active listing joins as an empty row: it is no listing.
+  const listings = rows.filter((row) => row.timezone !== null);
+  const zones = new Set(listings.map((row) => row.timezone));
   return {
-    label: rows.length === 1 && rows[0]!.ticker !== null ? rows[0]!.ticker : rows[0]?.legal_name ?? issuerId,
+    label: listings.length === 1 && listings[0]!.ticker !== null ? listings[0]!.ticker : rows[0]?.legal_name ?? issuerId,
     timezone: zones.size === 1 ? [...zones][0] ?? null : null,
   };
 }
