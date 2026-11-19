@@ -386,8 +386,9 @@ an operator command certifies the universe ahead of time, and each screen reads 
 - **Freshness:** a figure shows while it certifies the last regular session closed by now, in its listing's zone
   (`lastRegularSessionDate`). Once a later session closes it reads as null until the batch runs again, so the screener
   never shows a stale figure. If the batch stops running, every figure reads as null after the next close.
-  `lastRegularSessionDate` skips weekends only, so on a market holiday every figure reads as null from the holiday's
-  close until the batch certifies the next real close, about a day.
+  `lastRegularSessionDate` skips weekends and, for a New York listing, NYSE's holidays (#611), so a pre-holiday figure
+  stays current through the holiday. A listing in another zone skips weekends only, so on its own market's holiday its
+  figures read as null until the batch certifies the next real close, about a day.
 - **Retries:** rerunning a cutoff resumes its runs. They are created up front under an advisory lock, so two attempts
   never value an issuer twice, and the engine never publishes a unit twice. A run whose execution failed or was
   cancelled, an integrity failure in one issuer's inputs say, sealed nothing: the batch reports its issuers and exits

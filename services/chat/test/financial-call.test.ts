@@ -253,6 +253,12 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
        values ($1, $2, 'last_trade', '343.10', 'USD', '2026-11-10T01:30:00Z', '2026-11-10T01:30:05Z', '2026-11-10T01:30:05Z', $3)`,
       [AAPL.listing, POLYGON_MARKET_SOURCE_ID, "e".repeat(64)],
     );
+    // A former listing in another zone does not move the Call off its active listing's calendar.
+    await db.query(
+      `insert into listings (instrument_id, mic, ticker, trading_currency, timezone, active_from, active_to)
+       values ($1, 'XLON', 'AAPL-L', 'GBP', 'Europe/London', '2010-01-01', '2020-01-01')`,
+      [AAPL.issuer],
+    );
     const { block } = await ask("Make a Call on AAPL", { clock: "2026-11-10T02:00:00.000Z" });
     const call = block.call;
     assert.deepEqual([call.call_date, call.facts[4]!.figure.text, call.facts[4]!.citations.map((citation) => citation.text)], ["2026-11-09", "USD 343.1 per share", ["Close on 2026-11-09"]]);

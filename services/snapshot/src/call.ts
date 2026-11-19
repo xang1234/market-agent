@@ -85,7 +85,7 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
   const [member] = plan.subjects.members;
   if (plan.subjects.members.length !== 1 || member?.subject_ref.kind !== "issuer" || !isCallPlan(plan, member.slot_id)) return null;
   const issuer = member.subject_ref.id;
-  const listing = await subjectListing(db, issuer);
+  const listing = await subjectListing(db, issuer, plan.time.knowledge_cutoff);
   // The Call and its price are dated on the listing's calendar (#614), in the plan's own zone when the issuer's listings share none.
   const zone = listing.timezone ?? plan.time.cutoff_timezone;
   const localDate = (instant: string) => localDateOf(Date.parse(instant), zone);
@@ -184,15 +184,19 @@ function distinctSources(sources: ReadonlyArray<CallSource>): CallSource[] {
   return [...new Map(sources.map((source) => [`${source.source_id}|${source.period_end}`, source])).values()];
 }
 
-// The ticker of the issuer's one common-stock listing, its legal name otherwise, and the time zone all its listings share.
-async function subjectListing(db: QueryExecutor, issuerId: string): Promise<Readonly<{ label: string; timezone: string | null }>> {
+// The ticker of the issuer's one common-stock listing active at the cutoff, its legal name otherwise, and the
+// time zone all those listings share. Active as price selection reads it (loadSubjectSplitHistory), so a former
+// listing in another zone does not move the Call off its price's calendar.
+async function subjectListing(db: QueryExecutor, issuerId: string, cutoff: string): Promise<Readonly<{ label: string; timezone: string | null }>> {
   const { rows } = await db.query<{ ticker: string | null; legal_name: string; timezone: string | null }>(
     `select l.ticker, i.legal_name, l.timezone
        from issuers i
        left join instruments n on n.issuer_id = i.issuer_id and n.asset_type = 'common_stock'
        left join listings l on l.instrument_id = n.instrument_id
+        and (l.active_from is null or l.active_from <= $2::timestamptz)
+        and (l.active_to is null or l.active_to > $2::timestamptz)
       where i.issuer_id = $1::uuid`,
-    [issuerId],
+    [issuerId, cutoff],
   );
   const zones = new Set(rows.map((row) => row.timezone));
   return {
