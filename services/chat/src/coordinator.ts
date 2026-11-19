@@ -77,6 +77,8 @@ export type ChatTurnRunContext = ChatTurnInput & {
   reading?: (beforeModelCall?: () => void) => Promise<ScopeProposal | null>;
   // Set when the analyst agent hands the financial lane a company to pick, so the lane reads its companies as the agent did.
   companiesByReading?: true;
+  // Set when the analyst agent hands the turn on because its model failed before it read anything, so an answer with nothing to show says so (#695).
+  modelFailed?: true;
   // Analyst prompt-template bundle selected for this turn. Derived from the
   // resolved subject's kind via chooseBundleIdForSubjectKind; falls back to
   // DEFAULT_BUNDLE_ID when no subject was provided. Same routing function
@@ -142,8 +144,9 @@ export type ChatAnalystToolRuntime = (
 ) => Promise<ChatAnalystToolRuntimeResult> | ChatAnalystToolRuntimeResult;
 
 // The analyst agent's answer to a turn (analyst-agent.ts); "pick_company" when a company the turn
-// names is still to be picked, which the financial lane asks; null for a turn it reads nothing for.
-export type ChatAnalystAgent = (context: ChatTurnRunContext) => Promise<ChatAnalystToolRuntimeResult | "pick_company" | null>;
+// names is still to be picked, which the financial lane asks; null for a turn it reads nothing for,
+// and "model_failed" for one its model failed before it read anything.
+export type ChatAnalystAgent = (context: ChatTurnRunContext) => Promise<ChatAnalystToolRuntimeResult | "pick_company" | "model_failed" | null>;
 
 export type ChatAnalystToolExecutor = (input: {
   tool: ToolDefinition;
@@ -1460,11 +1463,11 @@ function analystAgentSeat(
       context.emit("turn.error", { error_code: "analyst_agent_failed", message: "The answer could not be completed." });
       return;
     }
-    if (answer === null) {
+    if (answer === null || answer === "model_failed") {
       // The agent streamed steps for a turn it gives back: the plan starts over, even
       // for a lane whose own turn.started is empty and would be dropped as a repeat.
       if (started) context.emit("turn.started", { bundle_id: context.bundleId });
-      return next(context);
+      return next(answer === null ? context : { ...context, modelFailed: true });
     }
     if (answer === "pick_company") return picking({ ...context, companiesByReading: true });
     await emitAnalystAnswer(turn, answer, options);

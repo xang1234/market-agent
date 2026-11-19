@@ -255,6 +255,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     // unlabelled, which is how a later turn knows they were auto-selected.
     scope: await withCompanyLabels(scope, asOf),
     cutoff: asOf,
+    ...(context.modelFailed ? { modelFailed: true } : {}),
   };
   // While the judge reads the answer's inferences, the answer shows a line in
   // each one's place; `judging` brings each verdict's blocks as it settles,

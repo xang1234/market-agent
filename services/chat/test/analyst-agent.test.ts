@@ -1311,6 +1311,32 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.deepEqual([next, financial.taken.length], [1, 0]);
   });
 
+  await t.test("a turn whose model fails before anything is read goes on to the next runner, told the model failed (#695)", async () => {
+    const told: Array<true | undefined> = [];
+    // A reading that runs out of time is not a model failure.
+    const hung = analystAgentRunner({
+      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
+      router: async () => analystAgentRouter(LLM_ENV, { createClient: () => () => new Promise<never>(() => {}) }),
+      read: noRead,
+      compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: OBSERVE_F1 }), onAnswered }),
+      asOf: () => new Date().toISOString(),
+      deadlines: { readMs: 1_000, turnMs: 30_000 },
+    });
+    for (const analystAgent of [agentOf(failing(1, scripted([])), OBSERVE_F1), agentOf(scripted([{ text: "DONE" }]), OBSERVE_F1), hung]) {
+      const turnId = randomUUID();
+      const coordinator = createChatCoordinator({
+        analystAgent,
+        persistAssistantMessage: persist,
+        runner: async (context) => {
+          told.push(context.modelFailed);
+          context.emit("turn.completed", {});
+        },
+      });
+      await coordinator.getOrCreateTurn({ ...base, runId: turnId, turnId, userIntent: "How has AAA's stock done this year?" }).completed;
+    }
+    assert.deepEqual(told, [true, undefined, undefined]);
+  });
+
   const meteredReading = (reading: Awaited<ReturnType<ReturnType<typeof readingOf>>>) => async (_question: string, beforeModelCall?: () => void) => {
     beforeModelCall?.();
     made.readings += 1;

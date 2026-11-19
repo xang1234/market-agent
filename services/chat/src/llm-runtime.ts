@@ -163,6 +163,8 @@ export async function composeAnalystBlocksWithLlm(input: {
   answerShape?: ReadonlyArray<string>;
   // Set false to reject every analyst_inference the answer lists, with no repair asked for one.
   inferences?: false;
+  // Set when a model failed before the turn read anything, so an answer with nothing to write from says so (#695).
+  modelFailed?: true;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
   // Receives the deployment (channel/model) that wrote the answer (#183).
   onAnswered?: (deployment: string) => void;
@@ -317,7 +319,7 @@ function withoutInferences(report: AssertionReport, list: ReadonlyArray<unknown>
   };
 }
 
-export type AnswerInput = Pick<Parameters<typeof composeAnalystBlocksWithLlm>[0], "blocks" | "toolCalls" | "factBlocks" | "scope">;
+export type AnswerInput = Pick<Parameters<typeof composeAnalystBlocksWithLlm>[0], "blocks" | "toolCalls" | "factBlocks" | "scope" | "modelFailed">;
 
 // The answer the accepted assertions render, or the fallback sentence, and
 // the report with what rendering left out (#208). An answer repaired after
@@ -497,7 +499,7 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
           `The data here does not answer this question; the ${packet.gaps.length > 1 ? "notes below say" : "note below says"} what is missing.`,
           ...(packet.claims_status === "unavailable" ? ["Research claims could not be read for this answer."] : []),
         ]
-        : [packet.figures.length === 0 && packet.claims.length === 0 && notes.length === 0 ? missingEvidence(packet) : NO_ANSWER_FALLBACK_TEXT]),
+        : [packet.figures.length === 0 && packet.claims.length === 0 && notes.length === 0 ? missingEvidence(packet, input.modelFailed) : NO_ANSWER_FALLBACK_TEXT]),
       ...notes,
     ].join(" "),
   };
@@ -530,12 +532,14 @@ export function answerContext(input: {
 
 // What an answer with no figure and no claim to write from says, with no
 // model asked: asking again would not help (#498). When the claims read
-// failed, the claims are unknown, not absent (#207).
-function missingEvidence(packet: EvidencePacket): string {
+// failed, the claims are unknown, not absent (#207). When the analyst agent's
+// model failed first, the answer says so before what this lane found (#695).
+function missingEvidence(packet: EvidencePacket, modelFailed?: true): string {
   const companies = packet.companies.length > 0 ? new Intl.ListFormat("en").format(packet.companies) : "this question";
-  return packet.claims_status === "unavailable"
+  const found = packet.claims_status === "unavailable"
     ? `Research claims could not be read for ${companies}, and no figure is shown.`
     : `No research claims are on file for ${companies}.`;
+  return modelFailed ? `The model could not be reached. ${found} Try again later.` : found;
 }
 
 // The turn's evidence packet: its figures, claims and bounds (#207).

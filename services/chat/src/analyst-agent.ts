@@ -152,6 +152,8 @@ type Gathered = Readonly<{
   packet: EvidencePacket;
   covered: ReadonlyArray<string>;
   labelOf: (issuer: string) => string;
+  // Reading stopped because the model failed, not for time or the turn's limit of calls.
+  modelFailed: boolean;
 }>;
 
 type Answered = Pick<ChatAnalystToolRuntimeResult, "blocks"> & Readonly<{
@@ -202,7 +204,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       ...(logToolCalls ? { logToolCalls: (calls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>) => logToolCalls(context.threadId, calls) } : {}),
     };
     const gathered = await gather(deps, job, signal);
-    if (!gathered?.toolCalls.some((entry) => entry.status === "ok")) return null;
+    if (!gathered?.toolCalls.some((entry) => entry.status === "ok")) return gathered?.modelFailed ? "model_failed" : null;
     const answered = await write(deps, job, gathered);
     const namedIds = new Set(named.map(issuerOf));
     const scope = await deps.financial.researchScope?.({ ...context, subjectPreResolutions: companies.resolved, subjectPreResolution: companies.resolved[0] }, reading)
@@ -459,6 +461,7 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
   };
 
   const template = policy.selection.prompt_template;
+  let modelFailed = false;
   const readingDeadline = new AbortController();
   const readTimer = setTimeout(() => readingDeadline.abort(new TurnDeadline()), (deps.deadlines ?? DEADLINES).readMs);
   const loop = await withLlmAbortSignal(AbortSignal.any([signal, readingDeadline.signal]), () => runToolLoop({
@@ -480,7 +483,9 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
     await Promise.allSettled([...inFlight]);
     if (!isModelFailure(reason)) throw reason;
     console.warn("[chat] the analyst agent's reading stopped early; it answers from what it read", reason);
-    notes.push(loopRefused ? UNFINISHED.calls : reason instanceof TurnDeadline ? UNFINISHED.time : UNFINISHED.model_failed);
+    const stop = loopRefused ? "calls" : reason instanceof TurnDeadline ? "time" : "model_failed";
+    modelFailed = stop === "model_failed";
+    notes.push(UNFINISHED[stop]);
     return null;
   }).finally(() => clearTimeout(readTimer));
   if (loop) notes.push(...stopNotes(loop, whoOf));
@@ -498,7 +503,7 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
     cutoff: asOf,
   });
   if (toolCalls.some((entry) => entry.status === "ok")) await job.logToolCalls?.(toolCalls);
-  return { conversation, toolCalls, certified, priced, analyst, packet, covered, labelOf };
+  return { conversation, toolCalls, certified, priced, analyst, packet, covered, labelOf, modelFailed };
 }
 
 async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promise<Answered> {
