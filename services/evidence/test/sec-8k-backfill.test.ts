@@ -5,6 +5,7 @@ import { backfillIssuer8k, type Form8kBackfillClient } from "../src/sec-8k-backf
 import { MemoryObjectStore } from "../src/object-store.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { cikMovesAfterRead } from "./cik-moves-after-read.ts";
 
 const IN_WINDOW = "0000320193-26-000011"; // 8-K, items 5.02,9.01 — ingest
 const STALE = "0000320193-25-000001"; //      8-K, out of window — skip
@@ -75,4 +76,22 @@ test("backfillIssuer8k ingests only in-window 8-K filings (items from the feed),
 
   const eventCount = await client.query<{ n: number }>(`select count(*)::int as n from events`);
   assert.equal(eventCount.rows[0]!.n, 2, "rerun does not duplicate events");
+});
+
+test("backfillIssuer8k stores nothing when the issuer's CIK moves to another issuer after it is read (#685)", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "form8k-backfill-cik-moved");
+  const client = await connectedClient(t, databaseUrl);
+  const [from, to] = (await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name, cik) values ('Apple ETN', '0000320193'), ('Apple Inc.', null) returning issuer_id::text as issuer_id`,
+  )).rows.map((row) => row.issuer_id);
+  const db = cikMovesAfterRead(client as unknown as QueryExecutor, { cik: "0000320193", from: from!, to: to! });
+  const deps = { db, objectStore: new MemoryObjectStore(), secClient: fakeClient({ n: 0 }) };
+  const result = await backfillIssuer8k(deps, { cik: 320193, sinceDays: 180, now: () => new Date("2026-06-20T00:00:00.000Z") });
+  assert.equal(result.ingested, 0);
+  const docs = await client.query(`select count(*)::int as n from documents`);
+  assert.equal(docs.rows[0]!.n, 0, "nothing written for the issuer that lost the CIK");
 });
