@@ -99,6 +99,7 @@ test('the dash is named for the figure it stands in for, with the reason as its 
     assert.equal(trigger.getAttribute('role'), 'img')
     assert.equal(trigger.getAttribute('aria-label'), 'P/E (diluted): not available')
     assert.equal(tip.textContent, 'No market price yet.')
+    assert.equal(tip.getAttribute('aria-hidden'), 'true', 'read once, as the description, not again as its own node')
   } finally {
     await done()
   }
@@ -111,6 +112,20 @@ test('Escape dismisses a reason opened by hover, wherever focus is', async () =>
     assert.doesNotMatch(tip.className, /sr-only/)
     await act(async () => { dom.window.document.body.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
     assert.match(tip.className, /sr-only/)
+  } finally {
+    await done()
+  }
+})
+
+test('a scroll in a scroller that does not hold the dash leaves its reason open', async () => {
+  const { dom, trigger, tip, at, done } = await renderPe()
+  try {
+    at(300)
+    await act(async () => { trigger.dispatchEvent(new dom.window.FocusEvent('focusin', { bubbles: true })) })
+    const other = dom.window.document.body.appendChild(dom.window.document.createElement('div'))
+    other.getBoundingClientRect = () => ({ left: 0, right: 100, top: 900, bottom: 1000, width: 100, height: 100, x: 0, y: 900, toJSON: () => ({}) }) as DOMRect
+    await act(async () => { other.dispatchEvent(new dom.window.Event('scroll')) })
+    assert.doesNotMatch(tip.className, /sr-only/)
   } finally {
     await done()
   }

@@ -38,6 +38,9 @@ export function GapReason({ label, reason, children }: { label: string; reason: 
     // Focus scrolls an off-screen trigger into view, so the tip follows its
     // trigger through a scroll and closes only once the trigger is out of view.
     const follow = (event: Event) => {
+      // A scroller that does not hold the trigger cannot move it.
+      const scroller = event.target as Partial<Node> | null
+      if (scroller && scroller !== document && scroller.contains && trigger.current && !scroller.contains(trigger.current)) return
       const box = trigger.current?.getBoundingClientRect()
       setAt(box && inView(box, event.target) ? place(box) : null)
     }
@@ -63,7 +66,8 @@ export function GapReason({ label, reason, children }: { label: string; reason: 
       onBlur={hide}
     >
       <span aria-hidden="true">{children}</span>
-      <span id={id} role="tooltip" className={open ? TIP : 'sr-only'} style={at ?? undefined}>
+      {/* Hidden from the tree: the trigger's description already reads it, once. */}
+      <span id={id} role="tooltip" aria-hidden="true" className={open ? TIP : 'sr-only'} style={at ?? undefined}>
         {reason}
       </span>
     </span>
