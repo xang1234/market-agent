@@ -175,6 +175,14 @@ test("the staleness limits hold at their edges: 15 months to the day, 5 weekdays
   assert.equal(valuePerShare(at({ price_date: "2026-11-06", call_date: "2026-11-16" }), ASSUMED, q("0.1")).kind, "outcome");
 });
 
+test("a market holiday is not a trading day: Christmas and New Year's Day leave 2026-12-24 five sessions before 2027-01-04 (#611)", () => {
+  const priced = (price_date: string) => valuePerShare(at({ price_date, call_date: "2027-01-04" }), ASSUMED, q("0.1"));
+  assert.deepEqual(["2026-12-24", "2026-12-23"].map((date) => {
+    const result = priced(date);
+    return "outcome" in result ? result.outcome : result.kind;
+  }), ["value", "stale_price"]);
+});
+
 test("a value past the exact-arithmetic limits is numeric_limit_exceeded, never a throw", () => {
   // (1 + 10^-1000)^5 needs a denominator of 10^5000, past the 4096-digit limit.
   const tiny = { coefficient: 1n, scale: 1000 };
