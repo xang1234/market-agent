@@ -357,6 +357,8 @@ test("a download for an issuer whose CIK the fill moves before it stores stores 
   const db = await etnAndParent(t, "fin-cik-fill-mid-download");
   const logged: string[] = [];
   let fill: CikFillReport | undefined;
+  const sources = async () => (await db.query<{ n: number }>(`select count(*)::int as n from sources`)).rows[0]!.n;
+  const sourcesBefore = await sources();
 
   const statement = await hydrateEtn(db, async () => {
     fill = await fillMissingCiks(db, ETN_CIKS, { error: (line: string) => logged.push(line) });
@@ -368,6 +370,7 @@ test("a download for an issuer whose CIK the fill moves before it stores stores 
     { legal_name: "Parent Alerian ETN", cik: null, facts: false, download: false },
     { legal_name: "Parent Co", cik: "990900", facts: false, download: false },
   ]);
+  assert.equal(await sources(), sourcesBefore, "no source row either");
   assert.equal(statement, null);
 });
 

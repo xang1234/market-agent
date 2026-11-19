@@ -445,7 +445,6 @@ async function storeFiling(
   clock: () => Date,
 ): Promise<{ statement: NormalizedStatement | null; filing: SecFilingRef | null }> {
   const asOf = input.fetched.evidence.completed_at;
-  if (source) await upsertSecFilingSource(db, source);
   const registry = await loadMetricRegistry(db, [
     ...[...(income ? [income] : []), ...companions].flatMap((entry) => entry.statement.lines.map((line) => line.metric_key)),
     ...(coverCount ? [coverCount.line.metric_key] : []),
@@ -455,12 +454,16 @@ async function storeFiling(
     ...mapCompanions(registry, companions, target, input.logger),
   ];
   const cover = coverCount && mapCoverCount(registry, coverCount, target, input.logger);
-  if (mapped.length === 0 && !cover) return { statement: income?.statement ?? null, filing: null };
+  if (mapped.length === 0 && !cover) {
+    if (source) await upsertSecFilingSource(db, source);
+    return { statement: income?.statement ?? null, filing: null };
+  }
   const stored = await withPinnedTransaction(db, async (client) => {
     // Each ingest of an issuer checks its inferences against what it reads, so
     // two at once could each re-store a figure the other refutes (#342).
     await client.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [input.issuerId]);
     if (!(await issuerHoldsCik(client, input.issuerId, input.cik))) return false;
+    if (source) await upsertSecFilingSource(client, source);
     // A download older than one already stored may lack the noncontrolling
     // interest the newer one reported, so it leaves every figure it would
     // infer as it is: none stored, none retired.
