@@ -159,7 +159,7 @@ cmd_import() {
   PATH="$NODE_APP:$PATH" caffeinate -ims "$ROOT/scripts/dev-shell.sh" reference-import "$@" > "$log" 2>&1 || code=$?
   line="$(grep '^weekly-reference' "$log" | tail -1 || true)"
   echo "$line"
-  grep -E '^(fill-ciks|issuer-splits|merged issuer)' "$log" || true
+  grep -E '^(fill-ciks|issuer-splits|merged issuer|skipped issuer)' "$log" || true
   echo "log: $log"
   if [[ "$code" != "0" ]]; then
     tail -5 "$log" >&2

@@ -12,7 +12,7 @@
 
 import { parseArgs } from "node:util";
 import { Pool } from "pg";
-import { goesBy } from "../../resolver/src/lookup.ts";
+import { goesBy, normalizeNameForLookup } from "../../resolver/src/lookup.ts";
 import { GOLDEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
 import { US_EQUITY_MICS } from "../../shared/src/identifiers.ts";
 import { logPoolErrors } from "../../shared/src/pool-client.ts";
@@ -20,7 +20,12 @@ import { loadSecTickerCiks } from "./cik-fill.ts";
 import { type TransactionalQueryExecutor, withPinnedTransaction } from "./pinned-transaction.ts";
 
 export type IssuerSplit = { keep: string; keep_name: string; drop: string; drop_name: string; basis: string };
+export type SkippedSplit = IssuerSplit & { constraint: string };
 type Queryable = Pick<TransactionalQueryExecutor, "query">;
+
+const UNIQUE_VIOLATION = "23505";
+// "Alphabet Inc. Class A Common Stock" names a class of Alphabet Inc's shares.
+const SHARE_CLASS = /^[\s.,-]+(?:(?:class|series) [a-z]\b|(?:common|capital|ordinary) (?:stock|shares)\b)/i;
 
 // Every column that names an issuer, with `kind` the column saying a row's id
 // names one. With the issuer, `unique` keys a row once, so the merged issuer's
@@ -28,8 +33,10 @@ type Queryable = Pick<TransactionalQueryExecutor, "query">;
 // the kept row takes `combine`'s columns, SQL over the kept row `k` and the
 // merged row `d`, and `referencedBy`'s rows that point at the merged row point
 // at the kept one. Append-only rows move by delete and insert. Any other clash
-// fails the repair. A test fails when the schema names an issuer in a column
-// not listed here.
+// leaves the pair apart for the repair to report, since each row holds what
+// the other lacks: two active facts for one period and source, two
+// definitions of one segment, one discovery run's candidate for each. A test
+// fails when the schema names an issuer in a column not listed here.
 export const ISSUER_KEYED_ROWS: ReadonlyArray<{
   table: string;
   id: string;
@@ -79,9 +86,10 @@ export const ISSUER_KEYED_ROWS: ReadonlyArray<{
 /**
  * Each issuer to merge, with the issuer it merges into. A frozen golden
  * issuer is never merged away. In order of precedence:
- * 1. an issuer listing a golden ticker merges into the golden issuer;
+ * 1. an issuer listing a golden ticker merges into the golden issuer, unless
+ *    it holds another CIK;
  * 2. a second holder of a CIK, with or without leading zeros, merges into the
- *    first (a golden one first);
+ *    first (a golden one first). A CIK of zeros names no filer;
  * 3. an issuer with no CIK, listing a ticker SEC files under another issuer's
  *    CIK, merges into it when the two go by one name. A share class does; an
  *    ETN a bank files under its own CIK, such as JPMorgan's AMJB, does not.
@@ -100,11 +108,12 @@ export async function findIssuerSplits(db: Queryable, ciks: ReadonlyMap<string, 
          from unnest($2::text[], $3::uuid[]) as g(ticker, issuer_id)
          join issuers k on k.issuer_id = g.issuer_id
          join listed d on d.ticker = g.ticker and d.issuer_id <> k.issuer_id
+        where d.cik is null or ltrim(d.cik, '0') = ltrim(k.cik, '0')
        union all
        select 2, k.issuer_id, d.issuer_id, 'holds CIK ' || ltrim(d.cik, '0'), false
          from issuers k
          join issuers d on ltrim(d.cik, '0') = ltrim(k.cik, '0') and d.issuer_id <> k.issuer_id
-        where k.issuer_id = any($3::uuid[]) or (k.created_at, k.issuer_id) < (d.created_at, d.issuer_id)
+        where ltrim(k.cik, '0') <> '' and (k.issuer_id = any($3::uuid[]) or (k.created_at, k.issuer_id) < (d.created_at, d.issuer_id))
        union all
        select 3, k.issuer_id, d.issuer_id, d.ticker || ' files under CIK ' || sec.cik, true
          from listed d
@@ -129,39 +138,60 @@ export async function findIssuerSplits(db: Queryable, ciks: ReadonlyMap<string, 
 
 /**
  * Merges every split in one transaction, rereading after each merge, since a
- * kept issuer can be another split's merged one. Then stores each CIK without
- * leading zeros, as every lookup by CIK writes it. The golden seed once wrote
- * them with zeros.
+ * kept issuer can be another split's merged one. A split whose rows clash
+ * where the merge cannot combine them stays apart, reported, and the rest
+ * still merge. Then stores each CIK without leading zeros, as every lookup by
+ * CIK writes it, unless a split left apart holds it too. The golden seed once
+ * wrote them with zeros.
  */
 export async function repairIssuerSplits(
   db: TransactionalQueryExecutor,
   ciks: ReadonlyMap<string, string>,
   out: Pick<Console, "log"> = console,
-): Promise<IssuerSplit[]> {
-  const { merged, stored } = await withPinnedTransaction(db, async (tx) => {
+): Promise<{ merged: IssuerSplit[]; skipped: SkippedSplit[] }> {
+  const { merged, skipped, stored } = await withPinnedTransaction(db, async (tx) => {
     const merged: IssuerSplit[] = [];
-    for (let [split] = await findIssuerSplits(tx, ciks); split; [split] = await findIssuerSplits(tx, ciks)) {
-      await mergeIssuer(tx, split);
-      merged.push(split);
+    const skipped: SkippedSplit[] = [];
+    const next = async () => (await findIssuerSplits(tx, ciks)).find((split) => !skipped.some(({ drop }) => drop === split.drop));
+    for (let split = await next(); split; split = await next()) {
+      await tx.query("savepoint merge");
+      try {
+        await mergeIssuer(tx, split);
+        merged.push(split);
+      } catch (error) {
+        if ((error as { code?: unknown }).code !== UNIQUE_VIOLATION) throw error;
+        await tx.query("rollback to savepoint merge");
+        skipped.push({ ...split, constraint: String((error as { constraint?: unknown }).constraint) });
+      }
+      await tx.query("release savepoint merge");
     }
     const { rows: stored } = await tx.query<{ issuer_id: string; legal_name: string; padded: string; cik: string }>(
       `update issuers iss set cik = ltrim(iss.cik, '0'), updated_at = now()
          from issuers old
-        where old.issuer_id = iss.issuer_id and iss.cik like '0%'
+        where old.issuer_id = iss.issuer_id and iss.cik like '0%' and ltrim(iss.cik, '0') <> ''
+          and not exists (select 1 from issuers other where other.issuer_id <> iss.issuer_id and ltrim(other.cik, '0') = ltrim(iss.cik, '0'))
         returning iss.issuer_id::text as issuer_id, iss.legal_name, old.cik as padded, iss.cik`,
     );
-    return { merged, stored };
+    return { merged, skipped, stored };
   });
   for (const split of merged) out.log(`merged issuer ${split.drop} (${split.drop_name}) into ${split.keep} (${split.keep_name}): ${split.basis}`);
+  for (const split of skipped) {
+    out.log(`skipped issuer ${split.drop} (${split.drop_name}) into ${split.keep} (${split.keep_name}): ${split.basis}; both hold a row under ${split.constraint}`);
+  }
   for (const row of stored.sort((a, b) => a.legal_name.localeCompare(b.legal_name))) {
     out.log(`stored CIK ${row.padded} of issuer ${row.issuer_id} (${row.legal_name}) as ${row.cik}`);
   }
-  return merged;
+  return { merged, skipped };
 }
 
 async function mergeIssuer(db: Queryable, { keep, drop }: IssuerSplit): Promise<void> {
   // A writer adding an instrument for the merged issuer waits, then fails on its key, instead of losing the row to the delete's cascade.
-  await db.query(`select 1 from issuers where issuer_id in ($1::uuid, $2::uuid) order by issuer_id for update`, [keep, drop]);
+  const { rows: locked } = await db.query<{ issuer_id: string; legal_name: string; former_names: string[] }>(
+    `select issuer_id::text as issuer_id, legal_name, former_names from issuers where issuer_id in ($1::uuid, $2::uuid) order by issuer_id for update`,
+    [keep, drop],
+  );
+  const k = locked.find((row) => row.issuer_id === keep)!;
+  const d = locked.find((row) => row.issuer_id === drop)!;
   for (const { table, id, kind, unique, combine, referencedBy, appendOnly } of ISSUER_KEYED_ROWS) {
     // Untyped, so each parameter takes its column's type, uuid or the text of claims.attributed_to_id.
     const of = (alias: string, param: string) => `${alias}.${id} = ${param}${kind ? ` and ${alias}.${kind} = 'issuer'` : ""}`;
@@ -189,13 +219,28 @@ async function mergeIssuer(db: Queryable, { keep, drop }: IssuerSplit): Promise<
     `delete from issuers where issuer_id = $1::uuid returning cik, lei, domicile, sector, industry`,
     [drop],
   );
+  // The kept issuer goes by the plain name of the two and still answers to every other. No golden name ends in a share class.
+  const legalName = isShareClassOf(k.legal_name, d.legal_name) ? d.legal_name : k.legal_name;
+  const known = new Set([legalName, ...k.former_names].map(normalizeNameForLookup));
+  const added = [k.legal_name, d.legal_name, ...d.former_names].filter((name) => {
+    const normalized = normalizeNameForLookup(name);
+    if (known.has(normalized)) return false;
+    known.add(normalized);
+    return true;
+  });
   await db.query(
     `update issuers
         set cik = coalesce(cik, $2), lei = coalesce(lei, $3), domicile = coalesce(domicile, $4),
-            sector = coalesce(sector, $5), industry = coalesce(industry, $6), updated_at = now()
+            sector = coalesce(sector, $5), industry = coalesce(industry, $6),
+            legal_name = $7, former_names = former_names || $8::jsonb, updated_at = now()
       where issuer_id = $1::uuid`,
-    [keep, dropped!.cik, dropped!.lei, dropped!.domicile, dropped!.sector, dropped!.industry],
+    [keep, dropped!.cik, dropped!.lei, dropped!.domicile, dropped!.sector, dropped!.industry, legalName, JSON.stringify(added)],
   );
+}
+
+function isShareClassOf(name: string, plain: string): boolean {
+  const stem = plain.replace(/\.$/, "");
+  return name.startsWith(stem) && SHARE_CLASS.test(name.slice(stem.length));
 }
 
 async function main(): Promise<void> {
@@ -208,10 +253,11 @@ async function main(): Promise<void> {
     if (values.census) {
       const splits = await findIssuerSplits(pool, ciks);
       for (const split of splits) console.log([split.drop, split.drop_name, "->", split.keep, split.keep_name, split.basis].join("\t"));
-      const { rows: [padded] } = await pool.query<{ n: number }>(`select count(*)::int as n from issuers where cik like '0%'`);
+      const { rows: [padded] } = await pool.query<{ n: number }>(`select count(*)::int as n from issuers where cik like '0%' and ltrim(cik, '0') <> ''`);
       console.log(`issuer-splits: ${splits.length} to merge, ${padded!.n} CIKs to store without leading zeros`);
     } else {
-      console.log(`issuer-splits: merged=${(await repairIssuerSplits(pool, ciks)).length}`);
+      const { merged, skipped } = await repairIssuerSplits(pool, ciks);
+      console.log(`issuer-splits: merged=${merged.length} skipped=${skipped.length}`);
     }
   } finally {
     await pool.end();

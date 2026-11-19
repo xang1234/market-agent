@@ -44,9 +44,21 @@ async function insertFact(db: Pool, issuerId: string, sourceId: string): Promise
   );
 }
 
+async function withoutForeignKeys(db: Pool, sql: string, params: unknown[]): Promise<void> {
+  const client = await db.connect();
+  try {
+    await client.query("begin");
+    await client.query("set local session_replication_role = replica");
+    await client.query(sql, params);
+    await client.query("commit");
+  } finally {
+    client.release();
+  }
+}
+
 const identity = (db: Pool) =>
   db.query(
-    `select coalesce(l.ticker, '-') as ticker, iss.issuer_id::text as issuer_id, iss.legal_name, iss.cik
+    `select coalesce(l.ticker, '-') as ticker, iss.issuer_id::text as issuer_id, iss.legal_name, iss.former_names, iss.cik
        from issuers iss
        left join instruments i on i.issuer_id = iss.issuer_id
        left join listings l on l.instrument_id = i.instrument_id
@@ -79,7 +91,12 @@ test("each split pair merges onto the issuer with the SEC identity, and a rerun 
   await insertListedIssuer(db, id(6), "JPMorgan Chase Financial Company LLC Alerian MLP Index ETNs", null, "AMJB");
   // Golden AMD is whole, but holds its CIK with the zeros no lookup writes.
   await insertListedIssuer(db, GOLDEN_ISSUER_IDS.AMD, "Advanced Micro Devices, Inc.", "0000002488", "AMD");
-  const ciks = new Map([["AAPL", "320193"], ["NVDA", "1045810"], ["GOOGL", "1652044"], ["GOOG", "1652044"], ["JPM", "19617"], ["AMJB", "19617"]]);
+  // Even where SEC files its ticker under Apple's CIK, "Apple Holdings" names another company than Apple Inc.
+  await insertListedIssuer(db, id(7), "Apple Holdings", null, "APLH");
+  // A CIK of zeros names no filer.
+  await insertListedIssuer(db, id(8), "Zero One", "0", "ZRO1");
+  await insertListedIssuer(db, id(9), "Zero Two", "00", "ZRO2");
+  const ciks = new Map([["AAPL", "320193"], ["NVDA", "1045810"], ["GOOGL", "1652044"], ["GOOG", "1652044"], ["JPM", "19617"], ["AMJB", "19617"], ["APLH", "320193"]]);
 
   assert.deepEqual(
     (await findIssuerSplits(db, ciks)).map(({ keep, drop, basis }) => ({ keep, drop, basis })),
@@ -91,7 +108,7 @@ test("each split pair merges onto the issuer with the SEC identity, and a rerun 
   );
 
   const lines: string[] = [];
-  assert.equal((await repairIssuerSplits(db, ciks, { log: (line: string) => lines.push(line) })).length, 3);
+  assert.equal((await repairIssuerSplits(db, ciks, { log: (line: string) => lines.push(line) })).merged.length, 3);
   assert.deepEqual(lines, [
     `merged issuer ${id(1)} (Apple Inc) into ${GOLDEN_ISSUER_IDS.AAPL} (Apple Inc.): lists golden AAPL`,
     `merged issuer ${id(2)} (Nvidia Corp) into ${GOLDEN_ISSUER_IDS.NVDA} (NVIDIA Corporation): lists golden NVDA`,
@@ -101,19 +118,23 @@ test("each split pair merges onto the issuer with the SEC identity, and a rerun 
     `stored CIK 0001045810 of issuer ${GOLDEN_ISSUER_IDS.NVDA} (NVIDIA Corporation) as 1045810`,
   ]);
   const merged = await identity(db);
+  // GOOGL's issuer takes GOOG's plain name, "Apple Inc" adds nothing to "Apple Inc.", and each other merged name stays a name the issuer goes by.
   assert.deepEqual(merged, [
-    { ticker: "AAPL", issuer_id: GOLDEN_ISSUER_IDS.AAPL, legal_name: "Apple Inc.", cik: "320193" },
-    { ticker: "AMD", issuer_id: GOLDEN_ISSUER_IDS.AMD, legal_name: "Advanced Micro Devices, Inc.", cik: "2488" },
-    { ticker: "AMJB", issuer_id: id(6), legal_name: "JPMorgan Chase Financial Company LLC Alerian MLP Index ETNs", cik: null },
-    { ticker: "GOOG", issuer_id: id(3), legal_name: "Alphabet Inc. Class A Common Stock", cik: "1652044" },
-    { ticker: "GOOGL", issuer_id: id(3), legal_name: "Alphabet Inc. Class A Common Stock", cik: "1652044" },
-    { ticker: "JPM", issuer_id: id(5), legal_name: "JPMorgan Chase & Co", cik: "19617" },
-    { ticker: "NVDA", issuer_id: GOLDEN_ISSUER_IDS.NVDA, legal_name: "NVIDIA Corporation", cik: "1045810" },
+    { ticker: "AAPL", issuer_id: GOLDEN_ISSUER_IDS.AAPL, legal_name: "Apple Inc.", former_names: [], cik: "320193" },
+    { ticker: "AMD", issuer_id: GOLDEN_ISSUER_IDS.AMD, legal_name: "Advanced Micro Devices, Inc.", former_names: [], cik: "2488" },
+    { ticker: "AMJB", issuer_id: id(6), legal_name: "JPMorgan Chase Financial Company LLC Alerian MLP Index ETNs", former_names: [], cik: null },
+    { ticker: "APLH", issuer_id: id(7), legal_name: "Apple Holdings", former_names: [], cik: null },
+    { ticker: "GOOG", issuer_id: id(3), legal_name: "Alphabet Inc", former_names: ["Alphabet Inc. Class A Common Stock"], cik: "1652044" },
+    { ticker: "GOOGL", issuer_id: id(3), legal_name: "Alphabet Inc", former_names: ["Alphabet Inc. Class A Common Stock"], cik: "1652044" },
+    { ticker: "JPM", issuer_id: id(5), legal_name: "JPMorgan Chase & Co", former_names: [], cik: "19617" },
+    { ticker: "NVDA", issuer_id: GOLDEN_ISSUER_IDS.NVDA, legal_name: "NVIDIA Corporation", former_names: ["Nvidia Corp"], cik: "1045810" },
+    { ticker: "ZRO1", issuer_id: id(8), legal_name: "Zero One", former_names: [], cik: "0" },
+    { ticker: "ZRO2", issuer_id: id(9), legal_name: "Zero Two", former_names: [], cik: "00" },
   ]);
 
   assert.deepEqual(await findIssuerSplits(db, ciks), []);
   const rerun: string[] = [];
-  assert.deepEqual(await repairIssuerSplits(db, ciks, { log: (line: string) => rerun.push(line) }), [], "a rerun merges nothing");
+  assert.deepEqual(await repairIssuerSplits(db, ciks, { log: (line: string) => rerun.push(line) }), { merged: [], skipped: [] }, "a rerun merges nothing");
   assert.deepEqual(rerun, []);
   assert.deepEqual(await identity(db), merged);
 });
@@ -127,9 +148,23 @@ test("a merge moves every row keyed by the merged issuer, and the kept issuer's 
   const db = await connectedPool(t, databaseUrl);
   await insertListedIssuer(db, id(1), "Alphabet Inc. Class A Common Stock", "1652044", "GOOGL");
   await insertListedIssuer(db, id(2), "Alphabet Inc", null, "GOOG");
-  await db.query(`update issuers set sector = 'Communication Services' where issuer_id = $1`, [id(2)]);
+  await db.query(`update issuers set sector = 'Communication Services', former_names = '["Google Inc."]' where issuer_id = $1`, [id(2)]);
   const vendor = await insertSource(db, "xang1234_stock_screener");
   await insertFact(db, id(2), vendor);
+  // Each issuer holds its own reading of one profile field from one source, its own companyfacts download, and its own certified P/E.
+  await db.query(
+    `insert into issuer_profile_enrichments (issuer_id, field_name, field_value, source_id, provider, retrieved_at)
+     values ($1, 'industry', 'Internet Content & Information', $3, 'vendor', now()), ($2, 'industry', 'Interactive Media', $3, 'vendor', now())`,
+    [id(1), id(2), vendor],
+  );
+  await db.query(`insert into sec_issuer_downloads (issuer_id, newest_filed) values ($1, '2026-10-29'), ($2, '2026-07-24')`, [id(1), id(2)]);
+  // A certified valuation's snapshot and run play no part in a merge.
+  await withoutForeignKeys(
+    db,
+    `insert into screener_certified_valuations (issuer_id, valuation, knowledge_cutoff, session_date, value, snapshot_id, financial_run_id, financial_unit_id)
+     values ($1, 'pe_ratio', now(), '2026-11-06', 25, gen_random_uuid(), gen_random_uuid(), 'pe'), ($2, 'pe_ratio', now(), '2026-11-06', 24, gen_random_uuid(), gen_random_uuid(), 'pe')`,
+    [id(1), id(2)],
+  );
   const { rows: [user] } = await db.query<{ user_id: string }>(`insert into users (email) values ('owner@example.com') returning user_id::text as user_id`);
   const { rows: lists } = await db.query<{ watchlist_id: string }>(
     `insert into watchlists (user_id, name, mode) values ($1, 'Both', 'manual'), ($1, 'GOOG only', 'manual') returning watchlist_id::text as watchlist_id`,
@@ -163,8 +198,23 @@ test("a merge moves every row keyed by the merged issuer, and the kept issuer's 
 
   await repairIssuerSplits(db, new Map([["GOOGL", "1652044"], ["GOOG", "1652044"]]), quiet);
 
-  const { rows: issuers } = await db.query(`select issuer_id::text as issuer_id, cik, sector from issuers`);
-  assert.deepEqual(issuers, [{ issuer_id: id(1), cik: "1652044", sector: "Communication Services" }]);
+  const { rows: issuers } = await db.query(`select issuer_id::text as issuer_id, legal_name, former_names, cik, sector from issuers`);
+  assert.deepEqual(issuers, [
+    { issuer_id: id(1), legal_name: "Alphabet Inc", former_names: ["Alphabet Inc. Class A Common Stock", "Google Inc."], cik: "1652044", sector: "Communication Services" },
+  ]);
+  const { rows: aliases } = await db.query(`select normalized_name from issuer_aliases where issuer_id = $1 order by 1`, [id(1)]);
+  assert.deepEqual(aliases.map((alias) => alias.normalized_name), ["alphabet inc", "alphabet inc class a common stock", "google inc"]);
+  const { rows: kept } = await db.query(
+    `select 'certified P/E' as row, issuer_id::text as issuer_id, value::text as value from screener_certified_valuations
+     union all select 'download', issuer_id::text, newest_filed::text from sec_issuer_downloads
+     union all select 'industry', issuer_id::text, field_value from issuer_profile_enrichments
+     order by 1`,
+  );
+  assert.deepEqual(kept, [
+    { row: "certified P/E", issuer_id: id(1), value: "25" },
+    { row: "download", issuer_id: id(1), value: "2026-10-29" },
+    { row: "industry", issuer_id: id(1), value: "Internet Content & Information" },
+  ]);
   const { rows: members } = await db.query(`select w.name, m.subject_id::text as subject_id from watchlist_members m join watchlists w using (watchlist_id) order by w.name`);
   assert.deepEqual(members, [{ name: "Both", subject_id: id(1) }, { name: "GOOG only", subject_id: id(1) }]);
   const { rows: captures } = await db.query(`select issuer_id::text as issuer_id, captured_on::text as captured_on, raw_value from consensus_captures order by captured_on`);
@@ -220,16 +270,19 @@ test("a clash adds up both issuers' positions and mention counts and keeps their
      values ($1, 'issuer', $2, jsonb_build_array($4::text)), ($1, 'issuer', $3, jsonb_build_array($5::text, $4::text))`,
     [theme!.theme_id, id(1), id(2), claimA, claimB],
   );
-  // Both issuers registered Alphabet's IR feed; a release came in through GOOG's registration.
+  // Both issuers registered Alphabet's IR feed. Each took in the Q1 release, and only GOOG's took in Q2.
   const { rows: feeds } = await db.query<{ ir_source_id: string }>(
     `insert into ir_source_registry (issuer_id, source_type, url) values ($1, 'rss', 'https://abc.xyz/investor/rss'), ($2, 'rss', 'https://abc.xyz/investor/rss')
      returning ir_source_id::text as ir_source_id`,
     [id(1), id(2)],
   );
+  const releases = [await insertDocument(db, sec, "press_release"), await insertDocument(db, sec, "press_release"), await insertDocument(db, sec, "press_release")];
   await db.query(
     `insert into ir_document_assets (ir_source_id, issuer_id, document_id, source_id, asset_kind, canonical_url, discovered_at, fetched_at)
-     values ($1, $2, $3, $4, 'press_release', 'https://abc.xyz/investor/2026-q2.pdf', now(), now())`,
-    [feeds[1]!.ir_source_id, id(2), await insertDocument(db, sec, "press_release"), sec],
+     values ($1, $3, $5, $8, 'press_release', 'https://abc.xyz/investor/2026-q1.pdf', now(), now()),
+            ($2, $4, $6, $8, 'press_release', 'https://abc.xyz/investor/2026-q1.pdf', now(), now()),
+            ($2, $4, $7, $8, 'press_release', 'https://abc.xyz/investor/2026-q2.pdf', now(), now())`,
+    [feeds[0]!.ir_source_id, feeds[1]!.ir_source_id, id(1), id(2), ...releases, sec],
   );
 
   await repairIssuerSplits(db, new Map([["GOOGL", "1652044"], ["GOOG", "1652044"]]), quiet);
@@ -242,8 +295,104 @@ test("a clash adds up both issuers' positions and mention counts and keeps their
     `select subject_id::text as subject_id, (select array_agg(e order by e) from jsonb_array_elements_text(rationale_claim_ids) e) as rationale from theme_memberships`,
   );
   assert.deepEqual(memberships, [{ subject_id: id(1), rationale: [claimA, claimB] }]);
-  const { rows: assets } = await db.query(`select issuer_id::text as issuer_id, ir_source_id::text as ir_source_id from ir_document_assets`);
-  assert.deepEqual(assets, [{ issuer_id: id(1), ir_source_id: feeds[0]!.ir_source_id }]);
+  const { rows: assets } = await db.query(
+    `select issuer_id::text as issuer_id, ir_source_id::text as ir_source_id, document_id::text as document_id from ir_document_assets order by canonical_url`,
+  );
+  assert.deepEqual(assets, [
+    { issuer_id: id(1), ir_source_id: feeds[0]!.ir_source_id, document_id: releases[0] },
+    { issuer_id: id(1), ir_source_id: feeds[0]!.ir_source_id, document_id: releases[2] },
+  ]);
+});
+
+test("a pair holding rows the merge cannot combine stays apart and is reported, and the other pairs still merge", { timeout: 120_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for issuer split coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fin-issuer-merge-skip");
+  const db = await connectedPool(t, databaseUrl);
+  const vendor = await insertSource(db, "xang1234_stock_screener");
+  await db.query(
+    `insert into issuers (issuer_id, legal_name, cik) values ($1, 'Apple Inc.', '320193'), ($2, 'NVIDIA Corporation', '0001045810'), ($3, 'Advanced Micro Devices, Inc.', '0000002488')`,
+    [GOLDEN_ISSUER_IDS.AAPL, GOLDEN_ISSUER_IDS.NVDA, GOLDEN_ISSUER_IDS.AMD],
+  );
+  // A ticker can pass to another company. This one lists AAPL under its own CIK.
+  await insertListedIssuer(db, id(1), "Other Co", "999999", "AAPL");
+  // A provider row moved NVDA's listing to a second holder of its CIK, and both defined one segment.
+  await insertListedIssuer(db, id(2), "Nvidia Corp", "1045810", "NVDA");
+  await db.query(
+    `insert into segments (issuer_id, axis, name, definition_as_of) values ($1, 'business', 'Data Center', '2025-01-26'), ($2, 'business', 'Data Center', '2025-01-26')`,
+    [GOLDEN_ISSUER_IDS.NVDA, id(2)],
+  );
+  // Both of Alphabet's issuers hold the vendor's revenue for one fiscal year.
+  await insertListedIssuer(db, id(3), "Alphabet Inc. Class A Common Stock", "1652044", "GOOGL");
+  await insertListedIssuer(db, id(4), "Alphabet Inc", null, "GOOG");
+  await insertFact(db, id(3), vendor);
+  await insertFact(db, id(4), vendor);
+  // One discovery run found both of Berkshire's classes. Its campaign and run play no part in a merge.
+  await insertListedIssuer(db, id(5), "Berkshire Hathaway Inc", "1067983", "BRK.A");
+  await insertListedIssuer(db, id(6), "Berkshire Hathaway Inc. Class B", null, "BRK.B");
+  await withoutForeignKeys(
+    db,
+    `insert into discovery_candidates (candidate_id, run_id, lead_key, issuer_id, listing_id, origins, mechanism_ids, lead_hit_ids, reason_codes, first_seen, seed, primary_domain_lead, name, state)
+     select gen_random_uuid(), $1, l.ticker, i.issuer_id, l.listing_id, '[]', '[]', '[]', '[]', '[1, 2]', false, false, l.ticker, 'discovered'
+       from instruments i join listings l using (instrument_id) where i.issuer_id = any($2::uuid[])`,
+    ["39000000-0000-4000-8000-00000000b001", [id(5), id(6)]],
+  );
+  // A second holder of AMD's CIK with nothing that clashes.
+  await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'Advanced Micro Devices', '2488')`, [id(7)]);
+  // A CIK of zeros names no filer, so it has no form without them.
+  await insertListedIssuer(db, id(8), "Zero Co", "000", "ZRO");
+  const ciks = new Map([["AAPL", "320193"], ["NVDA", "1045810"], ["GOOGL", "1652044"], ["GOOG", "1652044"], ["BRK.A", "1067983"], ["BRK.B", "1067983"]]);
+
+  const skipped = [
+    `skipped issuer ${id(2)} (Nvidia Corp) into ${GOLDEN_ISSUER_IDS.NVDA} (NVIDIA Corporation): lists golden NVDA; both hold a row under segments_issuer_id_axis_name_definition_as_of_key`,
+    `skipped issuer ${id(4)} (Alphabet Inc) into ${id(3)} (Alphabet Inc. Class A Common Stock): GOOG files under CIK 1652044; both hold a row under facts_active_reported_identity_idx`,
+    `skipped issuer ${id(6)} (Berkshire Hathaway Inc. Class B) into ${id(5)} (Berkshire Hathaway Inc): BRK.B files under CIK 1067983; both hold a row under discovery_candidate_issuer`,
+  ];
+  const lines: string[] = [];
+  await repairIssuerSplits(db, ciks, { log: (line: string) => lines.push(line) });
+  assert.deepEqual(lines, [
+    `merged issuer ${id(7)} (Advanced Micro Devices) into ${GOLDEN_ISSUER_IDS.AMD} (Advanced Micro Devices, Inc.): holds CIK 2488`,
+    ...skipped,
+    `stored CIK 0000002488 of issuer ${GOLDEN_ISSUER_IDS.AMD} (Advanced Micro Devices, Inc.) as 2488`,
+  ]);
+  // NVIDIA's golden CIK keeps its zeros while Nvidia Corp holds the same CIK without them.
+  const repaired = await identity(db);
+  assert.deepEqual(
+    repaired.map(({ ticker, issuer_id, cik }) => ({ ticker, issuer_id, cik })),
+    [
+      { ticker: "-", issuer_id: GOLDEN_ISSUER_IDS.NVDA, cik: "0001045810" },
+      { ticker: "-", issuer_id: GOLDEN_ISSUER_IDS.AMD, cik: "2488" },
+      { ticker: "-", issuer_id: GOLDEN_ISSUER_IDS.AAPL, cik: "320193" },
+      { ticker: "AAPL", issuer_id: id(1), cik: "999999" },
+      { ticker: "BRK.A", issuer_id: id(5), cik: "1067983" },
+      { ticker: "BRK.B", issuer_id: id(6), cik: null },
+      { ticker: "GOOG", issuer_id: id(4), cik: null },
+      { ticker: "GOOGL", issuer_id: id(3), cik: "1652044" },
+      { ticker: "NVDA", issuer_id: id(2), cik: "1045810" },
+      { ticker: "ZRO", issuer_id: id(8), cik: "000" },
+    ],
+  );
+  const { rows: held } = await db.query(
+    `select 'fact' as row, subject_id::text as issuer_id from facts
+     union all select 'segment', issuer_id::text from segments
+     union all select 'candidate', issuer_id::text from discovery_candidates
+     order by 1, 2`,
+  );
+  assert.deepEqual(held, [
+    { row: "candidate", issuer_id: id(5) },
+    { row: "candidate", issuer_id: id(6) },
+    { row: "fact", issuer_id: id(3) },
+    { row: "fact", issuer_id: id(4) },
+    { row: "segment", issuer_id: id(2) },
+    { row: "segment", issuer_id: GOLDEN_ISSUER_IDS.NVDA },
+  ]);
+
+  const rerun: string[] = [];
+  await repairIssuerSplits(db, ciks, { log: (line: string) => rerun.push(line) });
+  assert.deepEqual(rerun, skipped, "a rerun reports the same pairs and merges nothing");
+  assert.deepEqual(await identity(db), repaired);
 });
 
 test("the merge names every column that names an issuer", { timeout: 120_000 }, async (t) => {
