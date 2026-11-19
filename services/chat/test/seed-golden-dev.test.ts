@@ -51,6 +51,34 @@ test("a provider row for a golden ticker keeps its listing on the golden issuer 
   assert.deepEqual(rows, [{ issuer_id: nvda!.issuer_id, cik_holders: 1 }]);
 });
 
+test("a database seeded with padded golden CIKs still starts, and stores each CIK no other issuer holds without its zeros (#597)", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-padded-ciks");
+  const client = await connectedClient(t, databaseUrl);
+  assert.equal(await seedGoldenDevDatabase(databaseUrl), "seeded");
+  // As 8705e088 seeded it, with leading zeros on each CIK and proofs at that revision's dataset version.
+  const before597 = "d3d136070c5d85c0f2e09063b862950608e35d2ede7c0481e220e7b040293b72";
+  await client.query(`delete from source_publication_attestations where source_id = $1::uuid`, [GOLDEN_SOURCE_ID]);
+  await client.query(`update sources set content_hash = $2 where source_id = $1::uuid`, [GOLDEN_SOURCE_ID, `sha256:${before597}`]);
+  await client.query(
+    `insert into source_publication_attestations
+       (source_id, source_version_hash, available_no_later_than, timing_precision, source_timezone, proof_method, proof_ref, proof_hash, mapping_version)
+     values ($1::uuid, $2, $3::timestamptz, 'instant', 'UTC', 'fixture_declaration', 'golden_fixture:dataset.ts', $2, 'golden-fixture-declaration.v1')`,
+    [GOLDEN_SOURCE_ID, before597, GOLDEN_AS_OF],
+  );
+  await client.query(`update issuers set cik = lpad(cik, 10, '0') where issuer_id = any($1::uuid[])`, [GOLDEN_COMPANIES.map((c) => c.issuer_id)]);
+  // A provider row already put NVDA's CIK on a second issuer. repair:issuer-splits merges it, then strips the zeros.
+  await client.query(`insert into issuers (legal_name, cik) values ('Nvidia Corp', '1045810')`);
+
+  assert.equal(await seedGoldenDevDatabase(databaseUrl), "already-seeded");
+  const { rows } = await client.query(`select legal_name, cik from issuers order by cik`);
+  assert.deepEqual(rows, [
+    { legal_name: "NVIDIA Corporation", cik: "0001045810" },
+    { legal_name: "Nvidia Corp", cik: "1045810" },
+    { legal_name: "Advanced Micro Devices, Inc.", cik: "2488" },
+    { legal_name: "Apple Inc.", cik: "320193" },
+  ]);
+});
+
 test("assertNoGoldenDataset passes on a live database and rejects one holding the frozen dataset", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-assert-absent");
   await assertNoGoldenDataset(databaseUrl);

@@ -37,6 +37,14 @@ export async function seedGoldenDevDatabase(databaseUrl: string): Promise<"seede
     if (rowCount) {
       await client.query("begin");
       try {
+        // Databases seeded before #597 hold CIKs with leading zeros. A CIK another issuer already holds keeps them until repair:issuer-splits merges that issuer.
+        await client.query(
+          `update issuers iss set cik = g.cik, updated_at = now()
+             from unnest($1::uuid[], $2::text[]) as g(issuer_id, cik)
+            where iss.issuer_id = g.issuer_id and iss.cik <> g.cik and ltrim(iss.cik, '0') = g.cik
+              and not exists (select 1 from issuers other where other.cik = g.cik)`,
+          [GOLDEN_COMPANIES.map((c) => c.issuer_id), GOLDEN_COMPANIES.map((c) => c.cik)],
+        );
         await seedFiledClaims(client);
         await seedGoldenProofs(client);
         await client.query("commit");

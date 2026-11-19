@@ -233,8 +233,10 @@ for (const fact of GOLDEN_ISSUER_FACTS) {
   if (!Number.isSafeInteger(fact.value_usd)) throw new Error(`golden dataset: ${fact.key} is not a whole number of USD, so its decimal text is not exact`);
 }
 
+// CIKs hash in the ten-digit form the dataset stored before #597, so a database proven then keeps its version.
 export function goldenFixtureVersion(asOf: string): string {
-  return createHash("sha256").update(JSON.stringify({ GOLDEN_AS_OF: asOf, GOLDEN_COMPANIES })).digest("hex");
+  const companies = GOLDEN_COMPANIES.map((company) => ({ ...company, cik: company.cik.padStart(10, "0") }));
+  return createHash("sha256").update(JSON.stringify({ GOLDEN_AS_OF: asOf, GOLDEN_COMPANIES: companies })).digest("hex");
 }
 const GOLDEN_SOURCE_VERSION = goldenFixtureVersion(GOLDEN_AS_OF);
 
