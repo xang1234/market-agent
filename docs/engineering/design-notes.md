@@ -308,15 +308,16 @@ its own stored observation and its own bound-input variant. `market_cap` and `pe
   `publication_time_unknown` (only ones without a known time), `source_class_not_allowed` (none from a granted
   class), `precision_unverified` (a token outside the numeric policy), `conflicting_evidence` (the latest prices
   disagree), and `stale_input`, then the split gaps of #387. A price is stale when it traded before the last regular session the cutoff has closed
-  (`lastRegularSessionDate`, `services/market/src/ytd-window.ts`): weekdays, closing at 16:00 exchange time
-  (`SESSION_CLOSE_MINUTES`). A Friday close is current until Monday's session closes.
+  (`lastRegularSessionDate`, `services/market/src/ytd-window.ts`): sessions on the listing's calendar, closing at 16:00
+  exchange time (`SESSION_CLOSE_MINUTES`). The calendar (`services/financial-core/src/session-calendar.ts`) is every
+  weekday, less NYSE's holidays for a New York listing (#611). A Friday close is current until Monday's session closes.
 - **Seal:** the snapshot verifier reloads the observation. A missing one fails the input
   (`price_observation_unavailable`), and so does one whose token, times, listing, response, or currency no longer
   match (`price_observation_changed`). The verifier resolves the subject's listing again (`listing_changed`) and
   rebuilds the restatement from that listing's current splits (`splits_changed`), as for EPS. It re-checks the price's
   class against the run's grant, as for every input (below). The seal cites the price's source.
-- **Limits:** weekdays stand in for an exchange calendar, so until the session after a market holiday closes, the
-  price before the holiday reads as stale.
+- **Limits:** an unscheduled closure (a day of mourning, a storm) counts as a session, so until the session after it
+  closes, the price before it reads as stale. A listing outside New York trades every weekday.
 
 ## Market cap and P/E (#444)
 
