@@ -162,8 +162,7 @@ export async function repairIssuerSplits(
     for (let split = await next(); split; split = await next()) {
       await tx.query("savepoint merge");
       try {
-        await mergeIssuer(tx, split);
-        merged.push(split);
+        if (await mergeIssuer(tx, split)) merged.push(split);
       } catch (error) {
         if ((error as { code?: unknown }).code !== UNIQUE_VIOLATION) throw error;
         await tx.query("rollback to savepoint merge");
@@ -190,7 +189,7 @@ export async function repairIssuerSplits(
   return { merged, skipped };
 }
 
-async function mergeIssuer(db: Queryable, { keep, drop }: IssuerSplit): Promise<void> {
+async function mergeIssuer(db: Queryable, { keep, drop }: IssuerSplit): Promise<boolean> {
   // storeFiling's lock, taken before the row locks its writes wait on, so a filing stored for either issuer meanwhile moves and retires the golden figures it reports.
   for (const id of [keep, drop].sort()) await db.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [id]);
   // A writer adding an instrument for the merged issuer waits, then fails on its key, instead of losing the row to the delete's cascade.
@@ -198,8 +197,10 @@ async function mergeIssuer(db: Queryable, { keep, drop }: IssuerSplit): Promise<
     `select issuer_id::text as issuer_id, legal_name, former_names from issuers where issuer_id in ($1::uuid, $2::uuid) order by issuer_id for update`,
     [keep, drop],
   );
-  const k = locked.find((row) => row.issuer_id === keep)!;
-  const d = locked.find((row) => row.issuer_id === drop)!;
+  const k = locked.find((row) => row.issuer_id === keep);
+  const d = locked.find((row) => row.issuer_id === drop);
+  // A repair running beside this one merged an issuer away while this one waited on its locks. The next search sees what is left.
+  if (!k || !d) return false;
   for (const { table, id, kind, unique, combine, referencedBy, appendOnly } of ISSUER_KEYED_ROWS) {
     // Untyped, so each parameter takes its column's type, uuid or the text of claims.attributed_to_id.
     const of = (alias: string, param: string) => `${alias}.${id} = ${param}${kind ? ` and ${alias}.${kind} = 'issuer'` : ""}`;
@@ -245,6 +246,7 @@ async function mergeIssuer(db: Queryable, { keep, drop }: IssuerSplit): Promise<
       where issuer_id = $1::uuid`,
     [keep, dropped!.cik, dropped!.lei, dropped!.domicile, dropped!.sector, dropped!.industry, legalName, JSON.stringify(added)],
   );
+  return true;
 }
 
 function isShareClassOf(name: string, plain: string): boolean {

@@ -1268,7 +1268,9 @@ async function retireRefutedInferences(db: FundamentalsQueryExecutor, issuerId: 
 // repair:issuer-splits keeps the live issuer of a golden ticker and moves the
 // golden dataset's illustrative figures onto it (issuer-splits.ts). Each one a
 // filing reports for its metric and period is retired as a stale fact is. The
-// filing's figure supersedes it, and it stays the one known at an earlier cutoff.
+// filing's figure supersedes it. A statement read at an earlier cutoff still
+// returns it, but the financial engine skips a retired fact whatever the cutoff,
+// so a Call at the golden cutoff shows a gap for that period.
 export async function retireGoldenFacts(db: FundamentalsQueryExecutor, issuerId: UUID): Promise<void> {
   if (FROZEN_ISSUER_IDS.has(issuerId)) return;
   const { rows } = await db.query<{ fact_id: string; superseded_by: string }>(

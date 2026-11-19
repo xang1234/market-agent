@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Pool } from "pg";
+import { setTimeout as sleep } from "node:timers/promises";
+import type { Pool, PoolClient } from "pg";
 import { bootstrapDatabase, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { GOLDEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
 import { findIssuerSplits, ISSUER_KEYED_ROWS, repairIssuerSplits } from "../src/issuer-splits.ts";
@@ -30,7 +31,7 @@ async function insertDocument(db: Pool, sourceId: string, kind = "article"): Pro
   return document!.document_id;
 }
 
-async function insertFact(db: Pool, issuerId: string, sourceId: string): Promise<void> {
+async function insertFact(db: Pool | PoolClient, issuerId: string, sourceId: string): Promise<void> {
   await db.query(
     `insert into metrics (metric_key, display_name, unit_class, aggregation, interpretation, canonical_source_class)
      values ('revenue', 'Revenue', 'currency', 'sum', 'higher_is_better', 'gaap') on conflict (metric_key) do nothing`,
@@ -54,6 +55,20 @@ async function withoutForeignKeys(db: Pool, sql: string, params: unknown[]): Pro
   } finally {
     client.release();
   }
+}
+
+// Returns once n sessions wait on an advisory lock, or once work settles without waiting.
+async function lockWaiters(db: Pool, n: number, work: Promise<unknown>): Promise<void> {
+  let settled = false;
+  work.then(() => (settled = true), () => (settled = true));
+  const waiting = async () => (await db.query<{ n: number }>(`select count(*)::int as n from pg_locks where locktype = 'advisory' and not granted`)).rows[0]!.n;
+  while (!settled && (await waiting()) < n) await sleep(20);
+}
+
+// Two issuers of one CIK, the older first, so the newer merges into it.
+async function insertCikPair(db: Pool): Promise<void> {
+  await db.query(`insert into issuers (issuer_id, legal_name, cik, created_at) values ($1, 'Apple Inc.', '320193', '2020-01-01')`, [id(1)]);
+  await insertListedIssuer(db, id(2), "Apple Inc", "0000320193", "AAPL");
 }
 
 const identity = (db: Pool) =>
@@ -545,4 +560,77 @@ test("the merge names every column that names an issuer", { timeout: 120_000 }, 
   ];
   const named = ISSUER_KEYED_ROWS.map((row) => `${row.table}.${row.kind ?? row.id}`).concat(leftAlone);
   assert.deepEqual(rows.map((row) => row.key), named.sort());
+});
+
+test("a fresh frozen stack's golden issuers, each listing its own ticker, merge nothing", { timeout: 120_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for issuer split coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fin-issuer-merge-frozen");
+  const db = await connectedPool(t, databaseUrl);
+  await insertListedIssuer(db, GOLDEN_ISSUER_IDS.NVDA, "NVIDIA Corporation", "1045810", "NVDA");
+  await insertListedIssuer(db, GOLDEN_ISSUER_IDS.AMD, "Advanced Micro Devices, Inc.", "2488", "AMD");
+  await insertListedIssuer(db, GOLDEN_ISSUER_IDS.AAPL, "Apple Inc.", "320193", "AAPL");
+  const ciks = new Map([["NVDA", "1045810"], ["AMD", "2488"], ["AAPL", "320193"]]);
+  const before = await identity(db);
+
+  assert.deepEqual(await findIssuerSplits(db, ciks), []);
+  assert.deepEqual(await repairIssuerSplits(db, ciks, quiet), { merged: [], skipped: [] });
+  assert.deepEqual(await identity(db), before);
+});
+
+test("a filing stored for the merged issuer while the repair runs moves with it", { timeout: 120_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for issuer split coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fin-issuer-merge-filing-drop");
+  const db = await connectedPool(t, databaseUrl);
+  await insertCikPair(db);
+  const sec = await insertSource(db, "sec_edgar");
+  const writer = await db.connect();
+  let repair: Promise<unknown>;
+  try {
+    await writer.query("begin");
+    await writer.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [id(2)]);
+    await insertFact(writer, id(2), sec);
+    repair = repairIssuerSplits(db, new Map([["AAPL", "320193"]]), quiet);
+    await lockWaiters(db, 1, repair);
+    await writer.query("commit");
+  } finally {
+    writer.release();
+  }
+  await repair;
+
+  assert.deepEqual((await db.query(`select subject_id::text as issuer_id from facts`)).rows, [{ issuer_id: id(1) }]);
+  assert.deepEqual((await db.query(`select issuer_id::text as issuer_id from issuers`)).rows, [{ issuer_id: id(1) }]);
+});
+
+test("a repair that waited while another merged its pair skips the pair", { timeout: 120_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for issuer split coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fin-issuer-merge-twice");
+  const db = await connectedPool(t, databaseUrl);
+  await insertCikPair(db);
+  const ciks = new Map([["AAPL", "320193"]]);
+  const writer = await db.connect();
+  let repairs: Promise<Array<{ merged: unknown[] }>>;
+  try {
+    await writer.query("begin");
+    await writer.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [id(1)]);
+    const first = repairIssuerSplits(db, ciks, quiet);
+    await lockWaiters(db, 1, first);
+    const second = repairIssuerSplits(db, ciks, quiet);
+    repairs = Promise.all([first, second]);
+    await lockWaiters(db, 2, repairs);
+    await writer.query("commit");
+  } finally {
+    writer.release();
+  }
+
+  assert.deepEqual((await repairs).map(({ merged }) => merged.length).sort(), [0, 1]);
+  assert.deepEqual((await db.query(`select issuer_id::text as issuer_id from issuers`)).rows, [{ issuer_id: id(1) }]);
 });
