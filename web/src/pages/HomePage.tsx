@@ -29,6 +29,7 @@ import { severityFillClass } from '../blocks/severityTone.ts'
 import { StackedBar, StackedBarLegend, type StackedSegment } from '../symbol/StackedBar.tsx'
 import { useAuth } from '../shell/useAuth.ts'
 import { EmptyState } from '../ui/EmptyState.tsx'
+import { Timestamp } from '../evidence/Readable.tsx'
 import { FailureNotice } from '../ui/FailureNotice.tsx'
 import { PageHeader } from '../ui/PageHeader.tsx'
 import { Skeleton } from '../ui/Skeleton.tsx'
@@ -272,7 +273,7 @@ function FindingRow({ card }: { card: HomeFindingCardSummary }) {
     <div className="flex flex-col">
       <span className="text-sm font-medium">{card.headline}</span>
       <span className="mt-0.5 text-xs text-muted">
-        <span className="capitalize">{card.severity}</span> · <span className="num">{card.support_count}</span> sources · {card.created_at}
+        <span className="capitalize">{card.severity}</span> · <span className="num">{card.support_count}</span> sources · <Timestamp value={card.created_at} />
       </span>
     </div>
   )

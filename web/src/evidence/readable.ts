@@ -68,7 +68,7 @@ export function shortId(text: string): string {
 }
 
 /** Server prose with each embedded UUID shortened and each timestamp in words. */
-export function readableText(text: string, options: { timeZone?: string } = {}): string {
+export function readableText(text: string, options: Parameters<typeof readableDate>[1] = {}): string {
   return text
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/giu, (id) => shortId(id))
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})( \(UTC\))?/gu, (stamp, _s, _f, _z, utc: string | undefined) =>

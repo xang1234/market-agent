@@ -4,6 +4,7 @@ import { quoteRowView, type QuoteRowState, type QuoteRowView } from './quoteRowV
 import type { QuoteSnapshot } from './quote.ts'
 import type { ResolvedSubject, SubjectRef } from './search.ts'
 import type { VisibleFetchState } from '../fetch/resource.ts'
+import { readableDate } from '../evidence/readable.ts'
 
 const APPLE_LISTING_ID = '11111111-1111-4111-a111-111111111111'
 const APPLE_INSTRUMENT_ID = '44444444-4444-4444-a444-444444444444'
@@ -42,7 +43,7 @@ const APPLE_READY_VIEW: QuoteRowView = {
     text: '$184.32',
     direction: 'up',
     percent: '+1.00%',
-    freshness: 'regular · delayed 15m · 2026-04-27T20:00:00Z',
+    freshness: `regular · delayed 15m · ${readableDate('2026-04-27T20:00:00Z')}`,
   },
 }
 

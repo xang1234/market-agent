@@ -6,6 +6,7 @@ import { severityFillClass } from '../blocks/severityTone.ts'
 import { StackedBar, StackedBarLegend, type StackedSegment } from '../symbol/StackedBar.tsx'
 import { VerticalBars } from '../symbol/VerticalBars.tsx'
 import { EmptyState } from '../ui/EmptyState.tsx'
+import { Timestamp } from '../evidence/Readable.tsx'
 import { PAGE_PANEL_CLASS, PANEL_TITLE_CLASS, SECTION_LABEL_CLASS } from '../ui/pageStyles.ts'
 
 export type FactReviewCandidate = Record<string, unknown>
@@ -127,7 +128,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject, onApproveA
                         Stale {formatDuration(item.age_seconds!)}
                       </span>
                     ) : null}
-                    <span>{item.created_at}</span>
+                    <Timestamp value={item.created_at} />
                   </div>
                 </div>
                 <div className="flex shrink-0 gap-2">

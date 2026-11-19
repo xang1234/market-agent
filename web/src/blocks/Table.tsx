@@ -7,6 +7,9 @@ import { provenanceRow, toTsv } from './tableCopy.ts'
 type TableProps = { block: TableBlock }
 
 export function Table({ block }: TableProps): ReactElement {
+  // Numeric by the cell's JSON type, never by parsing text: a formatted string like "$85.8B" stays left.
+  const numeric = block.columns.map((_, index) => block.rows.length > 0 && block.rows.every((row) => typeof row[index] === 'number'))
+  const align = (index: number) => (numeric[index] ? ' text-right' : '')
   return (
     <div
       data-testid={`block-table-${block.id}`}
@@ -23,7 +26,7 @@ export function Table({ block }: TableProps): ReactElement {
               <th
                 key={`${block.id}-col-${index}`}
                 scope="col"
-                className="border-b border-line px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted"
+                className={`border-b border-line px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted${align(index)}`}
               >
                 {column}
               </th>
@@ -40,7 +43,7 @@ export function Table({ block }: TableProps): ReactElement {
               {row.map((cell, cellIndex) => (
                 <td
                   key={`${block.id}-row-${rowIndex}-cell-${cellIndex}`}
-                  className="num px-3 py-2 text-fg"
+                  className={`num px-3 py-2 text-fg${align(cellIndex)}`}
                 >
                   {formatTableCell(cell)}
                 </td>

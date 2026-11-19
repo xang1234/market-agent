@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import type { DonutSegment, SegmentDonutBlock } from './types.ts'
 import { ChartCard } from './ChartCard.tsx'
+import { readableDate } from '../evidence/readable.ts'
 
 type SegmentDonutProps = { block: SegmentDonutBlock }
 
@@ -43,7 +44,7 @@ function SegmentRow({ blockId, index, segment }: SegmentRowProps): ReactElement 
           dateTime={segment.definition_as_of}
           className="text-xs text-muted"
         >
-          as of {segment.definition_as_of}
+          as of {readableDate(segment.definition_as_of, { storedDate: true })}
         </time>
       ) : null}
     </li>

@@ -103,7 +103,7 @@ test('agentLastRunLabel reports Never run, Running now, or completed/failed time
         },
       }),
     ),
-    /Completed · 2026-05-05T11:05/,
+    /^Completed · May 5, 2026, \d{2}:\d{2}$/,
   )
 })
 
@@ -112,8 +112,8 @@ test('savedScreenSubtitle joins filter summary and updated timestamp', () => {
     screen_id: SCREEN_ID,
     name: 'Test',
     filter_summary: '3 filters · universe, market',
-    updated_at: '2026-05-05T00:00:00.000Z',
+    updated_at: '2026-05-05T12:00:00.000Z',
     replay_target: { kind: 'screen', id: SCREEN_ID },
   }
-  assert.equal(savedScreenSubtitle(row), '3 filters · universe, market · updated 2026-05-05T00:00:00.000Z')
+  assert.match(savedScreenSubtitle(row), /^3 filters · universe, market · updated May 5, 2026, \d{2}:\d{2}$/)
 })
