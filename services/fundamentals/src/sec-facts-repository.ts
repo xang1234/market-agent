@@ -50,6 +50,7 @@ import { recordSecFilingAcceptances, type SecFilingRef } from "./sec-acceptance.
 import { factActiveSql, factKnownAtSql } from "../../evidence/src/fact-activity.ts";
 import { FundamentalsDataUnavailableError } from "./availability.ts";
 import { FROZEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
+import { issuerHoldsCik } from "../../shared/src/identifiers.ts";
 import {
   FISCAL_PERIODS,
   normalizedStatement,
@@ -455,10 +456,11 @@ async function storeFiling(
   ];
   const cover = coverCount && mapCoverCount(registry, coverCount, target, input.logger);
   if (mapped.length === 0 && !cover) return { statement: income?.statement ?? null, filing: null };
-  await withPinnedTransaction(db, async (client) => {
+  const stored = await withPinnedTransaction(db, async (client) => {
     // Each ingest of an issuer checks its inferences against what it reads, so
     // two at once could each re-store a figure the other refutes (#342).
     await client.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [input.issuerId]);
+    if (!(await issuerHoldsCik(client, input.issuerId, input.cik))) return false;
     // A download older than one already stored may lack the noncontrolling
     // interest the newer one reported, so it leaves every figure it would
     // infer as it is: none stored, none retired.
@@ -511,7 +513,12 @@ async function storeFiling(
     if (accessionNumber) {
       await recordSecFetchPublication(client, { sourceId, accessionNumber, evidence: input.fetched.evidence });
     }
+    return true;
   });
+  if (!stored) {
+    input.logger.warn(`sec: issuer ${input.issuerId} no longer holds CIK ${input.cik}; its download is not stored`);
+    return { statement: null, filing: null };
+  }
   return { statement: income?.statement ?? null, filing: accessionNumber ? { sourceId, accessionNumber } : null };
 }
 

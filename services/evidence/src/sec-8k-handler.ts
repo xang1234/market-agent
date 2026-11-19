@@ -14,6 +14,7 @@ import { createEvent, createEventSubject } from "./event-repo.ts";
 import { createClaim } from "./claim-repo.ts";
 import { createClaimArgument } from "./claim-argument-repo.ts";
 import { resolveIssuerIdByCik } from "./sec-issuer-resolve.ts";
+import { issuerHoldsCik } from "../../shared/src/identifiers.ts";
 import { classify8kHeader, type Item8kClassification } from "./sec-8k-item-taxonomy.ts";
 import type { FetchFilingResult } from "./sec-edgar.ts";
 
@@ -27,6 +28,7 @@ export type Form8kFilingRef = Pick<FilingIndexEntry, "cik" | "accession" | "form
 // handler (items from the .txt header) and the per-issuer backfill (items from
 // the submissions feed) write identical rows. One source + document + issuer
 // mention, then one event per item and a material_event claim per claimable item.
+// Stores nothing, and returns false, when the issuer no longer holds the CIK.
 export async function persist8kFiling(
   deps: IngestDocumentTransactionDeps,
   args: {
@@ -35,8 +37,12 @@ export async function persist8kFiling(
     entry: Form8kFilingRef;
     items: ReadonlyArray<Item8kClassification>;
   },
-): Promise<void> {
+): Promise<boolean> {
   const { issuerId, fetched, entry, items } = args;
+  if (!(await issuerHoldsCik(deps.tx.db, issuerId, entry.cik))) {
+    console.warn(`[sec-8k] skip ${entry.accession}: issuer ${issuerId} no longer holds CIK ${entry.cik}`);
+    return false;
+  }
   const occurredAt = `${entry.filedDate}T00:00:00Z`;
 
   const source = await createSource(deps.tx.db, {
@@ -109,6 +115,7 @@ export async function persist8kFiling(
       role: "subject",
     });
   }
+  return true;
 }
 
 export const handle8k = async (entry: Form8kFilingRef, deps: FormHandlerDeps) => {
@@ -136,8 +143,7 @@ export const handle8k = async (entry: Form8kFilingRef, deps: FormHandlerDeps) =>
     return { ingested: false };
   }
 
-  await withTransaction(deps.db, async (tx) => {
-    await persist8kFiling({ tx, objectStore: deps.objectStore }, { issuerId, fetched, entry, items });
-  });
-  return { ingested: true };
+  const ingested = await withTransaction(deps.db, (tx) =>
+    persist8kFiling({ tx, objectStore: deps.objectStore }, { issuerId, fetched, entry, items }));
+  return { ingested };
 };
