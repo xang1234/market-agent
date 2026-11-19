@@ -1311,6 +1311,23 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.deepEqual([next, financial.taken.length], [1, 0]);
   });
 
+  await t.test("a turn whose model fails before anything is read goes on to the next runner, told the model failed (#695)", async () => {
+    const told: Array<true | undefined> = [];
+    for (const router of [failing(1, scripted([])), scripted([{ text: "DONE" }])]) {
+      const turnId = randomUUID();
+      const coordinator = createChatCoordinator({
+        analystAgent: agentOf(router, OBSERVE_F1),
+        persistAssistantMessage: persist,
+        runner: async (context) => {
+          told.push(context.modelFailed);
+          context.emit("turn.completed", {});
+        },
+      });
+      await coordinator.getOrCreateTurn({ ...base, runId: turnId, turnId, userIntent: "How has AAA's stock done this year?" }).completed;
+    }
+    assert.deepEqual(told, [true, undefined]);
+  });
+
   const meteredReading = (reading: Awaited<ReturnType<ReturnType<typeof readingOf>>>) => async (_question: string, beforeModelCall?: () => void) => {
     beforeModelCall?.();
     made.readings += 1;

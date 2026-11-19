@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -371,6 +371,44 @@ test("an evidence follow-up to an engine answer reads each company it explained 
   await t.test("a company whose explanations are bound to no quarter, or to another, gets none of them in the quarter's place", async () => {
     assert.deepEqual(await read([gamma], [figures(gamma)]), []);
   });
+});
+
+test("a turn whose model failed before anything was read says so, never that no claims are on file (#695)", {
+  skip: !dockerAvailable(),
+  timeout: 120_000,
+}, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-local-runtime-model-failed");
+  const llmEnv = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1", LITELLM_MODEL: "openai/gpt-4.1" };
+  const previous = Object.fromEntries(["CHAT_DATABASE_URL", "CHAT_LOCAL_TOOL_EXECUTOR", ...Object.keys(llmEnv)].map((key) => [key, process.env[key]]));
+  process.env.CHAT_DATABASE_URL = databaseUrl;
+  delete process.env.CHAT_LOCAL_TOOL_EXECUTOR;
+  Object.assign(process.env, llmEnv);
+  registerLifoCleanup(t, async () => {
+    await closeLocalRuntimePoolForTests();
+    for (const [key, value] of Object.entries(previous)) restoreEnv(key, value);
+  });
+  const client = await connectedClient(t, databaseUrl);
+  await seedUser(client);
+  const thread = await createThread(client, USER_ID, { title: "Model failed" });
+  const answer = async (modelFailed: boolean) => {
+    const turnId = randomUUID();
+    const result = await analystToolRuntime({
+      threadId: thread.thread_id,
+      runId: turnId,
+      turnId,
+      userId: USER_ID,
+      bundleId: "single_subject_analysis",
+      userIntent: "How has it done this year?",
+      emit: (() => ({}) as never),
+      ...(modelFailed ? { modelFailed } : {}),
+    });
+    return JSON.stringify(result.blocks);
+  };
+
+  const failed = await answer(true);
+  assert.ok(failed.includes("The model could not be reached, so nothing was read for this question. Try again later."), failed);
+  assert.ok(!failed.includes("No research claims are on file"), failed);
+  assert.ok((await answer(false)).includes("No research claims are on file for this question."), "an empty read with a working model is said as before");
 });
 
 test("a message's own word reaches the resolver as written, so \"hello\" is no Hello Group Inc (#668)", {
