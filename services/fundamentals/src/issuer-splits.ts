@@ -22,31 +22,57 @@ import { type TransactionalQueryExecutor, withPinnedTransaction } from "./pinned
 export type IssuerSplit = { keep: string; keep_name: string; drop: string; drop_name: string; basis: string };
 type Queryable = Pick<TransactionalQueryExecutor, "query">;
 
-// Every column that keys a row by issuer. With the issuer, `unique` keys a row
-// once, so a row the kept issuer already holds under it is the merged issuer's
-// copy and goes. Append-only rows move by delete and insert. Any other clash
-// fails the repair. A test fails when the schema keys rows by issuer in a
-// column not named here.
-export const ISSUER_KEYED_ROWS: ReadonlyArray<{ table: string; id: string; kind?: string; unique?: ReadonlyArray<string>; appendOnly?: true }> = [
+// Every column that names an issuer, with `kind` the column saying a row's id
+// names one. With the issuer, `unique` keys a row once, so the merged issuer's
+// row clashes with the kept issuer's row under it and goes. Before it goes,
+// the kept row takes `combine`'s columns, SQL over the kept row `k` and the
+// merged row `d`, and `referencedBy`'s rows that point at the merged row point
+// at the kept one. Append-only rows move by delete and insert. Any other clash
+// fails the repair. A test fails when the schema names an issuer in a column
+// not listed here.
+export const ISSUER_KEYED_ROWS: ReadonlyArray<{
+  table: string;
+  id: string;
+  kind?: string;
+  unique?: ReadonlyArray<string>;
+  combine?: Readonly<Record<string, string>>;
+  referencedBy?: { table: string; column: string };
+  appendOnly?: true;
+}> = [
   { table: "instruments", id: "issuer_id" },
   { table: "insider_transactions", id: "issuer_id" },
   { table: "segments", id: "issuer_id" },
   { table: "discovery_candidates", id: "issuer_id" },
   { table: "issuer_profile_enrichments", id: "issuer_id", unique: ["field_name", "source_id"] },
-  { table: "ir_source_registry", id: "issuer_id", unique: ["url"] },
+  { table: "ir_source_registry", id: "issuer_id", unique: ["url"], referencedBy: { table: "ir_document_assets", column: "ir_source_id" } },
   { table: "ir_document_assets", id: "issuer_id", unique: ["canonical_url"] },
-  { table: "institutional_holdings", id: "issuer_id", unique: ["filer_cik", "filing_period"] },
+  // Each class of a filing's position is a distinct CUSIP, which sec-13f-resolve.ts sums per issuer.
+  { table: "institutional_holdings", id: "issuer_id", unique: ["filer_cik", "filing_period"], combine: { shares: "k.shares + d.shares", value_usd: "k.value_usd + d.value_usd" } },
   { table: "screener_certified_valuations", id: "issuer_id", unique: ["valuation"] },
   { table: "sec_issuer_downloads", id: "issuer_id", unique: [] },
   { table: "consensus_captures", id: "issuer_id", unique: ["source_id", "captured_on", "field_key"], appendOnly: true },
   { table: "facts", id: "subject_id", kind: "subject_kind" },
-  { table: "mentions", id: "subject_id", kind: "subject_kind", unique: ["document_id", "prominence"] },
+  // As linkDocumentMentions adds up one subject's mentions in a document.
+  {
+    table: "mentions",
+    id: "subject_id",
+    kind: "subject_kind",
+    unique: ["document_id", "prominence"],
+    combine: { mention_count: "k.mention_count + d.mention_count", confidence: "greatest(k.confidence, d.confidence)" },
+  },
+  { table: "claims", id: "attributed_to_id", kind: "attributed_to_type" },
   { table: "claim_arguments", id: "subject_id", kind: "subject_kind" },
   { table: "entity_impacts", id: "subject_id", kind: "subject_kind" },
   { table: "event_subjects", id: "subject_id", kind: "subject_kind" },
   { table: "watchlist_members", id: "subject_id", kind: "subject_kind", unique: ["watchlist_id"] },
   { table: "portfolio_holdings", id: "subject_id", kind: "subject_kind" },
-  { table: "theme_memberships", id: "subject_id", kind: "subject_kind", unique: ["theme_id"] },
+  {
+    table: "theme_memberships",
+    id: "subject_id",
+    kind: "subject_kind",
+    unique: ["theme_id"],
+    combine: { rationale_claim_ids: "coalesce((select jsonb_agg(distinct e) from jsonb_array_elements(k.rationale_claim_ids || d.rationale_claim_ids) e), '[]')" },
+  },
   { table: "chat_threads", id: "primary_subject_id", kind: "primary_subject_kind" },
 ];
 
@@ -136,17 +162,26 @@ export async function repairIssuerSplits(
 async function mergeIssuer(db: Queryable, { keep, drop }: IssuerSplit): Promise<void> {
   // A writer adding an instrument for the merged issuer waits, then fails on its key, instead of losing the row to the delete's cascade.
   await db.query(`select 1 from issuers where issuer_id in ($1::uuid, $2::uuid) order by issuer_id for update`, [keep, drop]);
-  for (const { table, id, kind, unique, appendOnly } of ISSUER_KEYED_ROWS) {
-    const of = (alias: string, param: string) => `${alias}.${id} = ${param}::uuid${kind ? ` and ${alias}.${kind} = 'issuer'` : ""}`;
+  for (const { table, id, kind, unique, combine, referencedBy, appendOnly } of ISSUER_KEYED_ROWS) {
+    // Untyped, so each parameter takes its column's type, uuid or the text of claims.attributed_to_id.
+    const of = (alias: string, param: string) => `${alias}.${id} = ${param}${kind ? ` and ${alias}.${kind} = 'issuer'` : ""}`;
     if (unique) {
-      const same = unique.map((column) => ` and k.${column} is not distinct from d.${column}`).join("");
-      await db.query(`delete from ${table} d where ${of("d", "$2")} and exists (select 1 from ${table} k where ${of("k", "$1")}${same})`, [keep, drop]);
+      const clash = `${of("k", "$1")} and ${of("d", "$2")}${unique.map((column) => ` and k.${column} is not distinct from d.${column}`).join("")}`;
+      if (combine) {
+        const set = Object.entries(combine).map(([column, value]) => `${column} = ${value}`).join(", ");
+        await db.query(`update ${table} k set ${set} from ${table} d where ${clash}`, [keep, drop]);
+      }
+      if (referencedBy) {
+        const { table: referrer, column } = referencedBy;
+        await db.query(`update ${referrer} r set ${column} = k.${column} from ${table} k, ${table} d where r.${column} = d.${column} and ${clash}`, [keep, drop]);
+      }
+      await db.query(`delete from ${table} d using ${table} k where ${clash}`, [keep, drop]);
     }
     await db.query(
       appendOnly
         ? `with moved as (delete from ${table} d where ${of("d", "$2")} returning d.*)
            insert into ${table} select (jsonb_populate_record(null::${table}, to_jsonb(moved) || jsonb_build_object('${id}', $1::uuid))).* from moved`
-        : `update ${table} d set ${id} = $1::uuid where ${of("d", "$2")}`,
+        : `update ${table} d set ${id} = $1 where ${of("d", "$2")}`,
       [keep, drop],
     );
   }
