@@ -65,7 +65,7 @@ export function AgentDetailPanels({ findings, assessments, detailsError, runs, r
               <li key={item.run_activity_id} className="rounded-lg border border-line p-3 text-sm">
                 <div className="flex items-start justify-between gap-3">
                   <span className="font-medium capitalize text-fg">{item.stage}</span>
-                  <span className="text-xs text-muted">{item.ts}</span>
+                  <span className="text-xs text-muted"><Timestamp value={item.ts} /></span>
                 </div>
                 <p className="mt-2 text-fg-soft">{item.summary}</p>
               </li>

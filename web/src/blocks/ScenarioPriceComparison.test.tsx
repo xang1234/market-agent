@@ -38,11 +38,15 @@ test('a linked comparison labels the price source-linked, the differences condit
   const price = document.querySelector('[data-testid$="-price"]')!
   assert.match(price.textContent ?? '', /Latest stored completed close: 2024-06-07/)
   assert.deepEqual(labels(price), ['source_linked'])
-  for (const text of ['SCEN (USD)', '2024-06-07T20:00:00.000Z', '2024-06-07T20:15:00.000Z', 'session_close 5f000000-0000-4000-8000-0000000003d1', `sha256 ${'d'.repeat(64)}`, 'unadjusted', 'Same share basis']) {
+  for (const text of ['SCEN (USD)', 'session_close 5f000000-0000-4000-8000-0000000003d1', `sha256 ${'d'.repeat(64)}`, 'unadjusted', 'Same share basis']) {
     assert.ok(price.textContent?.includes(text), text)
   }
   const provenance = Object.fromEntries([...price.querySelectorAll('dt')].map((term) => [term.textContent, term.nextElementSibling?.textContent]))
   assert.equal(provenance['Source'], 'polygon_market', 'the source by its stored name')
+  // Times read in words, the exact stamp kept on the <time> (#410).
+  const times = [...price.querySelectorAll('time')].map((time) => time.getAttribute('dateTime'))
+  assert.deepEqual(times, ['2024-06-07T20:00:00.000Z', '2024-06-07T20:15:00.000Z', times[2]])
+  assert.doesNotMatch(price.textContent ?? '', /\d{4}-\d{2}-\d{2}T\d{2}:/)
   assert.equal(provenance['Source record'], `00000000-0000-4000-a000-000000000009 (sha256 ${'d'.repeat(64)})`)
   const rows = [...document.querySelectorAll('tbody tr')].map((row) => [...row.querySelectorAll('th, td')].map((cell) => cell.childNodes[0]?.textContent))
   assert.deepEqual(rows, [
