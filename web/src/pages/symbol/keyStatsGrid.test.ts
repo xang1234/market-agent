@@ -104,3 +104,12 @@ test('a blank fundamental cell carries the reason its warning names, never the r
   assert.equal(byKey.get('gross_margin')?.reason, undefined, 'no warning, no invented reason')
   assert.equal(byKey.get('prev_close')?.reason, undefined)
 })
+
+test('a blank cell takes its reason from the first warning this client can explain', () => {
+  const pe = { ...stat('pe_ratio', 0, 'multiple'), value_num: null, warnings: [
+    { code: 'a_future_code' as KeyStat['warnings'][number]['code'], message: 'not yet known to the client' },
+    { code: 'missing_market_price' as const, message: 'pe_ratio requires a market price input.' },
+  ] }
+  const cells = buildKeyStatsGrid({ bars: null, stats: envelope([pe]), prevClose: null, currency: 'USD' })
+  assert.equal(cells.find((c) => c.key === 'pe_ratio')?.reason, 'No market price yet.')
+})

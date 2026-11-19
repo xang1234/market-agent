@@ -25,7 +25,7 @@ export function KeyStatsGrid({ cells }: { cells: ReadonlyArray<KeyStatCell> }): 
             {cell.label}
           </dt>
           <dd className={`num text-sm font-medium ${cell.value === null ? 'text-faint' : 'text-fg'}`}>
-            {cell.value ?? (cell.reason ? <GapReason reason={cell.reason}>—</GapReason> : '—')}
+            {cell.value ?? (cell.reason ? <GapReason label={cell.label} reason={cell.reason}>—</GapReason> : '—')}
           </dd>
         </div>
       ))}

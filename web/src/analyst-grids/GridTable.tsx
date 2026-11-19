@@ -55,7 +55,7 @@ export function GridTable({ columns, detail }: GridTableProps): ReactElement {
             <tr key={row.grid_row_id} className="border-t border-line">
               <td className="px-3 py-2 text-fg">{row.subject_label ?? row.subject_ref.id}</td>
               {shown.map((col) => (
-                <GridCell key={col.id} cell={byKey.get(cellKey(row.grid_row_id, col.id))} />
+                <GridCell key={col.id} label={`${col.label}, ${row.subject_label ?? row.subject_ref.id}`} cell={byKey.get(cellKey(row.grid_row_id, col.id))} />
               ))}
             </tr>
           ))}
@@ -108,7 +108,7 @@ function gapText(cell: GridCellDetail | undefined): string | null {
  * verified; an evidence-backed value opens the evidence inspector; anything
  * else is text. Real buttons, so cells are reachable by keyboard.
  */
-function GridCell({ cell }: { cell: GridCellDetail | undefined }): ReactElement {
+function GridCell({ label, cell }: { label: string; cell: GridCellDetail | undefined }): ReactElement {
   const inspector = useEvidenceInspector();
   const tone = cell?.display?.tone ? TONE_CLASS[cell.display.tone] : { text: "", bg: "" };
   const certified = certifiedResult(cell);
@@ -134,7 +134,7 @@ function GridCell({ cell }: { cell: GridCellDetail | undefined }): ReactElement 
     >
       {gap ? (
         <span className="num text-muted">
-          <GapReason reason={gap}>{cellText(cell)}</GapReason>
+          <GapReason label={label} reason={gap}>{cellText(cell)}</GapReason>
         </span>
       ) : open ? (
         <button

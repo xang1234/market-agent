@@ -61,3 +61,57 @@ test('a reason for a dash near the bottom of the window opens above it, on scree
     restore()
   }
 })
+
+async function renderPe() {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  const root = createRoot(dom.window.document.getElementById('root')!)
+  await act(async () => {
+    root.render(<KeyStatsGrid cells={[{ key: 'pe_ratio', label: 'P/E (diluted)', value: null, reason: 'No market price yet.' }]} />)
+  })
+  const trigger = dom.window.document.querySelector('[data-testid="key-stat-pe_ratio"] [tabindex="0"]') as HTMLElement
+  const tip = dom.window.document.getElementById(trigger.getAttribute('aria-describedby')!)!
+  const at = (top: number) => { trigger.getBoundingClientRect = () => ({ left: 10, right: 30, top, bottom: top + 20, width: 20, height: 20, x: 10, y: top, toJSON: () => ({}) }) as DOMRect }
+  const done = async () => { await act(async () => root.unmount()); restore() }
+  return { dom, trigger, tip, at, done }
+}
+
+test('focusing a dash below the fold keeps its reason through the scroll that brings it into view', async () => {
+  const { dom, trigger, tip, at, done } = await renderPe()
+  try {
+    at(dom.window.innerHeight + 200)
+    await act(async () => { trigger.dispatchEvent(new dom.window.FocusEvent('focusin', { bubbles: true })) })
+    at(300)
+    await act(async () => { dom.window.document.dispatchEvent(new dom.window.Event('scroll')) })
+    assert.doesNotMatch(tip.className, /sr-only/, 'the focus-induced scroll does not close it')
+    assert.equal(tip.style.top, '320px', 'it follows the dash to where the scroll put it')
+    at(-100)
+    await act(async () => { dom.window.document.dispatchEvent(new dom.window.Event('scroll')) })
+    assert.match(tip.className, /sr-only/, 'scrolling the dash out of view closes it')
+  } finally {
+    await done()
+  }
+})
+
+test('the dash is named for the figure it stands in for, with the reason as its description', async () => {
+  const { trigger, tip, done } = await renderPe()
+  try {
+    assert.equal(trigger.getAttribute('role'), 'img')
+    assert.equal(trigger.getAttribute('aria-label'), 'P/E (diluted): not available')
+    assert.equal(tip.textContent, 'No market price yet.')
+  } finally {
+    await done()
+  }
+})
+
+test('Escape dismisses a reason opened by hover, wherever focus is', async () => {
+  const { dom, trigger, tip, done } = await renderPe()
+  try {
+    await act(async () => { trigger.dispatchEvent(new dom.window.MouseEvent('mouseover', { bubbles: true })) })
+    assert.doesNotMatch(tip.className, /sr-only/)
+    await act(async () => { dom.window.document.body.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    assert.match(tip.className, /sr-only/)
+  } finally {
+    await done()
+  }
+})

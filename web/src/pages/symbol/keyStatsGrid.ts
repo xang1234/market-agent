@@ -75,7 +75,7 @@ export function buildKeyStatsGrid(input: KeyStatsGridInput): ReadonlyArray<KeySt
     const stat = statByKey.get(key)
     if (!stat) return { key, label: statLabel(key), value: null }
     if (stat.value_num !== null) return { key, label: statLabel(key), value: formatStatValue(stat) }
-    const reason = gapReason(stat.warnings[0]?.code)
+    const reason = stat.warnings.map((warning) => gapReason(warning.code)).find((text) => text !== null)
     return { key, label: statLabel(key), value: null, ...(reason ? { reason } : {}) }
   })
 

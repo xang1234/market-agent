@@ -140,7 +140,7 @@ test("a blank cell shows its coverage reason in words, from the sealed block whe
     ],
   };
   const html = renderToStaticMarkup(<GridTable columns={COLUMNS} detail={detail} />);
-  assert.match(html, /tabindex="0" aria-describedby="[^"]+"/, "the blank is keyboard reachable");
+  assert.match(html, /tabindex="0" role="img" aria-label="[^"]+" aria-describedby="[^"]+"/, "the blank is keyboard reachable");
   assert.match(html, /role="tooltip"[^>]*>No filings or documents for this company yet\.</);
   assert.match(html, /role="tooltip"[^>]*>A required input or calculation is unavailable\.</);
   assert.doesNotMatch(html, /no_documents|no documents|blocked_by_dependency/, "never a raw code");
@@ -164,4 +164,17 @@ test("a certified gap cell shows its reason, not an inspect button, even with an
   );
   assert.doesNotMatch(html, /<button/);
   assert.match(html, /role="tooltip"[^>]*>A required input or calculation is unavailable\.</);
+});
+
+test("every blank cell status says why, and the blank is named for its column and company", () => {
+  const statuses = ["missing_data", "no_coverage", "error"] as const;
+  const detail: GridRunDetail = {
+    ...DETAIL,
+    rows: statuses.map((status, n) => ({ ...DETAIL.rows[0]!, grid_row_id: status, row_number: n, subject_label: `Co ${status}` })),
+    cells: statuses.map((status) => ({ ...DETAIL.cells[1]!, grid_row_id: status, status })),
+  };
+  const html = renderToStaticMarkup(<GridTable columns={COLUMNS} detail={detail} />);
+  for (const [status, reason] of [["missing_data", "No data for this company."], ["no_coverage", "Not covered for this company."], ["error", "This cell could not be computed."]]) {
+    assert.match(html, new RegExp(`role="img" aria-label="Market Cap \\(latest\\), Co ${status}: not available" aria-describedby="([^"]+)"[^]*?id="\\1" role="tooltip"[^>]*>${reason.replace(".", "\\.")}<`), status);
+  }
 });
