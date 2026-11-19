@@ -42,3 +42,21 @@ test('neutral text tokens clear WCAG AA 4.5:1 on every surface in both themes', 
   }
   assert.deepEqual(failures, [])
 })
+
+// The active nav link fills with accent-soft (rgba) over the sidebar surface.
+function over(rgba: string, base: string): string {
+  const [r, g, b, a] = rgba.match(/[\d.]+/g)!.map(Number)
+  return '#' + [r, g, b].map((c, i) => Math.round(c * a + parseInt(base.slice(1 + 2 * i, 3 + 2 * i), 16) * (1 - a)).toString(16).padStart(2, '0')).join('')
+}
+const softs = {
+  light: block(/@theme\s*\{([^}]*)\}/).match(/--color-accent-soft:\s*(rgba\([^)]*\))/)![1],
+  dark: block(/\.dark\s*\{([^}]*)\}/).match(/--color-accent-soft:\s*(rgba\([^)]*\))/)![1],
+}
+
+test('muted, the active nav hotkey chip text, clears 4.5:1 on the active link fill in both themes', () => {
+  for (const [theme, palette] of Object.entries(themes)) {
+    const fill = over(softs[theme as keyof typeof softs], palette.surface)
+    const ratio = contrast(palette.muted, fill)
+    assert.ok(ratio >= 4.5, `${theme} muted on accent-soft ${ratio.toFixed(2)}:1`)
+  }
+})

@@ -98,3 +98,19 @@ test('a collapsed sidebar keeps named controls, takes focus to Expand, and stays
   assert.ok(again.button('Expand sidebar'), 'the choice survives a remount')
   await again.unmount()
 })
+
+// Faint fails 4.5:1 on the active link's accent-soft fill in dark (#554), so
+// the active link's hotkey chip reads in muted.
+test('the active link shows its hotkey chip in muted, the others in faint', async () => {
+  localStorage.clear()
+  const view = await mount(<Sidebar />)
+  const chips = [...view.container.querySelectorAll('nav[aria-label="Primary workspaces"] a')].flatMap((link) => {
+    const chip = link.querySelector('kbd')
+    return chip ? [{ active: link.getAttribute('aria-current') === 'page', classes: chip.className.split(' ') }] : []
+  })
+  const active = chips.filter((chip) => chip.active)
+  assert.equal(active.length, 1, 'the /chat link is active and has a chip')
+  assert.ok(active[0].classes.includes('text-muted') && !active[0].classes.includes('text-faint'))
+  assert.ok(chips.filter((chip) => !chip.active).every((chip) => chip.classes.includes('text-faint')))
+  await view.unmount()
+})
