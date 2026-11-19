@@ -14,10 +14,11 @@ It's a scheduled job, and has no UI. Its results show up as listings in search a
 
 ## Driving it with scripts/verify
 
-- **Fresh.** On an empty database, run `$V import`. The line reads `ingested` with `ingested=` matching `total=`, and the `fill-ciks:` line after it shows most issuers `filled`.
+- **Fresh.** On an empty database, run `$V import`. The line reads `ingested` with `ingested=` matching `total=`, the `fill-ciks:` line after it shows most issuers `filled`, and `issuer-splits: merged=1` merges GOOG's issuer into GOOGL's.
 - **Skip.** Run `$V import` again. It exits 3 and says `SKIPPED`.
 - **Force, identity stable.** Run `$V identity save before`, `$V import --force`, `$V identity diff before`. The diff prints `identity unchanged`.
 - **Spot check.** Run `$V resolve AAPL GOOGL MSFT`. Each keeps its CIK issuer.
+- **Splits.** Run `$V splits`. It prints `0 to merge, 0 CIKs to store without leading zeros`.
 
 ## Gotchas
 

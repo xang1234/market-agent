@@ -143,15 +143,20 @@ export async function loadCompanyTickerCiks(file: string | undefined, download: 
   return ciks;
 }
 
-async function main(): Promise<void> {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) throw new Error("DATABASE_URL is required");
-  const { values } = parseArgs({ options: { file: { type: "string" } } });
-  const ciks = await loadCompanyTickerCiks(values.file, async () => {
+/** loadCompanyTickerCiks, downloading from SEC with SEC_EDGAR_USER_AGENT. */
+export function loadSecTickerCiks(file: string | undefined): Promise<Map<string, string>> {
+  return loadCompanyTickerCiks(file, async () => {
     const userAgent = process.env.SEC_EDGAR_USER_AGENT;
     if (!userAgent) throw new Error("SEC_EDGAR_USER_AGENT is required to download company_tickers.json");
     return (await createSecCompanyFactsHttpFetcher({ userAgent })(COMPANY_TICKERS_URL)).json;
   });
+}
+
+async function main(): Promise<void> {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) throw new Error("DATABASE_URL is required");
+  const { values } = parseArgs({ options: { file: { type: "string" } } });
+  const ciks = await loadSecTickerCiks(values.file);
   const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   try {
     const report = await fillMissingCiks(pool, ciks);

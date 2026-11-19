@@ -26,9 +26,8 @@
 // of its day, so it matches the cover count; the price return reads the
 // adjusted closes as they are, which include no dividends.
 //
-// Runbook on a dev DB, once the owner approves SEC fetches (#597 keeps the
-// listings' issuers apart from the SEC issuers, so each sample issuer needs
-// its CIK first, and the split history the engine's share count requires):
+// Runbook on a dev DB, once the owner approves SEC fetches (each sample issuer
+// needs its CIK first, and the split history the engine's share count requires):
 //
 //   cd services/fundamentals
 //   export DATABASE_URL=postgresql://postgres:<password>@127.0.0.1:54329/market_agent

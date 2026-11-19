@@ -159,7 +159,7 @@ cmd_import() {
   PATH="$NODE_APP:$PATH" caffeinate -ims "$ROOT/scripts/dev-shell.sh" reference-import "$@" > "$log" 2>&1 || code=$?
   line="$(grep '^weekly-reference' "$log" | tail -1 || true)"
   echo "$line"
-  grep '^fill-ciks' "$log" || true
+  grep -E '^(fill-ciks|issuer-splits|merged issuer)' "$log" || true
   echo "log: $log"
   if [[ "$code" != "0" ]]; then
     tail -5 "$log" >&2
@@ -178,6 +178,18 @@ cmd_fill_ciks() {
   local log="$EVIDENCE/fill-ciks-$(stamp).log"
   (cd "$ROOT/services/fundamentals" && PATH="$NODE_APP:$PATH" caffeinate -ims npm run -s fill:ciks -- --file "$ROOT/.dev/company_tickers.json") > "$log" 2>&1 || { tail -5 "$log" >&2; return 1; }
   grep '^fill-ciks' "$log"
+  echo "log: $log"
+}
+
+# Lists each issuer that holds a company's listing apart from its SEC issuer, or
+# with --repair merges them (services/fundamentals/src/issuer-splits.ts). Shares
+# the import's one-day cache of company_tickers.json.
+cmd_splits() {
+  mkdir -p "$EVIDENCE"
+  local log="$EVIDENCE/splits-$(stamp).log" census=--census
+  [[ "${1:-}" == "--repair" ]] && census=
+  (cd "$ROOT/services/fundamentals" && PATH="$NODE_APP:$PATH" npm run -s repair:issuer-splits -- --file "$ROOT/.dev/company_tickers.json" $census) > "$log" 2>&1 || { tail -5 "$log" >&2; return 1; }
+  cat "$log"
   echo "log: $log"
 }
 
@@ -369,6 +381,7 @@ case "${1:-}" in
   identity) shift; cmd_identity "$@" ;;
   import) shift; cmd_import "$@" ;;
   fill-ciks) cmd_fill_ciks ;;
+  splits) shift; cmd_splits "$@" ;;
   backfill-8k) cmd_backfill_8k "${2:-}" ;;
   restatements) shift; cmd_restatements "$@" ;;
   memo) shift; cmd_memo "$@" ;;
@@ -379,5 +392,5 @@ case "${1:-}" in
   scroll) shift; cmd_scroll "$@" ;;
   scorecard) shift; cmd_scorecard "$@" ;;
   suite) shift; cmd_suite "$@" ;;
-  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|fill-ciks|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|analyze-layout [TICKER]|agents [TICKER] [--stored] [--conditions=FILE]|lease-race [run-now|scheduled] [--thesis]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
+  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|fill-ciks|splits [--repair]|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|analyze-layout [TICKER]|agents [TICKER] [--stored] [--conditions=FILE]|lease-race [run-now|scheduled] [--thesis]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
 esac

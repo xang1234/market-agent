@@ -425,6 +425,11 @@ const FORM = "(?:class|series) [a-z]|(?:common |capital |ordinary )?(?:stock|sha
 const ASKED_FORM = new RegExp(` (?:${FORM})$`);
 const STORED_FORM = new RegExp(` (?:${FORM}|holdings?|group|com)$`);
 
+/** The shortest name a company goes by. "Alphabet Inc" and "Alphabet Inc. Class A Common Stock" both go by "alphabet". */
+export function goesBy(legalName: string): string {
+  return namesGoneBy(normalizeNameForLookup(legalName), STORED_FORM).at(-1)!;
+}
+
 // ponytail: a brand that is no legal name ("Google", "AMD") stays unresolved; a sourced alias feed would cover it.
 function namesGoneBy(normalized: string, form: RegExp): string[] {
   const joined = normalized.replace(/^the /, "").replace(/\b([a-z]) (?=[a-z]\b)/g, "$1");
