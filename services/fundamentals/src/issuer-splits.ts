@@ -18,6 +18,7 @@ import { US_EQUITY_MICS } from "../../shared/src/identifiers.ts";
 import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { loadSecTickerCiks } from "./cik-fill.ts";
 import { type TransactionalQueryExecutor, withPinnedTransaction } from "./pinned-transaction.ts";
+import { retireGoldenFacts } from "./sec-facts-repository.ts";
 
 export type IssuerSplit = { keep: string; keep_name: string; drop: string; drop_name: string; basis: string };
 export type SkippedSplit = IssuerSplit & { constraint: string };
@@ -84,15 +85,18 @@ export const ISSUER_KEYED_ROWS: ReadonlyArray<{
 ];
 
 /**
- * Each issuer to merge, with the issuer it merges into. A frozen golden
- * issuer is never merged away. In order of precedence:
- * 1. an issuer listing a golden ticker merges into the golden issuer, unless
- *    it holds another CIK;
+ * Each issuer to merge, with the issuer it merges into. In order of
+ * precedence, and a pair two rules match merges by the first:
+ * 1. a golden issuer merges into the issuer listing its ticker, unless that
+ *    issuer holds another CIK than the golden one's, or than SEC's for the
+ *    ticker once the CIK fill moved the golden one's to it. The ticker then
+ *    gets live prices and SEC filings, which the frozen golden issuers skip;
  * 2. a second holder of a CIK, with or without leading zeros, merges into the
  *    first (a golden one first). A CIK of zeros names no filer;
  * 3. an issuer with no CIK, listing a ticker SEC files under another issuer's
  *    CIK, merges into it when the two go by one name. A share class does; an
  *    ETN a bank files under its own CIK, such as JPMorgan's AMJB, does not.
+ * No other rule merges a golden issuer away.
  */
 export async function findIssuerSplits(db: Queryable, ciks: ReadonlyMap<string, string>): Promise<IssuerSplit[]> {
   const golden = Object.entries(GOLDEN_ISSUER_IDS);
@@ -104,11 +108,12 @@ export async function findIssuerSplits(db: Queryable, ciks: ReadonlyMap<string, 
          join listings l on l.instrument_id = i.instrument_id
         where l.active_to is null and l.mic = any($1::text[])
      ), pairs as (
-       select 1 as rank, k.issuer_id as keep, d.issuer_id as drop, 'lists golden ' || g.ticker as basis, false as by_name
+       select 1 as rank, k.issuer_id as keep, d.issuer_id as drop, 'golden issuer of ' || g.ticker as basis, false as by_name
          from unnest($2::text[], $3::uuid[]) as g(ticker, issuer_id)
-         join issuers k on k.issuer_id = g.issuer_id
-         join listed d on d.ticker = g.ticker and d.issuer_id <> k.issuer_id
-        where d.cik is null or ltrim(d.cik, '0') = ltrim(k.cik, '0')
+         join issuers d on d.issuer_id = g.issuer_id
+         join listed k on k.ticker = g.ticker and k.issuer_id <> d.issuer_id
+         left join unnest($4::text[], $5::text[]) as sec(ticker, cik) on sec.ticker = g.ticker
+        where k.cik is null or ltrim(k.cik, '0') = ltrim(coalesce(d.cik, sec.cik), '0')
        union all
        select 2, k.issuer_id, d.issuer_id, 'holds CIK ' || ltrim(d.cik, '0'), false
          from issuers k
@@ -125,13 +130,14 @@ export async function findIssuerSplits(db: Queryable, ciks: ReadonlyMap<string, 
        from pairs p
        join issuers k on k.issuer_id = p.keep
        join issuers d on d.issuer_id = p.drop
-      where p.drop <> all($3::uuid[])
+      where p.rank = 1 or p.drop <> all($3::uuid[])
       order by p.rank, d.legal_name, p.drop, p.keep`,
     [US_EQUITY_MICS, golden.map(([ticker]) => ticker), golden.map(([, id]) => id), [...ciks.keys()], [...ciks.values()]],
   );
   const splits = new Map<string, IssuerSplit>();
   for (const { by_name, ...split } of rows) {
-    if (!splits.has(split.drop) && (!by_name || goesBy(split.keep_name) === goesBy(split.drop_name))) splits.set(split.drop, split);
+    if (splits.has(split.drop) || splits.get(split.keep)?.keep === split.drop) continue;
+    if (!by_name || goesBy(split.keep_name) === goesBy(split.drop_name)) splits.set(split.drop, split);
   }
   return [...splits.values()];
 }
@@ -185,6 +191,8 @@ export async function repairIssuerSplits(
 }
 
 async function mergeIssuer(db: Queryable, { keep, drop }: IssuerSplit): Promise<void> {
+  // storeFiling's lock, taken before the row locks its writes wait on, so a filing stored for either issuer meanwhile moves and retires the golden figures it reports.
+  for (const id of [keep, drop].sort()) await db.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [id]);
   // A writer adding an instrument for the merged issuer waits, then fails on its key, instead of losing the row to the delete's cascade.
   const { rows: locked } = await db.query<{ issuer_id: string; legal_name: string; former_names: string[] }>(
     `select issuer_id::text as issuer_id, legal_name, former_names from issuers where issuer_id in ($1::uuid, $2::uuid) order by issuer_id for update`,
@@ -215,6 +223,7 @@ async function mergeIssuer(db: Queryable, { keep, drop }: IssuerSplit): Promise<
       [keep, drop],
     );
   }
+  await retireGoldenFacts(db, keep);
   const { rows: [dropped] } = await db.query<{ cik: string | null; lei: string | null; domicile: string | null; sector: string | null; industry: string | null }>(
     `delete from issuers where issuer_id = $1::uuid returning cik, lei, domicile, sector, industry`,
     [drop],

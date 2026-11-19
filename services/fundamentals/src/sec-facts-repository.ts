@@ -501,6 +501,7 @@ async function storeFiling(
       });
     }
     await retireRefutedInferences(client, input.issuerId, input.fetched.facts);
+    await retireGoldenFacts(client, input.issuerId);
     await recordSecRestatements(client, {
       facts: input.fetched.facts,
       cik: input.cik,
@@ -1262,6 +1263,32 @@ async function retireRefutedInferences(db: FundamentalsQueryExecutor, issuerId: 
   );
   const refuted = rows.filter((row) => reportsNoncontrollingInterest(usGaap, row.period_start, row.period_end)).map((row) => row.fact_id);
   if (refuted.length > 0) await invalidateWithDependents(db, issuerId, refuted);
+}
+
+// repair:issuer-splits keeps the live issuer of a golden ticker and moves the
+// golden dataset's illustrative figures onto it (issuer-splits.ts). Each one a
+// filing reports for its metric and period is retired as a stale fact is. The
+// filing's figure supersedes it, and it stays the one known at an earlier cutoff.
+export async function retireGoldenFacts(db: FundamentalsQueryExecutor, issuerId: UUID): Promise<void> {
+  if (FROZEN_ISSUER_IDS.has(issuerId)) return;
+  const { rows } = await db.query<{ fact_id: string; superseded_by: string }>(
+    `select distinct on (g.fact_id) g.fact_id::text as fact_id, r.fact_id::text as superseded_by
+       from facts g
+       join sources gs on gs.source_id = g.source_id and gs.provider = 'golden_fixture'
+       join facts r on r.subject_kind = 'issuer' and r.subject_id = g.subject_id and r.metric_id = g.metric_id and r.period_kind = g.period_kind
+                   and r.fiscal_year = g.fiscal_year and r.fiscal_period = g.fiscal_period and r.method = 'reported' and ${factActiveSql("r")}
+       join sources rs on rs.source_id = r.source_id and rs.provider = 'sec_edgar'
+      where g.subject_kind = 'issuer' and g.subject_id = $1 and ${factActiveSql("g")}
+      order by g.fact_id, r.as_of desc, r.created_at desc`,
+    [issuerId],
+  );
+  if (rows.length === 0) return;
+  await invalidateWithDependents(db, issuerId, rows.map((row) => row.fact_id));
+  await db.query(
+    `update facts f set superseded_by = r.superseded_by, updated_at = now()
+       from unnest($1::uuid[], $2::uuid[]) as r(fact_id, superseded_by) where f.fact_id = r.fact_id`,
+    [rows.map((row) => row.fact_id), rows.map((row) => row.superseded_by)],
+  );
 }
 
 // Invalidates the facts and every active fact of the issuer derived from one

@@ -4,7 +4,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { bootstrapDatabase, connectedPool, dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
 import { createSecCompanyFactsHttpFetcher } from "../src/sec-edgar-http.ts";
-import { backfillSecCompanionStatements, createSecBackedStatementRepository } from "../src/sec-facts-repository.ts";
+import { ELIGIBLE_FACT_SQL } from "../../evidence/src/financial-input-repo.ts";
+import { backfillSecCompanionStatements, createSecBackedStatementRepository, hydrateSecIssuerLatestYears } from "../src/sec-facts-repository.ts";
 import { loadUsableFacts } from "../src/usable-facts.ts";
 
 const ISSUER_ID = "32000000-0000-4000-8000-000000000001";
@@ -110,4 +111,76 @@ test("the backfill replaces an income fact the old selector got wrong, keeping h
   // A statement read back from facts keeps its dates in any local time zone.
   assert.equal(reread?.period_start, "2023-10-01");
   assert.equal(reread?.period_end, "2024-09-28");
+});
+
+test("a filing retires the golden dataset's figure for its period on a live issuer, and the golden cutoff still reads it (#597)", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for repair coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fin-sec-golden-retire");
+  const db = await connectedPool(t, databaseUrl);
+  await db.query(await readFile(join(workspaceRoot, "db", "seed", "metrics.sql"), "utf8"));
+  // repair:issuer-splits kept AAPL's live issuer and moved the golden dataset's figures onto it. They are FY2024's revenue, FY2024's
+  // gross profit, which this filing does not report, and revenue for a year SEC has not filed.
+  await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'Apple Inc', '320193')`, [ISSUER_ID]);
+  const goldenAsOf = "2026-09-01T00:00:00.000Z";
+  await db.query(
+    `with golden as (
+       insert into sources (provider, kind, trust_tier, license_class, retrieved_at) values ('golden_fixture', 'filing', 'primary', 'internal', $2)
+       returning source_id)
+     insert into facts (subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period, value_num, unit, currency,
+                        scale, as_of, reported_at, observed_at, source_id, method, verification_status, freshness_class, coverage_level, confidence)
+     select 'issuer', $1, m.metric_id, 'fiscal_y', y.period_start, y.period_end, y.fiscal_year, 'FY', y.value_num, 'currency', 'USD',
+            1, $2, $2, $2, golden.source_id, 'reported', 'authoritative', 'filing_time', 'full', 1
+       from golden,
+            (values ('revenue', '2023-10-01'::date, '2024-09-28'::date, 2024, 400000000000), ('gross_profit', '2023-10-01', '2024-09-28', 2024, 180000000000),
+                    ('revenue', '2025-09-28', '2026-09-26', 2026, 450000000000)) as y(metric_key, period_start, period_end, fiscal_year, value_num)
+       join metrics m using (metric_key)`,
+    [ISSUER_ID, goldenAsOf],
+  );
+  const ingestedAt = new Date("2026-11-19T00:00:00.000Z");
+  const fetcher = createSecCompanyFactsHttpFetcher({
+    userAgent: "market-agent-test test@example.invalid",
+    fetchImpl: async () => new Response(companyFactsText(), { status: 200 }),
+    clock: () => ingestedAt,
+  });
+
+  await hydrateSecIssuerLatestYears(db, {
+    issuerId: ISSUER_ID,
+    reads: new Map([["revenue", 1]]),
+    fetcher,
+    sourceId: FALLBACK_SOURCE_ID,
+    clock: () => ingestedAt,
+    logger: { warn: () => {} },
+  });
+
+  // The figures the financial engine may choose from, by year.
+  const candidates = async () => (await db.query(
+    `select f.fiscal_year, m.metric_key, f.value_num::text as value, s.provider
+       from facts f join sources s using (source_id) join metrics m on m.metric_id = f.metric_id
+      where f.subject_id = $1 and m.metric_key in ('revenue', 'gross_profit') and ${ELIGIBLE_FACT_SQL}
+      order by f.fiscal_year, m.metric_key`,
+    [ISSUER_ID],
+  )).rows;
+  assert.deepEqual(await candidates(), [
+    { fiscal_year: 2024, metric_key: "gross_profit", value: "180000000000", provider: "golden_fixture" },
+    { fiscal_year: 2024, metric_key: "revenue", value: "391035000000", provider: "sec_edgar" },
+    { fiscal_year: 2026, metric_key: "revenue", value: "450000000000", provider: "golden_fixture" },
+  ]);
+  const revenueAt = async (cutoff?: string) => (await createSecBackedStatementRepository(db, { fetcher: null, sourceId: FALLBACK_SOURCE_ID, ...(cutoff ? { cutoff } : {}) })
+    .find({ issuer_id: ISSUER_ID, family: "income", basis: "as_reported", fiscal_year: 2024, fiscal_period: "FY" }))
+    ?.lines.find((line) => line.metric_key === "revenue")?.value_num;
+  assert.equal(await revenueAt(), 391035000000);
+  assert.equal(await revenueAt(goldenAsOf), 400000000000, "a frozen turn reads what was known at its cutoff");
+
+  await hydrateSecIssuerLatestYears(db, {
+    issuerId: ISSUER_ID,
+    reads: new Map([["revenue", 1]]),
+    fetcher,
+    sourceId: FALLBACK_SOURCE_ID,
+    clock: () => ingestedAt,
+    logger: { warn: () => {} },
+  });
+  assert.equal((await candidates()).length, 3, "a second ingest retires nothing more");
 });

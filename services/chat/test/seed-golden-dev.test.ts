@@ -86,6 +86,31 @@ test("assertNoGoldenDataset passes on a live database and rejects one holding th
   await assert.rejects(() => assertNoGoldenDataset(databaseUrl), /frozen golden dataset.*down -v/s);
 });
 
+test("a database whose golden issuer merged into its ticker's live issuer starts without seeding it again, and data mode still refuses it (#597)", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-merged");
+  const client = await connectedClient(t, databaseUrl);
+  assert.equal(await seedGoldenDevDatabase(databaseUrl), "seeded");
+  const [nvda] = GOLDEN_COMPANIES;
+  // As repair:issuer-splits leaves it, with NVDA's listing, segments and facts on the live issuer and the golden issuer gone.
+  const { rows: [live] } = await client.query<{ issuer_id: string }>(`insert into issuers (legal_name) values ('Nvidia Corp') returning issuer_id::text as issuer_id`);
+  await client.query(`update instruments set issuer_id = $2::uuid where issuer_id = $1::uuid`, [nvda!.issuer_id, live!.issuer_id]);
+  await client.query(`update segments set issuer_id = $2::uuid where issuer_id = $1::uuid`, [nvda!.issuer_id, live!.issuer_id]);
+  await client.query(`update facts set subject_id = $2::uuid where subject_kind = 'issuer' and subject_id = $1::uuid`, [nvda!.issuer_id, live!.issuer_id]);
+  await client.query(`delete from issuers where issuer_id = $1::uuid`, [nvda!.issuer_id]);
+  await client.query(`update issuers set cik = $2 where issuer_id = $1::uuid`, [live!.issuer_id, nvda!.cik]);
+  const holders = () => client.query(
+    `select l.ticker, i.issuer_id::text as issuer_id from listings l join instruments i using (instrument_id) where l.ticker = $1`,
+    [nvda!.ticker],
+  ).then(({ rows }) => rows);
+  const facts = async () => (await client.query<{ n: number }>(`select count(*)::int as n from facts`)).rows[0]!.n;
+  const before = { holders: await holders(), facts: await facts() };
+
+  assert.equal(await seedGoldenDevDatabase(databaseUrl), "already-seeded");
+  assert.deepEqual({ holders: await holders(), facts: await facts() }, before);
+  assert.deepEqual((await client.query(`select 1 from issuers where issuer_id = $1::uuid`, [nvda!.issuer_id])).rows, []);
+  await assert.rejects(() => assertNoGoldenDataset(databaseUrl), /frozen golden dataset.*down -v/s);
+});
+
 test("seedGoldenDevDatabase leaves nothing half-seeded when a golden ticker is already taken", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-seed-conflict");
   const client = await connectedClient(t, databaseUrl);

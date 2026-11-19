@@ -851,6 +851,8 @@ class FakeFundamentalsDb {
         .filter((fact) => fact.invalidated_at === null && fact.subject_id === values[0] && inferenceOf(fact) !== null)
         .map(({ fact_id, period_start, period_end }) => ({ fact_id, period_start, period_end })));
     }
+    // The fake holds no golden dataset figures to retire.
+    if (sql.includes("gs.provider = 'golden_fixture'")) return rows([]);
     // The fake stores no derived facts, so a fact's dependents are none.
     if (sql.includes("with recursive refuted")) {
       for (const fact of this.facts) if ((values[1] as string[]).includes(fact.fact_id)) fact.invalidated_at = "now";
