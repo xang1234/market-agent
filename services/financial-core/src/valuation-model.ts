@@ -10,6 +10,7 @@
 import type { DecimalString, IsoDate, ReasonCode } from "./contracts.ts";
 import { fixed } from "./value-text.ts";
 import { addRationals, compareRationals, divideRationals, multiplyRationals, rationalSign, roundRational, subtractRationals, type ExactRational } from "./rational.ts";
+import { isSessionDate } from "./session-calendar.ts";
 
 /** Every reason the model shows no number, with the reason code ADR 0006 names for it, and what the Call says instead. */
 export const VALUATION_OUTCOMES = {
@@ -40,6 +41,8 @@ export type RequiredGrowth = Readonly<{ kind: "value"; growth: ExactRational; st
 /** A Call's reported inputs and the owner's required return, each already certified upstream (ADR 0006's input table). */
 export type ValuationInputs = Readonly<{
   call_date: IsoDate;
+  /** The listing's time zone: the Call and price dates are its calendar dates, and its exchange's sessions age the price. */
+  listing_timezone: string;
   /** F0: FY free cash flow, USD, from the latest 10-K filed by the Call date. */
   free_cash_flow: ExactRational;
   /** The fiscal year end of F0's 10-K. */
@@ -82,7 +85,7 @@ const INPUT_RULES: ReadonlyArray<readonly [ValuationOutcome, (inputs: ValuationI
   ["stale_filing", (i) => i.call_date > monthsAfter(i.period_end, 15)],
   ["shares_missing", (i) => rationalSign(i.shares) <= 0],
   ["price_missing", (i) => i.price_date > i.call_date],
-  ["stale_price", (i) => weekdaysAfter(i.price_date, i.call_date) > 5],
+  ["stale_price", (i) => sessionsAfter(i.price_date, i.call_date, i.listing_timezone) > 5],
   ["incompatible_currency", (i) => i.currency.reporting !== "USD" || i.currency.price !== "USD"],
   ["required_return_out_of_range", (i) => rationalSign(i.required_return) <= 0],
 ];
@@ -215,12 +218,10 @@ function monthsAfter(date: IsoDate, months: number): IsoDate {
   return new Date(Date.UTC(year, index, Math.min(day, lastDay))).toISOString().slice(0, 10);
 }
 
-// ponytail: weekdays stand in for the exchange calendar, so a market holiday counts as a trading day and a price before one reads a day staler than it is. Upgrade by reading an exchange session calendar once one exists.
-function weekdaysAfter(from: IsoDate, to: IsoDate): number {
+function sessionsAfter(from: IsoDate, to: IsoDate, timeZone: string): number {
   let count = 0;
   for (let day = Date.parse(`${from}T00:00:00Z`) + DAY_MS; day <= Date.parse(`${to}T00:00:00Z`) && count <= 5; day += DAY_MS) {
-    const weekday = new Date(day).getUTCDay();
-    if (weekday !== 0 && weekday !== 6) count += 1;
+    if (isSessionDate(new Date(day).toISOString().slice(0, 10), timeZone)) count += 1;
   }
   return count;
 }

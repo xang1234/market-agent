@@ -330,6 +330,7 @@ function solve(base: AsOfInputs, price: Restated | Figure, closes: CloseSeries |
   const inputs: ValuationInputs = {
     // The Call is made at the close it prices, which is on or after the as-of day the inputs are read at.
     call_date: close.trade_date,
+    listing_timezone: ZONE,
     free_cash_flow,
     period_end: base.fiscal_year_end!,
     shares: shares_outstanding,

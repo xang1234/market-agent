@@ -56,7 +56,7 @@ test("a last trade is known when its response arrived: its trade time plus the d
   assert.equal(lastTrade(LISTING, evidence(body, "2024-06-11T20:30:00.100Z")).known_at, null);
 });
 
-test("the last regular session is the last weekday whose 16:00 close the cutoff has passed", () => {
+test("the last regular session is the last session whose 16:00 close the cutoff has passed", () => {
   assert.equal(lastRegularSessionDate("2024-06-12T14:00:00.000Z", "America/New_York"), "2024-06-11");
   assert.equal(lastRegularSessionDate("2024-06-12T20:00:00.000Z", "America/New_York"), "2024-06-12");
   assert.equal(lastRegularSessionDate("2024-06-15T16:00:00.000Z", "America/New_York"), "2024-06-14");

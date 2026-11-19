@@ -157,6 +157,8 @@ export type CallEngineFigure =
 /** What a Call is assembled from: one certified run's results and sources, the owner's settings, and the consensus captures on file. */
 export type CallEvidence = Readonly<{
   call_date: IsoDate;
+  /** The listing's time zone, which the Call and price dates are dated in. */
+  listing_timezone: string;
   subject: CallContent["subject"];
   settings: CallSettings;
   inputs: CallInputsRef;
@@ -275,6 +277,7 @@ function modelFigures(evidence: CallEvidence, causes: Cause[]): Readonly<{ multi
     const currency = (id: CallFactId) => (evidence.figures[id] as Extract<CallEngineFigure, { kind: "value" }>).currency ?? "";
     const inputs: ValuationInputs = {
       call_date: evidence.call_date,
+      listing_timezone: evidence.listing_timezone,
       free_cash_flow: value("free_cash_flow"),
       period_end: evidence.fiscal_year_end!,
       shares: value("shares_outstanding"),

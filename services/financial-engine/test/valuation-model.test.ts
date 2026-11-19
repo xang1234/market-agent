@@ -87,6 +87,7 @@ test("AAPL FY2026: today's multiple is 36.15x and the price requires 7.3% a year
 
   const inputs = {
     call_date: "2026-11-09",
+    listing_timezone: "America/New_York",
     free_cash_flow: q(freeCashFlow),
     period_end: "2026-09-26",
     shares: q("14532182000"),
