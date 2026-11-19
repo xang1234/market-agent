@@ -22,9 +22,9 @@ export function isSessionDate(date: IsoDate, timeZone: string): boolean {
 
 function nyseHolidays(year: number): IsoDate[] {
   const [easterMonth, easterDay] = easter(year);
-  const newYearOnSaturday = new Date(Date.UTC(year, 0, 1)).getUTCDay() === 6;
   return [
-    ...(newYearOnSaturday ? [] : [observed(year, 0, 1)]),
+    // A Saturday New Year's Day is observed on the prior 31 December, which only that year's list would hold, so NYSE has no closure for it.
+    observed(year, 0, 1),
     weekdayFrom(year, 0, 15, MONDAY),
     weekdayFrom(year, 1, 15, MONDAY),
     iso(Date.UTC(year, easterMonth, easterDay - 2)),

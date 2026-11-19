@@ -175,8 +175,8 @@ function citation(row: Binding, localDate: (instant: string) => string): CallSou
     source_id: source.source_id,
     accession: ACCESSION.exec(row.canonical_url ?? "")?.[1] ?? null,
     period_end: period.end,
-    // The filing day in its own timezone, as the attestation states it.
-    date: publication.available_no_later_than.slice(0, 10),
+    // The filing day on the Call's calendar, so it is never after the Call date (#614).
+    date: localDate(publication.available_no_later_than),
   };
 }
 

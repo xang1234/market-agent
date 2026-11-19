@@ -41,7 +41,9 @@ const NVDA = issuer("NVDA", 4, 1045810, "0001045810-26-000026");
 const STAL = issuer("STAL", 5, 900005, "0000900005-26-000026");
 // AAPL's inputs, its last close Wednesday 2026-11-25, the day before Thanksgiving, and its splits checked on Friday.
 const HOLI = issuer("HOLI", 6, 900006, "0000900006-26-000026");
-const ISSUERS = [AAPL, NOCN, NOSH, NVDA, STAL, HOLI];
+// AAPL's inputs, its 10-K downloaded at 20:00 New York on 2026-11-09, already 2026-11-10 in UTC.
+const EVEN = issuer("EVEN", 7, 900007, "0000900007-26-000026");
+const ISSUERS = [AAPL, NOCN, NOSH, NVDA, STAL, HOLI, EVEN];
 
 const resolve = (mention: string): Promise<ChatSubjectPreResolution> => {
   const company = ISSUERS.find((entry) => entry.ticker === mention);
@@ -72,7 +74,7 @@ function filerFacts(company: Issuer, change: { shares?: false; capexTag?: string
   return facts;
 }
 
-async function seedIssuer(db: Client, pool: FinancialPool, company: Issuer, facts: unknown, consensus: boolean, splitsCheckedAt = "2026-11-09T12:00:00Z", closedAt = "2026-11-06T21:00:00Z"): Promise<void> {
+async function seedIssuer(db: Client, pool: FinancialPool, company: Issuer, facts: unknown, consensus: boolean, splitsCheckedAt = "2026-11-09T12:00:00Z", closedAt = "2026-11-06T21:00:00Z", publishedAt = "2026-11-09T06:00:00.000Z"): Promise<void> {
   await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, $2, $3)`, [company.issuer, `${company.ticker} Inc.`, String(company.cik)]);
   await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $1, 'common_stock')`, [company.issuer]);
   await db.query(`insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone) values ($1, $2, 'XNAS', $3, 'USD', 'America/New_York')`, [company.listing, company.issuer, company.ticker]);
@@ -83,7 +85,7 @@ async function seedIssuer(db: Client, pool: FinancialPool, company: Issuer, fact
     [company.listing, POLYGON_MARKET_SOURCE_ID, "d".repeat(64), closedAt],
   );
   const statements = createSecBackedStatementRepository(pool, {
-    fetcher: secCompanyFetcher(() => facts, { completed_at: "2026-11-09T06:00:00.000Z" }),
+    fetcher: secCompanyFetcher(() => facts, { completed_at: publishedAt }),
     sourceId: randomUUID(),
     logger: { warn: () => {} },
   });
@@ -131,6 +133,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
   await seedIssuer(db, pool, NVDA, filerFacts(NVDA, { capexTag: "PaymentsToAcquireProductiveAssets" }), true);
   await seedIssuer(db, pool, STAL, filerFacts(STAL), true, "2026-11-16T12:00:00Z");
   await seedIssuer(db, pool, HOLI, filerFacts(HOLI), true, "2026-11-27T12:00:00Z", "2026-11-25T21:00:00Z");
+  await seedIssuer(db, pool, EVEN, filerFacts(EVEN), true, undefined, "2026-11-09T21:00:00Z", "2026-11-10T01:00:00.000Z");
 
   const ask = async (question: string, options: { clock?: string; turnId?: string; threadId?: string; model?: PlanningModel } = {}) => {
     const threadId = options.threadId ?? randomUUID();
@@ -266,5 +269,12 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     assert.deepEqual([call.stance.rule, call.requires[1]!.figure.text], [1, "8.18%"]);
     const stored = (await db.query(`select call_date::text from calls where snapshot_id = $1`, [block.snapshot_id])).rows;
     assert.deepEqual(stored, [{ call_date: "2026-11-09" }]);
+  });
+
+  await t.test("a 10-K public at 20:00 in New York is cited public by that day, never after the Call (#614)", async () => {
+    const { call } = (await ask("Make a Call on EVEN", { clock: "2026-11-10T02:00:00.000Z" })).block;
+    const publicBy = call.facts.flatMap((fact) => fact.citations.map((citation) => citation.text)).filter((text) => text.includes("public by"));
+    assert.ok(publicBy.length > 0);
+    assert.deepEqual([call.call_date, [...new Set(publicBy.map((text) => text.slice(-10)))]], ["2026-11-09", ["2026-11-09"]]);
   });
 });
