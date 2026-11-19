@@ -17,6 +17,7 @@
 // exchange calendar when finding the baseline; a longer year-end closure
 // reads as a missing baseline.
 
+import { isSessionDate } from "../../financial-core/src/session-calendar.ts";
 import { zonedDateStartUtcIso } from "./range-canonicalization.ts";
 
 export type DailyClose = { ts: string; close: number };
@@ -58,15 +59,13 @@ export function completedSessionsEnd(cutoff: string, timeZone: string): string {
 }
 
 // The date of the last regular session closed by `cutoff` on the exchange's
-// calendar: today's once it has closed, else the weekday before. A price from
-// before it is stale (#444).
-// ponytail: weekdays stand in for an exchange calendar, so until the session
-// after a market holiday closes, the price before the holiday reads as stale.
+// calendar (session-calendar.ts): today's once it has closed, else the session
+// before. A price from before it is stale (#444).
 export function lastRegularSessionDate(cutoff: string, timeZone: string): string {
   const now = localParts(cutoff, timeZone);
   const date = new Date(`${now.date}T00:00:00.000Z`);
   if (now.minutes < SESSION_CLOSE_MINUTES) date.setUTCDate(date.getUTCDate() - 1);
-  while (date.getUTCDay() === 0 || date.getUTCDay() === 6) date.setUTCDate(date.getUTCDate() - 1);
+  while (!isSessionDate(date.toISOString().slice(0, 10), timeZone)) date.setUTCDate(date.getUTCDate() - 1);
   return date.toISOString().slice(0, 10);
 }
 

@@ -18,6 +18,7 @@ export * from "./publication-units.ts";
 export * from "./coverage.ts";
 export * from "./bound-evaluation.ts";
 export * from "./public-time.ts";
+export * from "./session-calendar.ts";
 export * from "./split-adjustment.ts";
 export * from "./derivation.ts";
 export * from "./presentation.ts";

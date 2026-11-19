@@ -56,11 +56,18 @@ test("a last trade is known when its response arrived: its trade time plus the d
   assert.equal(lastTrade(LISTING, evidence(body, "2024-06-11T20:30:00.100Z")).known_at, null);
 });
 
-test("the last regular session is the last weekday whose 16:00 close the cutoff has passed", () => {
+test("the last regular session is the last session whose 16:00 close the cutoff has passed", () => {
   assert.equal(lastRegularSessionDate("2024-06-12T14:00:00.000Z", "America/New_York"), "2024-06-11");
   assert.equal(lastRegularSessionDate("2024-06-12T20:00:00.000Z", "America/New_York"), "2024-06-12");
   assert.equal(lastRegularSessionDate("2024-06-15T16:00:00.000Z", "America/New_York"), "2024-06-14");
   assert.equal(lastRegularSessionDate("2024-06-17T13:00:00.000Z", "America/New_York"), "2024-06-14");
+});
+
+test("a market holiday is not a regular session, so the close before it stays the last (#611)", () => {
+  // Thanksgiving, Thu 2026-11-26: until Friday's session closes, Wednesday's is the last.
+  assert.equal(lastRegularSessionDate("2026-11-27T15:00:00.000Z", "America/New_York"), "2026-11-25");
+  // Christmas, Fri 2026-12-25: all weekend, Thursday's.
+  assert.equal(lastRegularSessionDate("2026-12-27T15:00:00.000Z", "America/New_York"), "2026-12-24");
 });
 
 test("price capture records exact tokens once and reads the latest known by a cutoff", { timeout: 180_000 }, async (t) => {

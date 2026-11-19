@@ -17,6 +17,7 @@ import {
   callInputOperations,
   canonicalDecimalString,
   hashCanonical,
+  localDateOf,
   parseCallSettings,
   parseFinancialDecimal,
   type CallContent,
@@ -83,6 +84,11 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
   const [{ run_id, unit_id, result_ids, plan }] = certificates as [typeof certificates[number]];
   const [member] = plan.subjects.members;
   if (plan.subjects.members.length !== 1 || member?.subject_ref.kind !== "issuer" || !isCallPlan(plan, member.slot_id)) return null;
+  const issuer = member.subject_ref.id;
+  const listing = await subjectListing(db, issuer, plan.time.knowledge_cutoff);
+  // The Call and its price are dated on the listing's calendar (#614), in the plan's own zone when the issuer's listings share none.
+  const zone = listing.timezone ?? plan.time.cutoff_timezone;
+  const localDate = (instant: string) => localDateOf(Date.parse(instant), zone);
 
   const certified = new Set(Array.isArray(result_ids) ? result_ids : []);
   const results = new Map((await db.query<{ result_id: string; node_id: string; disposition: string; payload: unknown }>(
@@ -103,7 +109,7 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
   const bound = new Map(bindings.flatMap((row) => row.binding_status === "bound" && row.bound_payload !== null ? [[row.input_slot, row] as const] : []));
   const citations = Object.fromEntries(Object.entries(CITED_SLOTS).map(([id, slots]) => [id, distinctSources(slots.flatMap((slot) => {
     const row = bound.get(slot);
-    return row === undefined ? [] : [citation(row)];
+    return row === undefined ? [] : [citation(row, localDate)];
   }))])) as Record<CallFactId, CallSource[]>;
   const period = (slot: string) => {
     const payload = bound.get(slot)?.bound_payload;
@@ -111,11 +117,11 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
   };
   const observed = bound.get("market_cap_px")?.bound_payload?.observed_at;
 
-  const issuer = member.subject_ref.id;
-  const callDate = new Date(plan.time.knowledge_cutoff).toISOString().slice(0, 10);
+  const callDate = localDate(plan.time.knowledge_cutoff);
   const evidence: CallEvidence = {
     call_date: callDate,
-    subject: { issuer_id: issuer, label: await subjectLabel(db, issuer) },
+    listing_timezone: zone,
+    subject: { issuer_id: issuer, label: listing.label },
     settings: request.settings,
     inputs: {
       snapshot_id: request.inputs_snapshot_id.toLowerCase(),
@@ -126,7 +132,7 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     figures: figures as CallEvidence["figures"],
     citations,
     fiscal_year_end: period("operating_cash_flow"),
-    price_date: typeof observed === "string" ? new Date(observed).toISOString().slice(0, 10) : null,
+    price_date: typeof observed === "string" ? localDate(observed) : null,
     consensus: await consensusCaptures(db, issuer, callDate),
   };
   const content = assembleCall(evidence);
@@ -156,12 +162,12 @@ function engineFigure(result: { disposition: string; payload: unknown } | undefi
   return null;
 }
 
-// A bound fact cites its filing, the period it is for and the date it was public by; a bound price its observation's day.
-function citation(row: Binding): CallSource {
+// A bound fact cites its filing, the period it is for and the date it was public by; a bound price its observation's day on the listing's calendar.
+function citation(row: Binding, localDate: (instant: string) => string): CallSource {
   const payload = row.bound_payload!;
   const source = payload.source as { source_id: UUID };
   if (typeof payload.observation_id === "string") {
-    return { source_id: source.source_id, accession: null, period_end: null, date: new Date(payload.observed_at as string).toISOString().slice(0, 10) };
+    return { source_id: source.source_id, accession: null, period_end: null, date: localDate(payload.observed_at as string) };
   }
   const period = payload.period as { end: string };
   const publication = payload.publication as { available_no_later_than: string };
@@ -169,8 +175,8 @@ function citation(row: Binding): CallSource {
     source_id: source.source_id,
     accession: ACCESSION.exec(row.canonical_url ?? "")?.[1] ?? null,
     period_end: period.end,
-    // The filing day in its own timezone, as the attestation states it.
-    date: publication.available_no_later_than.slice(0, 10),
+    // The filing day on the Call's calendar, so it is never after the Call date (#614).
+    date: localDate(publication.available_no_later_than),
   };
 }
 
@@ -178,17 +184,27 @@ function distinctSources(sources: ReadonlyArray<CallSource>): CallSource[] {
   return [...new Map(sources.map((source) => [`${source.source_id}|${source.period_end}`, source])).values()];
 }
 
-// The ticker of the issuer's one common-stock listing; its legal name otherwise.
-async function subjectLabel(db: QueryExecutor, issuerId: string): Promise<string> {
-  const { rows } = await db.query<{ ticker: string | null; legal_name: string }>(
-    `select l.ticker, i.legal_name
+// The ticker of the issuer's one common-stock listing active at the cutoff, its legal name otherwise, and the
+// time zone all those listings share. Active as price selection reads it (loadSubjectSplitHistory), so a former
+// listing in another zone does not move the Call off its price's calendar.
+async function subjectListing(db: QueryExecutor, issuerId: string, cutoff: string): Promise<Readonly<{ label: string; timezone: string | null }>> {
+  const { rows } = await db.query<{ ticker: string | null; legal_name: string; timezone: string | null }>(
+    `select l.ticker, i.legal_name, l.timezone
        from issuers i
        left join instruments n on n.issuer_id = i.issuer_id and n.asset_type = 'common_stock'
        left join listings l on l.instrument_id = n.instrument_id
+        and (l.active_from is null or l.active_from <= $2::timestamptz)
+        and (l.active_to is null or l.active_to > $2::timestamptz)
       where i.issuer_id = $1::uuid`,
-    [issuerId],
+    [issuerId, cutoff],
   );
-  return rows.length === 1 && rows[0]!.ticker !== null ? rows[0]!.ticker : rows[0]?.legal_name ?? issuerId;
+  // An instrument with no active listing joins as an empty row: it is no listing.
+  const listings = rows.filter((row) => row.timezone !== null);
+  const zones = new Set(listings.map((row) => row.timezone));
+  return {
+    label: listings.length === 1 && listings[0]!.ticker !== null ? listings[0]!.ticker : rows[0]?.legal_name ?? issuerId,
+    timezone: zones.size === 1 ? [...zones][0] ?? null : null,
+  };
 }
 
 // The issuer's Finviz five-year EPS growth captures in the 7 days up to the Call date.

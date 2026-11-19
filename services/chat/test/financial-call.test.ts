@@ -39,7 +39,11 @@ const NOSH = issuer("NOSH", 3, 900003, "0000900003-26-000026");
 const NVDA = issuer("NVDA", 4, 1045810, "0001045810-26-000026");
 // AAPL's inputs, its splits checked a week later, so a Call then binds its shares and finds Friday's close a week old.
 const STAL = issuer("STAL", 5, 900005, "0000900005-26-000026");
-const ISSUERS = [AAPL, NOCN, NOSH, NVDA, STAL];
+// AAPL's inputs, its last close Wednesday 2026-11-25, the day before Thanksgiving, and its splits checked on Friday.
+const HOLI = issuer("HOLI", 6, 900006, "0000900006-26-000026");
+// AAPL's inputs, its 10-K downloaded at 20:00 New York on 2026-11-09, already 2026-11-10 in UTC.
+const EVEN = issuer("EVEN", 7, 900007, "0000900007-26-000026");
+const ISSUERS = [AAPL, NOCN, NOSH, NVDA, STAL, HOLI, EVEN];
 
 const resolve = (mention: string): Promise<ChatSubjectPreResolution> => {
   const company = ISSUERS.find((entry) => entry.ticker === mention);
@@ -70,18 +74,18 @@ function filerFacts(company: Issuer, change: { shares?: false; capexTag?: string
   return facts;
 }
 
-async function seedIssuer(db: Client, pool: FinancialPool, company: Issuer, facts: unknown, consensus: boolean, splitsCheckedAt = "2026-11-09T12:00:00Z"): Promise<void> {
+async function seedIssuer(db: Client, pool: FinancialPool, company: Issuer, facts: unknown, consensus: boolean, splitsCheckedAt = "2026-11-09T12:00:00Z", closedAt = "2026-11-06T21:00:00Z", publishedAt = "2026-11-09T06:00:00.000Z"): Promise<void> {
   await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, $2, $3)`, [company.issuer, `${company.ticker} Inc.`, String(company.cik)]);
   await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $1, 'common_stock')`, [company.issuer]);
   await db.query(`insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone) values ($1, $2, 'XNAS', $3, 'USD', 'America/New_York')`, [company.listing, company.issuer, company.ticker]);
   await db.query(`insert into listing_split_coverage (listing_id, checked_at, source_id) values ($1, $2, $3)`, [company.listing, splitsCheckedAt, POLYGON_MARKET_SOURCE_ID]);
   await db.query(
     `insert into price_observations (listing_id, source_id, kind, price_text, currency, observed_at, known_at, fetched_at, body_sha256)
-     values ($1, $2, 'session_close', '342.37', 'USD', '2026-11-06T21:00:00Z', '2026-11-06T21:15:00Z', '2026-11-06T21:15:00Z', $3)`,
-    [company.listing, POLYGON_MARKET_SOURCE_ID, "d".repeat(64)],
+     values ($1, $2, 'session_close', '342.37', 'USD', $4::timestamptz, $4::timestamptz + interval '15 minutes', $4::timestamptz + interval '15 minutes', $3)`,
+    [company.listing, POLYGON_MARKET_SOURCE_ID, "d".repeat(64), closedAt],
   );
   const statements = createSecBackedStatementRepository(pool, {
-    fetcher: secCompanyFetcher(() => facts, { completed_at: "2026-11-09T06:00:00.000Z" }),
+    fetcher: secCompanyFetcher(() => facts, { completed_at: publishedAt }),
     sourceId: randomUUID(),
     logger: { warn: () => {} },
   });
@@ -128,6 +132,8 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
   await seedIssuer(db, pool, NOSH, filerFacts(NOSH, { shares: false }), true);
   await seedIssuer(db, pool, NVDA, filerFacts(NVDA, { capexTag: "PaymentsToAcquireProductiveAssets" }), true);
   await seedIssuer(db, pool, STAL, filerFacts(STAL), true, "2026-11-16T12:00:00Z");
+  await seedIssuer(db, pool, HOLI, filerFacts(HOLI), true, "2026-11-27T12:00:00Z", "2026-11-25T21:00:00Z");
+  await seedIssuer(db, pool, EVEN, filerFacts(EVEN), true, undefined, "2026-11-09T21:00:00Z", "2026-11-10T01:00:00.000Z");
 
   const ask = async (question: string, options: { clock?: string; turnId?: string; threadId?: string; model?: PlanningModel } = {}) => {
     const threadId = options.threadId ?? randomUUID();
@@ -236,5 +242,39 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     assert.deepEqual([kinds[0], kinds.includes("call")], ["financial_answer", false]);
     const text = JSON.stringify(message.blocks);
     assert.equal(STANCE_WORDS.test(text), false);
+  });
+
+  await t.test("the morning after Thanksgiving, Wednesday's close is the latest session's, so the Call is not declined for it (#611)", async () => {
+    const { call } = (await ask("Make a Call on HOLI", { clock: "2026-11-27T15:00:00.000Z" })).block;
+    assert.deepEqual([call.call_date, call.facts[4]!.figure.text, call.facts[4]!.citations.map((citation) => citation.text)], ["2026-11-27", "USD 342.37 per share", ["Close on 2026-11-25"]]);
+    assert.deepEqual([call.stance.rule, call.stance.reasons.map((reason) => reason.cites)], [1, ["exit_multiple"]]);
+  });
+
+  await t.test("a Call made at 21:00 in New York is dated that day, as is a last trade at 20:30 there (#614)", async () => {
+    await db.query(
+      `insert into price_observations (listing_id, source_id, kind, price_text, currency, observed_at, known_at, fetched_at, body_sha256)
+       values ($1, $2, 'last_trade', '343.10', 'USD', '2026-11-10T01:30:00Z', '2026-11-10T01:30:05Z', '2026-11-10T01:30:05Z', $3)`,
+      [AAPL.listing, POLYGON_MARKET_SOURCE_ID, "e".repeat(64)],
+    );
+    // A former listing in another zone does not move the Call off its active listing's calendar.
+    await db.query(
+      `with former as (insert into instruments (issuer_id, asset_type) values ($1, 'common_stock') returning instrument_id)
+       insert into listings (instrument_id, mic, ticker, trading_currency, timezone, active_from, active_to)
+       select instrument_id, 'XLON', 'AAPL-L', 'GBP', 'Europe/London', '2010-01-01', '2020-01-01' from former`,
+      [AAPL.issuer],
+    );
+    const { block } = await ask("Make a Call on AAPL", { clock: "2026-11-10T02:00:00.000Z" });
+    const call = block.call;
+    assert.deepEqual([call.call_date, call.facts[4]!.figure.text, call.facts[4]!.citations.map((citation) => citation.text)], ["2026-11-09", "USD 343.1 per share", ["Close on 2026-11-09"]]);
+    assert.deepEqual([call.stance.rule, call.requires[1]!.figure.text], [1, "8.18%"]);
+    const stored = (await db.query(`select call_date::text from calls where snapshot_id = $1`, [block.snapshot_id])).rows;
+    assert.deepEqual(stored, [{ call_date: "2026-11-09" }]);
+  });
+
+  await t.test("a 10-K public at 20:00 in New York is cited public by that day, never after the Call (#614)", async () => {
+    const { call } = (await ask("Make a Call on EVEN", { clock: "2026-11-10T02:00:00.000Z" })).block;
+    const publicBy = call.facts.flatMap((fact) => fact.citations.map((citation) => citation.text)).filter((text) => text.includes("public by"));
+    assert.ok(publicBy.length > 0);
+    assert.deepEqual([call.call_date, [...new Set(publicBy.map((text) => text.slice(-10)))]], ["2026-11-09", ["2026-11-09"]]);
   });
 });

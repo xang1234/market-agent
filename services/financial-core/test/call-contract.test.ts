@@ -20,6 +20,7 @@ const filing = (period_end: string) => ({ source_id: TEN_K, accession: "00003201
 // ADR 0006's AAPL probe: F0, N and SBC from the FY2026 10-K, the cover count, and Friday's close.
 const AAPL: CallEvidence = {
   call_date: "2026-11-09",
+  listing_timezone: "America/New_York",
   subject: { issuer_id: "00000000-0000-4000-8000-0000000000d1", label: "AAPL" },
   settings: DEFAULT_CALL_SETTINGS,
   inputs: { snapshot_id: "00000000-0000-4000-8000-0000000000e1", run_id: "00000000-0000-4000-8000-0000000000e2", unit_id: "call", fingerprint: "f".repeat(64) },

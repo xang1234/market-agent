@@ -26,6 +26,7 @@ function q(text: string): ExactRational {
 // F0 = 100, S0 = 10, N = 50, r = 10%, d = 0, X = 15 (USD m and m shares).
 const SYNTHETIC: ValuationInputs = {
   call_date: "2026-11-10",
+  listing_timezone: "America/New_York",
   period_end: "2026-09-26",
   price_date: "2026-11-09",
   currency: { reporting: "USD", price: "USD" },
@@ -132,7 +133,7 @@ test("each input outcome declines V, today's multiple and required growth alike,
     [{ period_end: "2025-08-09" }, "stale_filing", "stale_input"],
     [{ shares: q("0") }, "shares_missing", "missing_input"],
     [{ price_date: "2026-11-11" }, "price_missing", "missing_input"],
-    // Tue 2026-11-10 is six weekdays after Mon 2026-11-02.
+    // Tue 2026-11-10 is six sessions after Mon 2026-11-02.
     [{ price_date: "2026-11-02" }, "stale_price", "stale_input"],
     [{ required_return: q("0") }, "required_return_out_of_range", null],
   ];
@@ -165,14 +166,22 @@ test("an exit multiple or share change outside its range declines V and required
   assert.equal(valuePerShare(SYNTHETIC, { ...ASSUMED, share_change: q("-0.9999") }, q("0.1")).kind, "value");
 });
 
-test("the staleness limits hold at their edges: 15 months to the day, 5 weekdays", () => {
+test("the staleness limits hold at their edges: 15 months to the day, 5 sessions", () => {
   assert.equal(valuePerShare(at({ period_end: "2025-08-10" }), ASSUMED, q("0.1")).kind, "value");
   // A month-end start clamps: 2025-08-31 + 15 months is 2026-11-30.
   assert.equal(valuePerShare(at({ period_end: "2025-08-31", call_date: "2026-11-30", price_date: "2026-11-30" }), ASSUMED, q("0.1")).kind, "value");
   assert.equal(valuePerShare(at({ period_end: "2025-08-31", call_date: "2026-12-01", price_date: "2026-12-01" }), ASSUMED, q("0.1")).kind, "outcome");
-  // Fri 2026-11-06 to Fri 2026-11-13 is five weekdays; the weekend between is not counted.
+  // Fri 2026-11-06 to Fri 2026-11-13 is five sessions; the weekend between is not counted.
   assert.equal(valuePerShare(at({ price_date: "2026-11-06", call_date: "2026-11-13" }), ASSUMED, q("0.1")).kind, "value");
   assert.equal(valuePerShare(at({ price_date: "2026-11-06", call_date: "2026-11-16" }), ASSUMED, q("0.1")).kind, "outcome");
+});
+
+test("a market holiday is not a trading day: Christmas and New Year's Day leave 2026-12-24 five sessions before 2027-01-04 (#611)", () => {
+  const priced = (price_date: string) => valuePerShare(at({ price_date, call_date: "2027-01-04" }), ASSUMED, q("0.1"));
+  assert.deepEqual(["2026-12-24", "2026-12-23"].map((date) => {
+    const result = priced(date);
+    return "outcome" in result ? result.outcome : result.kind;
+  }), ["value", "stale_price"]);
 });
 
 test("a value past the exact-arithmetic limits is numeric_limit_exceeded, never a throw", () => {
