@@ -1,5 +1,8 @@
 import { useEffect, useId, useState, type ReactElement, type ReactNode, type SyntheticEvent } from 'react'
 
+// Room for about four lines of text-xs below a trigger.
+const TIP_ROOM = 80
+
 const TIP = 'fixed z-50 max-w-xs font-sans rounded border border-line-strong bg-surface px-2 py-1 text-xs font-normal normal-case tracking-normal text-fg shadow-md'
 
 /**
@@ -9,11 +12,13 @@ const TIP = 'fixed z-50 max-w-xs font-sans rounded border border-line-strong bg-
  */
 export function GapReason({ reason, children }: { reason: string; children: ReactNode }): ReactElement {
   const id = useId()
-  const [at, setAt] = useState<{ left: number; top: number } | null>(null)
+  const [at, setAt] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
   const show = (event: SyntheticEvent<HTMLElement>) => {
     const box = event.currentTarget.getBoundingClientRect()
-    // max-w-xs is 320px; keep the tip on screen near the right edge.
-    setAt({ left: Math.max(8, Math.min(box.left, window.innerWidth - 328)), top: box.bottom })
+    // max-w-xs is 320px; keep the tip on screen near the right edge, and open it
+    // above the trigger when a few lines would not fit below.
+    const left = Math.max(8, Math.min(box.left, window.innerWidth - 328))
+    setAt(window.innerHeight - box.bottom < TIP_ROOM ? { left, bottom: window.innerHeight - box.top } : { left, top: box.bottom })
   }
   const hide = () => setAt(null)
   // A fixed tip would float away from its trigger once anything scrolls.

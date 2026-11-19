@@ -35,3 +35,29 @@ test('a blank key stat with a known reason names it to keyboard and pointer user
     restore()
   }
 })
+
+test('a reason for a dash near the bottom of the window opens above it, on screen', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  try {
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(<KeyStatsGrid cells={[{ key: 'pe_ratio', label: 'P/E (diluted)', value: null, reason: 'No market price yet.' }]} />)
+    })
+    const doc = dom.window.document
+    const trigger = doc.querySelector('[data-testid="key-stat-pe_ratio"] [tabindex="0"]') as HTMLElement
+    const tip = doc.getElementById(trigger.getAttribute('aria-describedby')!)!
+    const at = (top: number) => { trigger.getBoundingClientRect = () => ({ left: 10, right: 30, top, bottom: top + 20, width: 20, height: 20, x: 10, y: top, toJSON: () => ({}) }) as DOMRect }
+    const height = dom.window.innerHeight
+    at(height - 30)
+    await act(async () => { trigger.dispatchEvent(new dom.window.FocusEvent('focusin', { bubbles: true })) })
+    assert.deepEqual([tip.style.top, tip.style.bottom], ['', '30px'], 'anchored above the dash')
+    await act(async () => { trigger.dispatchEvent(new dom.window.FocusEvent('focusout', { bubbles: true })) })
+    at(100)
+    await act(async () => { trigger.dispatchEvent(new dom.window.FocusEvent('focusin', { bubbles: true })) })
+    assert.deepEqual([tip.style.top, tip.style.bottom], ['120px', ''], 'below the dash when there is room')
+    await act(async () => root.unmount())
+  } finally {
+    restore()
+  }
+})
