@@ -56,16 +56,21 @@ export function SidebarNav({ compact = false }: { compact?: boolean }) {
             ].join(' ')
           }
         >
-          <Icon aria-hidden="true" className="h-[17px] w-[17px] shrink-0" strokeWidth={1.8} />
-          <span className={compact ? 'sr-only' : 'flex-1'}>{label}</span>
-          {!compact && HOTKEY_BY_PATH.has(to) ? (
-            <kbd
-              aria-hidden="true"
-              className="num rounded border border-line px-1 text-[10px] uppercase text-faint"
-            >
-              {HOTKEY_BY_PATH.get(to)}
-            </kbd>
-          ) : null}
+          {({ isActive }) => (
+            <>
+              <Icon aria-hidden="true" className="h-[17px] w-[17px] shrink-0" strokeWidth={1.8} />
+              <span className={compact ? 'sr-only' : 'flex-1'}>{label}</span>
+              {!compact && HOTKEY_BY_PATH.has(to) ? (
+                // Faint is under 4.5:1 on the active accent-soft fill in dark (#554).
+                <kbd
+                  aria-hidden="true"
+                  className={`num rounded border border-line px-1 text-[10px] uppercase ${isActive ? 'text-muted' : 'text-faint'}`}
+                >
+                  {HOTKEY_BY_PATH.get(to)}
+                </kbd>
+              ) : null}
+            </>
+          )}
         </NavLink>
       ))}
     </nav>
