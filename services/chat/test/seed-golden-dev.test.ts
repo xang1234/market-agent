@@ -4,6 +4,7 @@ import test from "node:test";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { assertNoGoldenDataset, seedGoldenDevDatabase } from "../scripts/seed-golden-dev.ts";
 import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
+import { upsertDiscoveredListing } from "../../resolver/src/discovery.ts";
 import { AMD_Q2_2025_RELEASE, GOLDEN_AS_OF, GOLDEN_COMPANIES, GOLDEN_SOURCE_ID, goldenFixtureVersion } from "./golden/dataset.ts";
 
 test("seedGoldenDevDatabase seeds the frozen dataset once and is a no-op on rerun", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
@@ -21,6 +22,33 @@ test("seedGoldenDevDatabase seeds the frozen dataset once and is a no-op on reru
 
   const tickers = (await client.query<{ ticker: string }>(`select ticker from listings order by ticker`)).rows.map((r) => r.ticker);
   assert.deepEqual(tickers, GOLDEN_COMPANIES.map((c) => c.ticker).sort());
+});
+
+test("a provider row for a golden ticker keeps its listing on the golden issuer (#597)", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-discovery");
+  const client = await connectedClient(t, databaseUrl);
+  await seedGoldenDevDatabase(databaseUrl);
+  const [nvda] = GOLDEN_COMPANIES;
+
+  // Polygon's NVDA row spells the name another way and writes the CIK without its zeros.
+  await upsertDiscoveredListing(client, {
+    ticker: "NVDA",
+    legal_name: "Nvidia Corp",
+    market: "stocks",
+    active: true,
+    mic: "XNAS",
+    trading_currency: "USD",
+    timezone: "America/New_York",
+    asset_type: "common_stock",
+    cik: "1045810",
+    figi_composite: "BBG000BBJQV0",
+  });
+
+  const { rows } = await client.query(
+    `select i.issuer_id::text as issuer_id, (select count(*)::int from issuers where ltrim(cik, '0') = '1045810') as cik_holders
+       from listings l join instruments i using (instrument_id) where l.ticker = 'NVDA'`,
+  );
+  assert.deepEqual(rows, [{ issuer_id: nvda!.issuer_id, cik_holders: 1 }]);
 });
 
 test("assertNoGoldenDataset passes on a live database and rejects one holding the frozen dataset", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {

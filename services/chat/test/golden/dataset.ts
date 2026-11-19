@@ -55,6 +55,7 @@ type Quarter = {
 export type GoldenCompany = {
   ticker: string;
   legal_name: string;
+  // Without leading zeros, as every other writer stores a CIK, so a provider's row finds this issuer by it (#597).
   cik: string;
   // Peers are companies in the same industry (fundamentals peer-set resolver).
   sector: string;
@@ -97,7 +98,7 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
   {
     ticker: "NVDA",
     legal_name: "NVIDIA Corporation",
-    cik: "0001045810",
+    cik: "1045810",
     sector: "Technology",
     industry: "Semiconductors",
     issuer_id: GOLDEN_ISSUER_IDS.NVDA,
@@ -133,7 +134,7 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
   {
     ticker: "AMD",
     legal_name: "Advanced Micro Devices, Inc.",
-    cik: "0000002488",
+    cik: "2488",
     sector: "Technology",
     industry: "Semiconductors",
     issuer_id: GOLDEN_ISSUER_IDS.AMD,
@@ -158,7 +159,7 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
   {
     ticker: "AAPL",
     legal_name: "Apple Inc.",
-    cik: "0000320193",
+    cik: "320193",
     sector: "Technology",
     industry: "Consumer Electronics",
     issuer_id: GOLDEN_ISSUER_IDS.AAPL,
