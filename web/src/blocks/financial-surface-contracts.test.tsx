@@ -118,7 +118,8 @@ test('grid: a peer without a value keeps its row, and its reason is readable', (
   }
   const html = withInspector(<GridTable columns={[{ column_key: 'latest_revenue', label: 'Revenue (latest)', kind: 'deterministic' }]} detail={detail} />)
   assert.ok(html.includes('Alpha Industries Inc.') && html.includes('Beta Holdings Corp.'), 'both requested companies stay in the table')
-  assert.ok(html.includes('Not available: missing input'))
+  assert.match(html, /role="tooltip"[^>]*>No data for this company\.</, 'the gap says why in words, never its raw code')
+  assert.ok(!html.includes('missing input') && !html.includes('missing_input'))
   assert.deepEqual([count(html, 'Verified calculation'), count(html, 'Partial coverage')], [1, 0], 'only a value is labelled verified; a gap says why instead')
   assert.ok(html.includes('aria-label="Inspect the verified calculation: $383.29B"'))
   assert.ok(html.includes('$365.82B'), 'two instances of one column are two columns, not one overwritten cell')

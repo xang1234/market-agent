@@ -92,3 +92,15 @@ test('only provider-backed cells are emitted; unavailable ones are null (dash)',
   // every emitted cell has a label
   assert.ok(cells.every((c) => c.label.length > 0))
 })
+
+test('a blank fundamental cell carries the reason its warning names, never the raw code', () => {
+  const pe = { ...stat('pe_ratio', 0, 'multiple'), value_num: null, warnings: [{ code: 'missing_market_price' as const, message: 'pe_ratio requires a market price input.' }] }
+  const margin = { ...stat('gross_margin', 0, 'percent'), value_num: null, warnings: [] }
+  const cells = buildKeyStatsGrid({ bars: null, stats: envelope([pe, margin]), prevClose: null, currency: 'USD' })
+  const byKey = new Map(cells.map((c) => [c.key, c]))
+  assert.equal(byKey.get('pe_ratio')?.value, null)
+  assert.equal(byKey.get('pe_ratio')?.reason, 'No market price yet.')
+  assert.equal(byKey.get('gross_margin')?.value, null)
+  assert.equal(byKey.get('gross_margin')?.reason, undefined, 'no warning, no invented reason')
+  assert.equal(byKey.get('prev_close')?.reason, undefined)
+})

@@ -6,6 +6,7 @@
 // the grid never ships tiles that can never carry data.
 
 import type { NormalizedBar } from '../../symbol/series.ts'
+import { gapReason } from '../../gaps/gapReasons.ts'
 import { formatQuotePrice } from '../../symbol/quote.ts'
 import { formatStatValue, statLabel, type KeyStatKey, type KeyStatsEnvelope } from '../../symbol/stats.ts'
 
@@ -14,6 +15,8 @@ export type KeyStatCell = {
   label: string
   // null → the value is unavailable for this subject; renderer shows a dash.
   value: string | null
+  // Why a null value is blank, when the stats envelope says.
+  reason?: string
   // The queried subject's prior close anchors the page — emphasize it.
   emphasis?: boolean
 }
@@ -70,7 +73,10 @@ export function buildKeyStatsGrid(input: KeyStatsGridInput): ReadonlyArray<KeySt
 
   const fundamentalCells: KeyStatCell[] = FUNDAMENTAL_CELLS.map((key) => {
     const stat = statByKey.get(key)
-    return { key, label: statLabel(key), value: stat ? formatStatValue(stat) : null }
+    if (!stat) return { key, label: statLabel(key), value: null }
+    if (stat.value_num !== null) return { key, label: statLabel(key), value: formatStatValue(stat) }
+    const reason = gapReason(stat.warnings[0]?.code)
+    return { key, label: statLabel(key), value: null, ...(reason ? { reason } : {}) }
   })
 
   return [...priceCells, ...fundamentalCells]

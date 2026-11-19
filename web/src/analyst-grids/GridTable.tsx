@@ -6,6 +6,8 @@ import { VerificationLabel } from "../blocks/VerificationLabel.tsx";
 import type { FinancialAnswerContent } from "../blocks/types.ts";
 import type { FinancialResultShown } from "../blocks/financialInspection.ts";
 import { resultShown } from "../blocks/financialAnswer.ts";
+import { GapReason } from "../gaps/GapReason.tsx";
+import { gapReason } from "../gaps/gapReasons.ts";
 
 /** A column as the table shows it: the run's frozen instance, labelled from the catalog. */
 type TableColumn = { id: string; label: string };
@@ -87,16 +89,24 @@ function certifiedResult(cell: GridCellDetail | undefined): { resultId: string; 
   return { resultId: result.result_id, shown: content?.labels ? resultShown(content as FinancialAnswerContent, result) : undefined };
 }
 
-/** Why a cell has no value, in words, for assistive technology; the row itself never disappears. */
+const STATUS_REASON: Readonly<Record<"missing_data" | "no_coverage" | "error", string>> = {
+  missing_data: "No data for this company.",
+  no_coverage: "Not covered for this company.",
+  error: "This cell could not be computed.",
+};
+
+/** Why a cell has no value: the sealed block's own gap text, else its coverage code, else its status. */
 function gapText(cell: GridCellDetail | undefined): string | null {
   if (!cell || cell.status === "ok" || cell.status === "pending") return null;
-  return cell.coverage_flag ? `Not available: ${cell.coverage_flag.replaceAll("_", " ")}` : "Not available";
+  const presented = (cell.financial_block?.financial as Partial<FinancialAnswerContent> | undefined)?.results?.[0]?.presented;
+  return (presented?.kind === "gap" ? presented.text : null) ?? gapReason(cell.coverage_flag) ?? STATUS_REASON[cell.status];
 }
 
 /**
- * One cell. A certified value opens the shared calculation inspector and is
- * labelled verified; an evidence-backed value opens the evidence inspector;
- * anything else is text. Real buttons, so cells are reachable by keyboard.
+ * One cell. A gap says why it is blank and, as in chat, opens no inspector. A
+ * certified value opens the shared calculation inspector and is labelled
+ * verified; an evidence-backed value opens the evidence inspector; anything
+ * else is text. Real buttons, so cells are reachable by keyboard.
  */
 function GridCell({ cell }: { cell: GridCellDetail | undefined }): ReactElement {
   const inspector = useEvidenceInspector();
@@ -122,7 +132,11 @@ function GridCell({ cell }: { cell: GridCellDetail | undefined }): ReactElement 
       data-snapshot-id={cell?.snapshot_id ?? undefined}
       data-certified={cell?.financial_block ? "true" : "false"}
     >
-      {open ? (
+      {gap ? (
+        <span className="num text-muted">
+          <GapReason reason={gap}>{cellText(cell)}</GapReason>
+        </span>
+      ) : open ? (
         <button
           type="button"
           className={buttonClass}
@@ -139,7 +153,6 @@ function GridCell({ cell }: { cell: GridCellDetail | undefined }): ReactElement 
           <VerificationLabel kind="verified" />
         </span>
       ) : null}
-      {gap ? <span className="sr-only">{gap}</span> : null}
     </td>
   );
 }

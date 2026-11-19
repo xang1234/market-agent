@@ -10,6 +10,7 @@ import { EvidenceInspectorProvider } from "../evidence/EvidenceInspectorProvider
 import { EvidenceInspectorContext } from "../evidence/evidenceInspectorContext.ts";
 import { GridTable } from "./GridTable.tsx";
 import type { GridColumn, GridRunDetail } from "./gridsTypes.ts";
+import type { FinancialAnswerBlock } from "../blocks/types.ts";
 
 const COLUMNS: GridColumn[] = [{ column_key: "latest_market_cap", label: "Market Cap (latest)", kind: "deterministic" }];
 
@@ -127,4 +128,40 @@ test("clicking an inspectable cell triggers an evidence inspection fetch", async
   } finally {
     restore();
   }
+});
+
+test("a blank cell shows its coverage reason in words, from the sealed block when there is one", () => {
+  const gapBlock = { financial: { results: [{ result_id: "r", presented: { kind: "gap", text: "A required input or calculation is unavailable." } }] } } as unknown as FinancialAnswerBlock;
+  const detail: GridRunDetail = {
+    ...DETAIL,
+    cells: [
+      { ...DETAIL.cells[1]!, grid_row_id: "row-a", coverage_flag: "no_documents" },
+      { ...DETAIL.cells[1]!, coverage_flag: "blocked_by_dependency", financial_block: gapBlock },
+    ],
+  };
+  const html = renderToStaticMarkup(<GridTable columns={COLUMNS} detail={detail} />);
+  assert.match(html, /tabindex="0" aria-describedby="[^"]+"/, "the blank is keyboard reachable");
+  assert.match(html, /role="tooltip"[^>]*>No filings or documents for this company yet\.</);
+  assert.match(html, /role="tooltip"[^>]*>A required input or calculation is unavailable\.</);
+  assert.doesNotMatch(html, /no_documents|no documents|blocked_by_dependency/, "never a raw code");
+});
+
+test("an unknown coverage code falls back to the cell status, never the code", () => {
+  const detail: GridRunDetail = { ...DETAIL, cells: [{ ...DETAIL.cells[1]!, status: "no_coverage", coverage_flag: "some_future_code" }] };
+  const html = renderToStaticMarkup(<GridTable columns={COLUMNS} detail={detail} />);
+  assert.match(html, /role="tooltip"[^>]*>Not covered for this company\.</);
+  assert.doesNotMatch(html, /some_future_code|some future code/);
+});
+
+test("a certified gap cell shows its reason, not an inspect button, even with an inspector present", () => {
+  const gapBlock = { financial: { results: [{ result_id: "r", presented: { kind: "gap", text: "A required input or calculation is unavailable." } }] } } as unknown as FinancialAnswerBlock;
+  const detail: GridRunDetail = { ...DETAIL, cells: [{ ...DETAIL.cells[1]!, snapshot_id: "snap-2", coverage_flag: "blocked_by_dependency", financial_block: gapBlock }] };
+  const inspector = { openInspection() {}, openBlockInspection() {}, openFinancialResult() {}, closeInspection() {} };
+  const html = renderToStaticMarkup(
+    <EvidenceInspectorContext.Provider value={inspector}>
+      <GridTable columns={COLUMNS} detail={detail} />
+    </EvidenceInspectorContext.Provider>,
+  );
+  assert.doesNotMatch(html, /<button/);
+  assert.match(html, /role="tooltip"[^>]*>A required input or calculation is unavailable\.</);
 });
