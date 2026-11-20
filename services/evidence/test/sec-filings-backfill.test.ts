@@ -1,9 +1,11 @@
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 
 import { backfillIssuerFilings } from "../src/sec-filings-backfill.ts";
 import { MemoryObjectStore } from "../src/object-store.ts";
 import type { FetchFilingInput, FetchFilingResult } from "../src/sec-edgar.ts";
+import type { QueryExecutor } from "../src/types.ts";
+import { moveCik } from "./cik-moves-after-read.ts";
 import {
   bootstrapDatabase,
   connectedClient,
@@ -118,3 +120,71 @@ test(
     assert.deepEqual(fetchedAgain, [], "idempotent re-run must not refetch");
   },
 );
+
+const HOLDER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const MOVE = { cik: String(CIK), from: ISSUER_ID, to: HOLDER_ID };
+
+async function issuerAndHolder(t: TestContext) {
+  const { databaseUrl } = await bootstrapDatabase(t, "sec-filings-backfill-cik-moved");
+  const db = await connectedClient(t, databaseUrl);
+  await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'Advanced Micro Devices', $2), ($3, 'AMD Holdings', null)`, [
+    ISSUER_ID,
+    String(CIK),
+    HOLDER_ID,
+  ]);
+  return db;
+}
+
+const storedRows = async (db: QueryExecutor) => (await db.query<{ sources: number; documents: number; mentions: number }>(
+  `select (select count(*)::int from sources) as sources,
+          (select count(*)::int from documents) as documents,
+          (select count(*)::int from mentions) as mentions`,
+)).rows[0];
+
+test("a backfill whose issuer loses the CIK mid-download stores nothing", { skip: !dockerAvailable() }, async (t) => {
+  const db = await issuerAndHolder(t);
+  const client = fakeClient([]);
+  const result = await backfillIssuerFilings(
+    {
+      db,
+      objectStore: new MemoryObjectStore(),
+      secClient: {
+        ...client,
+        fetchFiling: async (input) => {
+          await moveCik(db, MOVE);
+          return client.fetchFiling(input);
+        },
+      },
+    },
+    { issuerId: ISSUER_ID, cik: CIK, now: NOW },
+  );
+  assert.deepEqual(result.ingested, []);
+  assert.deepEqual(await storedRows(db), { sources: 0, documents: 0, mentions: 0 });
+});
+
+test("a backfill whose issuer loses the CIK mentions it on no filing already stored", { skip: !dockerAvailable() }, async (t) => {
+  const db = await issuerAndHolder(t);
+  const { rows: [source] } = await db.query<{ id: string }>(
+    `insert into sources (provider, kind, trust_tier, license_class, retrieved_at) values ('sec_edgar', 'filing', 'primary', 'public', now()) returning source_id::text as id`,
+  );
+  await db.query(
+    `insert into documents (source_id, kind, provider_doc_id, title, content_hash, raw_blob_id) values ($1, 'filing', '0000002488-26-000010', '10-Q', 'sha256:a', 'sha256:a')`,
+    [source!.id],
+  );
+  const client = fakeClient([]);
+  await backfillIssuerFilings(
+    {
+      db,
+      objectStore: new MemoryObjectStore(),
+      secClient: {
+        ...client,
+        fetchSubmissions: async (cik) => {
+          await moveCik(db, MOVE);
+          return client.fetchSubmissions(cik);
+        },
+      },
+    },
+    { issuerId: ISSUER_ID, cik: CIK, now: NOW },
+  );
+  assert.equal((await storedRows(db))!.mentions, 0);
+});

@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 
 import { resolveByNameCandidate, resolveByShortName } from "../../resolver/src/lookup.ts";
+import { issuerHoldsCik } from "../../shared/src/identifiers.ts";
 import type { LlmChatMessage } from "../../llm/src/router.ts";
 import { writeToolCallLog } from "../../observability/src/tool-call.ts";
 import { createClaimArgument } from "./claim-argument-repo.ts";
 import { createClaimEvidence } from "./claim-evidence-repo.ts";
 import { createClaim } from "./claim-repo.ts";
-import { ingestDocument } from "./ingest.ts";
+import { ingestDocumentInTransaction } from "./ingest.ts";
 import { createMention } from "./mention-repo.ts";
 import { contentHashFromBytes, type ObjectStore } from "./object-store.ts";
 import {
@@ -18,7 +19,7 @@ import {
   verifyStatement,
   type ExtractReleaseLlm,
 } from "./sec-earnings-release-extraction.ts";
-import { cleanupSourceAfterFailedIngest, recentSubmissionRows, type SecFilingFetcher, type SecSubmissions } from "./sec-edgar.ts";
+import { recentSubmissionRows, type SecFilingFetcher, type SecSubmissions } from "./sec-edgar.ts";
 import { tenKSections, TEN_K_ITEMS, type TenKItem, type TenKSection } from "./sec-10k-sections.ts";
 import { createSource, deleteSource } from "./source-repo.ts";
 import { withTransaction } from "./transaction.ts";
@@ -333,62 +334,69 @@ export async function resolveCompetitorByName(db: QueryExecutor, name: string): 
   return null;
 }
 
+// Stores a 10-K's bytes and mentions its issuer on them, in one transaction.
+// Stores nothing, and returns null, when the issuer no longer holds `cik`, the
+// CIK it was read with. A null `cik` checks nothing. Once the mention commits,
+// the CIK fill moves no CIK off the issuer, so its claims need no check.
 export async function storeTenK(
   deps: { db: QueryExecutor; objectStore: ObjectStore },
-  input: { issuerId: string; bytes: Uint8Array; url: string | null; accession: string | null; filedDate: string | null; retrievedAt: string },
-): Promise<{ documentId: string; sourceId: string }> {
-  const { rows: [existing] } = await deps.db.query<{ document_id: string; source_id: string }>(
-    `select document_id::text as document_id, source_id::text as source_id from documents
-      where content_hash = $1 and deleted_at is null order by created_at limit 1`,
-    [contentHashFromBytes(input.bytes)],
-  );
-  let stored = existing ? { documentId: existing.document_id, sourceId: existing.source_id } : null;
-  if (stored === null) {
-    const source = await createSource(deps.db, {
-      provider: "sec_edgar",
-      kind: "filing",
-      canonical_url: input.url,
-      trust_tier: "primary",
-      license_class: "public",
-      retrieved_at: input.retrievedAt,
-    });
-    const { document } = await ingestDocument(deps, {
-      source: { source_id: source.source_id, license_class: source.license_class },
-      bytes: input.bytes,
-      document: {
-        kind: "filing",
-        provider_doc_id: input.accession,
-        title: "10-K",
-        published_at: input.filedDate === null ? null : `${input.filedDate}T00:00:00Z`,
-      },
-    }).catch((error: unknown) => cleanupSourceAfterFailedIngest(deps.db, source.source_id, error));
-    // A concurrent run stored the same bytes first, and its document keeps its source.
-    if (document.source_id !== source.source_id) await deleteSource(deps.db, source.source_id);
-    stored = { documentId: document.document_id, sourceId: document.source_id };
-  }
-  // Bytes stored first by --file, earlier or by a concurrent run, carry no filing.
-  // The first run that names the accession records it, so the next backfill finds
-  // the bytes without a fetch. It also dates the document and its claims, and
-  // gives the source its EDGAR link.
-  if (input.accession !== null) {
-    await deps.db.query(`update sources set canonical_url = coalesce(canonical_url, $2) where source_id = $1`, [stored.sourceId, input.url]);
-    const filedAt = input.filedDate === null ? null : `${input.filedDate}T00:00:00Z`;
-    await deps.db.query(
-      `update documents set provider_doc_id = coalesce(provider_doc_id, $2), published_at = coalesce(published_at, $3::timestamptz)
-        where document_id = $1`,
-      [stored.documentId, input.accession, filedAt],
+  input: { issuerId: string; cik: number | null; bytes: Uint8Array; url: string | null; accession: string | null; filedDate: string | null; retrievedAt: string },
+): Promise<{ documentId: string; sourceId: string } | null> {
+  return withTransaction(deps.db, async (tx) => {
+    if (input.cik !== null && !(await issuerHoldsCik(tx.db, input.issuerId, input.cik))) return null;
+    const { rows: [existing] } = await tx.db.query<{ document_id: string; source_id: string }>(
+      `select document_id::text as document_id, source_id::text as source_id from documents
+        where content_hash = $1 and deleted_at is null order by created_at limit 1`,
+      [contentHashFromBytes(input.bytes)],
     );
-    await deps.db.query(`update claims set effective_time = $2::timestamptz where document_id = $1 and effective_time is null`, [stored.documentId, filedAt]);
-  }
-  await createMention(deps.db, {
-    document_id: stored.documentId,
-    subject_kind: "issuer",
-    subject_id: input.issuerId,
-    prominence: "headline",
-    mention_count: 1,
-    confidence: 1,
+    let stored = existing ? { documentId: existing.document_id, sourceId: existing.source_id } : null;
+    if (stored === null) {
+      const source = await createSource(tx.db, {
+        provider: "sec_edgar",
+        kind: "filing",
+        canonical_url: input.url,
+        trust_tier: "primary",
+        license_class: "public",
+        retrieved_at: input.retrievedAt,
+      });
+      const { document } = await ingestDocumentInTransaction({ tx, objectStore: deps.objectStore }, {
+        source: { source_id: source.source_id, license_class: source.license_class },
+        bytes: input.bytes,
+        document: {
+          kind: "filing",
+          provider_doc_id: input.accession,
+          title: "10-K",
+          published_at: input.filedDate === null ? null : `${input.filedDate}T00:00:00Z`,
+        },
+      });
+      // A concurrent run stored the same bytes first, and its document keeps its source.
+      if (document.source_id !== source.source_id) await deleteSource(tx.db, source.source_id);
+      stored = { documentId: document.document_id, sourceId: document.source_id };
+    }
+    // Bytes stored first by --file, earlier or by a concurrent run, carry no filing.
+    // The first run that names the accession records it, so the next backfill finds
+    // the bytes without a fetch. It also dates the document and its claims, and
+    // gives the source its EDGAR link.
+    if (input.accession !== null) {
+      await tx.db.query(`update sources set canonical_url = coalesce(canonical_url, $2) where source_id = $1`, [stored.sourceId, input.url]);
+      const filedAt = input.filedDate === null ? null : `${input.filedDate}T00:00:00Z`;
+      await tx.db.query(
+        `update documents set provider_doc_id = coalesce(provider_doc_id, $2), published_at = coalesce(published_at, $3::timestamptz)
+          where document_id = $1`,
+        [stored.documentId, input.accession, filedAt],
+      );
+      await tx.db.query(`update claims set effective_time = $2::timestamptz where document_id = $1 and effective_time is null`, [stored.documentId, filedAt]);
+    }
+    await createMention(tx.db, {
+      document_id: stored.documentId,
+      subject_kind: "issuer",
+      subject_id: input.issuerId,
+      prominence: "headline",
+      mention_count: 1,
+      confidence: 1,
+    });
+    return stored;
   });
-  return stored;
 }
 
 export type TenKBackfillDeps = Extract10kDeps & {
@@ -403,7 +411,7 @@ export type TenKBackfillDeps = Extract10kDeps & {
 export async function backfillIssuer10k(
   deps: TenKBackfillDeps,
   issuer: { issuerId: string; cik: number },
-): Promise<(Extract10kResult & { accession: string }) | { outcome: "no_10k" }> {
+): Promise<(Extract10kResult & { accession: string }) | { outcome: "no_10k" | "cik_moved" }> {
   const submissions = await deps.secClient.fetchSubmissions(issuer.cik);
   const latest = recentSubmissionRows(submissions.filings.recent).find((row) => row.form === "10-K");
   if (latest === undefined) return { outcome: "no_10k" };
@@ -420,7 +428,8 @@ export async function backfillIssuer10k(
   const { bytes, url, retrievedAt } = blob !== null
     ? { bytes: blob.bytes, url: null, retrievedAt: new Date().toISOString() }
     : await deps.secClient.fetchFiling({ cik: issuer.cik, accession_number: latest.accession, document: latest.primaryDocument });
-  const doc = await storeTenK(deps, { issuerId: issuer.issuerId, bytes, url, accession: latest.accession, filedDate: latest.filedDate, retrievedAt });
+  const doc = await storeTenK(deps, { ...issuer, bytes, url, accession: latest.accession, filedDate: latest.filedDate, retrievedAt });
+  if (doc === null) return { outcome: "cik_moved" };
   const result = await extract10kClaims(deps, {
     ...doc,
     issuerId: issuer.issuerId,

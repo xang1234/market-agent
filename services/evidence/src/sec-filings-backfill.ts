@@ -1,13 +1,13 @@
 // Backfills an issuer's recent SEC filings as evidence documents: discovers
-// filings via the submissions API, ingests each primary document
-// (source + blob + documents row via ingestSecFiling), and records a mention
-// binding the document to the issuer — the linkage reader columns select by.
+// filings via the submissions API, then stores each primary document (source +
+// blob + documents row) with a mention binding it to the issuer, the linkage
+// reader columns select by, in one transaction.
 // Idempotent: filings whose accession number already has a live documents row
 // are skipped without refetching (the issuer mention is still re-asserted via
-// upsert, so a rerun heals a run that died between ingest and mention).
+// upsert, so a rerun heals a document stored with no mention).
 
+import { issuerHoldsCik } from "../../shared/src/identifiers.ts";
 import {
-  ingestSecFiling,
   recentSubmissionRows,
   type FetchFilingInput,
   type FetchFilingResult,
@@ -16,7 +16,10 @@ import {
 } from "./sec-edgar.ts";
 import { createMention } from "./mention-repo.ts";
 import { findLiveDocumentIdByAccession } from "./document-repo.ts";
+import { ingestDocumentInTransaction } from "./ingest.ts";
 import type { ObjectStore } from "./object-store.ts";
+import { createSource } from "./source-repo.ts";
+import { withTransaction, type TransactionContext } from "./transaction.ts";
 import type { QueryExecutor } from "./types.ts";
 
 // Per-issuer backfill targets the periodic narrative-evidence filings. It is
@@ -77,47 +80,60 @@ export async function backfillIssuerFilings(
 
   const ingested: BackfillIssuerFilingsResult["ingested"] = [];
   let skipped = 0;
-  for (const candidate of candidates) {
-    const existingDocumentId = await findLiveDocumentIdByAccession(deps.db, candidate.accession);
-    if (existingDocumentId !== null) {
-      // A prior run may have ingested the document but died before recording
-      // the issuer mention; createMention upserts, so re-asserting the
-      // linkage here keeps reruns truly idempotent (heals partial state).
-      await createMention(deps.db, {
-        document_id: existingDocumentId,
-        subject_kind: "issuer",
-        subject_id: input.issuerId,
-        prominence: "headline",
-        mention_count: 1,
-        confidence: 1,
-      });
-      skipped += 1;
-      continue;
+  // The filing IS the issuer's own document: a full-confidence headline mention,
+  // the linkage reader document selection queries on. It stores nothing, and
+  // returns null, when the issuer no longer holds the CIK it was downloaded by.
+  const storeOnIssuer = async (tx: TransactionContext, store: () => Promise<string>): Promise<string | null> => {
+    if (!(await issuerHoldsCik(tx.db, input.issuerId, input.cik))) {
+      console.warn(`[sec-filings-backfill] issuer ${input.issuerId} no longer holds CIK ${input.cik}; stored nothing`);
+      return null;
     }
-    const result = await ingestSecFiling(
-      { db: deps.db, objectStore: deps.objectStore, secClient: deps.secClient },
-      {
-        cik: input.cik,
-        accession_number: candidate.accession,
-        document: candidate.primaryDocument,
-        form: candidate.form as SecFormCode,
-      },
-    );
-    // The filing IS the issuer's own document — full-confidence headline
-    // mention, the linkage reader document selection queries on.
-    await createMention(deps.db, {
-      document_id: result.ingest.document.document_id,
+    const documentId = await store();
+    await createMention(tx.db, {
+      document_id: documentId,
       subject_kind: "issuer",
       subject_id: input.issuerId,
       prominence: "headline",
       mention_count: 1,
       confidence: 1,
     });
-    ingested.push({
-      document_id: result.ingest.document.document_id,
-      form: candidate.form as SecFormCode,
+    return documentId;
+  };
+  for (const candidate of candidates) {
+    const existingDocumentId = await findLiveDocumentIdByAccession(deps.db, candidate.accession);
+    if (existingDocumentId !== null) {
+      if ((await withTransaction(deps.db, (tx) => storeOnIssuer(tx, async () => existingDocumentId))) === null) break;
+      skipped += 1;
+      continue;
+    }
+    const fetched = await deps.secClient.fetchFiling({
+      cik: input.cik,
       accession_number: candidate.accession,
+      document: candidate.primaryDocument,
     });
+    const documentId = await withTransaction(deps.db, (tx) =>
+      storeOnIssuer(tx, async () => {
+        const source = await createSource(tx.db, {
+          provider: "sec_edgar",
+          kind: "filing",
+          canonical_url: fetched.url,
+          trust_tier: "primary",
+          license_class: "public",
+          retrieved_at: fetched.retrievedAt,
+        });
+        const { document } = await ingestDocumentInTransaction(
+          { tx, objectStore: deps.objectStore },
+          {
+            source: { source_id: source.source_id, license_class: source.license_class },
+            bytes: fetched.bytes,
+            document: { kind: "filing", provider_doc_id: candidate.accession, title: candidate.form },
+          },
+        );
+        return document.document_id;
+      }));
+    // The issuer lost the CIK since it was read, so no later filing is its.
+    if (documentId === null) break;
+    ingested.push({ document_id: documentId, form: candidate.form as SecFormCode, accession_number: candidate.accession });
   }
   return { ingested, skipped };
 }
