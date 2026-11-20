@@ -130,8 +130,10 @@ test("the prior scope is the previous answer's saved research scope; none when i
   };
   const queries: string[] = [];
   const db = (scope: unknown) => ({
-    query: fakeQuery((text) => {
+    query: fakeQuery((text, values) => {
       queries.push(text);
+      // No company merged away.
+      if (text.includes("current_issuer_id")) return { rows: (values![0] as string[]).map((id) => ({ id, current: id })) };
       return { rows: scope === undefined ? [] : [{ research_scope: scope }] };
     }),
   });

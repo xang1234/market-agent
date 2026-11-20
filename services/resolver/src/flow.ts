@@ -439,9 +439,11 @@ async function handoffFromResolved(
 
 export async function hydrateSubjectRef(
   db: QueryExecutor,
-  subjectRef: SubjectRef,
+  requested: SubjectRef,
 ): Promise<HydratedSubjectHandoff> {
-  const context = await loadSubjectContext(db, subjectRef);
+  const context = await loadSubjectContext(db, requested);
+  // An issuer merged away hydrates as the issuer it merged into (#705).
+  const subjectRef = context.issuer && requested.kind === "issuer" ? context.issuer.subject_ref : requested;
   const displayLabel = displayLabelForSubjectRef(subjectRef, context);
   return {
     subject_ref: subjectRef,
@@ -627,7 +629,7 @@ async function loadIssuerSubjectContext(
             iss.sector,
             iss.industry
        from issuers iss
-      where iss.issuer_id = $1`,
+      where iss.issuer_id = current_issuer_id($1)`,
     [issuerId],
   );
 

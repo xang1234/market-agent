@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { Client } from "pg";
-import { dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { recordFactPrecisionAttestation, recordSourcePublicationAttestation } from "../../evidence/src/financial-attestations.ts";
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
 import Ajv2020 from "../../financial-core/node_modules/ajv/dist/2020.js";
@@ -15,7 +15,8 @@ import { bindPlanInputs } from "../src/bind-inputs.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
 import { finalizeUnit } from "../src/finalize.ts";
 import { inspectCommittedResult } from "../src/inspection.ts";
-import { authorityFor, engineDatabase, HASH, IDS as FIXTURE_IDS, leasedRun, pinnedClients, readyRun, revenuePlan } from "./db-fixtures.ts";
+import { mergeIssuerAway } from "../../fundamentals/test/issuer-merge-fixture.ts";
+import { authorityFor, databaseUrl, engineDatabase, HASH, IDS as FIXTURE_IDS, leasedRun, pinnedClients, readyRun, revenuePlan } from "./db-fixtures.ts";
 
 const IDS = {
   tenK: "4f000000-0000-4000-8000-0000000003c1",
@@ -281,5 +282,14 @@ test("as-filed share figures bound on a split basis", { timeout: 300_000 }, asyn
     } finally {
       await restore();
     }
+  });
+
+  // Last: NVDA's issuer is gone after it.
+  await t.test("a figure bound on its split basis before its issuer merged away still seals (#705)", async () => {
+    const { lease } = await readyRun(db, sharePlan(IDS.nvda, "2025-01-01T12:00:00.000Z"), authority);
+    await mergeIssuerAway(await connectedPool(t, databaseUrl(db)), IDS.nvda, "NVIDIA Corporation");
+    const [client] = await pinnedClients(t, db, 1);
+    const sealed = await finalizeUnit({ client: client!, lease, authority, unit_id: "share_unit", snapshot_id: randomUUID(), persistParent: async () => {} });
+    assert.equal(sealed.status, "published", JSON.stringify(sealed));
   });
 });
