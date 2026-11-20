@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const css = readFileSync(new URL('./index.css', import.meta.url), 'utf8')
@@ -59,4 +59,26 @@ test('muted, the active nav hotkey chip text, clears 4.5:1 on the active link fi
     const ratio = contrast(palette.muted, fill)
     assert.ok(ratio >= 4.5, `${theme} muted on accent-soft ${ratio.toFixed(2)}:1`)
   }
+})
+
+// Accent text: the bare surfaces, and the accent-soft fill (active nav, chips, pills) composited over each.
+test('accent-ink, the accent text colour, clears 4.5:1 on every surface and accent-soft fill in both themes', () => {
+  const failures: string[] = []
+  for (const [theme, palette] of Object.entries(themes)) {
+    for (const surface of ['bg', 'surface', 'surface-2', 'surface-hover']) {
+      for (const [name, base] of [[surface, palette[surface]], [`accent-soft over ${surface}`, over(softs[theme as keyof typeof softs], palette[surface])]]) {
+        const ratio = contrast(palette['accent-ink'], base)
+        if (!(ratio >= 4.5)) failures.push(`${theme} accent-ink on ${name} ${ratio.toFixed(2)}:1`)
+      }
+    }
+  }
+  assert.deepEqual(failures, [])
+})
+
+// The fill accents are tuned for fills and on-accent text, not for text on a surface.
+test('components colour text with accent-ink, not the fill accents', () => {
+  const offenders = readdirSync(new URL('.', import.meta.url), { recursive: true, encoding: 'utf8' })
+    .filter((file) => /\.tsx?$/.test(file) && !file.endsWith('.test.ts') && !file.endsWith('.test.tsx'))
+    .filter((file) => /\btext-accent(?:-strong)?(?![\w-])/.test(readFileSync(new URL(file, import.meta.url), 'utf8')))
+  assert.deepEqual(offenders, [])
 })
