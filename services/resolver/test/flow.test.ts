@@ -398,7 +398,7 @@ function scriptedDb(rows: ScriptRows): QueryExecutor {
         } as never;
       }
 
-      if (text.includes("where iss.issuer_id = $1")) {
+      if (text.includes("where iss.issuer_id = current_issuer_id($1)")) {
         return {
           rows: rows.issuerDetails?.filter((row) => row.issuer_id === values?.[0]) ?? [],
         } as never;

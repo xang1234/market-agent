@@ -462,7 +462,7 @@ test("handler: identifier-like input falls back to name lookup when identifier a
         return { rows: [] } as never;
       }
 
-      if (text.includes("where iss.issuer_id = $1")) {
+      if (text.includes("where iss.issuer_id = current_issuer_id($1)")) {
         return {
           rows: [
             {
