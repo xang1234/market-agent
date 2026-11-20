@@ -13,6 +13,7 @@
     "capture:consensus": "node --experimental-strip-types src/consensus-capture-cli.ts",
     "backtest:fcf": "node --experimental-strip-types src/fcf-backtest.ts",
     "fill:ciks": "node --experimental-strip-types src/cik-fill.ts",
+    "repair:issuer-splits": "node --experimental-strip-types src/issuer-splits.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

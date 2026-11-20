@@ -859,7 +859,8 @@ status() {
 # The weekly-reference import (#255) against this stack's database: the one
 # scheduled ingestion path. Extra args pass through (--force, --status). The
 # bundle carries no CIK, so each import is followed by a fill from SEC's
-# company_tickers.json (services/fundamentals/src/cik-fill.ts), cached a day.
+# company_tickers.json (services/fundamentals/src/cik-fill.ts), cached a day, and
+# a merge of each issuer split from its company's SEC issuer (issuer-splits.ts).
 reference_import() {
   if [[ "$(container_status postgres)" != "running" ]]; then
     echo "postgres is not running; start it with ./scripts/dev-shell.sh up" >&2
@@ -870,7 +871,8 @@ reference_import() {
     npm run --silent job:weekly-reference -- "$@") || return
   [[ "${1:-}" == "--status" ]] && return 0
   mkdir -p "$ROOT/.dev"
-  (cd "$ROOT/services/fundamentals" && npm run --silent fill:ciks -- --file "$ROOT/.dev/company_tickers.json")
+  (cd "$ROOT/services/fundamentals" && npm run --silent fill:ciks -- --file "$ROOT/.dev/company_tickers.json" &&
+    npm run --silent repair:issuer-splits -- --file "$ROOT/.dev/company_tickers.json")
 }
 
 GOLDEN_REPLAY_FILE="$ROOT/services/app/fixtures/golden-conversation.replay.json"

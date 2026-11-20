@@ -4,6 +4,7 @@ import test from "node:test";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { assertNoGoldenDataset, seedGoldenDevDatabase } from "../scripts/seed-golden-dev.ts";
 import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
+import { upsertDiscoveredListing } from "../../resolver/src/discovery.ts";
 import { AMD_Q2_2025_RELEASE, GOLDEN_AS_OF, GOLDEN_COMPANIES, GOLDEN_SOURCE_ID, goldenFixtureVersion } from "./golden/dataset.ts";
 
 test("seedGoldenDevDatabase seeds the frozen dataset once and is a no-op on rerun", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
@@ -23,10 +24,90 @@ test("seedGoldenDevDatabase seeds the frozen dataset once and is a no-op on reru
   assert.deepEqual(tickers, GOLDEN_COMPANIES.map((c) => c.ticker).sort());
 });
 
+test("a provider row for a golden ticker keeps its listing on the golden issuer (#597)", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-discovery");
+  const client = await connectedClient(t, databaseUrl);
+  await seedGoldenDevDatabase(databaseUrl);
+  const [nvda] = GOLDEN_COMPANIES;
+
+  // Polygon's NVDA row spells the name another way and writes the CIK without its zeros.
+  await upsertDiscoveredListing(client, {
+    ticker: "NVDA",
+    legal_name: "Nvidia Corp",
+    market: "stocks",
+    active: true,
+    mic: "XNAS",
+    trading_currency: "USD",
+    timezone: "America/New_York",
+    asset_type: "common_stock",
+    cik: "1045810",
+    figi_composite: "BBG000BBJQV0",
+  });
+
+  const { rows } = await client.query(
+    `select i.issuer_id::text as issuer_id, (select count(*)::int from issuers where ltrim(cik, '0') = '1045810') as cik_holders
+       from listings l join instruments i using (instrument_id) where l.ticker = 'NVDA'`,
+  );
+  assert.deepEqual(rows, [{ issuer_id: nvda!.issuer_id, cik_holders: 1 }]);
+});
+
+test("a database seeded with padded golden CIKs still starts, and stores each CIK no other issuer holds without its zeros (#597)", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-padded-ciks");
+  const client = await connectedClient(t, databaseUrl);
+  assert.equal(await seedGoldenDevDatabase(databaseUrl), "seeded");
+  // As 8705e088 seeded it, with leading zeros on each CIK and proofs at that revision's dataset version.
+  const before597 = "d3d136070c5d85c0f2e09063b862950608e35d2ede7c0481e220e7b040293b72";
+  await client.query(`delete from source_publication_attestations where source_id = $1::uuid`, [GOLDEN_SOURCE_ID]);
+  await client.query(`update sources set content_hash = $2 where source_id = $1::uuid`, [GOLDEN_SOURCE_ID, `sha256:${before597}`]);
+  await client.query(
+    `insert into source_publication_attestations
+       (source_id, source_version_hash, available_no_later_than, timing_precision, source_timezone, proof_method, proof_ref, proof_hash, mapping_version)
+     values ($1::uuid, $2, $3::timestamptz, 'instant', 'UTC', 'fixture_declaration', 'golden_fixture:dataset.ts', $2, 'golden-fixture-declaration.v1')`,
+    [GOLDEN_SOURCE_ID, before597, GOLDEN_AS_OF],
+  );
+  await client.query(`update issuers set cik = lpad(cik, 10, '0') where issuer_id = any($1::uuid[])`, [GOLDEN_COMPANIES.map((c) => c.issuer_id)]);
+  // A provider row already put NVDA's CIK on a second issuer. repair:issuer-splits merges it, then strips the zeros.
+  await client.query(`insert into issuers (legal_name, cik) values ('Nvidia Corp', '1045810')`);
+
+  assert.equal(await seedGoldenDevDatabase(databaseUrl), "already-seeded");
+  const { rows } = await client.query(`select legal_name, cik from issuers order by cik`);
+  assert.deepEqual(rows, [
+    { legal_name: "NVIDIA Corporation", cik: "0001045810" },
+    { legal_name: "Nvidia Corp", cik: "1045810" },
+    { legal_name: "Advanced Micro Devices, Inc.", cik: "2488" },
+    { legal_name: "Apple Inc.", cik: "320193" },
+  ]);
+});
+
 test("assertNoGoldenDataset passes on a live database and rejects one holding the frozen dataset", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-assert-absent");
   await assertNoGoldenDataset(databaseUrl);
   await seedGoldenDevDatabase(databaseUrl);
+  await assert.rejects(() => assertNoGoldenDataset(databaseUrl), /frozen golden dataset.*down -v/s);
+});
+
+test("a database whose golden issuer merged into its ticker's live issuer starts without seeding it again, and data mode still refuses it (#597)", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-merged");
+  const client = await connectedClient(t, databaseUrl);
+  assert.equal(await seedGoldenDevDatabase(databaseUrl), "seeded");
+  const [nvda] = GOLDEN_COMPANIES;
+  // As repair:issuer-splits leaves it, with NVDA's listing, segments and facts on the live issuer and the golden issuer gone.
+  const { rows: [live] } = await client.query<{ issuer_id: string }>(`insert into issuers (legal_name) values ('Nvidia Corp') returning issuer_id::text as issuer_id`);
+  await client.query(`update instruments set issuer_id = $2::uuid where issuer_id = $1::uuid`, [nvda!.issuer_id, live!.issuer_id]);
+  await client.query(`update segments set issuer_id = $2::uuid where issuer_id = $1::uuid`, [nvda!.issuer_id, live!.issuer_id]);
+  await client.query(`update facts set subject_id = $2::uuid where subject_kind = 'issuer' and subject_id = $1::uuid`, [nvda!.issuer_id, live!.issuer_id]);
+  await client.query(`delete from issuers where issuer_id = $1::uuid`, [nvda!.issuer_id]);
+  await client.query(`update issuers set cik = $2 where issuer_id = $1::uuid`, [live!.issuer_id, nvda!.cik]);
+  const holders = () => client.query(
+    `select l.ticker, i.issuer_id::text as issuer_id from listings l join instruments i using (instrument_id) where l.ticker = $1`,
+    [nvda!.ticker],
+  ).then(({ rows }) => rows);
+  const facts = async () => (await client.query<{ n: number }>(`select count(*)::int as n from facts`)).rows[0]!.n;
+  const before = { holders: await holders(), facts: await facts() };
+
+  assert.equal(await seedGoldenDevDatabase(databaseUrl), "already-seeded");
+  assert.deepEqual({ holders: await holders(), facts: await facts() }, before);
+  assert.deepEqual((await client.query(`select 1 from issuers where issuer_id = $1::uuid`, [nvda!.issuer_id])).rows, []);
   await assert.rejects(() => assertNoGoldenDataset(databaseUrl), /frozen golden dataset.*down -v/s);
 });
 
