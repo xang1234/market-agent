@@ -19,6 +19,7 @@ import type {
   ChatNotFoundSubjectPreResolution,
   ChatResolvedSubjectPreResolution,
 } from "../src/subjects.ts";
+import { fakeQuery } from "./fake-query.ts";
 import { readMessage } from "./read-message-fixture.ts";
 
 const USER_ID = "44444444-4444-4444-8444-444444444444";
@@ -421,6 +422,44 @@ test("run activity stream replays retained events after Last-Event-ID", async (t
   assert.equal(event.id, "2");
   assert.equal(event.event, "run_activity");
   assert.equal((event.data.activity as { stage?: string }).stage, "found");
+});
+
+test("recent run activities list the caller's persisted rows, so a run in another service reaches Home", async (t) => {
+  const queries: Array<{ text: string; values: unknown[] }> = [];
+  const db: ChatThreadsDb = {
+    query: fakeQuery((text, values) => {
+      queries.push({ text, values: values ?? [] });
+      return { rows: [{ ...runActivityRow({ user_id: USER_ID, stage: "found", summary: "Found a guidance cut" }, 1), ts: new Date("2026-11-19T10:00:00.000Z") }] };
+    }),
+  };
+  const base = await startServer(t, { threadsDb: db });
+
+  const response = await fetch(`${base}/v1/run-activities`, { headers: { "x-user-id": USER_ID } });
+
+  assert.equal(response.status, 200);
+  const body = (await response.json()) as { activities: Array<{ stage: string; summary: string; ts: string }> };
+  assert.deepEqual(body.activities.map(({ stage, summary, ts }) => ({ stage, summary, ts })), [
+    { stage: "found", summary: "Found a guidance cut", ts: "2026-11-19T10:00:00.000Z" },
+  ]);
+  assert.equal(queries.length, 1);
+  assert.match(queries[0].text, /from run_activities[\s\S]*where user_id = \$1/);
+  assert.equal(queries[0].values[0], USER_ID);
+});
+
+test("recent run activities require an authenticated user", async (t) => {
+  const queries: unknown[] = [];
+  const db: ChatThreadsDb = {
+    async query(text) {
+      queries.push(text);
+      return { rows: [], rowCount: 0 };
+    },
+  };
+  const base = await startServer(t, { threadsDb: db });
+
+  const response = await fetch(`${base}/v1/run-activities`);
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(queries, []);
 });
 
 test("run activity stream requires an authenticated user", async (t) => {

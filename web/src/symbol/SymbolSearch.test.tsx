@@ -5,13 +5,14 @@ import test from 'node:test'
 
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 
 import { Announcer } from '../ui/Announcer.tsx'
 import { ANNOUNCE_DELAY_MS, resetAnnouncerForTests } from '../ui/announcer.ts'
 import { SymbolSearch } from './SymbolSearch.tsx'
+import type { ResolvedSubject } from './search.ts'
 
-async function renderSearch(t: test.TestContext, reply: () => Response) {
+async function renderSearch(t: test.TestContext, reply: () => Response, onResolvedSubject?: (subject: ResolvedSubject) => void) {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   const originalFetch = globalThis.fetch
   globalThis.fetch = async () => reply()
@@ -24,7 +25,18 @@ async function renderSearch(t: test.TestContext, reply: () => Response) {
     globalThis.fetch = originalFetch
     resetAnnouncerForTests()
   })
-  await act(async () => root.render(<MemoryRouter><SymbolSearch /><Announcer /></MemoryRouter>))
+  let pathname = ''
+  function LocationProbe() {
+    pathname = useLocation().pathname
+    return null
+  }
+  await act(async () => root.render(
+    <MemoryRouter>
+      <SymbolSearch placement={onResolvedSubject ? 'watchlist' : 'topbar'} onResolvedSubject={onResolvedSubject} />
+      <Announcer />
+      <LocationProbe />
+    </MemoryRouter>,
+  ))
   const input = container.querySelector('input')!
   const region = container.querySelector('[data-testid="announcer"] [role="status"]')!
   // Every text the region takes, so a repeat of the same message shows as a clear and a refill.
@@ -44,6 +56,8 @@ async function renderSearch(t: test.TestContext, reply: () => Response) {
     }),
     submit: () => act(async () => container.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }))),
     message: () => container.querySelector('form')?.lastElementChild?.textContent,
+    value: () => input.value,
+    pathname: () => pathname,
     options: () => [...container.querySelectorAll('[role="option"]')].map((option) => option.querySelector('span span')?.textContent),
     optionLines: () => [...container.querySelectorAll('[role="option"]')].map((option) => [...option.querySelectorAll('span span')].map((line) => line.textContent)),
   }
@@ -93,4 +107,25 @@ test('a typeahead option shows its listing on a second line only when the name i
   await search.type('AAPL')
   await search.settle()
   assert.deepEqual(search.optionLines(), [['Apple Inc.', 'AAPL · XNAS'], ['AAPL · XLON']])
+})
+
+const AAPL = { subject_ref: { kind: 'listing', id: '11111111-1111-4111-a111-111111111111' }, display_labels: { primary: 'Apple Inc.', ticker: 'AAPL', mic: 'XNAS' }, confidence: 0.9 }
+
+test('the add-symbol box hands the symbol over, empties itself, and stays on the page', async (t) => {
+  const added: ResolvedSubject[] = []
+  const search = await renderSearch(t, () => new Response(JSON.stringify({ subjects: [AAPL], unresolved: [] }), { status: 200 }), (subject) => added.push(subject))
+  await search.type('AAPL')
+  await search.settle()
+  await search.submit()
+  await search.settle()
+  assert.deepEqual([added.map((subject) => subject.subject_ref.id), search.value(), search.pathname()], [[AAPL.subject_ref.id], '', '/'])
+})
+
+test('the top-bar search still opens the symbol it resolves', async (t) => {
+  const search = await renderSearch(t, () => new Response(JSON.stringify({ subjects: [AAPL], unresolved: [] }), { status: 200 }))
+  await search.type('AAPL')
+  await search.settle()
+  await search.submit()
+  await search.settle()
+  assert.notEqual(search.pathname(), '/')
 })
