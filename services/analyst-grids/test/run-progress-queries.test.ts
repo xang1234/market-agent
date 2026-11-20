@@ -56,4 +56,10 @@ test("run progress helpers advance run/row/cell state and read detail", async (t
   assert.equal(detail.rows[0].subject_label, "Acme Corp", "issuer rows carry the legal name for display");
   assert.equal(detail.cells.length, 1);
   assert.equal(detail.cells[0].column_key, "latest_market_cap");
+
+  // A row naming an issuer merged away since carries the name of the one it merged into (#705).
+  const merged = "bbbbbbbb-bbbb-4bbb-abbb-bbbbbbbbbbbb";
+  await db.query(`insert into issuer_merges (dropped_issuer_id, kept_issuer_id) values ($1, $2)`, [merged, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"]);
+  await insertRow(db, { gridRunId: runId, rowNumber: 1, subjectRef: { kind: "issuer", id: merged } });
+  assert.deepEqual((await getRunDetail(db, runId)).rows.map((row) => row.subject_label), ["Acme Corp", "Acme Corp"]);
 });

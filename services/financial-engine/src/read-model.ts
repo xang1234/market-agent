@@ -147,7 +147,7 @@ export async function readClosureInputs(db: SqlExecutor, ownerUserId: string, ru
        left join sources s on s.source_id = f.source_id
        left join price_observations po on po.observation_id = i.price_observation_id
        left join sources ps on ps.source_id = po.source_id
-       left join issuers iss on iss.issuer_id = (i.bound_payload #>> '{subject_ref,id}')::uuid
+       left join issuers iss on iss.issuer_id = current_issuer_id((i.bound_payload #>> '{subject_ref,id}')::uuid)
       where i.run_id = $1 and i.input_slot = any($2::text[])
       order by i.input_slot`,
     [runId, [...slots], ownerUserId],

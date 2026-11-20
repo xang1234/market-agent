@@ -15,6 +15,7 @@ import { POLYGON_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import { priorScenario } from "../src/eps-scenarios.ts";
 import { COMPARISON_DECLINES, publishScenarioPriceComparison } from "../src/scenario-price-comparison.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
+import { mergeIssuerAway } from "../../fundamentals/test/issuer-merge-fixture.ts";
 import { chatDatabase, chatHarness, completed, NO_ASKS, resolveMention } from "./financial-fixtures.ts";
 import { readMessage } from "./read-message-fixture.ts";
 
@@ -369,5 +370,13 @@ test("scenario price comparisons in chat", { timeout: 300_000 }, async (t) => {
     );
     assert.ok(deleted.rowCount! > 0);
     assert.deepEqual(await comparisonLeft(done.message_id, comparison.snapshot_id), []);
+  });
+
+  // Last: PXC's issuer is gone after it.
+  await t.test("a scenario answer on an issuer merged away since continues on the issuer it merged into (#705)", async () => {
+    const thread = await newThread();
+    await say(thread, "PXC bear 20x, base 25x, bull 30x");
+    const kept = await mergeIssuerAway(pool, PXC.issuer, PXC.name);
+    assert.equal((await priorScenario(pool, thread, IDS.owner))?.issuer_id, kept);
   });
 });

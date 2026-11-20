@@ -282,4 +282,12 @@ test("a period lookup returns a company's claims bound to that period (#542)", a
     assert.deepEqual(joined.claims.map((row) => [row.claim_id, row.subject_id]), [[acmeOnly, acme], [shared, acme], [disputed, beta]]);
     assert.deepEqual(joined.contradictions, [[acmeOnly, disputed]]);
   });
+
+  await t.test("an issuer merged into the company since reads the company's claims (#705)", async () => {
+    const acme = await company(db);
+    const fell = await claim(db, acme, margin("Gross margin fell on a merger charge.", "2025-08-05T20:00:00Z", Q2));
+    const merged = "4f000000-0000-4000-8000-000000000705";
+    await db.query(`insert into issuer_merges (dropped_issuer_id, kept_issuer_id) values ($1, $2)`, [merged, acme]);
+    assert.deepEqual(await lookup(merged, Q2, [GROSS_MARGIN]), [fell]);
+  });
 });

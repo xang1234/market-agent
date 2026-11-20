@@ -368,9 +368,12 @@ export async function getRunDetail(db: QueryExecutor, runId: string): Promise<Gr
     `select gr.grid_row_id::text as grid_row_id, gr.row_number, gr.subject_ref, gr.status,
             i.legal_name as subject_label
        from grid_rows gr
+       left join issuer_merges m
+         on gr.subject_ref->>'kind' = 'issuer'
+        and m.dropped_issuer_id::text = gr.subject_ref->>'id'
        left join issuers i
          on gr.subject_ref->>'kind' = 'issuer'
-        and i.issuer_id::text = gr.subject_ref->>'id'
+        and i.issuer_id::text = coalesce(m.kept_issuer_id::text, gr.subject_ref->>'id')
       where gr.grid_run_id = $1 order by gr.row_number asc`,
     [runId],
   );

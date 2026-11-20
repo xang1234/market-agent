@@ -94,7 +94,8 @@ export function SubjectDetailShell() {
   const [legacyResolution, setLegacyResolution] = useState<LegacyRouteResolutionState>({
     status: 'idle',
   })
-  const [hydratedSubject, setHydratedSubject] = useState<ResolvedSubject | null>(null)
+  // Keyed by the subject asked for: an issuer merged away hydrates as the one it merged into (#705).
+  const [hydrated, setHydrated] = useState<{ key: string; subject: ResolvedSubject } | null>(null)
   const [hydrationState, setHydrationState] = useState<HydrationState>({ status: 'idle' })
   const [loadAttempt, setLoadAttempt] = useState(0)
   const canonicalBaseSubject = isCanonicalResolvedSubject(baseSubject) ? baseSubject : null
@@ -103,11 +104,8 @@ export function SubjectDetailShell() {
   const needsHydration = canonicalBaseSubject !== null && subjectNeedsHydration(canonicalBaseSubject)
   const { session } = useAuth()
   const userId = session?.userId ?? null
-  const hydratedSubjectMatchesBase =
-    canonicalBaseSubject !== null &&
-    hydratedSubject?.subject_ref.kind === canonicalBaseSubject.subject_ref.kind &&
-    hydratedSubject.subject_ref.id === canonicalBaseSubject.subject_ref.id
-  const subject = needsHydration && hydratedSubjectMatchesBase ? hydratedSubject : baseSubject
+  const hydratedSubjectMatchesBase = hydrated !== null && hydrated.key === canonicalBaseSubjectKey
+  const subject = needsHydration && hydratedSubjectMatchesBase ? hydrated.subject : baseSubject
   const canonicalSubject = isCanonicalResolvedSubject(subject) ? subject : null
   const issuerId = issuerIdFromSubject(subject)
   const quoteState = useResource(listingQuote, listingIdForQuote(subject))
@@ -190,14 +188,14 @@ export function SubjectDetailShell() {
       subject_ref: canonicalBaseSubject.subject_ref,
       signal: controller.signal,
     })
-      .then((hydrated) => {
+      .then((resolved) => {
         if (controller.signal.aborted) return
-        setHydratedSubject(hydrated)
+        setHydrated({ key: canonicalBaseSubjectKey, subject: resolved })
         setHydrationState({ status: 'idle' })
       })
       .catch((error: unknown) => {
         if (error instanceof Error && error.name === 'AbortError') return
-        setHydratedSubject(null)
+        setHydrated(null)
         setHydrationState({
           status: 'error',
           key: canonicalBaseSubjectKey,

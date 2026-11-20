@@ -5,6 +5,7 @@ import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { executeRun } from "../../financial-engine/src/execute.ts";
+import { readClosureInputs } from "../../financial-engine/src/read-model.ts";
 import { authorityFor, databaseUrl, engineDatabase, IDS, leasedRun, marginPlan } from "../../financial-engine/test/db-fixtures.ts";
 import { mergeIssuerAway } from "../../fundamentals/test/issuer-merge-fixture.ts";
 import { loadUnitBoundFacts } from "../src/financial-verifier-loader.ts";
@@ -200,4 +201,6 @@ test("a plan on an issuer merged away presents under the kept issuer, its run in
     assert.ok(outcome.ok, JSON.stringify(!outcome.ok && outcome.failures));
     assert.match(JSON.stringify(outcome.block), /Alpha Holdings Corp\./);
   }
+  const slots = (await db.query<{ input_slot: string }>(`select input_slot from financial_run_inputs where run_id = $1 and binding_status = 'bound'`, [inFlight])).rows.map((row) => row.input_slot);
+  assert.deepEqual([...new Set((await readClosureInputs(db, IDS.owner, inFlight, slots)).map((input) => input.company))], ["Alpha Holdings Corp."]);
 });

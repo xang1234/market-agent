@@ -217,6 +217,59 @@ test('SubjectDetailShell hydrates a bare listing route before child sections nee
   }
 })
 
+test('an issuer route on an issuer merged away since shows the issuer it merged into (#705)', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  const mergedId = '55555555-5555-4555-a555-555555555555'
+  const kept = HYDRATED_LISTING.context!.issuer!
+
+  try {
+    globalThis.fetch = async (input) => {
+      if (String(input) === '/v1/subjects/hydrate') {
+        const subject: ResolvedSubject = {
+          ...HYDRATED_LISTING,
+          subject_ref: kept.subject_ref,
+          identity_level: 'issuer',
+          display_name: 'Apple Inc.',
+          display_label: 'Apple Inc.',
+          display_labels: { primary: 'Apple Inc.', legal_name: 'Apple Inc.' },
+          context: { issuer: kept },
+        }
+        return new Response(JSON.stringify({ subject }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response('{}', { status: 404 })
+    }
+
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        wrapShell(
+          <MemoryRouter initialEntries={[`/symbol/issuer%3A${mergedId}/overview`]}>
+            <Routes>
+              <Route path="/symbol/:subjectRef" element={<SubjectDetailShell />}>
+                <Route path="overview" element={<SubjectIssuerProbe />} />
+              </Route>
+            </Routes>
+          </MemoryRouter>,
+        ),
+      )
+    })
+    for (let attempt = 0; attempt < 5 && !dom.window.document.body.innerHTML.includes(ISSUER_ID); attempt += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+    }
+
+    assert.match(dom.window.document.body.innerHTML, new RegExp(ISSUER_ID), 'its sections read the issuer it merged into')
+    assert.equal(dom.window.document.querySelector('[data-testid="subject-header"] h1')?.textContent, 'Apple Inc.')
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restoreGlobals()
+  }
+})
+
 test('SubjectDetailShell surfaces issuer news & filings in the persistent right rail', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const restoreGlobals = installDomGlobals(dom.window as unknown as Window)

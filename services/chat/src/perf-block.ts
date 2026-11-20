@@ -490,11 +490,12 @@ export async function companyListings(
   asOf: string,
 ): Promise<Map<string, CompanyListing>> {
   const { rows } = await db.query<{ issuer_id: string; listing_id: string | null; ticker: string | null; legal_name: string }>(
-    `select i.issuer_id::text as issuer_id,
+    `select r.id::text as issuer_id,
             l.listing_id::text as listing_id,
             l.ticker,
             i.legal_name
-       from issuers i
+       from unnest($1::uuid[]) as r(id)
+       join issuers i on i.issuer_id = current_issuer_id(r.id)
        left join lateral (
          select l.listing_id, l.ticker
            from instruments ins
@@ -505,8 +506,7 @@ export async function companyListings(
             and (l.active_to is null or l.active_to > $2::timestamptz)
           order by l.ticker
           limit 1
-       ) l on true
-      where i.issuer_id = any($1::uuid[])`,
+       ) l on true`,
     [issuerIds, asOf],
   );
   return new Map(rows.map((row) => [row.issuer_id, { listing_id: row.listing_id, label: row.ticker ?? row.legal_name }]));
