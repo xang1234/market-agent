@@ -385,7 +385,7 @@ export function AgentsPage() {
   const agentForm = (
     <form
       onSubmit={submitAgent}
-      className={`flex min-w-0 flex-col gap-4 ${PAGE_PANEL_CLASS} ${showDetail ? 'xl:col-start-1 xl:row-start-2' : 'xl:col-start-2 xl:row-start-1'}`}
+      className={`flex min-w-0 flex-col gap-4 ${PAGE_PANEL_CLASS} ${showDetail ? '@4xl:col-start-1 @4xl:row-start-2' : '@4xl:col-start-2 @4xl:row-start-1'}`}
     >
       <h2 className={PANEL_TITLE_CLASS}>{editingAgentId ? 'Edit agent' : 'Create agent'}</h2>
       <label className={FIELD_LABEL_CLASS}>
@@ -486,7 +486,7 @@ export function AgentsPage() {
             </datalist>
           </label>
         )}
-        <div className="grid gap-3 sm:grid-cols-[9rem_minmax(0,1fr)]">
+        <div className="grid gap-3 @sm:grid-cols-[9rem_minmax(0,1fr)]">
           <label className={FIELD_LABEL_CLASS}>
             Quick kind
             <select
@@ -561,7 +561,7 @@ export function AgentsPage() {
               className={FIELD_CLASS}
             />
           </label>
-          <div role="group" aria-label="Delivery channels" className="grid gap-2 sm:grid-cols-3">
+          <div role="group" aria-label="Delivery channels" className="grid gap-2 @sm:grid-cols-3">
             <label className="inline-flex items-center gap-2 text-sm text-fg">
               <input
                 name="alert-email"
@@ -632,16 +632,17 @@ export function AgentsPage() {
       </div>
     </form>
   )
+  // Columns follow the canvas, not the viewport, because the evidence inspector narrows it.
   return (
-    <div className={PAGE_CLASS}>
+    <div className={`@container ${PAGE_CLASS}`}>
       <PageHeader
         title="Agents"
         description="Research monitors that watch a universe on a schedule and raise findings against your thesis."
       />
       {/* The form moves between columns by class, never by parent, so selecting an agent does not remount it and drop focus.
           auto_1fr keeps the roster row at its own height when the detail column outgrows roster and form. */}
-      <div className={`grid items-start gap-6 xl:grid-cols-[minmax(0,28rem)_minmax(0,1fr)] ${showDetail ? 'xl:grid-rows-[auto_1fr]' : ''}`}>
-        <div className="min-w-0 xl:col-start-1 xl:row-start-1">
+      <div className={`grid items-start gap-6 @4xl:grid-cols-[minmax(0,28rem)_minmax(0,1fr)] ${showDetail ? '@4xl:grid-rows-[auto_1fr]' : ''}`}>
+        <div className="min-w-0 @4xl:col-start-1 @4xl:row-start-1">
           <AgentRoster
             agents={agents}
             runs={runs}
@@ -659,7 +660,7 @@ export function AgentsPage() {
         </div>
         {agentForm}
         {showDetail ? (
-          <div className="flex min-w-0 flex-col gap-6 xl:col-start-2 xl:row-start-1 xl:row-span-2">
+          <div className="flex min-w-0 flex-col gap-6 @4xl:col-start-2 @4xl:row-start-1 @4xl:row-span-2">
             <ThesisPanel
               userId={session.userId}
               agentId={selectedAgentId}

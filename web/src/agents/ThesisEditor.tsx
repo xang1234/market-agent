@@ -246,7 +246,7 @@ function ConditionEditor({
           </select>
         </label>
         {condition.metric ? (
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 @sm:grid-cols-3">
             <label className="flex flex-col gap-1 text-xs font-medium text-fg">
               Comparison
               <select
