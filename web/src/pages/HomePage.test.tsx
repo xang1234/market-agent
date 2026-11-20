@@ -172,7 +172,7 @@ test('UserHomeView applies tabular numerals to quote and count metrics', () => {
 
   assert.match(html, /class="[^"]*\bnum\b[^"]*"[^>]*>\+1\.24%/)
   assert.match(html, /class="[^"]*\bnum\b[^"]*"[^>]*>\$191\.42/)
-  assert.match(html, /class="num">12<\/span> sources/)
+  assert.match(html, /class="num">12<\/span> sources · <time dateTime="2026-05-05T12:00:00.000Z" title="2026-05-05T12:00:00.000Z">May 5, 2026, \d{2}:\d{2}<\/time>/)
   assert.match(html, /class="num">7<\/span> total/)
 })
 

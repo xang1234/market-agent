@@ -1137,8 +1137,8 @@ test('Agents run history lists only the selected agent runs', async () => {
     const runHistory = [...dom.window.document.querySelectorAll('section')]
       .find((section) => section.querySelector('h2')?.textContent === 'Run history')
     assert.deepEqual(
-      [...(runHistory?.querySelectorAll('li') ?? [])].map((item) => item.textContent),
-      ['completed2026-05-06T01:00:00.000Z'],
+      [...(runHistory?.querySelectorAll('li') ?? [])].map((item) => [item.querySelector('span')?.textContent, item.querySelector('time')?.getAttribute('datetime')]),
+      [['completed', '2026-05-06T01:00:00.000Z']],
     )
     await act(async () => root.unmount())
   } finally {

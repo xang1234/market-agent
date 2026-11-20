@@ -4,6 +4,7 @@ import {
   quoteDirection as quoteDirectionByMove,
   type QuoteDirection,
 } from '../symbol/quote.ts'
+import { readableDate } from '../evidence/readable.ts'
 import type {
   HomeAgentSummaryRow,
   HomeQuoteRow,
@@ -46,9 +47,15 @@ export function agentLastRunLabel(row: HomeAgentSummaryRow): string {
   if (row.last_run === null) return 'Never run'
   if (row.last_run.status === 'running') return 'Running now'
   const ended = row.last_run.ended_at ?? row.last_run.started_at
-  return `${row.last_run.status === 'failed' ? 'Failed' : 'Completed'} · ${ended}`
+  return `${row.last_run.status === 'failed' ? 'Failed' : 'Completed'} · ${readableDate(ended)}`
+}
+
+// The exact stamp a last-run label reads in words, for its hover.
+export function agentLastRunAt(row: HomeAgentSummaryRow): string | undefined {
+  if (row.last_run === null || row.last_run.status === 'running') return undefined
+  return row.last_run.ended_at ?? row.last_run.started_at
 }
 
 export function savedScreenSubtitle(row: HomeSavedScreenRow): string {
-  return `${row.filter_summary} · updated ${row.updated_at}`
+  return `${row.filter_summary} · updated ${readableDate(row.updated_at)}`
 }

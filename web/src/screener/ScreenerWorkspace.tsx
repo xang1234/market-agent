@@ -66,6 +66,7 @@ import {
 import { ScreenerFetchError } from './screenerFetch.ts'
 import { marketCapCurrencyOf } from './screenerSummary.ts'
 import { searchScreener } from './searchScreener.ts'
+import { Timestamp } from '../evidence/Readable.tsx'
 
 type Status = 'loading' | 'error' | 'ready'
 
@@ -711,7 +712,7 @@ function ScreenerResults({
             ? 'No matches'
             : `Showing ${start}–${end} of ${response.total_count}`}
           <span className="ml-2 text-faint">
-            as of {response.as_of}
+            as of <Timestamp value={response.as_of} />
           </span>
         </span>
         <div className="flex gap-1">

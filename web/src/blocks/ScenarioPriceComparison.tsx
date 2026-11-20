@@ -1,4 +1,5 @@
-import { useContext, type ReactElement } from 'react'
+import { useContext, type ReactElement, type ReactNode } from 'react'
+import { Timestamp } from '../evidence/Readable.tsx'
 import { ChartCard } from './ChartCard.tsx'
 import { BlockProofContext } from './blockProof.ts'
 import { VerificationLabel } from './VerificationLabel.tsx'
@@ -42,12 +43,12 @@ export function ScenarioPriceComparison({ block }: ScenarioPriceComparisonProps)
     )
   }
   const { price, basis } = outcome
-  const provenance: ReadonlyArray<[string, string]> = [
+  const provenance: ReadonlyArray<[string, ReactNode]> = [
     ['Listing', `${price.ticker} (${price.currency})`],
     ['Session', price.session_date],
-    ['Traded', price.observed_at],
-    ['Public by', price.known_at],
-    ['Retrieved', price.fetched_at],
+    ['Traded', <Timestamp value={price.observed_at} />],
+    ['Public by', <Timestamp value={price.known_at} />],
+    ['Retrieved', <Timestamp value={price.fetched_at} />],
     ['Observation', `${price.kind} ${price.observation_id}`],
     ['Source', price.source_name],
     ['Source record', `${price.source_id} (sha256 ${price.body_sha256})`],

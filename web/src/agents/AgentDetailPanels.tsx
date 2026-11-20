@@ -2,6 +2,7 @@ import { SeverityBadge } from '../blocks/SeverityBadge.tsx'
 import { FINDING_SEVERITIES, type FindingSeverity } from '../blocks/types.ts'
 import type { AgentActivityRow, AgentFindingRow, AgentRunRow } from './agentRows.ts'
 import { PAGE_PANEL_CLASS, PANEL_TITLE_CLASS } from '../ui/pageStyles.ts'
+import { Timestamp } from '../evidence/Readable.tsx'
 import type { ThesisAssessment } from '../../../services/agents/src/thesis-types.ts'
 
 type AgentDetailPanelsProps = {
@@ -32,7 +33,7 @@ export function AgentDetailPanels({ findings, assessments, detailsError, runs, r
                   <span className="font-medium text-fg">{finding.headline}</span>
                   <FindingSeverityBadge severity={finding.severity} supported={supportedSnapshots.has(finding.snapshot_id)} />
                 </div>
-                <p className="mt-2 text-xs text-muted">{finding.created_at}</p>
+                <p className="mt-2 text-xs text-muted"><Timestamp value={finding.created_at} /></p>
               </li>
             ))}
           </ul>
@@ -47,7 +48,7 @@ export function AgentDetailPanels({ findings, assessments, detailsError, runs, r
             {runs.map((run) => (
               <li key={run.agent_run_log_id} className="rounded-lg border border-line p-3 text-sm">
                 <span className="font-medium">{run.status}</span>
-                <span className="ml-2 text-muted">{run.started_at}</span>
+                <span className="ml-2 text-muted"><Timestamp value={run.started_at} /></span>
                 {run.error ? <p className="mt-1 break-words text-negative">{run.error}</p> : null}
               </li>
             ))}
@@ -64,7 +65,7 @@ export function AgentDetailPanels({ findings, assessments, detailsError, runs, r
               <li key={item.run_activity_id} className="rounded-lg border border-line p-3 text-sm">
                 <div className="flex items-start justify-between gap-3">
                   <span className="font-medium capitalize text-fg">{item.stage}</span>
-                  <span className="text-xs text-muted">{item.ts}</span>
+                  <span className="text-xs text-muted"><Timestamp value={item.ts} /></span>
                 </div>
                 <p className="mt-2 text-fg-soft">{item.summary}</p>
               </li>

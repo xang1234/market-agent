@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  agentLastRunAt,
   agentLastRunLabel,
   agentSummaryHeadline,
   formatChangePercent,
@@ -103,7 +104,7 @@ test('agentLastRunLabel reports Never run, Running now, or completed/failed time
         },
       }),
     ),
-    /Completed · 2026-05-05T11:05/,
+    /^Completed · May 5, 2026, \d{2}:\d{2}$/,
   )
 })
 
@@ -112,8 +113,17 @@ test('savedScreenSubtitle joins filter summary and updated timestamp', () => {
     screen_id: SCREEN_ID,
     name: 'Test',
     filter_summary: '3 filters · universe, market',
-    updated_at: '2026-05-05T00:00:00.000Z',
+    updated_at: '2026-05-05T12:00:00.000Z',
     replay_target: { kind: 'screen', id: SCREEN_ID },
   }
-  assert.equal(savedScreenSubtitle(row), '3 filters · universe, market · updated 2026-05-05T00:00:00.000Z')
+  assert.match(savedScreenSubtitle(row), /^3 filters · universe, market · updated May 5, 2026, \d{2}:\d{2}$/)
+})
+
+test('a last-run label keeps its exact stamp for hover; none while running or never run (#410)', () => {
+  const run = (status: 'running' | 'completed', ended_at: string | null) => agentRow({
+    last_run: { agent_run_log_id: '11111111-1111-4111-a111-111111111111', status, started_at: '2026-05-05T11:00:00.000Z', ended_at, duration_ms: null, error: null },
+  })
+  assert.equal(agentLastRunAt(agentRow()), undefined)
+  assert.equal(agentLastRunAt(run('running', null)), undefined)
+  assert.equal(agentLastRunAt(run('completed', '2026-05-05T11:05:00.000Z')), '2026-05-05T11:05:00.000Z')
 })

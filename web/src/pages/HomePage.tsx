@@ -15,6 +15,7 @@ import {
   type HomeWatchlistMovers,
 } from '../home/summaryClient.ts'
 import {
+  agentLastRunAt,
   agentLastRunLabel,
   agentSummaryHeadline,
   formatChangePercent,
@@ -29,6 +30,7 @@ import { severityFillClass } from '../blocks/severityTone.ts'
 import { StackedBar, StackedBarLegend, type StackedSegment } from '../symbol/StackedBar.tsx'
 import { useAuth } from '../shell/useAuth.ts'
 import { EmptyState } from '../ui/EmptyState.tsx'
+import { Timestamp } from '../evidence/Readable.tsx'
 import { FailureNotice } from '../ui/FailureNotice.tsx'
 import { PageHeader } from '../ui/PageHeader.tsx'
 import { Skeleton } from '../ui/Skeleton.tsx'
@@ -272,7 +274,7 @@ function FindingRow({ card }: { card: HomeFindingCardSummary }) {
     <div className="flex flex-col">
       <span className="text-sm font-medium">{card.headline}</span>
       <span className="mt-0.5 text-xs text-muted">
-        <span className="capitalize">{card.severity}</span> · <span className="num">{card.support_count}</span> sources · {card.created_at}
+        <span className="capitalize">{card.severity}</span> · <span className="num">{card.support_count}</span> sources · <Timestamp value={card.created_at} />
       </span>
     </div>
   )
@@ -380,7 +382,7 @@ function AgentSummariesSection({
             <li key={row.agent_id} className={ROW_CLASS}>
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-sm font-medium">{row.name}</span>
-                <span className="text-xs text-muted">{agentLastRunLabel(row)}</span>
+                <span className="text-xs text-muted" title={agentLastRunAt(row)}>{agentLastRunLabel(row)}</span>
               </div>
               <div className="mt-1 text-sm text-fg">{agentSummaryHeadline(row)}</div>
               <div className="mt-1 text-xs text-muted">
@@ -412,7 +414,7 @@ function SavedScreensSection({ rows }: { rows: ReadonlyArray<HomeSavedScreenRow>
           {rows.map((row) => (
             <li key={row.screen_id} className={ROW_CLASS}>
               <div className="text-sm font-medium">{row.name}</div>
-              <div className="mt-1 text-xs text-muted">{savedScreenSubtitle(row)}</div>
+              <div className="mt-1 text-xs text-muted" title={row.updated_at}>{savedScreenSubtitle(row)}</div>
             </li>
           ))}
         </ul>

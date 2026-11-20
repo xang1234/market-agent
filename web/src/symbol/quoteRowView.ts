@@ -16,6 +16,7 @@ import {
 } from './quote.ts'
 import { symbolDetailPathForSubject, type ResolvedSubject, type SubjectRef } from './search.ts'
 import type { VisibleFetchState } from '../fetch/resource.ts'
+import { readableDate } from '../evidence/readable.ts'
 
 export type QuoteRowState = VisibleFetchState<QuoteSnapshot>
 
@@ -73,5 +74,5 @@ function placeholderName(subject: VisibleFetchState<ResolvedSubject>): string | 
 }
 
 function freshnessLabel(quote: QuoteSnapshot): string {
-  return `${quote.session_state.replaceAll('_', ' ')} · ${quote.delay_class.replaceAll('_', ' ')} · ${quote.as_of}`
+  return `${quote.session_state.replaceAll('_', ' ')} · ${quote.delay_class.replaceAll('_', ' ')} · ${readableDate(quote.as_of)}`
 }

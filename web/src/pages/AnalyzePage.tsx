@@ -37,6 +37,7 @@ import { FailureNotice } from '../ui/FailureNotice.tsx'
 import { Skeleton } from '../ui/Skeleton.tsx'
 import { sourceCategoryLabel } from '../analyze/sourceLabels.ts'
 import { PageHeader } from '../ui/PageHeader.tsx'
+import { Timestamp } from '../evidence/Readable.tsx'
 import {
   COMPACT_FIELD_CLASS,
   FIELD_CLASS,
@@ -490,7 +491,7 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
           <ul className="mt-3 flex flex-col gap-2">
             {runHistory.map((run) => (
               <li key={run.run_id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line px-3 py-2 text-sm">
-                <span>{run.display_title} · {run.playbook_version ? `v${run.playbook_version}` : run.template_name} · {run.created_at}</span>
+                <span>{run.display_title} · {run.playbook_version ? `v${run.playbook_version}` : run.template_name} · <Timestamp value={run.created_at} /></span>
                 <div className="flex gap-2">
                   <button type="button" className={ROW_BUTTON_CLASS} onClick={() => void handleOpenRun(run.run_id)}>
                     Open

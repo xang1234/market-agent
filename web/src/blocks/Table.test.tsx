@@ -25,3 +25,18 @@ test('Table renders body cells with the shared numeric class', () => {
   assert.match(html, /class="[^"]*\bnum\b[^"]*"[^>]*>123\.45<\/td>/)
   assert.doesNotMatch(html, /tabular-nums/)
 })
+
+test('a column of numbers and its header align right; a text column stays left', () => {
+  const html = renderToStaticMarkup(<Table block={{ ...TABLE_BLOCK, rows: [['Revenue', 123.45], ['Net income', 10]] }} />)
+
+  assert.match(html, /<th scope="col" class="[^"]*\btext-right\b[^"]*">FY 2026<\/th>/)
+  assert.match(html, /<td class="[^"]*\btext-right\b[^"]*">123\.45<\/td>/)
+  assert.doesNotMatch(html, /<th scope="col" class="[^"]*\btext-right\b[^"]*">Metric<\/th>/)
+  assert.doesNotMatch(html, /<td class="[^"]*\btext-right\b[^"]*">Revenue<\/td>/)
+})
+
+test('a column that mixes numbers with text stays left', () => {
+  const html = renderToStaticMarkup(<Table block={{ ...TABLE_BLOCK, rows: [['Revenue', 123.45], ['Net income', 'n/a']] }} />)
+
+  assert.doesNotMatch(html, /text-right/)
+})
