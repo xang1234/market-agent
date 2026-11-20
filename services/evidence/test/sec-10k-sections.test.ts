@@ -262,6 +262,7 @@ test("a labeled heading may set its label apart from its title, and close with a
   for (const [heading, opening] of [
     ["<span>ITEM 1A.  </span><span>I  </span><span>Risk Factors</span>", "ITEM 1A. I Risk Factors risk"],
     ["Item No. 1A - Risk Factors", "Item No. 1A - Risk Factors risk"],
+    ["Item 1A. Risk Factors 2025", "Item 1A. Risk Factors 2025 risk"],
     ["ITEM 1A. RISK FACTORS (dollars in millions, except per share amounts)", "ITEM 1A. RISK FACTORS (dollars in millions, except per share amounts) risk"],
   ]) {
     const sections = tenKSections(tenK(`<div>${heading}</div>`, "<div>Item 1B. Unresolved Staff Comments</div>"));

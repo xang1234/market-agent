@@ -78,7 +78,8 @@ const TITLE_ENDS_BLOCK = /^[\s.:\-–—\])]*$/;
 const SENTENCE_FOLLOWS = /^\s*[.:\-–—]*\s+[\p{Lu}\p{N}]/u;
 const RUN_IN_SENTENCE_FOLLOWS = /^\s*[.:]\s+[\p{Lu}\p{N}]/u;
 const HEADING_NOTE = /^\s*\((?!\s*(?:pp?\.?\s*|pages?\s*)?\d)[^)]*\)/i;
-const CONTENTS_PAGE = /^[\s.:\-–—]*(?:pages?\s*)?\d+(?:\s*[-–]\s*\d+)?\s*$/i;
+// ponytail: a 10-K contents page number has at most three digits; four reads as a year ("Risk Factors 2025").
+const CONTENTS_PAGE = /^[\s.:\-–—]*(?:pages?\s*)?\d{1,3}(?:\s*[-–]\s*\d{1,3})?\s*$/i;
 function headedItem(block: string): Heading | null {
   const { key, at } = letters(block);
   for (const { item, labeled, bare } of HEADINGS) {
