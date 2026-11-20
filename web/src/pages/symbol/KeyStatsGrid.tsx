@@ -1,11 +1,12 @@
 import type { ReactElement } from 'react'
 
+import { GapReason } from '../../gaps/GapReason.tsx'
 import type { KeyStatCell } from './keyStatsGrid.ts'
 
 // Dense label/value grid under the hero chart. Wraps to fewer columns on
 // narrow widths. The emphasized cell (prev close) gets an accent-tinted tile;
 // unavailable cells show a subdued dash rather than disappearing, so the grid
-// keeps a stable shape.
+// keeps a stable shape, with the reason on hover or focus when it is known.
 export function KeyStatsGrid({ cells }: { cells: ReadonlyArray<KeyStatCell> }): ReactElement {
   return (
     <dl
@@ -24,7 +25,7 @@ export function KeyStatsGrid({ cells }: { cells: ReadonlyArray<KeyStatCell> }): 
             {cell.label}
           </dt>
           <dd className={`num text-sm font-medium ${cell.value === null ? 'text-faint' : 'text-fg'}`}>
-            {cell.value ?? '—'}
+            {cell.value ?? (cell.reason ? <GapReason label={cell.label} reason={cell.reason}>—</GapReason> : '—')}
           </dd>
         </div>
       ))}
