@@ -66,7 +66,8 @@ function letters(block: string): { key: string; at: number[] } {
 // past the title ("Item 1A. Risk Factors, above, describes") or names no
 // title ("Item 7 for details"), so it heads nothing. A note in parentheses
 // may close the heading ("ITEM 1. BUSINESS (dollars in millions)"), but a
-// page number is a contents entry's ("Item 1A. Risk Factors (9)").
+// page number, bare or in parentheses, is a contents entry's ("Item 1A. Risk
+// Factors 9", "Item 1A. Risk Factors (9)").
 // A title with no label heads its item when it ends the block, or when it
 // is in capitals and a full stop ends it ("RISK FACTORS. The following").
 // A run-in subheading is in sentence case ("Properties. The Company owns",
@@ -77,6 +78,7 @@ const TITLE_ENDS_BLOCK = /^[\s.:\-–—\])]*$/;
 const SENTENCE_FOLLOWS = /^\s*[.:\-–—]*\s+[\p{Lu}\p{N}]/u;
 const RUN_IN_SENTENCE_FOLLOWS = /^\s*[.:]\s+[\p{Lu}\p{N}]/u;
 const HEADING_NOTE = /^\s*\((?!\s*(?:pp?\.?\s*|pages?\s*)?\d)[^)]*\)/i;
+const CONTENTS_PAGE = /^[\s.:\-–—]*(?:pages?\s*)?\d+(?:\s*[-–]\s*\d+)?\s*$/i;
 function headedItem(block: string): Heading | null {
   const { key, at } = letters(block);
   for (const { item, labeled, bare } of HEADINGS) {
@@ -85,6 +87,7 @@ function headedItem(block: string): Heading | null {
     if (heading === null) continue;
     const titleEnd = at[heading[0].length - 1]! + 1;
     const after = block.slice(titleEnd).replace(HEADING_NOTE, "");
+    if (CONTENTS_PAGE.test(after)) return null;
     const runIn = label !== null
       ? SENTENCE_FOLLOWS.test(after)
       : !/\p{Ll}/u.test(block.slice(0, titleEnd)) && RUN_IN_SENTENCE_FOLLOWS.test(after);
