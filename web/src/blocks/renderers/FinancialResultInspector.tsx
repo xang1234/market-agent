@@ -32,7 +32,7 @@ type PriceInput = Extract<FinancialInspectedInput, { observation_id: string }>
 type Term = NonNullable<FactInput['derivation']>['terms'][number]
 
 const H3 = 'text-[11px] font-semibold uppercase tracking-wide text-muted'
-const VIEW_SOURCE = 'shrink-0 text-xs font-medium text-accent-strong underline decoration-dotted underline-offset-2 dark:text-accent'
+const VIEW_SOURCE = 'shrink-0 text-xs font-medium text-accent-ink underline decoration-dotted underline-offset-2'
 
 // The one inspector for a certified result on every surface (chat, memo, grid,
 // thesis, Discovery). It leads with the value, then how it was computed and

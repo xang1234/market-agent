@@ -15,7 +15,7 @@ type StatusView = { Icon: LucideIcon; icon: string; row: string; label: string }
 
 const STATUS_VIEW: Readonly<Record<StreamPlanStepStatus, StatusView>> = {
   waiting: { Icon: Circle, icon: 'text-faint', row: 'text-faint', label: 'text-faint' },
-  running: { Icon: LoaderCircle, icon: 'text-accent motion-safe:animate-spin', row: 'text-fg', label: 'text-fg live-shine' },
+  running: { Icon: LoaderCircle, icon: 'text-accent-ink motion-safe:animate-spin', row: 'text-fg', label: 'text-fg live-shine' },
   done: { Icon: CircleCheck, icon: 'text-positive', row: 'text-fg-soft', label: 'text-fg' },
   error: { Icon: CircleX, icon: 'text-negative', row: 'text-negative', label: 'text-fg' },
 }

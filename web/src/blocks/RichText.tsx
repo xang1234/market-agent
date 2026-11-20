@@ -143,7 +143,7 @@ function OfferedChoices({ blockId, choices }: { blockId: string; choices: Readon
   )
 }
 
-const CITATION_CLASS = 'relative -top-[0.45em] ml-0.5 text-[0.7em] font-medium leading-none text-accent hover:underline'
+const CITATION_CLASS = 'relative -top-[0.45em] ml-0.5 text-[0.7em] font-medium leading-none text-accent-ink hover:underline'
 
 function Citation({ snapshotId, blockId, index, segment, number, quoted = false }: Omit<RefSegmentSpanProps, 'segment'> & {
   segment: CitationRef

@@ -20,7 +20,7 @@ export function KeyStatsGrid({ cells }: { cells: ReadonlyArray<KeyStatCell> }): 
           className={`-mr-px -mb-px flex flex-col gap-1 border-r border-b border-line p-3 ${cell.emphasis ? 'bg-accent-soft' : ''}`}
         >
           <dt
-            className={`text-[11px] uppercase tracking-wide ${cell.emphasis ? 'text-accent' : 'text-muted'}`}
+            className={`text-[11px] uppercase tracking-wide ${cell.emphasis ? 'text-accent-ink' : 'text-muted'}`}
           >
             {cell.label}
           </dt>

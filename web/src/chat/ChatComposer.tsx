@@ -51,10 +51,10 @@ export function ChatComposer({ ref, draftScope, canAsk, onAsk, stop, onStop, que
       <ThreadColumn>
         {queued !== null ? (
           <div data-testid="queued-question" className="mb-2 flex items-center gap-2 rounded-xl border border-accent-border bg-accent-soft px-3 py-1.5 text-xs">
-            <span className="shrink-0 font-semibold text-accent">Queued</span>
+            <span className="shrink-0 font-semibold text-accent-ink">Queued</span>
             <span className="min-w-0 flex-1 truncate text-fg" title={queued}>{queued}</span>
             {stop === 'none' ? (
-              <button type="button" onClick={onSendQueued} disabled={!canAsk} className="shrink-0 font-medium text-accent hover:underline disabled:opacity-50">
+              <button type="button" onClick={onSendQueued} disabled={!canAsk} className="shrink-0 font-medium text-accent-ink hover:underline disabled:opacity-50">
                 Send
               </button>
             ) : (

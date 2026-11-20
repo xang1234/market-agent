@@ -12,7 +12,7 @@ export function ResearchTrail({
   onLoadMore?: () => void
 }) {
   if (events.length === 0) {
-    return <div className="mt-2 space-y-2"><p className="text-sm text-muted">Recorded activity will appear here as research progresses.</p>{hasMore && onLoadMore ? <button type="button" onClick={onLoadMore} className="text-sm font-medium text-accent underline">Load more recorded activity</button> : null}</div>
+    return <div className="mt-2 space-y-2"><p className="text-sm text-muted">Recorded activity will appear here as research progresses.</p>{hasMore && onLoadMore ? <button type="button" onClick={onLoadMore} className="text-sm font-medium text-accent-ink underline">Load more recorded activity</button> : null}</div>
   }
   const groups = groupEvents(events)
   return <div className="mt-3 space-y-4">{groups.map((group) => (
@@ -26,7 +26,7 @@ export function ResearchTrail({
         </li>
       })}</ol>
     </section>
-  ))}{hasMore && onLoadMore ? <button type="button" onClick={onLoadMore} className="text-sm font-medium text-accent underline">Load more recorded activity</button> : null}</div>
+  ))}{hasMore && onLoadMore ? <button type="button" onClick={onLoadMore} className="text-sm font-medium text-accent-ink underline">Load more recorded activity</button> : null}</div>
 }
 
 function groupEvents(events: ReadonlyArray<CampaignEvent>): Array<{ label: string; events: CampaignEvent[] }> {

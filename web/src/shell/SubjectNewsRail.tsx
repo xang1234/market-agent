@@ -64,7 +64,7 @@ function NewsRow({ item }: { item: IssuerNewsItem }) {
       <div>
         <span
           className={`rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${
-            filing ? 'bg-warning-soft text-warning' : 'bg-accent-soft text-accent'
+            filing ? 'bg-warning-soft text-warning' : 'bg-accent-soft text-accent-ink'
           }`}
         >
           {filing ? item.kind : 'news'}

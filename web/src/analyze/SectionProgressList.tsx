@@ -4,7 +4,7 @@ import type { SectionProgressRow, SectionProgressState } from './sectionProgress
 
 const MARKER_CLASS: Readonly<Record<SectionProgressState, string>> = {
   pending: 'bg-surface-2 text-muted',
-  running: 'animate-pulse bg-accent-soft text-accent',
+  running: 'animate-pulse bg-accent-soft text-accent-ink',
   done: 'bg-positive-soft text-positive',
   skipped: 'bg-surface-2 text-faint',
 }

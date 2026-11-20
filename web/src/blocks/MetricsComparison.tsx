@@ -62,7 +62,7 @@ export function MetricsComparison({ block }: MetricsComparisonProps): ReactEleme
               >
                 <th
                   scope="row"
-                  className={`px-3 py-2 text-left ${isPrimary ? 'font-semibold text-accent' : 'text-fg'}`}
+                  className={`px-3 py-2 text-left ${isPrimary ? 'font-semibold text-accent-ink' : 'text-fg'}`}
                 >
                   {block.subject_labels?.[rowIndex] ?? formatSubjectRefShort(subject)}
                 </th>

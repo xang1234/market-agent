@@ -58,7 +58,7 @@ export function CampaignResults({
   );
 }
 
-function ResultTab({ active, label, onClick }: { active: boolean; label: string; onClick(): void }) { return <button type="button" aria-pressed={active} onClick={onClick} className={active ? "rounded-md bg-accent-soft px-3 py-1.5 text-sm font-medium text-accent" : "rounded-md px-3 py-1.5 text-sm text-muted hover:bg-surface-2"}>{label}</button>; }
+function ResultTab({ active, label, onClick }: { active: boolean; label: string; onClick(): void }) { return <button type="button" aria-pressed={active} onClick={onClick} className={active ? "rounded-md bg-accent-soft px-3 py-1.5 text-sm font-medium text-accent-ink" : "rounded-md px-3 py-1.5 text-sm text-muted hover:bg-surface-2"}>{label}</button>; }
 function emptyCopy(tab: Tab, run: RunView): string { if (tab === "shortlist" && run.status === "completed") return "No companies met the shortlist criteria in this run."; if (tab === "shortlist") return "No companies are shortlisted yet."; return tab === "investigated" ? "No additional investigated companies are available yet." : "No companies in this group are available yet."; }
 function uniqueCandidates(candidates: CandidateView[]): CandidateView[] { return [...new Map(candidates.map((candidate) => [candidate.candidate_id, candidate])).values()]; }
 
