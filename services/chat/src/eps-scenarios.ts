@@ -216,8 +216,8 @@ export type PriorScenario = Readonly<{
 export async function priorScenario(db: SqlExecutor, threadId: string, userId: string): Promise<PriorScenario | null> {
   const previous = await previousAnswer(db, threadId, userId);
   if (previous === null) return null;
-  const { rows } = await db.query<{ plan: FinancialPlan; issuer_id: string | null; input_slot: string | null; fiscal_year: number | null }>(
-    // The issuer its company is now, merged away since or not (#705).
+  const { rows } = await db.query<{ plan: FinancialPlan; issuer_id: string; input_slot: string | null; fiscal_year: number | null }>(
+    // Its company's issuer now, which a merge may have replaced (#705).
     `select p.plan, current_issuer_id((p.plan #>> '{subjects,members,0,subject_ref,id}')::uuid)::text as issuer_id,
             i.input_slot, (i.bound_payload->'period'->>'fiscal_year')::int as fiscal_year
        from chat_messages m
@@ -235,7 +235,7 @@ export async function priorScenario(db: SqlExecutor, threadId: string, userId: s
   if (earnings?.operation !== "reported_metric") return null;
   const bound = rows.find((row) => row.input_slot === earnings.node_id)?.fiscal_year ?? null;
   return {
-    issuer_id: rows[0]!.issuer_id!,
+    issuer_id: rows[0]!.issuer_id,
     earnings_period: bound === null ? earnings.period : { kind: "fiscal_period", fiscal_year: bound, fiscal_period: "FY" },
     assumptions: plan.assumptions,
   };

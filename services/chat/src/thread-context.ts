@@ -73,7 +73,7 @@ export async function loadPriorSubjects(
   for (const ref of refs) {
     if (!isCompanyRef(ref)) continue;
     try {
-      // An issuer merged away since hydrates as the one it merged into, once however many of the answer's merged into it (#705).
+      // An issuer merged away since hydrates as the one it merged into (#705); two merged into one carry once.
       const handoff = withListingTicker(await hydrate(db, ref), labels.get(ref.id.toLowerCase()));
       const key = `${handoff.subject_ref.kind}:${handoff.subject_ref.id}`;
       if (!handoffs.has(key)) handoffs.set(key, handoff);
@@ -118,7 +118,7 @@ export async function loadPriorScope(
   );
   const scope = parseResearchScope(rows[0]?.research_scope ?? null);
   if (scope === null || scope.companies.length === 0) return scope;
-  // A company merged away since is the issuer it merged into, once however many of the scope's merged into it (#705).
+  // A company merged away since is the issuer it merged into (#705); two merged into one count once.
   const { rows: current } = await db.query<{ id: string; current: string }>(
     `select id::text as id, current_issuer_id(id)::text as current from unnest($1::uuid[]) as id`,
     [scope.companies.map((company) => company.issuer_id)],

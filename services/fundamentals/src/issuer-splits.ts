@@ -83,7 +83,7 @@ export const ISSUER_KEYED_ROWS: ReadonlyArray<{
     combine: { rationale_claim_ids: "coalesce((select jsonb_agg(distinct e) from jsonb_array_elements(k.rationale_claim_ids || d.rationale_claim_ids) e), '[]')" },
   },
   { table: "chat_threads", id: "primary_subject_id", kind: "primary_subject_kind" },
-  // An issuer merged into the merged one now names the kept one, as the merged one does once merged (#705).
+  // A redirect to the merged issuer moves on to the kept one, so every redirect is one hop (#705).
   { table: "issuer_merges", id: "kept_issuer_id" },
 ];
 
