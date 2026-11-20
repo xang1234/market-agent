@@ -1121,6 +1121,26 @@ paths:
                     enum: [saving, ended]
                   error:
                     type: string
+  /v1/run-activities:
+    get:
+      tags: [RunActivity]
+      summary: The requesting user's 50 newest stored run activity rows, newest first
+      operationId: listRecentRunActivities
+      responses:
+        '200':
+          description: Stored run activity rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [activities]
+                properties:
+                  activities:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RunActivity'
+        '401':
+          description: Not signed in
   /v1/run-activities/stream:
     get:
       tags: [RunActivity]

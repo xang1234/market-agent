@@ -101,7 +101,7 @@ export function HomePage() {
       signal: controller.signal,
     }).then(
       (stored) => {
-        if (!controller.signal.aborted) update((state) => ({ activities: mergeActivities(stored.activities, state.activities) }))
+        if (!controller.signal.aborted) update((state) => ({ activities: mergeActivities(stored.activities, state.activities), storedFailed: false }))
       },
       () => {
         if (!controller.signal.aborted) update(() => ({ storedFailed: true }))
