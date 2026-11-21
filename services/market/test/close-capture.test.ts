@@ -64,8 +64,8 @@ test("capture:closes stores each ticker's split-adjusted closes as a dated set a
   assert.deepEqual(first, { inserted: 3, failures: 0, blocked: false });
   assert.equal(captureExitCode(first), 0);
   assert.deepEqual(requests, [
-    { ticker: "AAPL", mic: "XNAS", currency: "USD", timezone: "America/New_York", range: { start: "2016-11-10T00:00:00.000Z", end: "2026-11-11T00:00:00.000Z" }, adjustment_basis: "split_adjusted" },
-    { ticker: "CAT", mic: "XNYS", currency: "USD", timezone: "America/New_York", range: { start: "2016-11-10T00:00:00.000Z", end: "2026-11-11T00:00:00.000Z" }, adjustment_basis: "split_adjusted" },
+    { ticker: "AAPL", mic: "XNAS", currency: "USD", timezone: "America/New_York", range: { start: "2015-11-10T00:00:00.000Z", end: "2026-11-11T00:00:00.000Z" }, adjustment_basis: "split_adjusted" },
+    { ticker: "CAT", mic: "XNYS", currency: "USD", timezone: "America/New_York", range: { start: "2015-11-10T00:00:00.000Z", end: "2026-11-11T00:00:00.000Z" }, adjustment_basis: "split_adjusted" },
   ], "only active US common stock and ADR listings, never the frozen golden issuers");
   const yahoo = "00000000-0000-4000-a000-00000000000b";
   assert.deepEqual(await rows(), [
@@ -176,6 +176,11 @@ test("capture:closes stores each ticker's split-adjusted closes as a dated set a
     ],
     "a set is dated by the day its range was asked for, even when the answer lands after UTC midnight",
   );
+
+  // On 2026-01-21 a December filer's FY2025 10-K is not out yet, so a Call still needs FY2015's year-end close, 2015-12-31.
+  requests.length = 0;
+  await run("2026-01-21T06:00:00Z", ["AAPL"]);
+  assert.equal((requests[0]!.range as { start: string }).start, "2015-01-21T00:00:00.000Z");
 });
 
 test("an empty --tickers list is a usage error", () => {

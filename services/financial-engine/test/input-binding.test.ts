@@ -35,6 +35,26 @@ function latestBalancePlan(subjects: Array<"a" | "b">, offset: number): Financia
   return validated.value;
 }
 
+/** Subject a's total assets now and a year back and its total liabilities now, as a Call reads each metric at ten offsets. */
+function repeatedReadPlan(maxCandidates: number): FinancialPlan {
+  const base = revenuePlan({ maxCandidates });
+  const node = (nodeId: string, metric: string, offset: number) =>
+    ({ node_id: nodeId, operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot: "a", metric_key: metric, period: { kind: "latest" as const, period_type: "annual" as const, offset } });
+  const operations = [node("a_assets", "total_assets", 0), node("a_liab", "total_liabilities", 0), node("a_assets_prior", "total_assets", 1)];
+  const validated = validateFinancialPlan({
+    ...base,
+    plan_id: randomUUID(),
+    metric_definitions: [
+      { metric_key: "total_assets", definition_version: "total_assets.v1" },
+      { metric_key: "total_liabilities", definition_version: "total_liabilities.v1" },
+    ],
+    operations,
+    outputs: operations.map((operation) => ({ output_id: `out_${operation.node_id}`, node_id: operation.node_id, unit_id: "a_unit" })),
+  });
+  assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
+  return validated.value;
+}
+
 test("historical input binding", { timeout: 240_000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for input binding coverage");
@@ -167,6 +187,20 @@ test("historical input binding", { timeout: 240_000 }, async (t) => {
       ["b_assets", "bound", facts.assetsB2022],
       ["b_liab", "bound", facts.liabilitiesB2022],
     ]);
+  });
+
+  await t.test("a metric at several latest offsets is read once, so a later offset spends no budget and cannot block the latest year (#605)", async () => {
+    const bind = async (maxCandidates: number) => {
+      const plan = repeatedReadPlan(maxCandidates);
+      const { runId, lease } = await leasedRun(db, plan, authority);
+      await bindPlanInputs({ client: db, lease, plan, authority, evidence: createEvidenceFinancialPort });
+      return (await db.query(`select input_slot, binding_status, fact_id::text, gap_reason, candidate_count from financial_run_inputs where run_id = $1 order by input_slot`, [runId])).rows;
+    };
+    const ample = await bind(10_000);
+    assert.deepEqual(ample.map((row) => [row.input_slot, row.binding_status]), [["a_assets", "bound"], ["a_assets_prior", "bound"], ["a_liab", "gap"]]);
+    // One read of each metric: the assets' second offset reads nothing more.
+    const budget = ample.filter((row) => row.input_slot !== "a_assets_prior").reduce((sum, row) => sum + row.candidate_count, 0);
+    assert.deepEqual(await bind(budget), ample);
   });
 
   await t.test("stale leases, other owners, and foreign plans cannot bind; failures roll back cleanly", async () => {

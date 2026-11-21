@@ -54,13 +54,14 @@ import { parseArgs } from "node:util";
 import { Pool } from "pg";
 
 import {
-  callInputOperations,
+  callModelOperations,
   canonicalDecimalString,
   createRuntimeAuthority,
   DEFAULT_CALL_SETTINGS,
   divideRationals,
   endOfLocalDay,
   evaluateBoundPlan,
+  localDateOf,
   multiplyRationals,
   parseFinancialDecimal,
   rationalFromDecimal,
@@ -92,7 +93,7 @@ const HURDLE = Number(DEFAULT_CALL_SETTINGS.required_return);
 const READER = "00000000-0000-4000-8000-000000000610";
 const SLOT = "a";
 // The Call's input nodes without its price: the close comes from daily_close_captures, not price_observations.
-const OPERATIONS = callInputOperations(SLOT).filter((node) => node.node_id !== "market_cap_px" && node.node_id !== "market_cap");
+const OPERATIONS = callModelOperations(SLOT).filter((node) => node.node_id !== "market_cap_px" && node.node_id !== "market_cap");
 const INPUT_NODES = { free_cash_flow: "free_cash_flow", net_cash: "net_cash", stock_based_compensation: "stock_based_compensation", shares_outstanding: "market_cap_shares" } as const;
 export type InputId = keyof typeof INPUT_NODES;
 
@@ -117,7 +118,8 @@ export type AsOfInputs = Readonly<{
 }>;
 
 export type Close = Readonly<{ trade_date: IsoDate; close_text: string }>;
-export type CloseSeries = Readonly<{ kind: "closes"; captured_on: IsoDate; currency: string; closes: ReadonlyArray<Close> }>;
+/** One capture's closes, on the split basis of `basis_date`: the day it was retrieved on, on the listing's calendar. */
+export type CloseSeries = Readonly<{ kind: "closes"; basis_date: IsoDate; currency: string; closes: ReadonlyArray<Close> }>;
 
 export type ReadRow = Readonly<{
   kind: "read";
@@ -432,7 +434,7 @@ function closeOnOrAfter(series: CloseSeries, date: IsoDate): Restated | Absent {
 // A split-adjusted close restated to its own day's basis: times every split after that day and on or before the capture.
 function splitBasis(close: Restated, series: CloseSeries, splits: SplitHistory): Restated | Figure {
   if (splits.status === "gap") return outcome(splits.reason_code, "No split history to restate the adjusted close to its own day.");
-  const value = multiplyRationals(close.value, splitFactor(splits, close.trade_date, series.captured_on))!;
+  const value = multiplyRationals(close.value, splitFactor(splits, close.trade_date, series.basis_date))!;
   return { ...close, value, text: decimalText(value) };
 }
 
@@ -444,7 +446,7 @@ function splitFactor(splits: Extract<SplitHistory, { status: "ok" }>, after: Iso
 
 /** The closes of the issuer's one common-stock listing from its newest capture, whichever source took it: one split basis, one close a day. */
 export async function closeSeries(db: SqlExecutor, issuerId: string): Promise<CloseSeries | Absent> {
-  const { rows } = await db.query<{ listing_id: string; captured_on: string; currency: string; trade_date: string; close_text: string }>(
+  const { rows } = await db.query<{ listing_id: string; retrieved_at: Date; timezone: string; currency: string; trade_date: string; close_text: string }>(
     `with newest as (
        select distinct on (d.listing_id) d.listing_id, d.source_id, d.captured_on
          from daily_close_captures d
@@ -452,15 +454,17 @@ export async function closeSeries(db: SqlExecutor, issuerId: string): Promise<Cl
          join instruments i on i.instrument_id = l.instrument_id
         where i.issuer_id = $1::uuid and i.asset_type = 'common_stock'
         order by d.listing_id, d.captured_on desc, d.retrieved_at desc, d.source_id)
-     select d.listing_id::text as listing_id, d.captured_on::text as captured_on, d.currency, d.trade_date::text as trade_date, d.close_text
-       from daily_close_captures d join newest using (listing_id, source_id, captured_on)
+     select d.listing_id::text as listing_id, d.retrieved_at, l.timezone, d.currency, d.trade_date::text as trade_date, d.close_text
+       from daily_close_captures d join newest using (listing_id, source_id, captured_on) join listings l using (listing_id)
       order by d.trade_date`,
     [issuerId],
   );
   const listings = new Set(rows.map((row) => row.listing_id));
   if (listings.size === 0) return outcome("price_missing", "No captured closes for the issuer's common stock.");
   if (listings.size > 1) return outcome("price_listing_unresolved", "Closes are captured for more than one common-stock listing.");
-  return { kind: "closes", captured_on: rows[0]!.captured_on, currency: rows[0]!.currency, closes: rows.map(({ trade_date, close_text }) => ({ trade_date, close_text })) };
+  // captured_on is the UTC day (0081); split dates are the listing's, and an evening capture in New York is already the next UTC day.
+  const [first] = rows as [typeof rows[number]];
+  return { kind: "closes", basis_date: localDateOf(first.retrieved_at.getTime(), first.timezone), currency: first.currency, closes: rows.map(({ trade_date, close_text }) => ({ trade_date, close_text })) };
 }
 
 /** Each FY with SEC facts on file, its period's end, and the date of the earliest filing that states it (the original 10-K's), if any does. */

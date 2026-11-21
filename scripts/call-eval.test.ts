@@ -27,6 +27,7 @@ test("the rubric fails a Call that breaks each check", () => {
   const broken = (change: Partial<CallContent>) => scoreCall({ ...call, ...change }, expected).map((failure) => failure.split(":")[0]);
   assert.deepEqual(broken({ stance: { ...call.stance, reasons: [{ cites: "hurdle_price" as never, text: "x" }] } }), ["reasons_cite_rows", "declines_when_required"]);
   assert.deepEqual(broken({ assumptions: call.assumptions.map((row) => row.id === "share_change" ? { ...row, basis: "SBC over market cap" } : row) }), ["rows_labelled"]);
+  assert.deepEqual(broken({ assumptions: call.assumptions.map((row) => row.id === "anchored_exit_multiple" ? { ...row, basis: "the median of ten years" } : row) }), ["rows_labelled"]);
   assert.deepEqual(broken({ facts: call.facts.map((row) => row.id === "net_cash" ? { ...row, basis: " " } : row) }), ["rows_labelled"]);
   assert.deepEqual(broken({ facts: call.facts.map((row) => row.id === "share_price" ? { ...row, citations: [] } : row) }), ["rows_labelled"]);
   assert.deepEqual(broken({ stance: { ...call.stance, rule: 0 } }), ["declines_when_required"]);

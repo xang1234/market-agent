@@ -11,24 +11,32 @@
 import { isDeepStrictEqual } from "node:util";
 
 import {
+  ANCHOR_FISCAL_YEARS,
   assembleCall,
+  assembleCallV1,
   balanceComponents,
   CALL_FIGURE_NODES,
+  callHistoryNodes,
   callInputOperations,
+  callModelOperations,
   canonicalDecimalString,
   hashCanonical,
   localDateOf,
   parseCallSettings,
   parseFinancialDecimal,
+  type CallCloses,
   type CallContent,
+  type CallContentV1,
   type CallEngineFigure,
   type CallEvidence,
+  type CallEvidenceV1,
   type CallFactId,
   type CallSettings,
   type CallSource,
   type FinancialPlan,
   type UUID,
 } from "../../financial-core/src/index.ts";
+import { loadSubjectSplitHistory } from "../../market/src/split-history.ts";
 import { isRecord, type QueryExecutor } from "../../shared/src/http.ts";
 
 export const CALL_KIND = "call";
@@ -40,7 +48,7 @@ export type CallRequest = Readonly<{
   settings: CallSettings;
 }>;
 
-export type GeneratedCall = Readonly<{ content: CallContent; as_of: string; source_ids: ReadonlyArray<string> }>;
+export type GeneratedCall = Readonly<{ content: CallContent | CallContentV1; as_of: string; source_ids: ReadonlyArray<string> }>;
 
 export type CallBlock = Readonly<{
   id: string;
@@ -50,7 +58,7 @@ export type CallBlock = Readonly<{
   source_refs: ReadonlyArray<string>;
   as_of: string;
   subject_refs: ReadonlyArray<Readonly<{ kind: "issuer"; id: string }>>;
-  call: CallContent;
+  call: CallContent | CallContentV1;
 }>;
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -68,7 +76,8 @@ type Binding = Readonly<{ input_slot: string; binding_status: string; gap_reason
 
 /**
  * The Call on the certified run a thread's snapshot holds, or null when no
- * certificate of a Call inputs plan in this thread is sealed with it.
+ * certificate of a Call inputs plan in this thread is sealed with it. A run
+ * of the plan Calls had before the anchor (#605) regenerates as call.v1.
  */
 export async function generateCall(db: QueryExecutor, request: CallRequest): Promise<GeneratedCall | null> {
   if (!UUID_TEXT.test(request.inputs_snapshot_id) || !UUID_TEXT.test(request.thread_id)) return null;
@@ -83,7 +92,9 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
   if (certificates.length !== 1) return null;
   const [{ run_id, unit_id, result_ids, plan }] = certificates as [typeof certificates[number]];
   const [member] = plan.subjects.members;
-  if (plan.subjects.members.length !== 1 || member?.subject_ref.kind !== "issuer" || !isCallPlan(plan, member.slot_id)) return null;
+  if (plan.subjects.members.length !== 1 || member?.subject_ref.kind !== "issuer") return null;
+  const anchored = isPlan(plan, callInputOperations(member.slot_id));
+  if (!anchored && !isPlan(plan, callModelOperations(member.slot_id))) return null;
   const issuer = member.subject_ref.id;
   const listing = await subjectListing(db, issuer, plan.time.knowledge_cutoff);
   // The Call and its price are dated on the listing's calendar (#614), in the plan's own zone when the issuer's listings share none.
@@ -97,6 +108,11 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
   )).rows.filter((row) => certified.has(row.result_id)).map((row) => [row.node_id, row]));
   const figures = Object.fromEntries(Object.entries(CALL_FIGURE_NODES).map(([id, node]) => [id, engineFigure(results.get(node))]));
   if (Object.values(figures).some((figure) => figure === null)) return null;
+  const yearFigures = Array.from({ length: ANCHOR_FISCAL_YEARS }, (_, offset) => {
+    const nodes = callHistoryNodes(offset);
+    return { free_cash_flow: engineFigure(results.get(nodes.free_cash_flow)), net_cash: engineFigure(results.get(nodes.net_cash)), shares: engineFigure(results.get(nodes.shares)) };
+  });
+  if (anchored && yearFigures.some((year) => Object.values(year).some((figure) => figure === null))) return null;
 
   const bindings = (await db.query<Binding>(
     `select i.input_slot, i.binding_status, i.gap_reason, i.payload_hash, i.bound_payload, s.canonical_url
@@ -107,41 +123,67 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     [run_id],
   )).rows;
   const bound = new Map(bindings.flatMap((row) => row.binding_status === "bound" && row.bound_payload !== null ? [[row.input_slot, row] as const] : []));
-  const citations = Object.fromEntries(Object.entries(CITED_SLOTS).map(([id, slots]) => [id, distinctSources(slots.flatMap((slot) => {
+  const cited = (slots: ReadonlyArray<string>) => distinctSources(slots.flatMap((slot) => {
     const row = bound.get(slot);
     return row === undefined ? [] : [citation(row, localDate)];
-  }))])) as Record<CallFactId, CallSource[]>;
+  }));
+  const citations = Object.fromEntries(Object.entries(CITED_SLOTS).map(([id, slots]) => [id, cited(slots)])) as Record<CallFactId, CallSource[]>;
   const period = (slot: string) => {
     const payload = bound.get(slot)?.bound_payload;
     return isRecord(payload?.period) && typeof payload.period.end === "string" ? payload.period.end : null;
   };
   const observed = bound.get("market_cap_px")?.bound_payload?.observed_at;
-
   const callDate = localDate(plan.time.knowledge_cutoff);
-  const evidence: CallEvidence = {
+  const bindingsHashed = bindings.map((row) => ({ slot: row.input_slot, status: row.binding_status, payload_hash: row.payload_hash, gap_reason: row.gap_reason }));
+  // A call.v1 Call is assembled from these alone, its fingerprint over the bindings alone.
+  const evidenceV1: CallEvidenceV1 = {
     call_date: callDate,
     listing_timezone: zone,
     subject: { issuer_id: issuer, label: listing.label },
     settings: request.settings,
-    inputs: {
-      snapshot_id: request.inputs_snapshot_id.toLowerCase(),
-      run_id,
-      unit_id,
-      fingerprint: hashCanonical("call_inputs", bindings.map((row) => ({ slot: row.input_slot, status: row.binding_status, payload_hash: row.payload_hash, gap_reason: row.gap_reason }))),
-    },
+    inputs: { snapshot_id: request.inputs_snapshot_id.toLowerCase(), run_id, unit_id, fingerprint: hashCanonical("call_inputs", bindingsHashed) },
     figures: figures as CallEvidence["figures"],
     citations,
     fiscal_year_end: period("operating_cash_flow"),
     price_date: typeof observed === "string" ? localDate(observed) : null,
-    consensus: await consensusCaptures(db, issuer, callDate),
+    consensus: await consensusCaptures(db, issuer, callDate, plan.time.knowledge_cutoff),
   };
-  const content = assembleCall(evidence);
-  const cited = [...content.facts, ...content.requires].flatMap((row) => row.citations.map((entry) => entry.source_id));
-  return { content, as_of: new Date(plan.time.knowledge_cutoff).toISOString(), source_ids: [...new Set(cited)] };
+  const generated = (content: CallContent | CallContentV1): GeneratedCall => {
+    const sources = [...content.facts, ...content.assumptions, ...content.requires].flatMap((row) => row.citations.map((entry) => entry.source_id));
+    return { content, as_of: new Date(plan.time.knowledge_cutoff).toISOString(), source_ids: [...new Set(sources)] };
+  };
+  if (!anchored) return generated(assembleCallV1(evidenceV1));
+  // The anchor's years count back from the latest year's: a latest offset k is that fiscal year less k.
+  const latestPayload = bound.get("operating_cash_flow")?.bound_payload;
+  const latestYear = isRecord(latestPayload?.period) && typeof latestPayload.period.fiscal_year === "number" ? latestPayload.period.fiscal_year : null;
+  const history: CallEvidence["history"] = latestYear === null ? [] : yearFigures.map((year, offset) => {
+    const nodes = callHistoryNodes(offset);
+    return {
+      fiscal_year: latestYear - offset,
+      period_end: period(nodes.cited.free_cash_flow[0]!),
+      figures: year as CallEvidence["history"][number]["figures"],
+      citations: { free_cash_flow: cited(nodes.cited.free_cash_flow), net_cash: cited(nodes.cited.net_cash), shares: cited(nodes.cited.shares) },
+    };
+  });
+  // The listing whose splits the engine restated the counts with, and whose closes the anchor prices them at.
+  // A split after the Call date is not one the Call could know, so it never enters the Call or its fingerprint.
+  const splitHistory = await loadSubjectSplitHistory(db, { kind: "issuer", id: issuer }, plan.time.knowledge_cutoff);
+  const splits = splitHistory.status === "ok"
+    ? splitHistory.splits.filter((split) => split.execution_date <= callDate).map(({ execution_date, split_from, split_to }) => ({ execution_date, split_from, split_to }))
+    : null;
+  const closes = splitHistory.status === "ok" ? await closeCapture(db, splitHistory.listing_id, plan.time.knowledge_cutoff) : null;
+
+  return generated(assembleCall({
+    ...evidenceV1,
+    inputs: { ...evidenceV1.inputs, fingerprint: hashCanonical("call_inputs", { bindings: bindingsHashed, closes, splits }) },
+    history,
+    closes,
+    splits,
+  }));
 }
 
-function isCallPlan(plan: FinancialPlan, slot: string): boolean {
-  const expected = callInputOperations(slot);
+// Whether a plan's operations are exactly these.
+function isPlan(plan: FinancialPlan, expected: ReadonlyArray<Readonly<Record<string, unknown> & { node_id: string }>>): boolean {
   if (plan.operations.length !== expected.length) return false;
   return expected.every((node) => {
     const planned = plan.operations.find((candidate) => candidate.node_id === node.node_id) as Record<string, unknown> | undefined;
@@ -207,14 +249,37 @@ async function subjectListing(db: QueryExecutor, issuerId: string, cutoff: strin
   };
 }
 
-// The issuer's Finviz five-year EPS growth captures in the 7 days up to the Call date.
-async function consensusCaptures(db: QueryExecutor, issuerId: string, callDate: string): Promise<CallEvidence["consensus"]> {
+/**
+ * The listing's newest close capture retrieved by the cutoff, whole: a later
+ * split restates every earlier close, so a capture is one basis (0081).
+ */
+async function closeCapture(db: QueryExecutor, listingId: string, cutoff: string): Promise<CallCloses | null> {
+  const { rows } = await db.query<{ source_id: string; retrieved_at: Date; currency: string; trade_date: string; close_text: string }>(
+    `with newest as (
+       select source_id, captured_on from daily_close_captures
+        where listing_id = $1::uuid and retrieved_at <= $2::timestamptz
+        order by captured_on desc, retrieved_at desc, source_id
+        limit 1)
+     select d.source_id::text as source_id, d.retrieved_at, d.currency, d.trade_date::text as trade_date, d.close_text
+       from daily_close_captures d join newest using (source_id, captured_on)
+      where d.listing_id = $1::uuid
+      order by d.trade_date`,
+    [listingId, cutoff],
+  );
+  const [first] = rows;
+  if (first === undefined) return null;
+  return { source_id: first.source_id, retrieved_at: first.retrieved_at.toISOString(), currency: first.currency, closes: rows.map(({ trade_date, close_text }) => ({ trade_date, close_text })) };
+}
+
+// The issuer's Finviz five-year EPS growth captures in the 7 days up to the Call date, retrieved by its cutoff.
+async function consensusCaptures(db: QueryExecutor, issuerId: string, callDate: string, cutoff: string): Promise<CallEvidence["consensus"]> {
   const { rows } = await db.query<{ source_id: string; captured_on: string; value: string | null }>(
     `select source_id::text as source_id, captured_on::text as captured_on, value::text as value
        from consensus_captures
       where issuer_id = current_issuer_id($1::uuid) and field_key = 'eps_growth_next_5y' and captured_on <= $2::date and captured_on >= $2::date - 7
+        and retrieved_at <= $3::timestamptz
       order by captured_on, source_id`,
-    [issuerId, callDate],
+    [issuerId, callDate, cutoff],
   );
   return rows.map((row) => {
     const parsed = row.value === null ? null : parseFinancialDecimal(row.value);
