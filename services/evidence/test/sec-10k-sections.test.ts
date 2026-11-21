@@ -272,12 +272,42 @@ test("a labeled heading may set its label apart from its title, and close with a
 });
 
 test("a contents entry that closes with its page number heads nothing, though a long preface follows it", () => {
-  for (const page of ["(9)", "(page 9)", "(Pages 9-21)", "(p. 9)", "(pp. 9-21)", "9", "9-21", "........ 9", "Page 9"]) {
+  for (const page of [
+    "(9)", "(page 9)", "(Pages 9-21)", "(p. 9)", "(pp. 9-21)", "9", "9-21", "........ 9", "Page 9",
+    "F-1", "F-1 - F-40", "Page F-1", "(F-1)", "II", "IV", "(IV)", "P. 9", "Pp. 9-21",
+  ]) {
     const html = [
       `<div>Item 1. Business (3)</div><div>Item 1A. Risk Factors ${page}</div>${paragraphs("preface", 50)}`,
       `<div>Item 1. Business</div>${paragraphs("business", 30)}<div>Item 1A. Risk Factors</div>${paragraphs("risk", 30)}`,
       "<div>Item 1B. Unresolved Staff Comments</div>",
     ].join("");
     assert.ok((tenKSections(html)["1A"] as TenKSection).text.startsWith("Item 1A. Risk Factors risk paragraph 0"), page);
+  }
+});
+
+test("a contents table entry with its page number in another cell of its row heads nothing, though a long preface follows it", () => {
+  for (const row of [
+    "<tr><td>Item 1A.</td><td>Risk Factors</td><td>9</td></tr>",
+    "<tr><td><div>Item 1A.</div></td><td><div>Risk Factors</div></td><td><div>&#160;9</div></td><td></td></tr>",
+    "<tr><td>Item 1A. Risk Factors</td><td>Page 9</td></tr>",
+    "<tr><th>Item 1A.</th><th>Risk Factors</th><th>IV</th></tr>",
+  ]) {
+    const html = [
+      `<table><tr><td>Item 1.</td><td>Business</td><td>3</td></tr>${row}</table>${paragraphs("preface", 50)}`,
+      `<div>Item 1. Business</div>${paragraphs("business", 30)}<div>Item 1A. Risk Factors</div>${paragraphs("risk", 30)}`,
+      "<div>Item 1B. Unresolved Staff Comments</div>",
+    ].join("");
+    assert.ok((tenKSections(html)["1A"] as TenKSection).text.startsWith("Item 1A. Risk Factors risk paragraph 0"), row);
+  }
+});
+
+test("a heading printed above a page footer's number heads its item, the number in a block or table row of its own", () => {
+  for (const heading of [
+    "<div>Item 1A. Risk Factors</div><div>12</div>",
+    "<table><tr><td>Item 1A.</td><td>Risk Factors</td></tr><tr><td></td><td>12</td></tr></table>",
+  ]) {
+    const sections = tenKSections(tenK(heading, "<div>Item 1B. Unresolved Staff Comments</div>"));
+    assert.ok(!(sections["1"] as TenKSection).text.includes("risk paragraph"), heading);
+    assert.ok((sections["1A"] as TenKSection).text.startsWith("Item 1A. Risk Factors 12 risk paragraph 0"), heading);
   }
 });
