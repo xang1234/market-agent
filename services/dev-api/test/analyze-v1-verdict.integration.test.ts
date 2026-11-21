@@ -15,7 +15,7 @@ test("a stored v1 memo's final verdict is neither shown nor shared, and its othe
     playbookId: "investment_memo",
     playbookVersion: 1,
     blocks: [
-      verdict("tagged-verdict", { title: "Final verdict", data_ref: { kind: "analyze_run", id: "tagged", params: { playbook_section_id: "final_verdict" } } }),
+      verdict("tagged-verdict", { title: "Closing summary", data_ref: { kind: "analyze_run", id: "tagged", params: { playbook_section_id: "final_verdict" } } }),
       verdict("titled-verdict", { title: "Final verdict" }),
     ],
   });
