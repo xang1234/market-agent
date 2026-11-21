@@ -156,12 +156,11 @@ The exit multiple's implied perpetual growth, `gT = (X · r − 1) / (X + 1)`, m
 - **Result**: with `d` = 0.277% (SBC ÷ market cap) and `r` = 10%, required growth at today's multiple is **7.3%** a year. The hand model's revenue-driven figure was 7.4%, and trailing three-year revenue growth is 7.7%.
 - **Diagnostic**: the implied perpetual growth of 36.15x is 7.0%.
 
-**NVDA: the starting cash flow is missing.**
+**NVDA: the starting cash flow was missing at drafting.**
 
-- NVIDIA (CIK 1045810) tags capex as `PaymentsToAcquireProductiveAssets` (`services/fundamentals/test/sec-edgar.test.ts:869`). `free_cash_flow.v1` certifies capex only from `PaymentsToAcquirePropertyPlantAndEquipment`, so capex is `missing` and free cash flow is `blocked_dependency` (`services/chat/test/financial-free-cash-flow.test.ts:117-124`).
-- The outcome is no starting free cash flow, so the Call declines.
-- The local fixture (`services/fundamentals/test/sec-call-inputs.companyfacts.json`) also has no NVDA cash facts, and no balance facts from a 10-K (its debt facts are 10-Q only), so `N` would be `missing_input` too.
-- This is the intended behavior: a capex tag the owner hasn't reviewed doesn't silently become free cash flow.
+- NVIDIA (CIK 1045810) tags capex as `PaymentsToAcquireProductiveAssets` (`services/fundamentals/test/sec-edgar.test.ts:879`). At drafting, `free_cash_flow.v1` certified capex only from `PaymentsToAcquirePropertyPlantAndEquipment`, so capex was `missing`, free cash flow was `blocked_dependency`, and the Call declined.
+- Since #731 (PR #741) that concept certifies with its scope recorded. NVDA's free cash flow computes, and its basis names the concept (`services/chat/test/financial-free-cash-flow.test.ts:155`, `services/chat/test/financial-call.test.ts:206`). A capex or free cash flow comparison between the two concepts is a named gap, not a change in spending.
+- The local fixture (`services/fundamentals/test/sec-call-inputs.companyfacts.json`) has no NVDA cash facts, and no balance facts from a 10-K (its debt facts are 10-Q only), so `N` would be `missing_input` there.
 
 **Consensus for both**: AAPL `eps_growth_next_5y` 8.18%, captured 2026-11-09. Every captured `fiscal_period` is null in the dev DB because the listing and SEC issuers are split (#597, which also affects NVDA). This doesn't affect the consensus row, which needs no fiscal period.
 
