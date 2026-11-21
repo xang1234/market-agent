@@ -104,6 +104,38 @@ test("trailing growth runs from the 10-K 3 and 5 fiscal years earlier, as each w
   assert.deepEqual(texts(row.realized), ["10.00%", "21.00%", "-9.09%"]);
 });
 
+// CAT FY2016 (2026-11-11 run): one end's free cash flow has no value, so the engine gives it no exact figure.
+const noFcf = (read: AsOfInputs): AsOfInputs => {
+  const { free_cash_flow: _, ...rest } = read.exact;
+  return { ...read, figures: { ...read.figures, free_cash_flow: { kind: "outcome", outcome: "missing_input", text: "operating_cash_flow: none" } }, exact: rest };
+};
+
+test("a missing free cash flow at either end of any window is named, and the share change still shows", () => {
+  const blocked = (label: string) => ({ kind: "outcome", outcome: "missing_input", input: `${label}free_cash_flow`, text: "operating_cash_flow: none" });
+  const own = backtestRow({
+    ticker: "POW", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
+    base: noFcf(inputs("2018-02-16", "2017-12-31", "1331000000", "161051000")),
+    later: inputs("2023-02-16", "2022-12-31", "2143588810", "100000000"),
+    earlier: powers, closes, splits: early,
+  });
+  for (const growth of [own.realized, own.trailing[3], own.trailing[5]]) {
+    assert.deepEqual([growth.fcf, growth.per_share], [blocked(""), blocked("")]);
+  }
+  assert.deepEqual([own.realized.shares.text, own.trailing[3].shares.text, own.trailing[5].shares.text], ["-9.09%", "-9.09%", "0.00%"]);
+  const others = backtestRow({
+    ticker: "POW", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
+    base: inputs("2018-02-16", "2017-12-31", "1331000000", "161051000"),
+    later: noFcf(inputs("2023-02-16", "2022-12-31", "2143588810", "100000000")),
+    earlier: { 3: noFcf(powers[3]), 5: noFcf(powers[5]) }, closes, splits: early,
+  });
+  for (const [growth, label] of [[others.realized, "FY+5 "], [others.trailing[3], "FY-3 "], [others.trailing[5], "FY-5 "]] as const) {
+    assert.deepEqual([growth.fcf, growth.per_share], [blocked(label), blocked(label)]);
+  }
+  assert.deepEqual(texts(others.realized).slice(2), ["-9.09%"]);
+  assert.deepEqual([others.trailing[3].shares.text, others.trailing[5].shares.text], ["-9.09%", "0.00%"]);
+  assert.match(renderBacktest({ rows: [own, others], issuers: [] }, { ranOn: "2026-11-21", command: "c", notes: "" }), /FY\+5 free_cash_flow: \*\*missing_input\*\*/u);
+});
+
 test("an earlier 10-K that is missing, mislabeled or has no positive free cash flow is named as FY-3's or FY-5's", () => {
   const row = powersRow({
     3: inputs("2016-02-14", "2015-12-31", "1000000000", "214358881"),
