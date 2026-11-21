@@ -6,17 +6,29 @@ import { type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { ChangePill } from './ChangePill.tsx'
 import { useResource } from '../fetch/resource.ts'
-import { listingQuote, SIGNED_BY_QUOTE_DIRECTION } from './quote.ts'
+import { listingQuote, SIGNED_BY_QUOTE_DIRECTION, type QuoteDirection } from './quote.ts'
 import { quoteRowView } from './quoteRowView.ts'
 import { subjectHydration, type SubjectRef } from './search.ts'
 import { Sparkline } from './Sparkline.tsx'
 import { Skeleton } from '../ui/Skeleton.tsx'
 
+const SPARKLINE_STROKE: Readonly<Record<QuoteDirection, string>> = {
+  up: 'stroke-positive',
+  down: 'stroke-negative',
+  flat: 'stroke-muted',
+}
+
+function seriesDirection(values: ReadonlyArray<number>): QuoteDirection {
+  const move = values[values.length - 1] - values[0]
+  return move > 0 ? 'up' : move < 0 ? 'down' : 'flat'
+}
+
 type QuoteRowProps = {
   subjectRef: SubjectRef
   // Given the row's label, so a control beside the row can say what it acts on.
   trailing?: (label: string | null) => ReactNode
-  // Closing prices for an inline trend sparkline (reference-terminal rail).
+  // Closing prices of the latest session for an inline sparkline (watchlist
+  // rail). Coloured by the quote's day change, so it matches the pill.
   // Omit to render the row without one (e.g. holdings surfaces).
   sparkline?: ReadonlyArray<number>
 }
@@ -47,9 +59,9 @@ export function QuoteRow({ subjectRef, trailing, sparkline }: QuoteRowProps) {
             values={sparkline}
             ariaLabel="price trend"
             trendStrokeClass={
-              sparkline[sparkline.length - 1] >= sparkline[0]
-                ? 'stroke-positive'
-                : 'stroke-negative'
+              SPARKLINE_STROKE[
+                view.price?.direction ?? seriesDirection(sparkline)
+              ]
             }
             className="h-6 w-14 shrink-0"
           />

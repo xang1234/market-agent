@@ -14,7 +14,7 @@ const A: SubjectRef = { kind: 'listing', id: 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaa
 const B: SubjectRef = { kind: 'listing', id: 'bbbbbbbb-bbbb-4bbb-abbb-bbbbbbbbbbbb' }
 
 function SparklineProbe({ members }: { members: ReadonlyArray<SubjectRef> }): ReactElement {
-  const closes = useWatchlistSparklines(members, '1M')
+  const closes = useWatchlistSparklines(members)
   return <span>{[...closes.entries()].map(([id, values]) => `${id.slice(0, 1)}=${values.join('/')}`).join(',')};</span>
 }
 
