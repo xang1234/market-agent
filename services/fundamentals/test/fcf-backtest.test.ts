@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseFinancialDecimal, rationalFromDecimal, type ExactRational } from "../../financial-core/src/index.ts";
-import { backtestRow, labelOffset, renderBacktest, type Absent, type AsOfInputs, type BacktestRow, type CloseSeries, type Figure } from "../src/fcf-backtest.ts";
+import { backtestRow, labelOffset, renderBacktest, type Absent, type AsOfInputs, type BacktestRow, type CloseSeries, type Figure, type Growth } from "../src/fcf-backtest.ts";
 
 const exact = (text: string): ExactRational => {
   const parsed = parseFinancialDecimal(text);
@@ -30,6 +30,8 @@ function inputs(asOf: string, periodEnd: string, fcf: string, shares: string): A
 
 // Split-adjusted closes as captured on 2026-11-10, after a 2-for-1 split on 2020-06-01.
 const closes: CloseSeries = { kind: "closes", captured_on: "2026-11-10", currency: "USD", closes: [{ trade_date: "2018-02-16", close_text: "57.7245" }, { trade_date: "2023-02-16", close_text: "101.73" }] };
+const noFiling: Absent = { kind: "outcome", outcome: "no_fy_facts", text: "No SEC facts labeled for that FY on file." };
+const noEarlier = { 3: noFiling, 5: noFiling } as const;
 const split = { status: "ok", listing_id: "l", timezone: "America/New_York", checked_at: "2026-11-10T00:00:00Z", splits: [{ execution_date: "2020-06-01", split_from: "1", split_to: "2" }] } as const;
 
 test("a split restates the close to its own day and the earlier share count to the later basis", () => {
@@ -37,11 +39,11 @@ test("a split restates the close to its own day and the earlier share count to t
     ticker: "HIST", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
     base: inputs("2018-02-16", "2017-12-31", "1100000000", "100000000"),
     later: inputs("2023-02-16", "2022-12-31", "1600000000", "200000000"),
-    closes, splits: split,
+    earlier: noEarlier, closes, splits: split,
   });
   assert.equal(row.kind, "read");
   if (row.kind !== "read") return;
-  assert.deepEqual([row.price.text, row.required_growth.text, row.realized_fcf_cagr.text, row.share_change.text, row.realized_share_change.text, row.period], [
+  assert.deepEqual([row.price.text, row.required_growth.text, row.realized.fcf.text, row.share_change.text, row.realized.shares.text, row.period], [
     "115.449 (2018-02-16, dev close, never certified)",
     "0.7%",
     // (1,600M / 1,100M)^(1/5) - 1.
@@ -56,9 +58,9 @@ test("a split restates the close to its own day and the earlier share count to t
     ticker: "HIST", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
     base: inputs("2018-02-16", "2017-12-31", "1100000000", "100000000"),
     later: inputs("2023-02-16", "2022-12-31", "1600000000", "200000000"),
-    closes, splits: { ...split, splits: [] },
+    earlier: noEarlier, closes, splits: { ...split, splits: [] },
   });
-  assert.deepEqual([unsplit.price.text, unsplit.realized_fcf_cagr.text, unsplit.realized_share_change.text], [
+  assert.deepEqual([unsplit.price.text, unsplit.realized.fcf.text, unsplit.realized.shares.text], [
     "57.7245 (2018-02-16, dev close, never certified)",
     "7.78%",
     "14.87%",
@@ -70,14 +72,50 @@ test("realized growth is total free cash flow, as required growth is, and buybac
     ticker: "BUYB", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
     base: inputs("2018-02-16", "2017-12-31", "1100000000", "100000000"),
     later: inputs("2023-02-16", "2022-12-31", "1600000000", "80000000"),
-    closes, splits: { ...split, splits: [] },
+    earlier: noEarlier, closes, splits: { ...split, splits: [] },
   });
-  assert.deepEqual([row.realized_fcf_cagr.text, row.share_change.text, row.realized_share_change.text], [
-    // Per share it would be (20 / 11)^(1/5) - 1 = 12.70%: the buyback is not growth the model priced.
+  assert.deepEqual([row.realized.fcf.text, row.realized.per_share.text, row.share_change.text, row.realized.shares.text], [
     "7.78%",
+    // (20 / 11)^(1/5) - 1: the buyback is not growth the model priced.
+    "12.70%",
     "0.87%",
     "-4.36%",
   ]);
+});
+
+// Every ratio below is a whole power, so each CAGR is exact: 1.331 = 1.1^3, 1.771561 = 1.21^3, 1.61051 = 1.1^5 and 32 = 2^5.
+const powers = { 3: inputs("2015-02-14", "2014-12-31", "1000000000", "214358881"), 5: inputs("2013-02-15", "2012-12-31", "41593750", "80525500") };
+const early = { ...split, splits: [{ execution_date: "2014-06-01", split_from: "1", split_to: "2" }] } as const;
+const powersRow = (earlier: Parameters<typeof backtestRow>[0]["earlier"]) => backtestRow({
+  ticker: "POW", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
+  base: inputs("2018-02-16", "2017-12-31", "1331000000", "161051000"),
+  later: inputs("2023-02-16", "2022-12-31", "2143588810", "100000000"),
+  earlier, closes, splits: early,
+});
+const texts = (growth: Growth) => [growth.fcf.text, growth.per_share.text, growth.shares.text];
+
+test("trailing growth runs from the 10-K 3 and 5 fiscal years earlier, as each was filed, in total and per share", () => {
+  const row = powersRow(powers);
+  // FY2014: 1,000M to 1,331M is 10% a year; per share 1,000M / 214.358881M to 1,331M / 161.051M is 1.771561, 21%.
+  assert.deepEqual(texts(row.trailing[3]), ["10.00%", "21.00%", "-9.09%"]);
+  // FY2012: 41.59375M to 1,331M is 32x; its 80.5255M shares are 161.051M after the 2014 split, so per share is 32x too.
+  assert.deepEqual(texts(row.trailing[5]), ["100.00%", "100.00%", "0.00%"]);
+  // FY2022: 1.61051x in total, and the count fell by 1.61051x, so per share is 1.21^5.
+  assert.deepEqual(texts(row.realized), ["10.00%", "21.00%", "-9.09%"]);
+});
+
+test("an earlier 10-K that is missing, mislabeled or has no positive free cash flow is named as FY-3's or FY-5's", () => {
+  const row = powersRow({
+    3: inputs("2016-02-14", "2015-12-31", "1000000000", "214358881"),
+    5: { ...powers[5], figures: { ...powers[5].figures, free_cash_flow: { kind: "value", value: -1, text: "-1" } }, exact: { ...powers[5].exact, free_cash_flow: exact("-1") } },
+  });
+  assert.deepEqual(row.trailing[3].fcf, { kind: "outcome", outcome: "period_mismatch", input: "FY-3", text: "The bound base period ends 2015-12-31, which is FY2015, not FY2014." });
+  assert.deepEqual([row.trailing[5].fcf.kind === "outcome" && row.trailing[5].fcf.outcome, row.trailing[5].per_share.kind === "outcome" && row.trailing[5].per_share.outcome, row.trailing[5].shares.text],
+    ["non_positive_base", "non_positive_base", "0.00%"]);
+  const missing = powersRow(noEarlier);
+  assert.deepEqual(missing.trailing[3].per_share, { ...noFiling, input: "FY-3" });
+  const text = renderBacktest({ rows: [missing], issuers: [] }, { ranOn: "2026-11-21", command: "c", notes: "" });
+  assert.match(text, /FY-3: \*\*no_fy_facts\*\* \(No SEC facts labeled for that FY on file\.\); FY-5: \*\*no_fy_facts\*\*/u);
 });
 
 test("a missing later 10-K is named once, as FY+5's, for both realized figures", () => {
@@ -85,10 +123,11 @@ test("a missing later 10-K is named once, as FY+5's, for both realized figures",
     ticker: "HIST", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
     base: inputs("2018-02-16", "2017-12-31", "1100000000", "100000000"),
     later: { kind: "outcome", outcome: "no_fy_facts", text: "No SEC facts labeled FY2022 on file." },
-    closes, splits: split,
+    earlier: noEarlier, closes, splits: split,
   });
   const text = renderBacktest({ rows: [row], issuers: [] }, { ranOn: "2026-11-11", command: "c", notes: "" });
-  assert.match(text, /\| 0\.7% \| n\/a \| 0\.43% \| n\/a \| 12\.00%, at or above \| FY\+5: \*\*no_fy_facts\*\* \(No SEC facts labeled FY2022 on file\.\) \|$/mu);
+  // Trailing 3y and 5y, each in total and per share, then realized in total and per share: n/a, each named once.
+  assert.match(text, /\| 0\.7% \| n\/a \| n\/a \| n\/a \| n\/a \| n\/a \| n\/a \| 0\.43% \| n\/a \| 12\.00%, at or above \| FY-3: \*\*no_fy_facts\*\* \([^)]*\); FY-5: \*\*no_fy_facts\*\* \([^)]*\); FY\+5: \*\*no_fy_facts\*\* \(No SEC facts labeled FY2022 on file\.\) \|$/mu);
   assert.match(text, /^ {2}- 1 realized growth, FY\+5 no_fy_facts$/mu);
 });
 
@@ -99,7 +138,7 @@ test("an as-of day with no trading takes the next close, never the filing day's"
     ticker: "HIST", fiscal_year: 2017, filed: "2018-02-16", label_offset: 0,
     base: inputs(asOf, "2017-12-31", "1100000000", "100000000"),
     later: inputs("2023-02-21", "2022-12-31", "1600000000", "200000000"),
-    closes: captured, splits: split,
+    earlier: noEarlier, closes: captured, splits: split,
   });
   const weekend = row("2018-02-17", series([["2018-02-16", "57.7245"], ["2018-02-19", "60"], ["2023-02-17", "90"], ["2023-02-21", "100"]]));
   assert.deepEqual([weekend.price.text, weekend.required_growth.kind, weekend.price_return.text], [
@@ -123,7 +162,7 @@ test("a row whose statements are another fiscal year's is a period_mismatch", ()
     ticker: "HON", fiscal_year: fiscalYear, filed: "2022-02-11", label_offset: offset,
     base: inputs("2022-02-12", periodEnd, "1100000000", "100000000"),
     later: inputs("2027-02-12", laterEnd, "1600000000", "100000000"),
-    closes, splits: split,
+    earlier: noEarlier, closes, splits: split,
   });
   // HON tagged its FY2021 10-K as fiscal 2020.
   const hon = row(2020, "2021-12-31", 0, "2025-12-31");
@@ -132,7 +171,7 @@ test("a row whose statements are another fiscal year's is a period_mismatch", ()
   assert.deepEqual([row(2016, "2017-01-01", 0, "2022-01-02"), row(2016, "2017-01-29", -1, "2022-01-30")].map((r) => r.kind === "read" && r.period), [null, null]);
   // The later 10-K's statements are checked too: FY2021's realized growth must end at FY2026, not FY2025.
   const late = row(2021, "2021-12-31", 0, "2025-12-31");
-  assert.deepEqual(late.kind === "read" && [late.period, late.realized_fcf_cagr.kind === "outcome" && late.realized_fcf_cagr.outcome], [null, "period_mismatch"]);
+  assert.deepEqual(late.kind === "read" && [late.period, late.realized.fcf.kind === "outcome" && late.realized.fcf.outcome], [null, "period_mismatch"]);
 });
 
 test("a filer's fiscal year label is the year its period ends in, a week early, plus the offset most of its years show", () => {
@@ -142,14 +181,21 @@ test("a filer's fiscal year label is the year its period ends in, a week early, 
   assert.equal(labelOffset(filings([[2016, "2017-01-01"], [2017, "2017-12-31"], [2020, "2021-01-03"]])), 0);
 });
 
-const read = (fy: number, required: number | Figure, realized: number, priceReturn: number, period: Absent | null = null): BacktestRow => {
-  const percent = (value: number): Figure => ({ kind: "value", value, text: `${(value * 100).toFixed(2)}%` });
+const percent = (value: number): Figure => ({ kind: "value", value, text: `${(value * 100).toFixed(2)}%` });
+const unpriced: Figure = { kind: "outcome", outcome: "price_missing", text: "5 years on: none" };
+const read = (fy: number, required: number | Figure, realized: number, priceReturn: number | Figure, period: Absent | null = null, trailing: Partial<Record<3 | 5, number>> = {}): BacktestRow => {
   const base = inputs("2020-02-01", `${fy}-12-31`, "1", "1");
+  const trailed = (value: number | undefined): Growth => value === undefined
+    ? { fcf: noFiling, per_share: noFiling, shares: noFiling }
+    : { fcf: percent(value), per_share: percent(value + 0.01), shares: percent(-0.01) };
   return {
     kind: "read", ticker: "T", fiscal_year: fy, filed: "2020-01-31", inputs: base, period,
     price: { kind: "value", value: 10, text: "10" }, todays_multiple: { kind: "value", value: 20, text: "20.00x" },
     required_growth: typeof required === "number" ? percent(required) : required,
-    share_change: percent(0.01), realized_fcf_cagr: percent(realized), realized_share_change: percent(-0.02), price_return: percent(priceReturn),
+    share_change: percent(0.01),
+    realized: { fcf: percent(realized), per_share: percent(realized + 0.02), shares: percent(-0.02) },
+    trailing: { 3: trailed(trailing[3]), 5: trailed(trailing[5]) },
+    price_return: typeof priceReturn === "number" ? percent(priceReturn) : priceReturn,
   };
 };
 
@@ -176,9 +222,20 @@ test("the summary counts a tie with the required growth and with the hurdle as a
     "  - 1 required growth, net_cash missing_input",
     "- **Realized against required.** 3 rows have both. In 2, realized growth was at or above the required growth, compared unrounded. 1 of the 3 (T FY2016) differs by less than 0.005 points, the required-growth solver's precision, so its side is not settled. The median gap, realized minus required, is 0.00 points.",
     "- **Against the hurdle.** Of the 2 at or above required growth, 2 have a 5-year price return, 2 at or above 10% a year, median 11.00%. Of the 1 below, 1 has a 5-year price return, 0 at or above 10% a year, median 9.99%.",
+    ...GAP_LEAD,
+    "  - **3-year gap.** 0 rows, and 0 more with no 5-year price return. At or above 0, 0 rows, 0 at or above 10% a year, median n/a. Below 0, 0 rows, 0 at or above 10% a year, median n/a.",
+    "    - Lowest third: 0 rows.",
+    "    - Middle third: 0 rows.",
+    "    - Highest third: 0 rows.",
+    "  - **5-year gap.** 0 rows, and 0 more with no 5-year price return. At or above 0, 0 rows, 0 at or above 10% a year, median n/a. Below 0, 0 rows, 0 at or above 10% a year, median n/a.",
+    "    - Lowest third: 0 rows.",
+    "    - Middle third: 0 rows.",
+    "    - Highest third: 0 rows.",
+    // FY2016 to FY2019 have both realized figures; FY2020 is a period_mismatch.
+    "- **Buybacks.** 4 rows have realized growth in total and per share. Median a year: total 7.00%, per share 9.00%, realized share change -2.00%, d 1.00%.",
   ].join("\n"));
   assert.match(text, /^## Caveats\n\n- Small N\.$/mu);
-  assert.match(text, /^\| T \| 2020 \| 2020-01-31 \| 2020-02-01 \|.* \| \*\*period_mismatch\*\* \(FY2021\) \|$/mu);
+  assert.match(text, /^\| T \| 2020 \| 2020-01-31 \| 2020-02-01 \|.* \| \*\*period_mismatch\*\* \(FY2021\); trailing_3y: \*\*no_fy_facts\*\*.* \|$/mu);
   assert.match(text, /^\| T \| 2021 \| n\/a \| n\/a \|.* \| \*\*no_filing_date\*\* \(No FY2021 filing date\.\) \|$/mu);
   assert.ok(text.startsWith("# FCF required-growth backtest, 2026-11-11\n\nGenerated by `npm run backtest:fcf -- --tickers T`."));
 });
@@ -189,10 +246,43 @@ test("five years after a 29 February close is 28 February, so a late end close i
     ticker: "HIST", fiscal_year: 2015, filed: "2016-02-26", label_offset: 0,
     base: inputs("2016-02-27", "2015-12-31", "1100000000", "100000000"),
     later: inputs("2021-02-27", "2020-12-31", "1600000000", "200000000"),
-    closes: leap, splits: { ...split, splits: [] },
+    earlier: noEarlier, closes: leap, splits: { ...split, splits: [] },
   });
   assert.deepEqual([row.price_return.kind === "outcome" && row.price_return.outcome, row.price_return.text], [
     "stale_price",
     "5 years on: The first captured close on or after 2021-02-28 is 2021-03-15.",
+  ]);
+});
+
+const GAP_LEAD = ["- **Trailing against required, ex ante.** The gap is trailing growth of total free cash flow minus required growth, both known at the as-of date. The trailing CAGR runs from the 10-K 3 or 5 fiscal years earlier to the row's own, each as first filed. Each split counts rows with a gap and a 5-year price return, sorted by the gap; a period_mismatch row is left out."];
+
+test("the gap, trailing minus required, splits the 5-year price return by sign and by third, with N for each", () => {
+  const rows: BacktestRow[] = [
+    // Required 5% each; 3-year gaps -4, -2, -1, 0, +1, +3 and +6 points.
+    read(2016, 0.05, 0.05, 0.02, null, { 3: 0.01, 5: 0.0 }),
+    read(2017, 0.05, 0.05, 0.05, null, { 3: 0.03, 5: 0.07 }),
+    read(2018, 0.05, 0.05, 0.08, null, { 3: 0.04 }),
+    read(2019, 0.05, 0.05, 0.1, null, { 3: 0.05 }),
+    read(2020, 0.05, 0.05, 0.12, null, { 3: 0.06 }),
+    read(2021, 0.05, 0.05, 0.15, null, { 3: 0.08 }),
+    read(2015, 0.05, 0.05, 0.2, null, { 3: 0.11 }),
+    // A gap with no 5-year price, one mislabeled, and one with no required growth: none is in a split.
+    read(2014, 0.05, 0.05, unpriced, null, { 3: 0.2 }),
+    read(2013, 0.05, 0.05, 0.5, { kind: "outcome", outcome: "period_mismatch", text: "FY2014" }, { 3: 0.2 }),
+    read(2012, { kind: "outcome", outcome: "missing_input", input: "net_cash", text: "none" }, 0.05, 0.5, null, { 3: 0.2 }),
+  ];
+  const text = renderBacktest({ rows, issuers: [] }, { ranOn: "2026-11-21", command: "c", notes: "" });
+  const lines = text.split("\n");
+  const from = lines.indexOf(GAP_LEAD[0]!);
+  assert.deepEqual(lines.slice(from + 1, from + 9), [
+    "  - **3-year gap.** 7 rows, and 1 more with no 5-year price return. At or above 0, 4 rows, 4 at or above 10% a year, median 13.50%. Below 0, 3 rows, 0 at or above 10% a year, median 5.00%.",
+    // Seven rows split 3, 2 and 2, lowest gap first.
+    "    - Lowest third, gap -4.00 to -1.00 points: 3 rows, 0 at or above 10% a year, median 5.00%.",
+    "    - Middle third, gap 0.00 to 1.00 points: 2 rows, 2 at or above 10% a year, median 11.00%.",
+    "    - Highest third, gap 3.00 to 6.00 points: 2 rows, 2 at or above 10% a year, median 17.50%.",
+    "  - **5-year gap.** 2 rows, and 0 more with no 5-year price return. At or above 0, 1 row, 0 at or above 10% a year, median 5.00%. Below 0, 1 row, 0 at or above 10% a year, median 2.00%.",
+    "    - Lowest third, gap -5.00 to -5.00 points: 1 row, 0 at or above 10% a year, median 2.00%.",
+    "    - Middle third, gap 2.00 to 2.00 points: 1 row, 0 at or above 10% a year, median 5.00%.",
+    "    - Highest third: 0 rows.",
   ]);
 });
