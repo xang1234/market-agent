@@ -318,6 +318,7 @@ test("gross_margin: success, zero revenue, negative revenue, and mismatched cont
 const fcf: FreeCashFlowNode = { node_id: "fcf", operation: "free_cash_flow", operation_version: "free_cash_flow.v1", operating_cash_flow: "ocf", capex: "capex" };
 const ocfOf = (value: string, extra: Partial<InputSpec> = {}) => operand("ocf", { metric: "operating_cash_flow", value, ...FY2023, ...extra });
 const capexOf = (value: string, extra: Partial<InputSpec> = {}) => operand("capex", { metric: "capex", value, ...FY2023, ...extra });
+const PRODUCTIVE_ASSETS = { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const;
 
 test("free_cash_flow is reported OCF less reported capex, exactly, whatever the sign of OCF", () => {
   assert.equal(value(freeCashFlow(fcf, ocfOf("120"), capexOf("30"))), "90");
@@ -325,7 +326,7 @@ test("free_cash_flow is reported OCF less reported capex, exactly, whatever the 
   assert.equal(value(freeCashFlow(fcf, ocfOf("-10"), capexOf("30"))), "-40");
   assert.equal(value(freeCashFlow(fcf, ocfOf("118254000000.123456789012345678"), capexOf("9447000000.000000000000000001"))), "108807000000.123456789012345677");
   const result = freeCashFlow(fcf, ocfOf("120"), capexOf("30"));
-  assert.deepEqual(result.ok && result.operand.measure, { metric_key: "free_cash_flow", definition_version: "free_cash_flow.v1", derivations: [] });
+  assert.deepEqual(result.ok && result.operand.measure, { metric_key: "free_cash_flow", definition_version: "free_cash_flow.v1", derivations: [], concept_scope: null });
   assert.deepEqual(result.ok && result.payload.unit, { kind: "currency", currency: "USD" });
 });
 
@@ -360,6 +361,26 @@ test("free_cash_flow combines one fiscal year only, in one currency, scope, and 
   assert.deepEqual(gap(freeCashFlow(fcf, ocfOf("120"), capexOf("30", { reporting: "as_restated" }))), ["incompatible", "incompatible_basis"]);
   assert.deepEqual(gap(freeCashFlow(fcf, ocfOf("120"), capexOf("30", { slot: "b" }))), ["incompatible", "incompatible_scope"]);
   assert.deepEqual(gap(freeCashFlow(fcf, operand("ocf", { metric: "net_income", value: "120", ...FY2023 }), capexOf("30"))), ["incompatible", "incompatible_definition"]);
+});
+
+// A filer that switches tags reports 125 of productive-asset payments one year
+// and 100 of PP&E payments the next, though PP&E spending did not move.
+test("capex filed as productive assets never compares with PP&E capex as one measure, nor does the free cash flow taken from it (#731)", () => {
+  const scoped = (value: string, extra: Partial<InputSpec> = {}) => capexOf(value, { inference: PRODUCTIVE_ASSETS, ...extra });
+  const growth = change("percent_change_positive_base");
+  const mixed = percentChangePositiveBase(growth, capexOf("100"), scoped("125", FY2022));
+  assert.deepEqual(gap(mixed), ["incompatible", "incompatible_definition"]);
+  assert.match(mixed.ok ? "" : mixed.explanation, /PaymentsToAcquireProductiveAssets.*PP&E/);
+  assert.deepEqual(gap(absoluteChange(change("absolute_change"), scoped("125"), capexOf("100", FY2022))), ["incompatible", "incompatible_definition"]);
+  assert.equal(value(percentChangePositiveBase(growth, scoped("100"), scoped("125", FY2022))), "-0.2");
+
+  const freeCash = (capex: ReturnType<typeof capexOf>) => {
+    const outcome = freeCashFlow(fcf, ocfOf("200", capex.period.fiscal_year === 2022 ? FY2022 : {}), capex);
+    assert.ok(outcome.ok);
+    return outcome.operand;
+  };
+  assert.deepEqual(gap(absoluteChange(change("absolute_change"), freeCash(capexOf("100")), freeCash(scoped("125", FY2022)))), ["incompatible", "incompatible_definition"]);
+  assert.equal(value(absoluteChange(change("absolute_change"), freeCash(scoped("100")), freeCash(scoped("125", FY2022)))), "25");
 });
 
 test("margins are exact when the quotient terminates", () => {
@@ -436,6 +457,12 @@ test("trailing_sum rejects partial, gapped, overlapping, and year-to-date quarte
   assert.deepEqual(gap(trailingSum(ttm, quarters("revenue", undefined, duplicate))), ["incompatible", "overlapping_periods"]);
   const ytd = [QUARTERS[0]!, { start: "2023-01-01", end: "2023-06-30", fiscal_period: "Q2" as const }, QUARTERS[2]!, QUARTERS[3]!];
   assert.deepEqual(gap(trailingSum(ttm, quarters("revenue", undefined, ytd))), ["unsupported", "unsupported_period"]);
+});
+
+test("trailing_sum never adds capex quarters filed under different scopes (#731)", () => {
+  const switched = [...quarters("capex", ["1", "2"], QUARTERS.slice(0, 2)), ...quarters("capex", ["3", "4"], QUARTERS.slice(2), { inference: PRODUCTIVE_ASSETS })];
+  assert.deepEqual(gap(trailingSum(ttm, switched)), ["incompatible", "incompatible_definition"]);
+  assert.equal(value(trailingSum(ttm, quarters("capex", ["1", "2", "3", "4"], QUARTERS, { inference: PRODUCTIVE_ASSETS }))), "10");
 });
 
 test("trailing_sum rejects non-additive metrics: EPS, balances, share averages, and margins", () => {

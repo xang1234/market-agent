@@ -67,7 +67,7 @@ test("two quarters pair only while their ends lie within half a quarter of each 
 test("a spread of multiples has no percentage points", () => {
   const ratio = (nodeId: string, slot: "a" | "b") => ({
     ...operand(nodeId, { slot, metric: "revenue", value: "2", ...NVDA_Q4 }),
-    measure: { metric_key: "pe_ratio", definition_version: "pe_ratio.v1", derivations: [] },
+    measure: { metric_key: "pe_ratio", definition_version: "pe_ratio.v1", derivations: [], concept_scope: null },
     measurement: { unit: { kind: "ratio" as const }, dimensions: { scope: "consolidated" as const, members: [] }, basis: { reporting: "as_reported" as const, adjustment: "unadjusted" as const, share_basis: "not_applicable" as const } },
   });
   assert.deepEqual(gap(spread(SPREAD, ratio("a_pe", "a"), ratio("b_pe", "b"))), ["unsupported", "unsupported_operation"]);
