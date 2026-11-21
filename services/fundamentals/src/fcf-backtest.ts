@@ -398,8 +398,11 @@ function growth(from: Read | Absent, to: Read | Absent, years: number, splits: S
   const noGrowth = outcome("non_positive_base", "Free cash flow at one end is zero or negative, so it has no growth rate.");
   const fcf = (): Figure => nonPositive() ? noGrowth : annual(divideRationals(exact(end, "free_cash_flow"), exact(start, "free_cash_flow"))!);
   // The engine states each count on its own as-of day's basis; the splits between them restate the earlier one.
+  // A reported share count may be zero; dividing by it, or taking its root, has no growth rate.
   const shareRatio = (): ExactRational | Absent => splits.status === "gap"
     ? outcome(splits.reason_code, "No split history to put both share counts on one basis.")
+    : rationalSign(exact(start, "shares_outstanding")) <= 0 || rationalSign(exact(end, "shares_outstanding")) <= 0
+    ? outcome("non_positive_shares", "A share count at one end is zero or negative, so it has no growth rate.")
     : divideRationals(exact(end, "shares_outstanding"), multiplyRationals(exact(start, "shares_outstanding"), splitFactor(splits, start.inputs.as_of, end.inputs.as_of))!)!;
   const shares = (): Figure => {
     const ratio = shareRatio();

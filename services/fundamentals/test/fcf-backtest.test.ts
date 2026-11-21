@@ -136,6 +136,20 @@ test("a missing free cash flow at either end of any window is named, and the sha
   assert.match(renderBacktest({ rows: [own, others], issuers: [] }, { ranOn: "2026-11-21", command: "c", notes: "" }), /FY\+5 free_cash_flow: \*\*missing_input\*\*/u);
 });
 
+test("a zero share count at either end names the share figures and keeps the free cash flow growth", () => {
+  const zeroShares = { kind: "outcome", outcome: "non_positive_shares", text: "A share count at one end is zero or negative, so it has no growth rate." };
+  for (const [base, later] of [["0", "100000000"], ["161051000", "0"]]) {
+    const row = backtestRow({
+      ticker: "POW", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
+      base: inputs("2018-02-16", "2017-12-31", "1331000000", base),
+      later: inputs("2023-02-16", "2022-12-31", "2143588810", later),
+      earlier: powers, closes, splits: early,
+    });
+    assert.deepEqual([row.realized.shares, row.realized.per_share], [zeroShares, zeroShares]);
+    assert.equal(row.realized.fcf.text, "10.00%");
+  }
+});
+
 test("an earlier 10-K that is missing, mislabeled or has no positive free cash flow is named as FY-3's or FY-5's", () => {
   const row = powersRow({
     3: inputs("2016-02-14", "2015-12-31", "1000000000", "214358881"),
