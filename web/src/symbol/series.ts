@@ -109,8 +109,8 @@ export type PriceWindow = '5D' | '1M' | '6M' | 'YTD' | '1Y' | '5Y'
 
 // ── Canonical range-label vocabulary ─────────────────────────────────────────
 // Single source of truth for "range label → day span" and "label → daily
-// series query" across every surface (Overview hero chart, watchlist rail
-// sparklines, perf_comparison blocks). YTD deliberately has no table entry —
+// series query" across every surface (Overview hero chart, perf_comparison
+// blocks). YTD deliberately has no table entry —
 // it only exists through rangeDays(label, anchor), so it cannot be misread
 // as a fixed span.
 

@@ -11,6 +11,7 @@ import { resetResourcesForTests } from '../fetch/resource.ts'
 import { useWatchlist } from '../watchlists/watchlistContext.ts'
 import { WatchlistProvider } from '../watchlists/WatchlistProvider.tsx'
 import { AuthContext, DEFAULT_MOCK_SESSION } from './authTypes.ts'
+import { computeSparklineGeometry, SPARKLINE_DEFAULTS } from '../symbol/sparklineGeometry.ts'
 import { WatchlistSection } from './WatchlistSection.tsx'
 
 const MEMBERS_PATH = '/v1/watchlists/default/members'
@@ -220,6 +221,64 @@ test('Remove buttons stay distinct for same-ticker listings, quoted or not, and 
       'Remove AAPL · XNAS — Apple Inc. from watchlist',
       'Remove AAPL · XLON — Apple Inc. from watchlist',
     ])
+  } finally {
+    await rail.cleanup()
+  }
+})
+
+test('a row sparkline draws only the latest session and takes its colour from the day change beside it', async () => {
+  const LISTING_REF = { kind: 'listing', id: '44444444-4444-4444-a444-444444444444' } as const
+  // Thursday rises to 110 and closes there; Friday gaps down to 100 and rallies
+  // to 105, still under Thursday's close. The day is down, though Friday's own
+  // line and the two-day line both rise.
+  const thursday = [100, 104, 110].map((close, i) => ({ ts: `2026-11-19T${14 + i}:00:00.000Z`, close }))
+  const friday = [100, 102, 105].map((close, i) => ({ ts: `2026-11-20T${14 + i}:00:00.000Z`, close }))
+  const seriesBodies: Array<{ interval: string; range: { start: string; end: string } }> = []
+  const rail = await renderRail((method, path, body) => {
+    if (path === MEMBERS_PATH) {
+      return new Response(JSON.stringify({ members: [{ subject_ref: LISTING_REF, created_at: '2026-10-19T00:00:00.000Z' }] }), { status: 200 })
+    }
+    if (method === 'POST' && path === '/v1/market/series') {
+      const query = JSON.parse(body) as { subject_refs: unknown[]; interval: string; range: { start: string; end: string } }
+      seriesBodies.push(query)
+      const bars = [...thursday, ...friday].map((bar) => ({ ...bar, open: bar.close, high: bar.close, low: bar.close, volume: 1 }))
+      return new Response(JSON.stringify({ query, results: [{ listing: LISTING_REF, outcome: { outcome: 'available', data: { listing: LISTING_REF, bars } } }] }), { status: 200 })
+    }
+    if (path.startsWith('/v1/market/quote')) {
+      return new Response(JSON.stringify({
+        quote: {
+          listing: LISTING_REF,
+          price: 105,
+          prev_close: 110,
+          change_abs: -5,
+          change_pct: -5 / 110,
+          currency: 'USD',
+          as_of: '2026-11-20T16:00:00.000Z',
+          delay_class: 'delayed_15m',
+          session_state: 'closed',
+          source_id: '00000000-0000-4000-a000-000000000001',
+        },
+        provenance: { provider: 'polygon_market' },
+        listing_context: { ticker: 'AAPL', mic: 'XNAS', timezone: 'America/New_York' },
+      }), { status: 200 })
+    }
+    return new Response(JSON.stringify({ error: 'unavailable' }), { status: 503 })
+  })
+  try {
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)))
+    assert.equal(rail.section().querySelector('[aria-label="Watchlist sparkline range"]') === null, true)
+    assert.equal(seriesBodies.length, 1)
+    assert.notEqual(seriesBodies[0].interval, '1d')
+    const line = rail.section().querySelector('svg[aria-label="price trend"] path')!
+    assert.equal(line.getAttribute('class'), 'stroke-negative')
+    const geometry = computeSparklineGeometry({
+      values: friday.map((bar) => bar.close),
+      domain: 'auto',
+      baseline: null,
+      width: SPARKLINE_DEFAULTS.width,
+      height: SPARKLINE_DEFAULTS.height,
+    })
+    assert.equal(line.getAttribute('d'), geometry?.path)
   } finally {
     await rail.cleanup()
   }
