@@ -64,7 +64,8 @@ export const AAPL: CallEvidence = {
   history: AAPL_HISTORY,
   closes: {
     source_id: CLOSE_SOURCE,
-    captured_on: "2026-11-08",
+    // 20:00 on Saturday 2026-11-07 in New York, already Sunday in UTC.
+    retrieved_at: "2026-11-08T01:00:00.000Z",
     currency: "USD",
     closes: YEARS.map(([, , , , , trade_date, close_text]) => ({ trade_date, close_text })).reverse(),
   },

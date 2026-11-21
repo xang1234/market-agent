@@ -19,7 +19,7 @@
       }
     ],
     "call": {
-      "version": "call.v1",
+      "version": "call.v2",
       "call_date": "2026-11-09",
       "subject": {
         "issuer_id": "00000000-0000-4000-8000-0000000000d1",
@@ -173,7 +173,7 @@
           "id": "anchored_exit_multiple",
           "label": "Exit multiple (X), anchored",
           "kind": "agent_assumption",
-          "basis": "anchored: the lowest of today's multiple 36.15x, the FY2017 to FY2026 median EV/FCF 25.85x (range 15.61x to 38.47x) and 17.33x, the multiple whose implied perpetual growth at your 10% required return is 4%. Each year's EV is its last close on or before its fiscal year end times its diluted weighted-average shares on the closes' split basis, less its net cash.",
+          "basis": "anchored: the lowest of today's multiple 36.15x, the FY2017 to FY2026 median EV/FCF 25.85x (range 15.61x to 38.47x) and 17.33x, the multiple whose implied perpetual growth at your 10% required return is 4%. Each year's EV is its last close on or before its fiscal year end times its diluted weighted-average shares on the closes' split basis, less its net cash. A past 10-K's cover count never binds, while today's multiple uses the latest one. FY2026's diluted average is 1.29% above it, so the years' multiples read high against today's.",
           "figure": {
             "kind": "value",
             "text": "17.33x"
@@ -184,77 +184,77 @@
               "accession": "0000320193-26-000026",
               "period_end": "2017-09-30",
               "date": "2026-11-03",
-              "text": "FY2017: 17.48x, (close 38.53 on 2017-09-29 × 21,006,768,000 shares − net cash USD -95,391,000,000) ÷ free cash flow USD 51,774,000,000"
+              "text": "FY2017: 17.48x, (close 38.53 on 2017-09-29 × 21,006,768,000 shares − net cash USD -95,391,000,000) ÷ free cash flow USD 51,774,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2017-09-30, public by 2026-11-03"
             },
             {
               "source_id": "00000000-0000-4000-8000-0000000000a1",
               "accession": "0000320193-26-000026",
               "period_end": "2018-09-29",
               "date": "2026-11-03",
-              "text": "FY2018: 18.98x, (close 56.44 on 2018-09-28 × 20,000,436,000 shares − net cash USD -88,570,000,000) ÷ free cash flow USD 64,121,000,000"
+              "text": "FY2018: 18.98x, (close 56.44 on 2018-09-28 × 20,000,436,000 shares − net cash USD -88,570,000,000) ÷ free cash flow USD 64,121,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2018-09-29, public by 2026-11-03"
             },
             {
               "source_id": "00000000-0000-4000-8000-0000000000a1",
               "accession": "0000320193-26-000026",
               "period_end": "2019-09-28",
               "date": "2026-11-03",
-              "text": "FY2019: 15.61x, (close 54.71 on 2019-09-27 × 18,595,652,000 shares − net cash USD 97,851,000,000) ÷ free cash flow USD 58,896,000,000"
+              "text": "FY2019: 15.61x, (close 54.71 on 2019-09-27 × 18,595,652,000 shares − net cash USD 97,851,000,000) ÷ free cash flow USD 58,896,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2019-09-28, public by 2026-11-03"
             },
             {
               "source_id": "00000000-0000-4000-8000-0000000000a1",
               "accession": "0000320193-26-000026",
               "period_end": "2020-09-26",
               "date": "2026-11-03",
-              "text": "FY2020: 25.74x, (close 112.28 on 2020-09-25 × 17,528,214,000 shares − net cash USD 79,394,000,000) ÷ free cash flow USD 73,365,000,000"
+              "text": "FY2020: 25.74x, (close 112.28 on 2020-09-25 × 17,528,214,000 shares − net cash USD 79,394,000,000) ÷ free cash flow USD 73,365,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2020-09-26, public by 2026-11-03"
             },
             {
               "source_id": "00000000-0000-4000-8000-0000000000a1",
               "accession": "0000320193-26-000026",
               "period_end": "2021-09-25",
               "date": "2026-11-03",
-              "text": "FY2021: 25.95x, (close 146.92 on 2021-09-24 × 16,864,919,000 shares − net cash USD 65,797,000,000) ÷ free cash flow USD 92,953,000,000"
+              "text": "FY2021: 25.95x, (close 146.92 on 2021-09-24 × 16,864,919,000 shares − net cash USD 65,797,000,000) ÷ free cash flow USD 92,953,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2021-09-25, public by 2026-11-03"
             },
             {
               "source_id": "00000000-0000-4000-8000-0000000000a1",
               "accession": "0000320193-26-000026",
               "period_end": "2022-09-24",
               "date": "2026-11-03",
-              "text": "FY2022: 21.60x, (close 150.43 on 2022-09-23 × 16,325,819,000 shares − net cash USD 49,040,000,000) ÷ free cash flow USD 111,443,000,000"
+              "text": "FY2022: 21.60x, (close 150.43 on 2022-09-23 × 16,325,819,000 shares − net cash USD 49,040,000,000) ÷ free cash flow USD 111,443,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2022-09-24, public by 2026-11-03"
             },
             {
               "source_id": "00000000-0000-4000-8000-0000000000a1",
               "accession": "0000320193-26-000026",
               "period_end": "2023-09-30",
               "date": "2026-11-03",
-              "text": "FY2023: 26.67x, (close 171.21 on 2023-09-29 × 15,812,547,000 shares − net cash USD 51,011,000,000) ÷ free cash flow USD 99,584,000,000"
+              "text": "FY2023: 26.67x, (close 171.21 on 2023-09-29 × 15,812,547,000 shares − net cash USD 51,011,000,000) ÷ free cash flow USD 99,584,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2023-09-30, public by 2026-11-03"
             },
             {
               "source_id": "00000000-0000-4000-8000-0000000000a1",
               "accession": "0000320193-26-000026",
               "period_end": "2024-09-28",
               "date": "2026-11-03",
-              "text": "FY2024: 31.80x, (close 227.79 on 2024-09-27 × 15,408,095,000 shares − net cash USD 50,021,000,000) ÷ free cash flow USD 108,807,000,000"
+              "text": "FY2024: 31.80x, (close 227.79 on 2024-09-27 × 15,408,095,000 shares − net cash USD 50,021,000,000) ÷ free cash flow USD 108,807,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2024-09-28, public by 2026-11-03"
             },
             {
               "source_id": "00000000-0000-4000-8000-0000000000a1",
               "accession": "0000320193-26-000026",
               "period_end": "2025-09-27",
               "date": "2026-11-03",
-              "text": "FY2025: 38.47x, (close 255.46 on 2025-09-26 × 15,004,697,000 shares − net cash USD 33,763,000,000) ÷ free cash flow USD 98,767,000,000"
+              "text": "FY2025: 38.47x, (close 255.46 on 2025-09-26 × 15,004,697,000 shares − net cash USD 33,763,000,000) ÷ free cash flow USD 98,767,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2025-09-27, public by 2026-11-03"
             },
             {
               "source_id": "00000000-0000-4000-8000-0000000000a1",
               "accession": "0000320193-26-000026",
               "period_end": "2026-09-26",
               "date": "2026-11-03",
-              "text": "FY2026: 36.48x, (close 341.07 on 2026-09-25 × 14,720,306,000 shares − net cash USD 56,824,000,000) ÷ free cash flow USD 136,056,000,000"
+              "text": "FY2026: 36.48x, (close 341.07 on 2026-09-25 × 14,720,306,000 shares − net cash USD 56,824,000,000) ÷ free cash flow USD 136,056,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03"
             },
             {
               "source_id": "00000000-0000-4000-8000-00000000000b",
               "accession": null,
               "period_end": null,
-              "date": "2026-11-08",
-              "text": "yfinance split-adjusted daily closes, captured 2026-11-08; dev only, never certified"
+              "date": "2026-11-07",
+              "text": "yfinance split-adjusted daily closes, captured 2026-11-07; dev only, never certified"
             }
           ],
           "from": [
@@ -388,7 +388,7 @@
       }
     ],
     "call": {
-      "version": "call.v1",
+      "version": "call.v2",
       "call_date": "2026-11-09",
       "subject": {
         "issuer_id": "00000000-0000-4000-8000-0000000000d1",
@@ -685,7 +685,7 @@
       }
     ],
     "call": {
-      "version": "call.v1",
+      "version": "call.v2",
       "call_date": "2026-11-09",
       "subject": {
         "issuer_id": "00000000-0000-4000-8000-0000000000d1",

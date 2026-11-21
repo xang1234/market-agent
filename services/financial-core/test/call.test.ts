@@ -36,10 +36,12 @@ test("AAPL: today's multiple is 36.15x, the anchored exit multiple 17.33x, and t
   // The cap binds: 1.04 / (10% - 4%) = 52/3, below the median and today's multiple.
   assert.equal(
     call.assumptions[2]!.basis,
-    "anchored: the lowest of today's multiple 36.15x, the FY2017 to FY2026 median EV/FCF 25.85x (range 15.61x to 38.47x) and 17.33x, the multiple whose implied perpetual growth at your 10% required return is 4%. Each year's EV is its last close on or before its fiscal year end times its diluted weighted-average shares on the closes' split basis, less its net cash.",
+    "anchored: the lowest of today's multiple 36.15x, the FY2017 to FY2026 median EV/FCF 25.85x (range 15.61x to 38.47x) and 17.33x, the multiple whose implied perpetual growth at your 10% required return is 4%. Each year's EV is its last close on or before its fiscal year end times its diluted weighted-average shares on the closes' split basis, less its net cash. "
+      + "A past 10-K's cover count never binds, while today's multiple uses the latest one. FY2026's diluted average is 1.29% above it, so the years' multiples read high against today's.",
   );
-  assert.equal(call.assumptions[2]!.citations[2]!.text, "FY2019: 15.61x, (close 54.71 on 2019-09-27 × 18,595,652,000 shares − net cash USD 97,851,000,000) ÷ free cash flow USD 58,896,000,000");
-  assert.equal(call.assumptions[2]!.citations.at(-1)!.text, "yfinance split-adjusted daily closes, captured 2026-11-08; dev only, never certified");
+  assert.equal(call.assumptions[2]!.citations[2]!.text, "FY2019: 15.61x, (close 54.71 on 2019-09-27 × 18,595,652,000 shares − net cash USD 97,851,000,000) ÷ free cash flow USD 58,896,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2019-09-28, public by 2026-11-03");
+  // Retrieved at 20:00 on 2026-11-07 in New York: the capture is dated on the listing's calendar, as split dates are.
+  assert.equal(call.assumptions[2]!.citations.at(-1)!.text, "yfinance split-adjusted daily closes, captured 2026-11-07; dev only, never certified");
   assert.equal(call.requires[2]!.label, "Attributed consensus: Finviz EPS growth, next 5 years");
   assert.equal(call.facts[0]!.citations[0]!.text, "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03");
   assert.equal(call.facts[4]!.citations[0]!.text, "Close on 2026-11-06");
@@ -66,10 +68,25 @@ test("the median binds when it is the lowest, and today's multiple when it is; a
 
 test("a split after the capture restates each share count back to the closes' basis", () => {
   // Closes captured before a 2-for-1 split that executes before the Call trade at twice the counts' basis.
-  const closes = { ...AAPL.closes!, captured_on: "2026-10-30", closes: AAPL.closes!.closes.map((close) => ({ ...close, close_text: String(Number(close.close_text) * 2) })) };
+  const closes = { ...AAPL.closes!, retrieved_at: "2026-10-30T20:00:00.000Z", closes: AAPL.closes!.closes.map((close) => ({ ...close, close_text: String(Number(close.close_text) * 2) })) };
   const split = anchored({ ...AAPL, closes, splits: [...AAPL.splits!, { execution_date: "2026-11-02", split_from: "1", split_to: "2" }] });
   assert.deepEqual([split.figure.text, split.citations.slice(0, -1).map((citation) => citation.text.slice(0, 14))], [anchored(AAPL).figure.text, anchored(AAPL).citations.slice(0, -1).map((citation) => citation.text.slice(0, 14))]);
   assert.match(split.citations[2]!.text, /× 9,297,826,000 shares/u);
+});
+
+test("each year cites every filing its free cash flow, net cash and diluted shares came from", () => {
+  const later = { ...filing("2019-09-28"), source_id: "00000000-0000-4000-8000-0000000000a2", accession: "0000320193-21-000105", date: "2021-10-29" };
+  const row = anchored({ ...AAPL, history: year(2019, (entry) => ({ ...entry, citations: { free_cash_flow: [filing("2019-09-28"), later], net_cash: [later], shares: [later] } })) });
+  assert.deepEqual(row.citations.filter((citation) => citation.text.startsWith("FY2019")).map((citation) => [citation.source_id, citation.text]), [
+    [filing("2019-09-28").source_id, "FY2019: 15.61x, (close 54.71 on 2019-09-27 × 18,595,652,000 shares − net cash USD 97,851,000,000) ÷ free cash flow USD 58,896,000,000; free cash flow from 10-K 0000320193-26-000026, period ended 2019-09-28, public by 2026-11-03"],
+    [later.source_id, "FY2019: free cash flow, net cash and diluted shares from 10-K 0000320193-21-000105, period ended 2019-09-28, public by 2021-10-29"],
+  ]);
+});
+
+test("the basis names the share-count gap between the years' diluted averages and today's cover count, either way", () => {
+  // A cover count of 15,000,000,000 is above FY2026's diluted 14,720,306,000 by 1.86%.
+  const above = anchored({ ...AAPL, figures: { ...AAPL.figures, shares_outstanding: { kind: "value", value: "15000000000", currency: null } } });
+  assert.match(above.basis, /FY2026's diluted average is 1\.86% below it, so the years' multiples read low against today's\.$/u);
 });
 
 test("a year without an EV/FCF multiple leaves the exit multiple unanchored, and rule 1 names both anchors", () => {
@@ -80,6 +97,9 @@ test("a year without an EV/FCF multiple leaves the exit multiple unanchored, and
   assert.equal(unanchored(year(2019, (entry) => ({ ...entry, citations: { ...entry.citations, net_cash: [filing("2018-09-29")] } }))), `${prefix}net cash is not at its fiscal year end, 2019-09-28.`);
   assert.equal(unanchored(year(2019, (entry) => ({ ...entry, figures: { ...entry.figures, net_cash: { kind: "value", value: "2000000000000", currency: "USD" } } }))), `${prefix}net cash is at least the market cap.`);
   assert.equal(unanchored(AAPL_HISTORY, { closes: { ...AAPL.closes!, closes: AAPL.closes!.closes.filter((close) => close.trade_date !== "2019-09-27") } }), `${prefix}no captured close in the 5 trading days to 2019-09-28.`);
+  // A capture that starts after the oldest year's end says so, rather than that no close was captured.
+  assert.equal(unanchored(AAPL_HISTORY, { closes: { ...AAPL.closes!, closes: AAPL.closes!.closes.filter((close) => close.trade_date > "2017-09-30") } }),
+    "Not anchored: only 9 of the last 10 fiscal years have an EV/FCF multiple. FY2017: the closes captured 2026-11-07 start on 2018-09-28, after its fiscal year end 2017-09-30.");
   assert.equal(unanchored(AAPL_HISTORY.slice(0, 7).concat(AAPL_HISTORY.slice(7).map((entry) => ({ ...entry, period_end: null, figures: { ...entry.figures, free_cash_flow: { kind: "gap", disposition: "missing", reason_code: "missing_input" } } })))),
     "Not anchored: only 7 of the last 10 fiscal years have an EV/FCF multiple. FY2019: free cash flow not certified (missing, missing_input). FY2018: free cash flow not certified (missing, missing_input). FY2017: free cash flow not certified (missing, missing_input).");
   assert.equal(unanchored(AAPL_HISTORY, { closes: null }), "Not anchored: no closes are captured for the listing by the Call's cutoff.");

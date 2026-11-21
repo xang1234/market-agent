@@ -12,6 +12,8 @@ import type { CallBlock } from './types.ts'
 
 // The server's own output (services/financial-core/test/call-contract.test.ts).
 const [RULE_ONE, RULE_ZERO, UNANCHORED] = JSON.parse(readFileSync(new URL('./call.fixture.json', import.meta.url), 'utf8')) as CallBlock[]
+// main's fixture at de724754: Calls saved before the exit multiple was anchored (#605).
+const [SAVED_V1] = JSON.parse(readFileSync(new URL('./call.v1.fixture.json', import.meta.url), 'utf8')) as CallBlock[]
 // The words ADVICE_WORDS forbids (services/financial-core/src/call.ts) and "hold", which ADR 0005 also forbids; "required return", the owner setting it names, is set aside.
 const ADVICE = /\b(?:upside|downside|targets?|expected|returns?|undervalued|overvalued|fair|worth|buy|sell|hold|forecasts?|recommend\w*|cheap|expensive|potential)\b/iu
 
@@ -93,4 +95,15 @@ test('nothing a Call shows is advice wording', () => {
     const text = (render(block).body.textContent ?? '').replaceAll(/required return/giu, '')
     assert.equal(ADVICE.exec(text)?.[0], undefined)
   }
+})
+
+test('a Call saved before #605 still passes the schema and shows its own rows and decline', () => {
+  const result = validateBlock(SAVED_V1!)
+  assert.ok(result.valid, JSON.stringify(!result.valid && result.errors))
+  const document = render(SAVED_V1!)
+  assert.deepEqual([...document.querySelectorAll('[data-row]')].map((row) => row.getAttribute('data-row')), [
+    'free_cash_flow', 'net_cash', 'stock_based_compensation', 'shares_outstanding', 'share_price', 'required_return', 'exit_multiple', 'share_change', 'required_growth', 'consensus',
+  ])
+  assert.equal(document.querySelector('[data-row="exit_multiple"] dt')?.textContent, "Exit multiple (X): today's multiple")
+  assert.equal(document.querySelector('[data-reason]')?.getAttribute('data-reason'), 'exit_multiple')
 })

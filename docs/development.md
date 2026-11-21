@@ -170,12 +170,13 @@ To run it daily, add a crontab line like this one (`crontab -e`), with the stack
 ```
 
 A Call anchors its exit multiple against the company's own price history, which the Polygon key holds for about two
-years. A dev job records about ten years of yfinance's split-adjusted daily closes into `daily_close_captures`, one
+years. A dev job records about eleven years of yfinance's split-adjusted daily closes into `daily_close_captures`, one
 request per listing, at least half a second apart. It reads yfinance through the dev-providers sidecar, so the stack must
 run with `ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`. With no `--tickers` it captures every active US common stock or ADR
 listing except the frozen golden issuers'. It skips, and counts as failed, a ticker that more than one active US
-listing carries. A split restates every earlier close, so each run stores a whole set of about 2,500 rows per ticker,
-dated by the UTC day of its request, and a reader takes the latest `captured_on` per listing. Run it occasionally,
+listing carries. A split restates every earlier close, so each run stores a whole set of about 2,770 rows per ticker,
+dated by the UTC day of its request, and a reader takes the latest `captured_on` per listing. Eleven years covers a
+Call's oldest fiscal year end while its latest 10-K is up to 15 months old. Run it occasionally,
 such as monthly or after a split, not daily. A rerun the same UTC day inserts nothing. The stored currency is the
 listing's, which the sidecar echoes back without reading it from yfinance, so a non-USD listing's currency is not
 verified. The job exits 2 and stops when the sidecar cannot be reached or reports a block, keeping the rows it wrote,
@@ -186,7 +187,8 @@ cd services/market
 DATABASE_URL=... DEV_PROVIDERS_BASE_URL=http://127.0.0.1:4336 npm run capture:closes [-- --tickers AAPL,COST,CAT]
 ```
 
-A Call reads the listing's newest capture retrieved by its cutoff. Its exit multiple is anchored only when each of the
+A Call reads the listing's newest capture retrieved by its cutoff, on the split basis of the day it was retrieved on the
+listing's calendar. Its exit multiple is anchored only when each of the
 last 10 fiscal years has a 10-K's free cash flow, net cash and diluted share count on file. A Call fetches no filing,
 and chat's SEC fetch stores only the fiscal years a question reads, so on a dev DB store the ten years with one
 companyfacts download per issuer:

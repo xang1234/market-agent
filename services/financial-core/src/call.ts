@@ -10,9 +10,10 @@
 // move or a scenario. The Call reads facts by identity and never feeds the
 // fact layer.
 
-import type { DecimalString, GapDisposition, IsoDate, LocalId, ReasonCode, Sha256Hex, UUID } from "./contracts.ts";
+import type { DecimalString, GapDisposition, IsoDate, IsoDateTime, LocalId, ReasonCode, Sha256Hex, UUID } from "./contracts.ts";
 import { balanceComponents } from "./definitions.ts";
 import { canonicalDecimalString, parseFinancialDecimal, type ExactDecimal } from "./exact-decimal.ts";
+import { localDateOf } from "./public-time.ts";
 import type { RecordedSplit } from "./split-adjustment.ts";
 import { fixed } from "./value-text.ts";
 import { addRationals, compareRationals, divideRationals, multiplyRationals, rationalFromDecimal, rationalSign, roundRational, subtractRationals, type ExactRational } from "./rational.ts";
@@ -28,7 +29,7 @@ import {
   type ValuationOutcomeResult,
 } from "./valuation-model.ts";
 
-export const CALL_VERSION = "call.v1";
+export const CALL_VERSION = "call.v2";
 
 /** Advice and valuation words: a price comparison ask with one is declined (#224), and neither a comparison nor a Call says one. */
 export const ADVICE_WORDS = /\b(?:upside|downside|targets?|hold|expected|returns?|undervalued|overvalued|fair|worth|buy|sell|forecasts?|recommend\w*|cheap|expensive|potential)\b/iu;
@@ -224,6 +225,12 @@ export type CallContent = Readonly<{
   stance: CallStance;
 }>;
 
+/** A Call as #604 sealed it, before the exit multiple was anchored (#605): three assumptions and two requires rows. */
+export type CallContentV1 = Omit<CallContent, "version"> & Readonly<{ version: "call.v1" }>;
+
+/** What a call.v1 Call was assembled from: no anchor history. */
+export type CallEvidenceV1 = Omit<CallEvidence, "history" | "closes" | "splits">;
+
 /** An engine result: its certified value, or the gap it published. */
 export type CallEngineFigure =
   | Readonly<{ kind: "value"; value: DecimalString; currency: string | null }>
@@ -264,8 +271,8 @@ export type CallHistoryYear = Readonly<{
 /** One set of dev split-adjusted daily closes, as captured (daily_close_captures): never certified. */
 export type CallCloses = Readonly<{
   source_id: UUID;
-  /** The capture's day: its closes are on the split basis of that day. */
-  captured_on: IsoDate;
+  /** When the provider answered: the closes are on the split basis of that instant's day on the listing's calendar. */
+  retrieved_at: IsoDateTime;
   currency: string;
   /** Ordered by trade date. */
   closes: ReadonlyArray<Readonly<{ trade_date: IsoDate; close_text: DecimalString }>>;
@@ -391,6 +398,35 @@ export function assembleCall(evidence: CallEvidence): CallContent {
   };
 }
 
+/**
+ * A Call as call.v1 states it (#604): today's multiple as the exit multiple,
+ * declined under rule 1 for want of an anchor. A Call sealed before #605
+ * regenerates with this, from its own plan's inputs, so its seal still holds.
+ */
+export function assembleCallV1(evidence: CallEvidenceV1): CallContentV1 {
+  const call = assembleCall({ ...evidence, history: [], closes: null, splits: null });
+  const row = (id: CallRowId) => [...call.assumptions, ...call.requires].find((entry) => entry.id === id)!;
+  return {
+    ...call,
+    version: "call.v1",
+    assumptions: [
+      row("required_return"),
+      { ...row("exit_multiple"), label: "Exit multiple (X): today's multiple", basis: "(P × S0 − N) ÷ F0 at the Call date; no anchored exit multiple exists yet" },
+      row("share_change"),
+    ],
+    requires: [row("required_growth"), row("consensus")],
+    stance: call.stance.rule === 0 ? call.stance : {
+      kind: "declined",
+      rule: 1,
+      text: "Declined under rule 1: the exit multiple has no anchor, so no stance is stated.",
+      reasons: [{
+        cites: "exit_multiple",
+        text: "Today's multiple is the only exit multiple on file. Anchoring another needs about ten years of the company's own multiple history, which is not captured yet.",
+      }],
+    },
+  };
+}
+
 type Outcome = Extract<CallFigure, { kind: "outcome" }>;
 // An input outcome that declines the Call under rule 0, by the row it is about.
 type Cause = Readonly<{ cites: CallRowId; label: string; figure: Outcome }>;
@@ -459,7 +495,7 @@ type Anchor =
   | Readonly<{ kind: "anchored"; value: ExactRational; basis: string; citations: ReadonlyArray<CallCitation> }>
   | Readonly<{ kind: "unanchored"; text: string }>;
 
-type YearMultiple = Readonly<{ fiscal_year: number; multiple: ExactRational; citation: CallCitation }>;
+type YearMultiple = Readonly<{ fiscal_year: number; multiple: ExactRational; citations: ReadonlyArray<CallCitation> }>;
 
 const FOUR_PERCENT = rational("0.04");
 const MAX_CLOSE_SESSIONS = 5;
@@ -480,11 +516,14 @@ function anchorExitMultiple(evidence: CallEvidence, today: ExactRational | null)
   const { closes, splits } = evidence;
   if (closes === null) return unanchored("No closes are captured for the listing by the Call's cutoff.");
   if (splits === null) return unanchored("The listing's split history is unknown, so no share count can be put on the closes' split basis.");
-  // The engine states each count on the Call date's split basis; the closes are on their capture day's.
+  // The engine states each count on the Call date's split basis; the closes are on the basis of the day they were retrieved,
+  // on the listing's calendar as split dates are. captured_on is the UTC day (0081), already the next day for an evening
+  // capture in New York.
+  const capturedOn = localDateOf(Date.parse(closes.retrieved_at), evidence.listing_timezone);
   const basis = splits
-    .filter((split) => split.execution_date > closes.captured_on && split.execution_date <= evidence.call_date)
+    .filter((split) => split.execution_date > capturedOn && split.execution_date <= evidence.call_date)
     .reduce((factor, split) => multiplyRationals(factor, divideRationals(rational(split.split_to), rational(split.split_from))!)!, ONE);
-  const years = evidence.history.map((year) => yearMultiple(year, closes, basis, evidence.listing_timezone));
+  const years = evidence.history.map((year) => yearMultiple(year, closes, capturedOn, basis, evidence.listing_timezone));
   const multiples = years.filter((year): year is YearMultiple => "multiple" in year);
   if (multiples.length < ANCHOR_FISCAL_YEARS) {
     const gaps = years.flatMap((year) => "text" in year ? [` FY${year.fiscal_year}: ${year.text}.`] : []);
@@ -506,16 +545,30 @@ function anchorExitMultiple(evidence: CallEvidence, today: ExactRational | null)
     kind: "anchored",
     value,
     basis: `anchored: the lowest of today's multiple ${multipleText(today)}x, the ${span} median EV/FCF ${multipleText(median)}x (range ${multipleText(sorted[0]!)}x to ${multipleText(sorted.at(-1)!)}x)${capped}. `
-      + "Each year's EV is its last close on or before its fiscal year end times its diluted weighted-average shares on the closes' split basis, less its net cash.",
+      + "Each year's EV is its last close on or before its fiscal year end times its diluted weighted-average shares on the closes' split basis, less its net cash. "
+      + shareBasis(evidence),
     citations: [
-      ...multiples.map((year) => year.citation).reverse(),
-      { source_id: closes.source_id, accession: null, period_end: null, date: closes.captured_on, text: `yfinance split-adjusted daily closes, captured ${closes.captured_on}; dev only, never certified` },
+      ...multiples.map((year) => year.citations).reverse().flat(),
+      { source_id: closes.source_id, accession: null, period_end: null, date: capturedOn, text: `yfinance split-adjusted daily closes, captured ${capturedOn}; dev only, never certified` },
     ],
   };
 }
 
+// A past 10-K's cover count never binds (select-inputs.ts rule 9), so the years' counts are diluted averages and today's is a
+// cover count: how far apart the two are in the latest year, and which way that moves the years' multiples against today's.
+function shareBasis(evidence: CallEvidence): string {
+  const latest = evidence.history[0]!;
+  const diluted = rational((latest.figures.shares as Extract<CallEngineFigure, { kind: "value" }>).value);
+  const cover = rational((evidence.figures.shares_outstanding as Extract<CallEngineFigure, { kind: "value" }>).value);
+  const gap = subtractRationals(divideRationals(diluted, cover)!, ONE)!;
+  const side = rationalSign(gap);
+  const lead = `A past 10-K's cover count never binds, while today's multiple uses the latest one. FY${latest.fiscal_year}'s diluted average`;
+  if (side === 0) return `${lead} equals it.`;
+  return `${lead} is ${percent(side > 0 ? gap : multiplyRationals(gap, MINUS_ONE)!, 2)}% ${side > 0 ? "above" : "below"} it, so the years' multiples read ${side > 0 ? "high" : "low"} against today's.`;
+}
+
 // One fiscal year's EV/FCF, (close × shares − net cash) ÷ free cash flow, or why it has none.
-function yearMultiple(year: CallHistoryYear, closes: CallCloses, basis: ExactRational, timeZone: string): YearMultiple | Readonly<{ fiscal_year: number; text: string }> {
+function yearMultiple(year: CallHistoryYear, closes: CallCloses, capturedOn: IsoDate, basis: ExactRational, timeZone: string): YearMultiple | Readonly<{ fiscal_year: number; text: string }> {
   const missing = (text: string) => ({ fiscal_year: year.fiscal_year, text });
   const uncertified = (label: string, gap: Extract<CallEngineFigure, { kind: "gap" }>) => missing(`${label} not certified (${gap.disposition}, ${gap.reason_code})`);
   const { free_cash_flow: cash, net_cash: net, shares: count } = year.figures;
@@ -529,7 +582,8 @@ function yearMultiple(year: CallHistoryYear, closes: CallCloses, basis: ExactRat
   const flow = rational(cash.value);
   if (rationalSign(flow) <= 0) return missing("free cash flow is not positive");
   const close = closes.closes.findLast((entry) => entry.trade_date <= end);
-  if (close === undefined || sessionsAfter(close.trade_date, end, timeZone) > MAX_CLOSE_SESSIONS) return missing(`no captured close in the ${MAX_CLOSE_SESSIONS} trading days to ${end}`);
+  if (close === undefined) return missing(`the closes captured ${capturedOn} start on ${closes.closes[0]?.trade_date}, after its fiscal year end ${end}`);
+  if (sessionsAfter(close.trade_date, end, timeZone) > MAX_CLOSE_SESSIONS) return missing(`no captured close in the ${MAX_CLOSE_SESSIONS} trading days to ${end}`);
   const price = rational(close.close_text);
   const restated = divideRationals(rational(count.value), basis)!;
   const enterprise = subtractRationals(multiplyRationals(price, restated)!, rational(net.value));
@@ -537,15 +591,27 @@ function yearMultiple(year: CallHistoryYear, closes: CallCloses, basis: ExactRat
   const multiple = enterprise === null ? null : divideRationals(enterprise, flow);
   if (multiple === null) return missing(VALUATION_OUTCOMES.numeric_limit_exceeded.text);
   const amount = (text: DecimalString) => `USD ${fixed(decimal(text)!, Math.max(decimal(text)!.scale, 0))}`;
+  const computed = `FY${year.fiscal_year}: ${multipleText(multiple)}x, (close ${fixed(roundRational(price, 2), 2)} on ${close.trade_date} × ${fixed(roundRational(restated, 0), 0)} shares − net cash ${amount(net.value)}) ÷ free cash flow ${amount(cash.value)}`;
+  // Each filing the year's figures came from and what it gave, the first free cash flow filing first.
+  const filings = new Map<string, { source: CallSource; figures: string[] }>();
+  for (const [figure, sources] of [["free cash flow", year.citations.free_cash_flow], ["net cash", year.citations.net_cash], ["diluted shares", year.citations.shares]] as const) {
+    for (const source of sources) {
+      const key = `${source.source_id}|${source.period_end}`;
+      const filing = filings.get(key) ?? filings.set(key, { source, figures: [] }).get(key)!;
+      if (!filing.figures.includes(figure)) filing.figures.push(figure);
+    }
+  }
   return {
     fiscal_year: year.fiscal_year,
     multiple,
-    citation: {
-      ...year.citations.free_cash_flow[0]!,
-      text: `FY${year.fiscal_year}: ${multipleText(multiple)}x, (close ${fixed(roundRational(price, 2), 2)} on ${close.trade_date} × ${fixed(roundRational(restated, 0), 0)} shares − net cash ${amount(net.value)}) ÷ free cash flow ${amount(cash.value)}`,
-    },
+    citations: [...filings.values()].map(({ source, figures }, index) => ({
+      ...source,
+      text: `${index === 0 ? `${computed}; ` : `FY${year.fiscal_year}: `}${LIST.format(figures)} from ${tenK(source)}`,
+    })),
   };
 }
+
+const LIST = new Intl.ListFormat("en-GB", { type: "conjunction" });
 
 const multipleText = (value: ExactRational) => fixed(roundRational(value, 2), 2);
 const lowerFirst = (text: string) => `${text.charAt(0).toLowerCase()}${text.slice(1)}`;

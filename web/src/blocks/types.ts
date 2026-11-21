@@ -539,9 +539,9 @@ export type CallRow = {
   from: ReadonlyArray<CallRowId>
 }
 
-/** The agent's opinion on one company (ADR 0005, #604, #605): server-written strings, stored unchanged, never evidence. */
+/** The agent's opinion on one company (ADR 0005, #604, #605): server-written strings, stored unchanged, never evidence. A call.v1 has the rows #604 wrote, before the exit multiple was anchored. */
 export type CallContent = {
-  version: 'call.v1'
+  version: 'call.v1' | 'call.v2'
   call_date: string
   subject: { issuer_id: string; label: string }
   settings: { required_return: string; margin_of_safety: string; bear_loss_limit: string; near_band: string }

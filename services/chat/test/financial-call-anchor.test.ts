@@ -11,7 +11,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
-import type { CallContent } from "../../financial-core/src/index.ts";
+import type { CallContent, CallContentV1 } from "../../financial-core/src/index.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
 import { IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { backfillSecStatements } from "../../fundamentals/src/sec-statements-backfill-cli.ts";
@@ -34,7 +34,9 @@ const AAPL = issuer("AAPL", 1, 320193);
 const GAPY = issuer("GAPY", 2, 900102);
 // AAPL's history with no closes captured.
 const NOCL = issuer("NOCL", 3, 900103);
-const ISSUERS = [AAPL, GAPY, NOCL];
+// AAPL's history with a 2-for-1 split on the Call date, its closes captured at 20:00 the evening before in New York.
+const SPLT = issuer("SPLT", 4, 900104);
+const ISSUERS = [AAPL, GAPY, NOCL, SPLT];
 
 // yfinance's split-adjusted closes on the last session of each AAPL fiscal year and the session after it, as the
 // dev capture of 2026-11-21 returned them, captured here a day before the Call.
@@ -102,7 +104,7 @@ async function seedIssuer(db: Client, pool: FinancialPool, company: Issuer, fact
   );
 }
 
-const row = (call: CallContent, id: string) => [...call.facts, ...call.assumptions, ...call.requires].find((entry) => entry.id === id)!;
+const row = (call: CallContent | CallContentV1, id: string) => [...call.facts, ...call.assumptions, ...call.requires].find((entry) => entry.id === id)!;
 
 test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -115,6 +117,15 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
   await seedIssuer(db, pool, AAPL, aaplHistoryCompanyFacts(), true);
   await seedIssuer(db, pool, GAPY, productiveAssetsIn2019(), true);
   await seedIssuer(db, pool, NOCL, asFiler(NOCL), false);
+  await seedIssuer(db, pool, SPLT, asFiler(SPLT), false);
+  await db.query(`insert into listing_splits (listing_id, execution_date, split_from, split_to, source_id) values ($1, '2026-11-09', 1, 2, $2)`, [SPLT.listing, POLYGON_MARKET_SOURCE_ID]);
+  // Retrieved at 01:00 UTC on the split's day, which is 20:00 on 2026-11-08 in New York: the closes are still on the basis before it.
+  await db.query(
+    `insert into daily_close_captures (listing_id, source_id, captured_on, retrieved_at, trade_date, close_text, currency, adjustment_basis)
+     select $1, $2, '2026-11-09', '2026-11-09T01:00:00Z', c.trade_date, c.close_text, 'USD', 'split_adjusted'
+       from unnest($3::date[], $4::text[]) as c(trade_date, close_text)`,
+    [SPLT.listing, YAHOO_FINANCE_DEV_MARKET_SOURCE_ID, CLOSES.map(([date]) => date), CLOSES.map(([, close]) => close)],
+  );
 
   const ask = async (question: string) => {
     const threadId = randomUUID();
@@ -132,23 +143,26 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
     assert.deepEqual([anchored.kind, anchored.figure.text], ["agent_assumption", "17.33x"]);
     assert.equal(
       anchored.basis,
-      "anchored: the lowest of today's multiple 36.15x, the FY2017 to FY2026 median EV/FCF 25.85x (range 15.61x to 38.47x) and 17.33x, the multiple whose implied perpetual growth at your 10% required return is 4%. Each year's EV is its last close on or before its fiscal year end times its diluted weighted-average shares on the closes' split basis, less its net cash.",
+      "anchored: the lowest of today's multiple 36.15x, the FY2017 to FY2026 median EV/FCF 25.85x (range 15.61x to 38.47x) and 17.33x, the multiple whose implied perpetual growth at your 10% required return is 4%. Each year's EV is its last close on or before its fiscal year end times its diluted weighted-average shares on the closes' split basis, less its net cash. "
+        + "A past 10-K's cover count never binds, while today's multiple uses the latest one. FY2026's diluted average is 1.29% above it, so the years' multiples read high against today's.",
     );
     // FY2017's operating cash flow is the 64,225M its later 10-Ks restated it to, and FY2017 to FY2019's shares are
     // their 10-Ks' pre-split counts times the 4-for-1 split, the closes' basis. Net cash in FY2017 and FY2018 is
     // negative: AAPL tagged its marketable securities then as available-for-sale, which net_cash.v1 does not map.
     assert.deepEqual(anchored.citations.map((citation) => citation.text), [
-      "FY2017: 17.48x, (close 38.53 on 2017-09-29 × 21,006,768,000 shares − net cash USD -95,391,000,000) ÷ free cash flow USD 51,774,000,000",
-      "FY2018: 18.98x, (close 56.44 on 2018-09-28 × 20,000,436,000 shares − net cash USD -88,570,000,000) ÷ free cash flow USD 64,121,000,000",
-      "FY2019: 15.61x, (close 54.71 on 2019-09-27 × 18,595,652,000 shares − net cash USD 97,851,000,000) ÷ free cash flow USD 58,896,000,000",
-      "FY2020: 25.74x, (close 112.28 on 2020-09-25 × 17,528,214,000 shares − net cash USD 79,394,000,000) ÷ free cash flow USD 73,365,000,000",
-      "FY2021: 25.95x, (close 146.92 on 2021-09-24 × 16,864,919,000 shares − net cash USD 65,797,000,000) ÷ free cash flow USD 92,953,000,000",
-      "FY2022: 21.60x, (close 150.43 on 2022-09-23 × 16,325,819,000 shares − net cash USD 49,040,000,000) ÷ free cash flow USD 111,443,000,000",
-      "FY2023: 26.67x, (close 171.21 on 2023-09-29 × 15,812,547,000 shares − net cash USD 51,011,000,000) ÷ free cash flow USD 99,584,000,000",
-      "FY2024: 31.80x, (close 227.79 on 2024-09-27 × 15,408,095,000 shares − net cash USD 50,021,000,000) ÷ free cash flow USD 108,807,000,000",
-      "FY2025: 38.47x, (close 255.46 on 2025-09-26 × 15,004,697,000 shares − net cash USD 33,763,000,000) ÷ free cash flow USD 98,767,000,000",
-      "FY2026: 36.48x, (close 341.07 on 2026-09-25 × 14,720,306,000 shares − net cash USD 56,824,000,000) ÷ free cash flow USD 136,056,000,000",
-      "yfinance split-adjusted daily closes, captured 2026-11-08; dev only, never certified",
+      "FY2017: 17.48x, (close 38.53 on 2017-09-29 × 21,006,768,000 shares − net cash USD -95,391,000,000) ÷ free cash flow USD 51,774,000,000; free cash flow from 10-K 0000320193-18-000145, period ended 2017-09-30, public by 2026-11-09",
+      // FY2017's capex, net cash and count are its own 10-K's; its operating cash flow is the FY2018 10-K's restatement.
+      "FY2017: free cash flow, net cash and diluted shares from 10-K 0000320193-17-000070, period ended 2017-09-30, public by 2026-11-09",
+      "FY2018: 18.98x, (close 56.44 on 2018-09-28 × 20,000,436,000 shares − net cash USD -88,570,000,000) ÷ free cash flow USD 64,121,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-18-000145, period ended 2018-09-29, public by 2026-11-09",
+      "FY2019: 15.61x, (close 54.71 on 2019-09-27 × 18,595,652,000 shares − net cash USD 97,851,000,000) ÷ free cash flow USD 58,896,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-19-000119, period ended 2019-09-28, public by 2026-11-09",
+      "FY2020: 25.74x, (close 112.28 on 2020-09-25 × 17,528,214,000 shares − net cash USD 79,394,000,000) ÷ free cash flow USD 73,365,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-20-000096, period ended 2020-09-26, public by 2026-11-09",
+      "FY2021: 25.95x, (close 146.92 on 2021-09-24 × 16,864,919,000 shares − net cash USD 65,797,000,000) ÷ free cash flow USD 92,953,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-21-000105, period ended 2021-09-25, public by 2026-11-09",
+      "FY2022: 21.60x, (close 150.43 on 2022-09-23 × 16,325,819,000 shares − net cash USD 49,040,000,000) ÷ free cash flow USD 111,443,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-22-000108, period ended 2022-09-24, public by 2026-11-09",
+      "FY2023: 26.67x, (close 171.21 on 2023-09-29 × 15,812,547,000 shares − net cash USD 51,011,000,000) ÷ free cash flow USD 99,584,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-23-000106, period ended 2023-09-30, public by 2026-11-09",
+      "FY2024: 31.80x, (close 227.79 on 2024-09-27 × 15,408,095,000 shares − net cash USD 50,021,000,000) ÷ free cash flow USD 108,807,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-24-000123, period ended 2024-09-28, public by 2026-11-09",
+      "FY2025: 38.47x, (close 255.46 on 2025-09-26 × 15,004,697,000 shares − net cash USD 33,763,000,000) ÷ free cash flow USD 98,767,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-25-000079, period ended 2025-09-27, public by 2026-11-09",
+      "FY2026: 36.48x, (close 341.07 on 2026-09-25 × 14,720,306,000 shares − net cash USD 56,824,000,000) ÷ free cash flow USD 136,056,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-09",
+      "yfinance split-adjusted daily closes, captured 2026-11-07; dev only, never certified",
     ]);
     // A separate float bisection of ADR 0006's V(g) at X = 52/3 and d = 0.277% gives 22.46%.
     assert.deepEqual([row(call, "exit_multiple").figure.text, row(call, "required_growth").figure.text, row(call, "required_growth_anchored").figure.text], ["36.15x", "7.3% a year", "22.5% a year"]);
@@ -160,6 +174,13 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
       reasons: [{ cites: "bear_case", text: "No bear case is anchored yet, so the bear value per share is not computed." }],
     });
     assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the anchor");
+    // A split known only after the Call, executing after its date, is not one the Call could have read.
+    await db.query(`insert into listing_splits (listing_id, execution_date, split_from, split_to, source_id) values ($1, '2027-01-15', 1, 2, $2)`, [AAPL.listing, POLYGON_MARKET_SOURCE_ID]);
+    try {
+      assert.deepEqual(await verifyCalls([block], threadId, pool), [], "a later split leaves the sealed Call as it was");
+    } finally {
+      await db.query(`delete from listing_splits where listing_id = $1 and execution_date = '2027-01-15'`, [AAPL.listing]);
+    }
   });
 
   await t.test("the closes are sealed with the Call: a newer capture by the cutoff fails the seal and makes another fingerprint", async () => {
@@ -173,7 +194,7 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
     assert.deepEqual(await verifyCalls([first.block], first.threadId, pool), [{ block_id: first.block.id, reason: "block" }]);
     const { block } = await ask("Make a Call on AAPL");
     assert.notEqual(block.call.inputs.fingerprint, first.block.call.inputs.fingerprint);
-    assert.match(row(block.call, "anchored_exit_multiple").citations[2]!.text, /^FY2019: \d+\.\d\dx, \(close 60\.00 on 2019-09-27 /u);
+    assert.ok(row(block.call, "anchored_exit_multiple").citations.some((citation) => /^FY2019: \d+\.\d\dx, \(close 60\.00 on 2019-09-27 /u.test(citation.text)));
     await db.query(`delete from daily_close_captures where listing_id = $1 and captured_on = '2026-11-09'`, [AAPL.listing]);
     // A capture retrieved after the cutoff is not one the Call could have read.
     await db.query(
@@ -184,6 +205,15 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
     );
     const later = (await ask("Make a Call on AAPL")).block.call;
     assert.deepEqual([later.inputs.fingerprint, row(later, "anchored_exit_multiple")], [first.block.call.inputs.fingerprint, row(first.block.call, "anchored_exit_multiple")]);
+  });
+
+  await t.test("closes captured at 01:00 UTC on a split's day are dated the evening before in New York, so the split puts the counts back on their basis", async () => {
+    // The engine states SPLT's counts after the split, twice AAPL's; the closes are before it, as AAPL's are.
+    const computed = (call: CallContent | CallContentV1) => row(call, "anchored_exit_multiple").citations.flatMap((citation) => /^FY\d{4}: [\d.]+x, /u.test(citation.text) ? [citation.text.split("; ")[0]] : []);
+    const [split, aapl] = [(await ask("Make a Call on SPLT")).block.call, (await ask("Make a Call on AAPL")).block.call];
+    assert.equal(computed(split).length, 10);
+    assert.deepEqual([computed(split), row(split, "anchored_exit_multiple").basis], [computed(aapl), row(aapl, "anchored_exit_multiple").basis]);
+    assert.equal(row(split, "anchored_exit_multiple").citations.at(-1)!.text, "yfinance split-adjusted daily closes, captured 2026-11-08; dev only, never certified");
   });
 
   await t.test("a year whose capex tag blocks its free cash flow leaves the exit multiple unanchored, and rule 1 names both anchors", async () => {
