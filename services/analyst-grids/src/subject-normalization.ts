@@ -6,14 +6,16 @@ import type { QueryExecutor } from "./types.ts";
 // Map each ref to its issuer (listing -> instrument -> issuer) so columns see
 // the subject kind they understand; refs that don't map (other kinds, or
 // dangling ids) pass through and columns report missing/no_coverage honestly.
-// Dedupes by the mapped ref preserving first-seen order, so two listings of
-// the same issuer become one grid row.
+// An issuer merged away maps to the issuer it merged into (#705). Dedupes by
+// the mapped ref preserving first-seen order, so two listings of the same
+// issuer become one grid row.
 export async function normalizeUniverseToIssuers(
   db: QueryExecutor,
   refs: ReadonlyArray<SubjectRef>,
 ): Promise<SubjectRef[]> {
   const listingIds = refs.filter((r) => r.kind === "listing").map((r) => r.id);
   const instrumentIds = refs.filter((r) => r.kind === "instrument").map((r) => r.id);
+  const issuerIds = refs.filter((r) => r.kind === "issuer").map((r) => r.id);
 
   const issuerByListing = new Map<string, string>();
   if (listingIds.length > 0) {
@@ -38,6 +40,15 @@ export async function normalizeUniverseToIssuers(
     for (const row of rows) issuerByInstrument.set(row.instrument_id, row.issuer_id);
   }
 
+  const currentIssuer = new Map<string, string>();
+  if (issuerIds.length > 0) {
+    const { rows } = await db.query<{ id: string; issuer_id: string }>(
+      `select r.id, current_issuer_id(r.id::uuid)::text as issuer_id from unnest($1::text[]) as r(id)`,
+      [issuerIds],
+    );
+    for (const row of rows) currentIssuer.set(row.id, row.issuer_id);
+  }
+
   const out: SubjectRef[] = [];
   const seen = new Set<string>();
   for (const ref of refs) {
@@ -46,7 +57,9 @@ export async function normalizeUniverseToIssuers(
         ? issuerByListing.get(ref.id)
         : ref.kind === "instrument"
           ? issuerByInstrument.get(ref.id)
-          : undefined;
+          : ref.kind === "issuer"
+            ? currentIssuer.get(ref.id)
+            : undefined;
     const mapped: SubjectRef = issuerId ? { kind: "issuer", id: issuerId } : ref;
     const key = `${mapped.kind}:${mapped.id}`;
     if (seen.has(key)) continue;

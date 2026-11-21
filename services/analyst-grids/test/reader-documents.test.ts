@@ -290,3 +290,31 @@ test("selectReaderDocuments — SQL ranking: kind preference, recency tiebreak, 
     "limit truncates the ranked result, keeping the best-ranked rows",
   );
 });
+
+test("selectReaderDocuments — an issuer merged away reads the documents of the issuer it merged into (#705)", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker not available");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "reader-docs-merged");
+  const db = await connectedClient(t, databaseUrl);
+  const merged = "4f000000-0000-4000-8000-000000000705";
+  await db.query(`insert into issuers (issuer_id, legal_name) values ($1, 'Issuer X')`, [ISSUER_X_ID]);
+  await db.query(`insert into issuer_merges (dropped_issuer_id, kept_issuer_id) values ($1, $2)`, [merged, ISSUER_X_ID]);
+  await db.query(
+    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at, content_hash)
+     values ($1, 'test', 'filing', 'primary', 'public', now(), 'hmerged')`,
+    [SOURCE_A_ID],
+  );
+  const filing = await seedDocument(db, {
+    sourceId: SOURCE_A_ID,
+    kind: "filing",
+    publishedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+    rawBlobId: "sha256:" + "9".repeat(64),
+    contentHash: "hash-merged",
+  });
+  await seedMention(db, filing, ISSUER_X_ID);
+
+  assert.deepEqual((await selectReaderDocuments(db, merged, OUR_USER_ID, 5)).map((row) => row.document_id), [filing]);
+});
