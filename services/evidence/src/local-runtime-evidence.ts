@@ -112,8 +112,9 @@ export async function loadLocalRuntimeEvidence(
   const selected = input.selection && prefixPatterns(input.selection.predicate_prefixes);
   const { rows } = await db.query<ClaimEvidenceRow>(
     `with input_refs as (
+       -- An issuer merged away, as a saved universe still names it, reads as the issuer it merged into (#705).
        select kind::subject_kind as subject_kind,
-              id::uuid as subject_id
+              case when kind = 'issuer' then current_issuer_id(id::uuid) else id::uuid end as subject_id
          from jsonb_to_recordset($1::jsonb) as refs(kind text, id text)
      ),
      subject_refs as (
