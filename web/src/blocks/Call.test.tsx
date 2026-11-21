@@ -11,7 +11,7 @@ import { Call } from './Call.tsx'
 import type { CallBlock } from './types.ts'
 
 // The server's own output (services/financial-core/test/call-contract.test.ts).
-const [RULE_ONE, RULE_ZERO] = JSON.parse(readFileSync(new URL('./call.fixture.json', import.meta.url), 'utf8')) as CallBlock[]
+const [RULE_ONE, RULE_ZERO, UNANCHORED] = JSON.parse(readFileSync(new URL('./call.fixture.json', import.meta.url), 'utf8')) as CallBlock[]
 // The words ADVICE_WORDS forbids (services/financial-core/src/call.ts) and "hold", which ADR 0005 also forbids; "required return", the owner setting it names, is set aside.
 const ADVICE = /\b(?:upside|downside|targets?|expected|returns?|undervalued|overvalued|fair|worth|buy|sell|hold|forecasts?|recommend\w*|cheap|expensive|potential)\b/iu
 
@@ -25,7 +25,7 @@ function render(block: CallBlock): Document {
 }
 
 test('the server-generated Calls pass the canonical block schema; a title does not', () => {
-  for (const block of [RULE_ONE!, RULE_ZERO!]) {
+  for (const block of [RULE_ONE!, RULE_ZERO!, UNANCHORED!]) {
     const result = validateBlock(block)
     assert.ok(result.valid, JSON.stringify(!result.valid && result.errors))
   }
@@ -61,12 +61,16 @@ test('rows read in ADR 0005 order, each with its kind and basis, and the decline
     ['share_price', 'USD 342.37 per share', 'Market observation', true],
     ['required_return', '10%', 'Owner policy', true],
     ['exit_multiple', '36.15x', 'Deterministic result', true],
+    ['anchored_exit_multiple', '17.33x', 'Agent assumption', true],
     ['share_change', '0.277% a year', 'Agent assumption', true],
+    ['bear_case', 'Not anchored', 'Agent assumption', true],
     ['required_growth', '7.3% a year', 'Deterministic result', true],
+    ['required_growth_anchored', '22.5% a year', 'Deterministic result', true],
     ['consensus', '8.18%', 'Attributed consensus', true],
   ])
+  assert.match(document.querySelector('[data-row="anchored_exit_multiple"]')?.textContent ?? '', /FY2017: 17\.48x, \(close 38\.53 on 2017-09-29 × 21,006,768,000 shares/)
   assert.match(document.querySelector('[data-row="free_cash_flow"]')?.textContent ?? '', /10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03/)
-  assert.equal(document.querySelector('[data-reason]')?.textContent, 'Exit multiple (X): today\'s multiple: Today\'s multiple is the only exit multiple on file. Anchoring another needs about ten years of the company\'s own multiple history, which is not captured yet.')
+  assert.equal(document.querySelector('[data-reason]')?.textContent, 'Bear case: No bear case is anchored yet, so the bear value per share is not computed.')
   assert.match(document.body.textContent ?? '', /Your settings: required return 10%, margin of safety 1\.25, bear-loss limit 25%, near band 10%/)
 })
 
@@ -78,8 +82,14 @@ test('a rule 0 Call names the outcome in the row and in row 3', () => {
   assert.equal([...document.querySelectorAll('h3')].at(-1)?.textContent, 'Declined (rule 0)')
 })
 
+test('an unanchored exit multiple says why, and the decline names both missing anchors', () => {
+  const document = render(UNANCHORED!)
+  assert.equal(document.querySelector('[data-row="anchored_exit_multiple"] [data-part="figure"]')?.textContent, "Not anchored: no closes are captured for the listing by the Call's cutoff.")
+  assert.deepEqual([...document.querySelectorAll('[data-reason]')].map((reason) => reason.getAttribute('data-reason')), ['anchored_exit_multiple', 'bear_case'])
+})
+
 test('nothing a Call shows is advice wording', () => {
-  for (const block of [RULE_ONE!, RULE_ZERO!]) {
+  for (const block of [RULE_ONE!, RULE_ZERO!, UNANCHORED!]) {
     const text = (render(block).body.textContent ?? '').replaceAll(/required return/giu, '')
     assert.equal(ADVICE.exec(text)?.[0], undefined)
   }

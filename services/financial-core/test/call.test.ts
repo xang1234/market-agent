@@ -1,46 +1,17 @@
-// The Call's content (ADR 0005, ADR 0006, #604), assembled from certified
-// inputs: AAPL's FY2026 inputs as ADR 0006's probe reads them, and each named
-// input outcome that declines a Call under rule 0.
+// The Call's content (ADR 0005, ADR 0006, #604, #605), assembled from
+// certified inputs: AAPL's FY2026 inputs as ADR 0006's probe reads them, its
+// last ten fiscal years' EV/FCF, and each named input outcome that declines a
+// Call under rule 0.
 
 import assert from "node:assert/strict";
 import test from "node:test";
 import { assembleCall, DEFAULT_CALL_SETTINGS, parseCallSettings, type CallContent, type CallEvidence } from "../src/index.ts";
 
-const TEN_K = "00000000-0000-4000-8000-0000000000a1";
-const PRICE_SOURCE = "00000000-0000-4000-8000-0000000000b1";
-const CONSENSUS_SOURCE = "00000000-0000-4000-8000-0000000000c1";
-const filing = (period_end: string) => ({ source_id: TEN_K, accession: "0000320193-26-000026", period_end, date: "2026-11-03" });
-
-// ADR 0006's AAPL probe: F0, N and SBC from the FY2026 10-K, the cover count, and Friday's close.
-const AAPL: CallEvidence = {
-  call_date: "2026-11-09",
-  listing_timezone: "America/New_York",
-  subject: { issuer_id: "00000000-0000-4000-8000-0000000000d1", label: "AAPL" },
-  settings: DEFAULT_CALL_SETTINGS,
-  inputs: { snapshot_id: "00000000-0000-4000-8000-0000000000e1", run_id: "00000000-0000-4000-8000-0000000000e2", unit_id: "call", fingerprint: "f".repeat(64) },
-  figures: {
-    free_cash_flow: { kind: "value", value: "136056000000", currency: "USD" },
-    net_cash: { kind: "value", value: "56824000000", currency: "USD" },
-    stock_based_compensation: { kind: "value", value: "13789000000", currency: "USD" },
-    shares_outstanding: { kind: "value", value: "14532182000", currency: null },
-    share_price: { kind: "value", value: "342.37", currency: "USD" },
-    market_cap: { kind: "value", value: "4975383151340", currency: "USD" },
-  },
-  citations: {
-    free_cash_flow: [filing("2026-09-26")],
-    net_cash: [filing("2026-09-26")],
-    stock_based_compensation: [filing("2026-09-26")],
-    shares_outstanding: [filing("2026-10-23")],
-    share_price: [{ source_id: PRICE_SOURCE, accession: null, period_end: null, date: "2026-11-06" }],
-  },
-  fiscal_year_end: "2026-09-26",
-  price_date: "2026-11-06",
-  consensus: [{ source_id: CONSENSUS_SOURCE, captured_on: "2026-11-09", eps_growth_next_5y: "8.18" }],
-};
+import { AAPL, AAPL_HISTORY, filing, PRICE_SOURCE } from "./call-fixtures.ts";
 
 const figures = (rows: CallContent["facts"]) => rows.map((row) => [row.id, row.kind, row.figure.text]);
 
-test("AAPL: today's multiple is 36.15x, the price requires 7.3% a year, and the stance declines under rule 1", () => {
+test("AAPL: today's multiple is 36.15x, the anchored exit multiple 17.33x, and the stance declines under rule 1 for the bear case", () => {
   const call = assembleCall(AAPL);
   assert.deepEqual(figures(call.facts), [
     ["free_cash_flow", "deterministic_result", "USD 136,056,000,000"],
@@ -52,26 +23,77 @@ test("AAPL: today's multiple is 36.15x, the price requires 7.3% a year, and the 
   assert.deepEqual(figures(call.assumptions), [
     ["required_return", "owner_policy", "10%"],
     ["exit_multiple", "deterministic_result", "36.15x"],
+    ["anchored_exit_multiple", "agent_assumption", "17.33x"],
     ["share_change", "agent_assumption", "0.277% a year"],
+    ["bear_case", "agent_assumption", "Not anchored"],
   ]);
   assert.deepEqual(figures(call.requires), [
     ["required_growth", "deterministic_result", "7.3% a year"],
+    ["required_growth_anchored", "deterministic_result", "22.5% a year"],
     ["consensus", "attributed_consensus", "8.18%"],
   ]);
-  assert.equal(call.assumptions[2]!.basis.startsWith("judgment:"), true, "d is the agent's judgment");
-  assert.equal(call.requires[1]!.label, "Attributed consensus: Finviz EPS growth, next 5 years");
+  assert.equal(call.assumptions[3]!.basis.startsWith("judgment:"), true, "d is the agent's judgment");
+  // The cap binds: 1.04 / (10% - 4%) = 52/3, below the median and today's multiple.
+  assert.equal(
+    call.assumptions[2]!.basis,
+    "anchored: the lowest of today's multiple 36.15x, the FY2017 to FY2026 median EV/FCF 25.85x (range 15.61x to 38.47x) and 17.33x, the multiple whose implied perpetual growth at your 10% required return is 4%. Each year's EV is its last close on or before its fiscal year end times its diluted weighted-average shares on the closes' split basis, less its net cash.",
+  );
+  assert.equal(call.assumptions[2]!.citations[2]!.text, "FY2019: 15.61x, (close 54.71 on 2019-09-27 × 18,595,652,000 shares − net cash USD 97,851,000,000) ÷ free cash flow USD 58,896,000,000");
+  assert.equal(call.assumptions[2]!.citations.at(-1)!.text, "yfinance split-adjusted daily closes, captured 2026-11-08; dev only, never certified");
+  assert.equal(call.requires[2]!.label, "Attributed consensus: Finviz EPS growth, next 5 years");
   assert.equal(call.facts[0]!.citations[0]!.text, "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03");
   assert.equal(call.facts[4]!.citations[0]!.text, "Close on 2026-11-06");
   assert.deepEqual(call.stance, {
     kind: "declined",
     rule: 1,
-    text: "Declined under rule 1: the exit multiple has no anchor, so no stance is stated.",
-    reasons: [{
-      cites: "exit_multiple",
-      text: "Today's multiple is the only exit multiple on file. Anchoring another needs about ten years of the company's own multiple history, which is not captured yet.",
-    }],
+    text: "Declined under rule 1: the exit multiple is anchored, but the bear case is not, so no stance is stated.",
+    reasons: [{ cites: "bear_case", text: "No bear case is anchored yet, so the bear value per share is not computed." }],
   });
   assert.deepEqual(call.settings, { required_return: "0.1", margin_of_safety: "1.25", bear_loss_limit: "0.25", near_band: "0.1" });
+});
+
+const anchored = (evidence: CallEvidence) => assembleCall(evidence).assumptions.find((row) => row.id === "anchored_exit_multiple")!;
+const year = (fiscalYear: number, change: (entry: CallEvidence["history"][number]) => CallEvidence["history"][number]) =>
+  AAPL_HISTORY.map((entry) => entry.fiscal_year === fiscalYear ? change(entry) : entry);
+
+test("the median binds when it is the lowest, and today's multiple when it is; at a required return of 4% nothing caps it", () => {
+  assert.equal(anchored({ ...AAPL, settings: { ...DEFAULT_CALL_SETTINGS, required_return: "0.05" } }).figure.text, "25.85x");
+  // At USD 150 today's multiple is (150 × 14,532,182,000 − 56,824,000,000) ÷ 136,056,000,000 = 15.60x.
+  const cheap = anchored({ ...AAPL, settings: { ...DEFAULT_CALL_SETTINGS, required_return: "0.04" }, figures: { ...AAPL.figures, share_price: { kind: "value", value: "150", currency: "USD" } } });
+  assert.equal(cheap.figure.text, "15.60x");
+  assert.match(cheap.basis, /\(range 15\.61x to 38\.47x\), with no cap: at your 4% required return no multiple implies perpetual growth above 4%\. /u);
+});
+
+test("a split after the capture restates each share count back to the closes' basis", () => {
+  // Closes captured before a 2-for-1 split that executes before the Call trade at twice the counts' basis.
+  const closes = { ...AAPL.closes!, captured_on: "2026-10-30", closes: AAPL.closes!.closes.map((close) => ({ ...close, close_text: String(Number(close.close_text) * 2) })) };
+  const split = anchored({ ...AAPL, closes, splits: [...AAPL.splits!, { execution_date: "2026-11-02", split_from: "1", split_to: "2" }] });
+  assert.deepEqual([split.figure.text, split.citations.slice(0, -1).map((citation) => citation.text.slice(0, 14))], [anchored(AAPL).figure.text, anchored(AAPL).citations.slice(0, -1).map((citation) => citation.text.slice(0, 14))]);
+  assert.match(split.citations[2]!.text, /× 9,297,826,000 shares/u);
+});
+
+test("a year without an EV/FCF multiple leaves the exit multiple unanchored, and rule 1 names both anchors", () => {
+  const unanchored = (history: CallEvidence["history"], change: Partial<CallEvidence> = {}) => anchored({ ...AAPL, history, ...change }).figure.text;
+  const prefix = "Not anchored: only 9 of the last 10 fiscal years have an EV/FCF multiple. FY2019: ";
+  assert.equal(unanchored(year(2019, (entry) => ({ ...entry, figures: { ...entry.figures, free_cash_flow: { kind: "gap", disposition: "blocked_dependency", reason_code: "blocked_by_dependency" } } }))), `${prefix}free cash flow not certified (blocked_dependency, blocked_by_dependency).`);
+  assert.equal(unanchored(year(2019, (entry) => ({ ...entry, figures: { ...entry.figures, free_cash_flow: { kind: "value", value: "-1", currency: "USD" } } }))), `${prefix}free cash flow is not positive.`);
+  assert.equal(unanchored(year(2019, (entry) => ({ ...entry, citations: { ...entry.citations, net_cash: [filing("2018-09-29")] } }))), `${prefix}net cash is not at its fiscal year end, 2019-09-28.`);
+  assert.equal(unanchored(year(2019, (entry) => ({ ...entry, figures: { ...entry.figures, net_cash: { kind: "value", value: "2000000000000", currency: "USD" } } }))), `${prefix}net cash is at least the market cap.`);
+  assert.equal(unanchored(AAPL_HISTORY, { closes: { ...AAPL.closes!, closes: AAPL.closes!.closes.filter((close) => close.trade_date !== "2019-09-27") } }), `${prefix}no captured close in the 5 trading days to 2019-09-28.`);
+  assert.equal(unanchored(AAPL_HISTORY.slice(0, 7).concat(AAPL_HISTORY.slice(7).map((entry) => ({ ...entry, period_end: null, figures: { ...entry.figures, free_cash_flow: { kind: "gap", disposition: "missing", reason_code: "missing_input" } } })))),
+    "Not anchored: only 7 of the last 10 fiscal years have an EV/FCF multiple. FY2019: free cash flow not certified (missing, missing_input). FY2018: free cash flow not certified (missing, missing_input). FY2017: free cash flow not certified (missing, missing_input).");
+  assert.equal(unanchored(AAPL_HISTORY, { closes: null }), "Not anchored: no closes are captured for the listing by the Call's cutoff.");
+  assert.equal(unanchored(AAPL_HISTORY, { splits: null }), "Not anchored: the listing's split history is unknown, so no share count can be put on the closes' split basis.");
+  assert.equal(unanchored(AAPL_HISTORY, { figures: { ...AAPL.figures, net_cash: { kind: "value", value: "5000000000000", currency: "USD" } } }), "Not anchored: there is no positive multiple today.");
+  const call = assembleCall({ ...AAPL, closes: null });
+  assert.equal(call.requires[1]!.figure.text, "Not computed: the exit multiple is not anchored.");
+  assert.deepEqual([call.stance.text, call.stance.reasons], [
+    "Declined under rule 1: neither the exit multiple nor the bear case is anchored, so no stance is stated.",
+    [
+      { cites: "anchored_exit_multiple", text: "No closes are captured for the listing by the Call's cutoff." },
+      { cites: "bear_case", text: "No bear case is anchored yet, so the bear value per share is not computed." },
+    ],
+  ]);
 });
 
 test("NVDA: free cash flow blocked on its capex declines under rule 0, and what the price requires names that outcome", () => {
@@ -85,6 +107,8 @@ test("NVDA: free cash flow blocked on its capex declines under rule 0, and what 
   });
   assert.deepEqual(call.requires[0]!.figure, { kind: "outcome", outcome: "blocked_dependency", reason_code: "blocked_by_dependency", text: "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)" });
   assert.equal(call.assumptions[1]!.figure.kind, "outcome");
+  const notComputed = "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)";
+  assert.deepEqual([call.assumptions[2]!.figure.text, call.requires[1]!.figure.text, call.assumptions[4]!.figure.text], [notComputed, notComputed, "Not anchored"]);
 });
 
 test("a close more than 5 trading days before the Call date declines under rule 0 as stale_input", () => {
@@ -110,10 +134,10 @@ test("net cash from another filing than free cash flow's 10-K is incompatible_pe
 
 test("no consensus captured within 7 days reads so, and the Call is otherwise unchanged", () => {
   const call = assembleCall({ ...AAPL, consensus: [{ ...AAPL.consensus[0]!, captured_on: "2026-11-01" }] });
-  assert.deepEqual(call.requires[1]!.figure, { kind: "outcome", outcome: "no_consensus", reason_code: null, text: "no consensus within 7 days" });
-  assert.deepEqual(call.requires[1]!.citations, []);
+  assert.deepEqual(call.requires[2]!.figure, { kind: "outcome", outcome: "no_consensus", reason_code: null, text: "no consensus within 7 days" });
+  assert.deepEqual(call.requires[2]!.citations, []);
   const fresh = assembleCall(AAPL);
-  assert.deepEqual({ ...call, requires: [call.requires[0]] }, { ...fresh, requires: [fresh.requires[0]] });
+  assert.deepEqual({ ...call, requires: call.requires.slice(0, 2) }, { ...fresh, requires: fresh.requires.slice(0, 2) });
 });
 
 test("owner settings save only inside ADR 0005's ranges, as canonical decimals", () => {

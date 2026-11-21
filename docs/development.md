@@ -186,6 +186,16 @@ cd services/market
 DATABASE_URL=... DEV_PROVIDERS_BASE_URL=http://127.0.0.1:4336 npm run capture:closes [-- --tickers AAPL,COST,CAT]
 ```
 
+A Call reads the listing's newest capture retrieved by its cutoff. Its exit multiple is anchored only when each of the
+last 10 fiscal years has a 10-K's free cash flow, net cash and diluted share count on file. A Call fetches no filing,
+and chat's SEC fetch stores only the fiscal years a question reads, so on a dev DB store the ten years with one
+companyfacts download per issuer:
+
+```bash
+cd services/fundamentals
+DATABASE_URL=... SEC_EDGAR_USER_AGENT=... npm run backfill:sec-statements -- --annual-history-years 10 <issuer_uuid>
+```
+
 ### Keep frozen and live data apart
 
 Frozen modes need a database without provider-hydrated NVDA, AMD, or AAPL. Data mode refuses a database that a frozen mode seeded, because the frozen facts would let a live check pass without touching Polygon or SEC. Reset with `docker compose -f docker-compose.dev.yml --env-file .env.dev down -v` when you switch.

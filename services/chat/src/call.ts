@@ -10,7 +10,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { callInputOperations, DEFAULT_CALL_SETTINGS, type CallSettings, type FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
+import { CALL_OUTPUT_NODES, callInputOperations, DEFAULT_CALL_SETTINGS, type CallSettings, type FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
 import { buildDeterministicPlan, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { publishRequest } from "../../financial-engine/src/request.ts";
@@ -83,7 +83,7 @@ export async function callTurn(deps: CallTurnDeps, request: CallTurnRequest, sav
     }, {
       subjects: [{ slot_id: "a", mention: subject.mention }],
       operations: callInputOperations("a"),
-      outputs: CALL_OUTPUTS.map((node) => ({ output_id: `out_${node}`, node_id: node })),
+      outputs: CALL_OUTPUT_NODES.map((node) => ({ output_id: `out_${node}`, node_id: node })),
       thresholds: [],
     }),
     evidence: deps.evidence,
@@ -107,8 +107,6 @@ export async function callTurn(deps: CallTurnDeps, request: CallTurnRequest, sav
   });
   return published === "saved" ? saved() : { kind: "gap", reason_code: "verification_failed", text: CALL_REFUSED };
 }
-
-const CALL_OUTPUTS = ["free_cash_flow", "net_cash", "stock_based_compensation", "market_cap", "market_cap_px", "market_cap_shares"];
 
 type CallPublication = Readonly<{ thread_id: string; user_id: string; message_id: string; inputs_snapshot_id: string; settings: CallSettings }>;
 

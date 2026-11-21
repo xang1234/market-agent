@@ -54,7 +54,7 @@ import { parseArgs } from "node:util";
 import { Pool } from "pg";
 
 import {
-  callInputOperations,
+  callModelOperations,
   canonicalDecimalString,
   createRuntimeAuthority,
   DEFAULT_CALL_SETTINGS,
@@ -92,7 +92,7 @@ const HURDLE = Number(DEFAULT_CALL_SETTINGS.required_return);
 const READER = "00000000-0000-4000-8000-000000000610";
 const SLOT = "a";
 // The Call's input nodes without its price: the close comes from daily_close_captures, not price_observations.
-const OPERATIONS = callInputOperations(SLOT).filter((node) => node.node_id !== "market_cap_px" && node.node_id !== "market_cap");
+const OPERATIONS = callModelOperations(SLOT).filter((node) => node.node_id !== "market_cap_px" && node.node_id !== "market_cap");
 const INPUT_NODES = { free_cash_flow: "free_cash_flow", net_cash: "net_cash", stock_based_compensation: "stock_based_compensation", shares_outstanding: "market_cap_shares" } as const;
 export type InputId = keyof typeof INPUT_NODES;
 

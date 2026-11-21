@@ -2,9 +2,11 @@
 // Calls on their own rubric, never the research-quality one:
 //
 //   - every reason cites an input row;
-//   - every input row is labelled with its kind and basis;
+//   - every input row is labelled with its kind and basis, and an assumption
+//     that carries a value says whether it is judgment or anchored;
 //   - the Call declines when the rules say it must (rule 0 on each input
-//     outcome, rule 1 otherwise, until #605 anchors an exit multiple);
+//     outcome, rule 1 otherwise, naming the missing anchors, until a bear case
+//     is anchored);
 //   - it says no advice wording, and no stance wording leaks into a factual
 //     answer.
 //
@@ -23,7 +25,6 @@ import {
   ADVICE_WORDS,
   assembleCall,
   CALL_INPUT_KINDS,
-  DEFAULT_CALL_SETTINGS,
   SCENARIO_DISCLOSURE,
   STANCE_WORDS,
   type CallContent,
@@ -32,37 +33,12 @@ import {
   type CallFactId,
   type CallRowId,
 } from "../services/financial-core/src/index.ts";
+import { AAPL, AAPL_HISTORY, filing } from "../services/financial-core/test/call-fixtures.ts";
 
 export type CallCase = Readonly<{ id: string; evidence: CallEvidence; rule: 0 | 1; cites: ReadonlyArray<CallRowId> }>;
 
-const TEN_K = "00000000-0000-4000-8000-0000000000a1";
-const filing = (period_end: string) => ({ source_id: TEN_K, accession: "0000320193-26-000026", period_end, date: "2026-11-03" });
-
-// ADR 0006's AAPL probe: F0, N and SBC from the FY2026 10-K, the cover count, and Friday's 342.37 close.
-export const AAPL: CallEvidence = {
-  call_date: "2026-11-09",
-  subject: { issuer_id: "00000000-0000-4000-8000-0000000000d1", label: "AAPL" },
-  settings: DEFAULT_CALL_SETTINGS,
-  inputs: { snapshot_id: "00000000-0000-4000-8000-0000000000e1", run_id: "00000000-0000-4000-8000-0000000000e2", unit_id: "call", fingerprint: "f".repeat(64) },
-  figures: {
-    free_cash_flow: { kind: "value", value: "136056000000", currency: "USD" },
-    net_cash: { kind: "value", value: "56824000000", currency: "USD" },
-    stock_based_compensation: { kind: "value", value: "13789000000", currency: "USD" },
-    shares_outstanding: { kind: "value", value: "14532182000", currency: null },
-    share_price: { kind: "value", value: "342.37", currency: "USD" },
-    market_cap: { kind: "value", value: "4975383151340", currency: "USD" },
-  },
-  citations: {
-    free_cash_flow: [filing("2026-09-26")],
-    net_cash: [filing("2026-09-26")],
-    stock_based_compensation: [filing("2026-09-26")],
-    shares_outstanding: [filing("2026-10-23")],
-    share_price: [{ source_id: "00000000-0000-4000-8000-0000000000b1", accession: null, period_end: null, date: "2026-11-06" }],
-  },
-  fiscal_year_end: "2026-09-26",
-  price_date: "2026-11-06",
-  consensus: [{ source_id: "00000000-0000-4000-8000-0000000000c1", captured_on: "2026-11-09", eps_growth_next_5y: "8.18" }],
-};
+// ADR 0006's AAPL probe with its last ten fiscal years' EV/FCF (#605).
+export { AAPL };
 
 const FACTS: ReadonlyArray<CallFactId> = ["free_cash_flow", "net_cash", "stock_based_compensation", "shares_outstanding", "share_price"];
 // Engine outcomes an input can publish instead of a value.
@@ -76,8 +52,15 @@ const ENGINE_OUTCOMES: ReadonlyArray<Extract<CallEngineFigure, { kind: "gap" }>>
 
 /** AAPL as a full declined Call, NVDA's blocked free cash flow, each engine outcome on each input, and each input outcome the model finds. */
 export const CALL_CASES: ReadonlyArray<CallCase> = [
-  { id: "aapl", evidence: AAPL, rule: 1, cites: ["exit_multiple"] },
-  { id: "aapl-no-consensus", evidence: { ...AAPL, consensus: [] }, rule: 1, cites: ["exit_multiple"] },
+  { id: "aapl", evidence: AAPL, rule: 1, cites: ["bear_case"] },
+  { id: "aapl-no-consensus", evidence: { ...AAPL, consensus: [] }, rule: 1, cites: ["bear_case"] },
+  { id: "aapl-no-closes", evidence: { ...AAPL, closes: null }, rule: 1, cites: ["anchored_exit_multiple", "bear_case"] },
+  {
+    id: "aapl-fy2019-free-cash-flow-blocked",
+    evidence: { ...AAPL, history: AAPL_HISTORY.map((year) => year.fiscal_year === 2019 ? { ...year, figures: { ...year.figures, free_cash_flow: ENGINE_OUTCOMES[2]! } } : year) },
+    rule: 1,
+    cites: ["anchored_exit_multiple", "bear_case"],
+  },
   { id: "nvda-free-cash-flow-blocked", evidence: with_("free_cash_flow", ENGINE_OUTCOMES[2]!), rule: 0, cites: ["free_cash_flow"] },
   ...FACTS.flatMap((fact) => ENGINE_OUTCOMES.map((outcome): CallCase => ({
     id: `${fact}-${outcome.reason_code}`,
@@ -91,7 +74,7 @@ export const CALL_CASES: ReadonlyArray<CallCase> = [
   { id: "stale-price", evidence: { ...AAPL, price_date: "2026-10-30" }, rule: 0, cites: ["share_price"] },
   { id: "non-positive-free-cash-flow", evidence: { ...AAPL, figures: { ...AAPL.figures, free_cash_flow: { kind: "value", value: "-1", currency: "USD" } } }, rule: 0, cites: ["free_cash_flow"] },
   { id: "non-usd-price", evidence: { ...AAPL, figures: { ...AAPL.figures, share_price: { kind: "value", value: "342.37", currency: "EUR" } } }, rule: 0, cites: ["share_price"] },
-  { id: "no-multiple-today", evidence: { ...AAPL, figures: { ...AAPL.figures, net_cash: { kind: "value", value: "5000000000000", currency: "USD" } } }, rule: 1, cites: ["exit_multiple"] },
+  { id: "no-multiple-today", evidence: { ...AAPL, figures: { ...AAPL.figures, net_cash: { kind: "value", value: "5000000000000", currency: "USD" } } }, rule: 1, cites: ["anchored_exit_multiple", "bear_case"] },
 ];
 
 function with_(fact: CallFactId, figure: CallEngineFigure): CallEvidence {
@@ -110,7 +93,8 @@ export function scoreCall(call: CallContent, expected: Readonly<{ rule: 0 | 1; c
   for (const row of rows) {
     if (!(CALL_INPUT_KINDS as ReadonlyArray<string>).includes(row.kind)) failures.push(`rows_labelled: ${row.id} kind ${row.kind}`);
     if (row.basis.trim() === "") failures.push(`rows_labelled: ${row.id} has no basis`);
-    if (row.kind === "agent_assumption" && !/^(?:judgment|anchored):/u.test(row.basis)) failures.push(`rows_labelled: ${row.id} basis is neither judgment nor anchored`);
+    // An assumption not made (an unanchored exit multiple, the bear case) shows an outcome, and its basis says why.
+    if (row.kind === "agent_assumption" && row.figure.kind === "value" && !/^(?:judgment|anchored):/u.test(row.basis)) failures.push(`rows_labelled: ${row.id} basis is neither judgment nor anchored`);
   }
   for (const fact of call.facts) {
     if (fact.figure.kind === "value" && fact.citations.length === 0) failures.push(`rows_labelled: ${fact.id} cites nothing`);

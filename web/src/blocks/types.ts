@@ -520,8 +520,11 @@ export type CallRowId =
   | 'share_price'
   | 'required_return'
   | 'exit_multiple'
+  | 'anchored_exit_multiple'
   | 'share_change'
+  | 'bear_case'
   | 'required_growth'
+  | 'required_growth_anchored'
   | 'consensus'
 
 export type CallInputKind = 'reported_fact' | 'attributed_consensus' | 'market_observation' | 'owner_policy' | 'agent_assumption' | 'deterministic_result'
@@ -536,7 +539,7 @@ export type CallRow = {
   from: ReadonlyArray<CallRowId>
 }
 
-/** The agent's opinion on one company (ADR 0005, #604): server-written strings, stored unchanged, never evidence. */
+/** The agent's opinion on one company (ADR 0005, #604, #605): server-written strings, stored unchanged, never evidence. */
 export type CallContent = {
   version: 'call.v1'
   call_date: string
