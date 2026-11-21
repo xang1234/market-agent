@@ -228,11 +228,12 @@ test('Remove buttons stay distinct for same-ticker listings, quoted or not, and 
 
 test('a row sparkline draws only the latest session and takes its colour from the day change beside it', async () => {
   const LISTING_REF = { kind: 'listing', id: '44444444-4444-4444-a444-444444444444' } as const
-  // Thursday rises to 110 and closes there; Friday gaps down to 100 and rallies
-  // to 105, still under Thursday's close. The day is down, though Friday's own
-  // line and the two-day line both rise.
+  // Thursday rises to 110 and closes there; Friday gaps down to 100, rallies
+  // to 108 and fades to 105, still under Thursday's close. The day is down,
+  // though Friday's own line and the two-day line both rise. The two sessions
+  // have different shapes, so drawing Thursday fails the path check.
   const thursday = [100, 104, 110].map((close, i) => ({ ts: `2026-11-19T${14 + i}:00:00.000Z`, close }))
-  const friday = [100, 102, 105].map((close, i) => ({ ts: `2026-11-20T${14 + i}:00:00.000Z`, close }))
+  const friday = [100, 108, 105].map((close, i) => ({ ts: `2026-11-20T${14 + i}:00:00.000Z`, close }))
   const seriesBodies: Array<{ interval: string; range: { start: string; end: string } }> = []
   const rail = await renderRail((method, path, body) => {
     if (path === MEMBERS_PATH) {
@@ -279,6 +280,29 @@ test('a row sparkline draws only the latest session and takes its colour from th
       height: SPARKLINE_DEFAULTS.height,
     })
     assert.equal(line.getAttribute('d'), geometry?.path)
+  } finally {
+    await rail.cleanup()
+  }
+})
+
+test('an unquoted row with a flat session draws a muted line, not a rising one', async () => {
+  const LISTING_REF = { kind: 'listing', id: '55555555-5555-4555-a555-555555555555' } as const
+  const bars = [100, 101, 100].map((close, i) => ({
+    ts: `2026-11-20T${14 + i}:00:00.000Z`, open: close, high: close, low: close, close, volume: 1,
+  }))
+  const rail = await renderRail((method, path, body) => {
+    if (path === MEMBERS_PATH) {
+      return new Response(JSON.stringify({ members: [{ subject_ref: LISTING_REF, created_at: '2026-10-19T00:00:00.000Z' }] }), { status: 200 })
+    }
+    if (method === 'POST' && path === '/v1/market/series') {
+      return new Response(JSON.stringify({ query: JSON.parse(body), results: [{ listing: LISTING_REF, outcome: { outcome: 'available', data: { listing: LISTING_REF, bars } } }] }), { status: 200 })
+    }
+    return new Response(JSON.stringify({ error: 'unavailable' }), { status: 503 })
+  })
+  try {
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)))
+    const line = rail.section().querySelector('svg[aria-label="price trend"] path')!
+    assert.equal(line.getAttribute('class'), 'stroke-muted')
   } finally {
     await rail.cleanup()
   }

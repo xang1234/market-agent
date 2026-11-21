@@ -16,10 +16,17 @@ test('watchlistSeriesQuery batches only listing-kind members into one query', ()
   assert.ok(query !== null)
   assert.deepEqual(query.subject_refs.map((ref) => ref.id), ['l-1', 'l-2'])
   assert.equal(query.interval, '15m')
-  assert.equal(query.range.start, '2026-06-05T00:00:00.000Z')
   assert.equal(query.basis, 'split_adjusted')
   assert.equal(query.normalization, 'raw')
-  assert.equal(query.range.end, '2026-06-12T00:00:00.000Z')
+})
+
+test('watchlistSeriesQuery keeps one range all day, so the market cache row is reused', () => {
+  const members = [{ kind: 'listing', id: 'l-1' }] as const
+  const morning = watchlistSeriesQuery(members, new Date('2026-11-20T14:31:00Z'))
+  const evening = watchlistSeriesQuery(members, new Date('2026-11-20T23:59:00Z'))
+  assert.deepEqual(morning?.range, evening?.range)
+  // The week before today through the end of today.
+  assert.deepEqual(morning?.range, { start: '2026-11-13T00:00:00.000Z', end: '2026-11-21T00:00:00.000Z' })
 })
 
 test('watchlistSeriesQuery returns null with no listing members', () => {
@@ -86,5 +93,17 @@ test('sparklineClosesByListing keeps the latest session, after an overnight or w
   } as unknown as GetSeriesResponse
   const map = sparklineClosesByListing(response)
   assert.deepEqual(map.get('overnight'), [2, 3, 4, 5, 6, 7])
-  assert.deepEqual(map.get('weekend'), [9])
+  // Monday's open alone cannot draw a line, so it is left out and the batch
+  // counts as incomplete (retried) rather than cached as a blank row.
+  assert.equal(map.has('weekend'), false)
+})
+
+test('sparklineClosesByListing keeps a session whose after-hours trades sit exactly 4h apart', () => {
+  const bars = ['2026-11-20T14:30:00.000Z', '2026-11-20T20:45:00.000Z', '2026-11-21T00:45:00.000Z']
+    .map((ts, i) => ({ ts, close: i + 1 }))
+  const response = {
+    query: {} as never,
+    results: [{ listing: { kind: 'listing', id: 'l-1' }, outcome: { outcome: 'available', data: { bars } } }],
+  } as unknown as GetSeriesResponse
+  assert.deepEqual(sparklineClosesByListing(response).get('l-1'), [1, 2, 3])
 })

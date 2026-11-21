@@ -18,6 +18,11 @@ const SPARKLINE_STROKE: Readonly<Record<QuoteDirection, string>> = {
   flat: 'stroke-muted',
 }
 
+function seriesDirection(values: ReadonlyArray<number>): QuoteDirection {
+  const move = values[values.length - 1] - values[0]
+  return move > 0 ? 'up' : move < 0 ? 'down' : 'flat'
+}
+
 type QuoteRowProps = {
   subjectRef: SubjectRef
   // Given the row's label, so a control beside the row can say what it acts on.
@@ -55,7 +60,7 @@ export function QuoteRow({ subjectRef, trailing, sparkline }: QuoteRowProps) {
             ariaLabel="price trend"
             trendStrokeClass={
               SPARKLINE_STROKE[
-                view.price?.direction ?? (sparkline[sparkline.length - 1] >= sparkline[0] ? 'up' : 'down')
+                view.price?.direction ?? seriesDirection(sparkline)
               ]
             }
             className="h-6 w-14 shrink-0"

@@ -30,3 +30,18 @@ test("seeded fixture fallback fetcher synthesizes discovered ticker quotes when 
 
   assert.equal(typeof (payload as { ticker?: { lastTrade?: { p?: unknown } } }).ticker?.lastTrade?.p, "number");
 });
+
+test("dev intraday bars pause overnight and stop at the clock, like Polygon's", async () => {
+  const now = Date.parse("2026-05-08T15:00:00.000Z");
+  const fetcher = createDevPolygonFetcher({ clock: () => new Date(now) });
+  const start = Date.parse("2026-05-07T00:00:00.000Z");
+  const end = Date.parse("2026-05-09T00:00:00.000Z");
+  const payload = (await fetcher(`/v2/aggs/ticker/AAPL/range/15/minute/${start}/${end}`)) as {
+    results: Array<{ t: number }>;
+  };
+  const ts = payload.results.map((bar) => bar.t);
+  assert.ok(ts.length > 0);
+  assert.ok(ts[ts.length - 1] < now);
+  const gaps = ts.slice(1).map((t, i) => t - ts[i]);
+  assert.ok(gaps.some((gap) => gap > 8 * 60 * 60_000), "no overnight gap");
+});
