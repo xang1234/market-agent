@@ -8,7 +8,7 @@
 // variant, and nothing here computes a hurdle price, a stability move or a
 // scenario. The Call reads facts by identity and never feeds the fact layer.
 
-import type { DecimalString, GapDisposition, IsoDate, LocalId, ReasonCode, Sha256Hex, UUID } from "./contracts.ts";
+import { inferenceNote, type DecimalString, type GapDisposition, type IsoDate, type LocalId, type ProductiveAssetsCapexV1, type ReasonCode, type Sha256Hex, type UUID } from "./contracts.ts";
 import { balanceComponents } from "./definitions.ts";
 import { canonicalDecimalString, parseFinancialDecimal, type ExactDecimal } from "./exact-decimal.ts";
 import { fixed } from "./value-text.ts";
@@ -168,6 +168,8 @@ export type CallEvidence = Readonly<{
   fiscal_year_end: IsoDate | null;
   /** The session date of the price. */
   price_date: IsoDate | null;
+  /** Present when the bound capex is filed as productive assets (#731). */
+  capex_scope: ProductiveAssetsCapexV1 | null;
   consensus: ReadonlyArray<ConsensusCapture & Readonly<{ source_id: UUID }>>;
 }>;
 
@@ -205,7 +207,10 @@ export function assembleCall(evidence: CallEvidence): CallContent {
     id: fact.id,
     label: fact.label,
     kind: fact.kind,
-    basis: fact.basis,
+    // A caller written before #731 passes no capex_scope, and its capex is PP&E.
+    basis: fact.id === "free_cash_flow" && evidence.capex_scope != null
+      ? `free_cash_flow.v1: operating cash flow less capex, as reported in the latest 10-K. ${inferenceNote(evidence.capex_scope).text}`
+      : fact.basis,
     figure: engine[fact.id],
     citations: evidence.citations[fact.id].map((citation) => ({ ...citation, text: fact.source(citation) })),
     from: [],

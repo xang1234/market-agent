@@ -108,10 +108,16 @@ npm test         # contract + AAPL FY2024 income statement verification
   consolidated, unadjusted. EPS and weighted-average share counts are
   `as_filed` instead, on the split basis of the filing date companyfacts
   lists beside them (#387). Capex is
-  certified only from `PaymentsToAcquirePropertyPlantAndEquipment`;
-  capex mapped from `PaymentsToAcquireProductiveAssets` still appears in
-  statements but gets no context, since that concept adds purchased
-  intangibles. Operating cash flow is certified only from the total
+  certified from `PaymentsToAcquirePropertyPlantAndEquipment`, or from
+  `PaymentsToAcquireProductiveAssets` for a filing that tags only that
+  (#731). That concept may add purchased intangibles, so its fact carries a
+  `productive_assets_capex` inference in its `quality_flags` that the
+  inspectors and the Call's free cash flow basis show. The engine never
+  compares it with PP&E capex, and an answer labels it as a measure of its
+  own. A later filing's PP&E line for its period, or for a derived
+  quarter's input, is the same figure when equal within rounding, and
+  otherwise an unverified restatement. Operating cash
+  flow is certified only from the total
   `NetCashProvidedByUsedInOperatingActivities`, the scope capex covers;
   the continuing-operations line gets no context. Net income is
   `NetIncomeLoss`, attributable to the parent. `ProfitLoss`, which adds

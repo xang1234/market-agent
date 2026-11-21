@@ -126,6 +126,7 @@ test("an engine answer renders its figures with labels and periods, its gaps wit
     renderBlock({ kind: "financial_answer", financial: { presentation_version: "financial-presentation.v9" } }),
     "*Engine answer in an unsupported presentation (financial-presentation.v9)*",
   );
+  assert.equal(renderBlock({ ...block, financial: { ...block.financial, presentation_version: "financial-presentation.v4" } }), renderBlock(block), "an answer that reads productive-assets capex renders too (#731)");
   assert.equal(
     renderBlock({ kind: "rich_text", analyst_commentary: true, segments: [{ type: "text", text: "Scale funds research." }] }),
     "_Analyst commentary:_ Scale funds research.",

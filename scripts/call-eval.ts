@@ -61,6 +61,7 @@ export const AAPL: CallEvidence = {
   },
   fiscal_year_end: "2026-09-26",
   price_date: "2026-11-06",
+  capex_scope: null,
   consensus: [{ source_id: "00000000-0000-4000-8000-0000000000c1", captured_on: "2026-11-09", eps_growth_next_5y: "8.18" }],
 };
 

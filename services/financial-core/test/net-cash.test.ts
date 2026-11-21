@@ -73,7 +73,7 @@ test("the answer labels net cash so a net debt reads as negative net cash", () =
   const built = plan();
   const results = Object.values(publish(aapl({}, { cash_and_equivalents: "10000000000", long_term_debt_noncurrent: "30000000000" })))
     .map((result) => ({ ...result, result_id: `r_${result.output_id}` }));
-  const content = presentFinancialUnit({ plan: built, run_id: "run", unit_id: "balance", results, subject_names: { a: "Apple Inc." }, periods: new Map() });
+  const content = presentFinancialUnit({ plan: built, run_id: "run", unit_id: "balance", results, subject_names: { a: "Apple Inc." }, periods: new Map(), concept_scopes: new Map() });
   assert.deepEqual(content.results.map((result) => [content.labels[result.measure_label_id]!.text, result.presented.kind === "value" && result.presented.full_text]), [
     ["Net cash (cash and securities less debt)", "USD -20000000000"],
     ["Total debt (long-term debt, commercial paper and short-term borrowings)", "USD 30000000000"],

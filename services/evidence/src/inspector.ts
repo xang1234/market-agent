@@ -6,7 +6,7 @@ import {
 import { formatCompactCurrency, formatCurrency, formatPercent } from "../../analyze/src/block-format.ts";
 import { closeLabel } from "../../market/src/perf-points.ts";
 import { isPricePeriod, PERIOD_WORDS } from "../../market/src/ytd-window.ts";
-import { noncontrollingInterestInferenceText } from "../../financial-core/src/contracts.ts";
+import { inferenceNote } from "../../financial-core/src/contracts.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 export const EVIDENCE_INSPECTION_REF_KINDS = [
@@ -625,12 +625,13 @@ async function derivationInputs(
   });
 }
 
-// A value standing for a metric its concept does not name (#342) never reads as stated.
+// A value standing for a metric its concept does not name (#342, #731) never reads as stated.
 function inferenceRows(qualityFlags: unknown): ReadonlyArray<{ label: string; value: string }> {
-  return (Array.isArray(qualityFlags) ? qualityFlags : []).flatMap((flag) =>
-    isRecord(flag) && flag.kind === "no_noncontrolling_interest" && typeof flag.concept === "string"
-      ? [{ label: "Inferred", value: noncontrollingInterestInferenceText({ concept: flag.concept }) }]
-      : []);
+  return (Array.isArray(qualityFlags) ? qualityFlags : []).flatMap((flag) => {
+    if (!isRecord(flag) || (flag.kind !== "no_noncontrolling_interest" && flag.kind !== "productive_assets_capex") || typeof flag.concept !== "string") return [];
+    const { label, text } = inferenceNote({ kind: flag.kind, concept: flag.concept });
+    return [{ label, value: text }];
+  });
 }
 
 function factSubtitle(row: FactRow): string {

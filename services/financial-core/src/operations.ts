@@ -25,6 +25,8 @@ import {
   type PeRatioNode,
   type PeriodSelector,
   type PredicatePayload,
+  conceptScope,
+  type ConceptScopeV1,
   type RankingPayload,
   type RatioNode,
   type ReasonCode,
@@ -74,6 +76,8 @@ export type MeasureIdentity = {
   metric_key: string;
   definition_version: VersionTag;
   derivations: ReadonlyArray<{ operation: OperationKind; operation_version: VersionTag }>;
+  /** The concept scopes it is filed under or computed from (#731), sorted; none for a figure in its metric's reviewed concept. */
+  concept_scopes: ReadonlyArray<ConceptScopeV1["kind"]>;
 };
 
 export type FinancialOperand = {
@@ -223,11 +227,17 @@ function factOperand(input: BoundFactInputV1, node: ReportedMetricNode, definiti
     throw new FinancialIntegrityError(restated.code, `split adjustment of ${node.node_id} does not restate its value to its listing's reference date`);
   }
 
+  const scope = conceptScope(input.inference);
   return success({
     node_id: node.node_id,
     value: restated?.value ?? native,
     subject_slot: expected.slot.slot_id,
-    measure: { metric_key: definition.metric_key, definition_version: definition.definition_version, derivations: [] },
+    measure: {
+      metric_key: definition.metric_key,
+      definition_version: definition.definition_version,
+      derivations: [],
+      concept_scopes: scope ? [scope.kind] : [],
+    },
     value_kind: definition.value_kind,
     period: { ...input.period },
     measurement: {
@@ -267,7 +277,7 @@ function priceOperand(input: BoundPriceInputV1, node: ReportedMetricNode, defini
     node_id: node.node_id,
     value: restated.value,
     subject_slot: expected.slot.slot_id,
-    measure: { metric_key: definition.metric_key, definition_version: definition.definition_version, derivations: [] },
+    measure: { metric_key: definition.metric_key, definition_version: definition.definition_version, derivations: [], concept_scopes: [] },
     value_kind: definition.value_kind,
     period: { kind: "instant", start: null, end: adjustment.as_filed_on, fiscal_year: null, fiscal_period: null, calendar_version: null },
     measurement: {
@@ -304,10 +314,10 @@ export function margin(node: MarginNode, numerator: FinancialOperand, revenue: F
   }
   const incompatible = subjectMismatch(numerator, revenue) ?? measurementMismatch(numerator, revenue) ?? periodMismatch(numerator, revenue);
   if (incompatible) return incompatible;
-  return quotient(node.node_id, { metric_key: node.operation, definition_version: node.operation_version, derivations: [] }, numerator, revenue);
+  return quotient(node.node_id, { metric_key: node.operation, definition_version: node.operation_version, derivations: [], concept_scopes: [] }, numerator, revenue);
 }
 
-/** Annual operating cash flow less PP&E cash capex, both as reported; capex is never sign-flipped. */
+/** Annual operating cash flow less PP&E cash capex, both as reported; capex is never sign-flipped. It measures both operands' scopes. */
 export function freeCashFlow(node: FreeCashFlowNode, operatingCashFlow: FinancialOperand, capex: FinancialOperand): OperandOutcome {
   if (operatingCashFlow.measure.metric_key !== "operating_cash_flow" || capex.measure.metric_key !== "capex") {
     return operationGap("incompatible_definition", "Free cash flow uses only operating cash flow less capex.");
@@ -320,7 +330,9 @@ export function freeCashFlow(node: FreeCashFlowNode, operatingCashFlow: Financia
   if (incompatible) return incompatible;
   if (operatingCashFlow.period.fiscal_period !== "FY" || classifyDuration(operatingCashFlow.period) !== "annual") return operationGap("unsupported_period", "Free cash flow v1 is defined for a fiscal year only.");
   if (rationalSign(capex.value) < 0) {
-    return operationGap("incompatible_definition", "Capex v1 is a nonnegative PP&E cash payment; a negative reported value is not one.");
+    // PP&E's text keeps its result hashes; a scoped capex's measure label names its concept (#731).
+    const payment = capex.measure.concept_scopes.length === 0 ? "PP&E cash payment" : "cash payment";
+    return operationGap("incompatible_definition", `Capex v1 is a nonnegative ${payment}; a negative reported value is not one.`);
   }
   const value = subtractRationals(operatingCashFlow.value, capex.value);
   if (value === null) return operationGap("numeric_limit_exceeded", "Free cash flow exceeds supported numeric limits.");
@@ -328,7 +340,7 @@ export function freeCashFlow(node: FreeCashFlowNode, operatingCashFlow: Financia
     node_id: node.node_id,
     value,
     subject_slot: operatingCashFlow.subject_slot,
-    measure: { metric_key: node.operation, definition_version: node.operation_version, derivations: [] },
+    measure: { metric_key: node.operation, definition_version: node.operation_version, derivations: [], concept_scopes: [...new Set([...operatingCashFlow.measure.concept_scopes, ...capex.measure.concept_scopes])].sort() },
     value_kind: "derived",
     period: operatingCashFlow.period,
     measurement: operatingCashFlow.measurement,
@@ -384,7 +396,7 @@ export function balanceSum(node: BalanceSumNode, operands: ReadonlyArray<Financi
     node_id: node.node_id,
     value: total,
     subject_slot: first.operand.subject_slot,
-    measure: { metric_key: node.operation, definition_version: node.operation_version, derivations: [] },
+    measure: { metric_key: node.operation, definition_version: node.operation_version, derivations: [], concept_scopes: [] },
     value_kind: "derived",
     period: first.operand.period,
     measurement: first.operand.measurement,
@@ -404,7 +416,7 @@ export function ratio(node: RatioNode, numerator: FinancialOperand, denominator:
   if ((numerator.period.kind === "instant") !== (definition.timing === "same_instant")) {
     return operationGap("incompatible_period", "The ratio requires a different period timing.");
   }
-  return quotient(node.node_id, { metric_key: definition.ratio_key, definition_version: definition.definition_version, derivations: [] }, numerator, denominator);
+  return quotient(node.node_id, { metric_key: definition.ratio_key, definition_version: definition.definition_version, derivations: [], concept_scopes: [] }, numerator, denominator);
 }
 
 /** Four consecutive, non-overlapping single quarters of one reported flow metric. */
@@ -575,7 +587,7 @@ function valuation(node: MarketCapNode | PeRatioNode, price: FinancialOperand, v
     node_id: node.node_id,
     value,
     subject_slot: price.subject_slot,
-    measure: { metric_key: node.operation, definition_version: node.operation_version, derivations: [] },
+    measure: { metric_key: node.operation, definition_version: node.operation_version, derivations: [], concept_scopes: [] },
     value_kind: "derived",
     period: price.period,
     measurement: { ...price.measurement, unit },
@@ -598,8 +610,14 @@ export function measureMismatch(left: FinancialOperand, right: FinancialOperand)
     a.definition_version === b.definition_version &&
     a.derivations.length === b.derivations.length &&
     a.derivations.every((step, index) => step.operation === b.derivations[index]!.operation && step.operation_version === b.derivations[index]!.operation_version);
-  return same ? null : operationGap("incompatible_definition", "The operands use different metric definitions.");
+  if (!same) return operationGap("incompatible_definition", "The operands use different metric definitions.");
+  const apart = [...a.concept_scopes.filter((scope) => !b.concept_scopes.includes(scope)), ...b.concept_scopes.filter((scope) => !a.concept_scopes.includes(scope))];
+  return apart.length === 0 ? null : operationGap("incompatible_definition", SCOPE_MISMATCH[apart[0]!]);
 }
+
+const SCOPE_MISMATCH: Readonly<Record<ConceptScopeV1["kind"], string>> = {
+  productive_assets_capex: "One figure's capex is filed as PaymentsToAcquireProductiveAssets, which may include purchased intangibles, and the other's as PP&E only, so they do not measure the same spending.",
+};
 
 const MEASUREMENT_EXPLANATIONS: Readonly<Record<MeasurementReason, string>> = {
   incompatible_unit: "The operands use different units.",

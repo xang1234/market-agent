@@ -369,6 +369,8 @@ export const SUPPORTED_FINANCIAL_PRESENTATION_VERSION = 'financial-presentation.
 export const FINANCIAL_PRESENTATION_V1 = 'financial-presentation.v1'
 /** Content with P/E scenarios (#201); all other content stays v2. */
 export const FINANCIAL_PRESENTATION_V3 = 'financial-presentation.v3'
+/** Content that reads capex filed as productive assets, labelled as its own measure (#731); otherwise as v3. */
+export const FINANCIAL_PRESENTATION_V4 = 'financial-presentation.v4'
 
 export type FinancialUnit =
   | { kind: 'currency' | 'currency_per_share'; currency: string }
@@ -439,7 +441,7 @@ export type FinancialPresentation =
   | FinancialScenariosPresentation
 
 export type FinancialAnswerContent = {
-  presentation_version: typeof SUPPORTED_FINANCIAL_PRESENTATION_VERSION | typeof FINANCIAL_PRESENTATION_V1 | typeof FINANCIAL_PRESENTATION_V3
+  presentation_version: typeof SUPPORTED_FINANCIAL_PRESENTATION_VERSION | typeof FINANCIAL_PRESENTATION_V1 | typeof FINANCIAL_PRESENTATION_V3 | typeof FINANCIAL_PRESENTATION_V4
   template_version: string
   run_id: string
   unit_id: string
