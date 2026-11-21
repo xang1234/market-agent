@@ -22,13 +22,14 @@ if [[ "${1:-}" == "init-env" ]]; then
 fi
 
 # The example's default ports may belong to another checkout's stack.
-# ten-k-sections reads only fixtures, so it runs without the file.
+# ten-k-sections reads only fixtures, and suite runs each file under env -i,
+# so both run without the file.
 if [[ -f "$ENV_FILE" ]]; then
   set -a
   # shellcheck disable=SC1090
   . "$ENV_FILE"
   set +a
-elif [[ "${1:-}" != "ten-k-sections" ]]; then
+elif [[ "${1:-}" != "ten-k-sections" && "${1:-}" != "suite" ]]; then
   echo "no $ENV_FILE: run init-env first" >&2
   exit 2
 fi
