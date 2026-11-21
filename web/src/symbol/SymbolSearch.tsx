@@ -111,11 +111,17 @@ export function SymbolSearch({
     [placement],
   )
 
+  // A box that hands the subject to its owner (the watchlist's Add symbol)
+  // stays on the page and empties for the next symbol; a plain search opens it.
   const enterSubject = (subject: ResolvedSubject) => {
-    onResolvedSubject?.(subject)
-    navigate(symbolDetailPathForSubject(subject.subject_ref), {
-      state: { subject },
-    })
+    if (onResolvedSubject) {
+      onResolvedSubject(subject)
+      setQuery('')
+    } else {
+      navigate(symbolDetailPathForSubject(subject.subject_ref), {
+        state: { subject },
+      })
+    }
     setTypeahead(createSymbolTypeaheadState([]))
     setMessage(null)
   }

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { serializeJsonValue, type JsonValue, type QueryExecutor } from "./types.ts";
+import { serializeJsonValue, type JsonValue, type QueryExecutor, type RowQueryExecutor } from "./types.ts";
 
 export const RUN_ACTIVITY_STAGES = [
   "reading",
@@ -88,6 +88,25 @@ export async function writeRunActivity(
     throw new Error("run activity insert returned no row");
   }
   return row;
+}
+
+// The hub only carries activity published in its own process; agent runs write
+// rows from another service, so Home starts from what is stored.
+export async function listRecentRunActivities(
+  db: RowQueryExecutor,
+  userId: string,
+  limit: number,
+): Promise<RunActivityRow[]> {
+  assertUserId(userId);
+  const { rows } = await db.query<RunActivityRow>(
+    `select run_activity_id, user_id, agent_id, stage, subject_refs, source_refs, summary, ts
+       from run_activities
+      where user_id = $1::uuid
+      order by ts desc, run_activity_id
+      limit $2`,
+    [userId, limit],
+  );
+  return rows;
 }
 
 export function createRunActivityHub(
