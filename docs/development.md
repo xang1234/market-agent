@@ -188,12 +188,14 @@ DATABASE_URL=... DEV_PROVIDERS_BASE_URL=http://127.0.0.1:4336 npm run capture:cl
 ```
 
 A Call reads the listing's newest capture retrieved by its cutoff, on the split basis of the day it was retrieved on the
-listing's calendar. Its exit multiple is anchored only when each of the
-last 10 fiscal years has a 10-K's free cash flow, net cash and diluted share count on file. A Call fetches no filing,
-and chat's SEC fetch stores only the fiscal years a question reads, so on a dev DB store the ten years with one
-companyfacts download per issuer:
+listing's calendar. Its exit multiple is anchored only when each of the last 10 fiscal years has a 10-K's free cash
+flow, net cash and diluted share count on file. A Call fetches no filing, and chat's SEC fetch stores only the fiscal
+years a question reads, so on a dev DB store the ten years with one companyfacts download per issuer. Sync the
+listing's splits first. A backfill without them stores a later 10-K's recast pre-split count as a restatement nobody
+verified, and the Call leaves that year unanchored until the backfill runs again.
 
 ```bash
+cd services/market && DATABASE_URL=... POLYGON_API_KEY=... npm run sync:splits -- <listing_uuid>
 cd services/fundamentals
 DATABASE_URL=... SEC_EDGAR_USER_AGENT=... npm run backfill:sec-statements -- --annual-history-years 10 <issuer_uuid>
 ```
