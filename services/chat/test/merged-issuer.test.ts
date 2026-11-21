@@ -7,6 +7,7 @@ import { issuerLabels as evidenceIssuerLabels } from "../../evidence/src/local-r
 import { issuerLabels } from "../../financial-engine/src/request.ts";
 import { IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { mergeIssuerAway } from "../../fundamentals/test/issuer-merge-fixture.ts";
+import { reReadExplained } from "../src/filed-cause.ts";
 import { companyListings } from "../src/perf-block.ts";
 import { loadPriorScope, loadPriorSubjects } from "../src/thread-context.ts";
 import { chatDatabase, chatHarness, completed, LISTING_A, revenueModel, seedListingA } from "./financial-fixtures.ts";
@@ -24,6 +25,8 @@ test("a thread scoped to an issuer since merged away carries the kept issuer for
   const subjects = await loadPriorSubjects(pool, { threadId });
   assert.deepEqual(subjects.map((subject) => [subject.subject_ref, subject.input_text]), [[{ kind: "issuer", id: kept }, "ALPX"]]);
   assert.deepEqual((await loadPriorScope(pool, { threadId }))?.companies.map((company) => company.issuer_id), [kept]);
+  // "Show the evidence" reads the figures the answer explained as the kept issuer's, the company it now covers.
+  assert.deepEqual((await reReadExplained(pool, threadId))?.map((company) => [company.issuer, company.kind]), [[kept, "figures"]]);
 
   // Labels and listings read for a saved issuer id are the kept issuer's, under that id.
   const asOf = new Date().toISOString();

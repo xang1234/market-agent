@@ -119,17 +119,22 @@ export async function loadPriorScope(
   const scope = parseResearchScope(rows[0]?.research_scope ?? null);
   if (scope === null || scope.companies.length === 0) return scope;
   // A company merged away since is the issuer it merged into (#705); two merged into one count once.
-  const { rows: current } = await db.query<{ id: string; current: string }>(
-    `select id::text as id, current_issuer_id(id)::text as current from unnest($1::uuid[]) as id`,
-    [scope.companies.map((company) => company.issuer_id)],
-  );
-  const currentOf = new Map(current.map((row) => [row.id, row.current]));
+  const currentOf = await currentIssuerIds(db, scope.companies.map((company) => company.issuer_id));
   const companies = new Map<string, ResearchScope["companies"][number]>();
   for (const company of scope.companies) {
     const issuerId = currentOf.get(company.issuer_id.toLowerCase())!;
     if (!companies.has(issuerId)) companies.set(issuerId, { ...company, issuer_id: issuerId });
   }
   return { ...scope, companies: [...companies.values()] };
+}
+
+/** The issuer each saved issuer id names now, by the id's lowercase text. A merged-away id names the issuer it merged into (#705). */
+export async function currentIssuerIds(db: QueryExecutor, ids: ReadonlyArray<string>): Promise<Map<string, string>> {
+  const { rows } = await db.query<{ id: string; current: string }>(
+    `select id::text as id, current_issuer_id(id)::text as current from unnest($1::uuid[]) as id`,
+    [ids],
+  );
+  return new Map(rows.map((row) => [row.id, row.current]));
 }
 
 // The answer an evidence follow-up in thread $1 re-reads: the latest that
