@@ -16,6 +16,7 @@ import {
 import { checkFiler, filerCik, parseCliArgs, summaryLine } from "../src/sec-10k-claims-cli.ts";
 import { loadLocalRuntimeEvidence } from "../src/local-runtime-evidence.ts";
 import { MemoryObjectStore } from "../src/object-store.ts";
+import { moveCik } from "./cik-moves-after-read.ts";
 import type { SecSubmissions } from "../src/sec-edgar.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { bootstrapDatabase, connectedClient, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
@@ -74,9 +75,9 @@ async function nvdaDatabase(t: TestContext, prefix: string): Promise<{ client: Q
 
 async function storedTenK(client: QueryExecutor, issuerId: string, bytes: Uint8Array, objectStore = new MemoryObjectStore()): Promise<TenKDocument> {
   const doc = await storeTenK({ db: client, objectStore }, {
-    issuerId, bytes, url: null, accession: null, filedDate: null, retrievedAt: "2026-02-25T00:00:00.000Z",
+    issuerId, cik: null, bytes, url: null, accession: null, filedDate: null, retrievedAt: "2026-02-25T00:00:00.000Z",
   });
-  return { ...doc, issuerId, html: new TextDecoder().decode(bytes), effectiveTime: null };
+  return { ...doc!, issuerId, html: new TextDecoder().decode(bytes), effectiveTime: null };
 }
 
 const counts = async (client: QueryExecutor) => (await client.query<{ claims: number; competitors: number }>(
@@ -234,7 +235,7 @@ test("two stores of one 10-K's bytes at once keep one source", dockerTest, async
   const { client, nvda, databaseUrl } = await nvdaDatabase(t, "tenk-store-race");
   const pool = await connectedPool(t, databaseUrl);
   const objectStore = new MemoryObjectStore();
-  const input = { issuerId: nvda, bytes: NVDA_HTML, url: null, accession: null, filedDate: null, retrievedAt: "2026-11-15T00:00:00.000Z" };
+  const input = { issuerId: nvda, cik: 1045810, bytes: NVDA_HTML, url: null, accession: null, filedDate: null, retrievedAt: "2026-11-15T00:00:00.000Z" };
   const [a, b] = await Promise.all([storeTenK({ db: pool, objectStore }, input), storeTenK({ db: pool, objectStore }, input)]);
   assert.deepEqual(a, b);
   const { rows: [sources] } = await client.query<{ n: number }>(`select count(*)::int as n from sources`);
@@ -326,7 +327,7 @@ test("a 10-K extracted from a file takes its filing's accession and date from th
   const { llm } = llmAnswering({ "1": JSON.stringify({ claims: [{ predicate: "business.competition", quote: COMPETITION_LIST_ITEM }] }), "1A": RISK_REPLY });
   assert.equal((await extract10kClaims({ db: client, llm, resolveCompetitor: async () => null }, tenK)).outcome, "extracted");
   await storeTenK({ db: client, objectStore }, {
-    issuerId: nvda, bytes: NVDA_HTML, url: "https://www.sec.gov/x", accession: "0001045810-26-000021", filedDate: "2026-02-25", retrievedAt: "2026-11-15T00:00:00.000Z",
+    issuerId: nvda, cik: 1045810, bytes: NVDA_HTML, url: "https://www.sec.gov/x", accession: "0001045810-26-000021", filedDate: "2026-02-25", retrievedAt: "2026-11-15T00:00:00.000Z",
   });
   const { rows } = await client.query<{ provider_doc_id: string; published_at: Date; effective_time: Date; canonical_url: string }>(
     `select distinct d.provider_doc_id, d.published_at, c.effective_time, s.canonical_url
@@ -340,7 +341,7 @@ test("a --file run on a 10-K the backfill stored but could not read dates its cl
   const { client, nvda } = await nvdaDatabase(t, "tenk-file-after-backfill");
   const objectStore = new MemoryObjectStore();
   await storeTenK({ db: client, objectStore }, {
-    issuerId: nvda, bytes: NVDA_HTML, url: "https://www.sec.gov/x", accession: "0001045810-26-000021", filedDate: "2026-02-25", retrievedAt: "2026-11-15T00:00:00.000Z",
+    issuerId: nvda, cik: 1045810, bytes: NVDA_HTML, url: "https://www.sec.gov/x", accession: "0001045810-26-000021", filedDate: "2026-02-25", retrievedAt: "2026-11-15T00:00:00.000Z",
   });
   const tenK = await storedTenK(client, nvda, NVDA_HTML, objectStore);
   const { llm } = llmAnswering({ "1": JSON.stringify({ claims: [{ predicate: "business.competition", quote: COMPETITION_LIST_ITEM }] }), "1A": RISK_REPLY });
@@ -389,6 +390,29 @@ test("the backfill reads an issuer's latest 10-K once: a rerun fetches only the 
   );
   assert.deepEqual(rows, [{ provider_doc_id: "0001045810-26-000021", effective_time: new Date("2026-02-25T00:00:00Z") }]);
   assert.equal((await backfillIssuer10k({ ...deps, secClient: { ...deps.secClient, fetchSubmissions: async () => ({ filings: { recent: { ...submissions.filings.recent, form: ["10-Q", "8-K", "20-F"] } } }) } }, { issuerId: nvda, cik: 1045810 })).outcome, "no_10k");
+});
+
+test("the backfill stores nothing, and calls no model, for an issuer that loses its CIK mid-download", dockerTest, async (t) => {
+  const { client, nvda } = await nvdaDatabase(t, "tenk-cik-moved");
+  const { rows: [holder] } = await client.query<{ id: string }>(`insert into issuers (legal_name) values ('NVIDIA Holdings') returning issuer_id::text as id`);
+  const { llm, calls } = llmAnswering({ "1": JSON.stringify({ claims: [{ predicate: "business.competition", quote: COMPETITION_LIST_ITEM }] }), "1A": RISK_REPLY });
+  const result = await backfillIssuer10k({
+    db: client, llm, objectStore: new MemoryObjectStore(), resolveCompetitor: async () => null,
+    secClient: {
+      fetchSubmissions: async () => ({ filings: { recent: { accessionNumber: ["0001045810-26-000021"], form: ["10-K"], primaryDocument: ["nvda-20260125.htm"], filingDate: ["2026-02-25"] } } }),
+      fetchFiling: async () => {
+        await moveCik(client, { cik: "0001045810", from: nvda, to: holder!.id });
+        return { bytes: NVDA_HTML, contentType: "text/html", retrievedAt: "2026-11-15T00:00:00.000Z", url: "https://www.sec.gov/x" };
+      },
+    },
+  }, { issuerId: nvda, cik: 1045810 });
+  assert.equal(result.outcome, "cik_moved");
+  assert.equal(calls(), 0);
+  const { rows: [stored] } = await client.query<{ sources: number; documents: number; mentions: number; claims: number }>(
+    `select (select count(*)::int from sources) as sources, (select count(*)::int from documents) as documents,
+            (select count(*)::int from mentions) as mentions, (select count(*)::int from claims) as claims`,
+  );
+  assert.deepEqual(stored, { sources: 0, documents: 0, mentions: 0, claims: 0 });
 });
 
 test("the first paragraph of a longer list item is no item", dockerTest, async (t) => {
@@ -573,9 +597,9 @@ test("a 10-K's claims enter an evidence read only when the read names their pred
   const chat = async () => ids(await loadLocalRuntimeEvidence(client, { subject_refs, selection: chatRoute, limit: 6 }));
   const [unselectedBefore, chatBefore] = [await unselected(), await chat()];
 
-  const doc = await storeTenK({ db: client, objectStore: new MemoryObjectStore() }, {
-    issuerId: nvda, bytes: NVDA_HTML, url: null, accession: "0001045810-26-000021", filedDate: "2026-02-25", retrievedAt: "2026-11-15T00:00:00.000Z",
-  });
+  const doc = (await storeTenK({ db: client, objectStore: new MemoryObjectStore() }, {
+    issuerId: nvda, cik: 1045810, bytes: NVDA_HTML, url: null, accession: "0001045810-26-000021", filedDate: "2026-02-25", retrievedAt: "2026-11-15T00:00:00.000Z",
+  }))!;
   await extract10kClaims({ db: client, llm: llmQuotingEachPredicateInTurn, resolveCompetitor: async () => null }, { ...doc, issuerId: nvda, html: NVDA_HTML.toString("utf8"), effectiveTime: "2026-02-25T00:00:00Z" });
   const { rows: stored } = await client.query<{ predicate: string; n: number }>(
     `select predicate, count(*)::int as n from claims where document_id = $1 group by 1 order by 1`,
