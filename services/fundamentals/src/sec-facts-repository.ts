@@ -35,7 +35,7 @@ import {
   type SecSourceToken,
   type SecValueLocation,
 } from "./sec-edgar.ts";
-import type { DerivationProofV1, NoncontrollingInterestInferenceV1 } from "../../financial-core/src/contracts.ts";
+import type { DerivationProofV1, NoncontrollingInterestInferenceV1, ProductiveAssetsCapexV1 } from "../../financial-core/src/contracts.ts";
 import { resolveMetricDefinition, type MetricValueKind } from "../../financial-core/src/definitions.ts";
 import { derivationValue } from "../../financial-core/src/derivation.ts";
 import type { ShareBasis } from "../../financial-core/src/evidence-vocabulary.ts";
@@ -1325,12 +1325,11 @@ async function invalidateWithDependents(db: FundamentalsQueryExecutor, issuerId:
 const SEC_CONTEXT_VERSION = "sec_companyfacts_context.v1";
 
 // A metric mapped from several concepts is certified only from the reviewed
-// one: capex v1 is cash paid for PP&E, and PaymentsToAcquireProductiveAssets
-// (which some filers tag instead) adds purchased intangibles. OCF is the total,
-// matching capex's scope; the continuing-operations line leaves out
-// discontinued operations. Facts from the other concepts stay readable in
-// statements but get no context. A Call's inputs (#594) are each one reviewed
-// concept, so an alias mapped beside one later is never certified unreviewed.
+// one, or a scoped one (secConceptScope). OCF is the total, matching capex's
+// scope; the continuing-operations line leaves out discontinued operations.
+// Facts from the other concepts stay readable in statements but get no
+// context. A Call's inputs (#594) are each one reviewed concept, so an alias
+// mapped beside one later is never certified unreviewed.
 const SEC_CERTIFIED_CONCEPTS: Readonly<Record<string, string>> = {
   capex: "PaymentsToAcquirePropertyPlantAndEquipment",
   operating_cash_flow: "NetCashProvidedByUsedInOperatingActivities",
@@ -1350,6 +1349,14 @@ const SEC_CERTIFIED_CONCEPTS: Readonly<Record<string, string>> = {
   remaining_performance_obligations: "RevenueRemainingPerformanceObligation",
 };
 
+// Capex a filer tags as PaymentsToAcquireProductiveAssets instead of PP&E
+// certifies too (operator, 2026-11-21, #731), with the concept recorded in its
+// quality_flags, since productive assets may include purchased intangibles.
+// Extraction reads a filing that tags both as PP&E (US_GAAP_TO_METRIC_KEY's order).
+function secConceptScope(metricKey: string, concept: string): ProductiveAssetsCapexV1 | null {
+  return metricKey === "capex" && concept === "PaymentsToAcquireProductiveAssets" ? { kind: "productive_assets_capex", concept } : null;
+}
+
 // Selection takes every token from the filing whose own period it is, never
 // from a later filing's comparative, so the stored fact is that filing's
 // original disclosure. Companyfacts carries only undimensioned values, which
@@ -1366,7 +1373,15 @@ async function recordSecOriginalContext(
   // count keeps its filing's own fiscal period.
   if (token.start === null && token.form !== "10-K" && token.concept !== SEC_COVER_COUNT_CONCEPT) return;
   const certifiedConcept = SEC_CERTIFIED_CONCEPTS[line.metric_key];
-  if (certifiedConcept !== undefined && token.concept !== certifiedConcept) return;
+  const scope = secConceptScope(line.metric_key, token.concept);
+  if (certifiedConcept !== undefined && token.concept !== certifiedConcept && scope === null) return;
+  // A fact stored before its concept certified gains the scope with its context.
+  if (scope !== null) {
+    await db.query(
+      `update facts set quality_flags = quality_flags || $2::jsonb, updated_at = now() where fact_id = $1 and not quality_flags @> $2::jsonb`,
+      [tokenFactId, JSON.stringify([scope])],
+    );
+  }
   const existing = await db.query(`select 1 from fact_financial_contexts where fact_id = $1`, [tokenFactId]);
   if (existing.rows.length > 0) return;
   await recordFactFinancialContext(db, {
@@ -1741,7 +1756,7 @@ async function storeLaterStatement(
       input.issuerId, original.metric_id, original.period_kind, original.period_start, original.period_end, original.fiscal_year,
       token.token, original.unit, original.currency, original.scale, asOf, input.clock().toISOString(), sourceId, original.fact_id,
       later.filed,
-      JSON.stringify(original.inference ? [original.inference] : []),
+      JSON.stringify([original.inference, secConceptScope(original.metric_key, later.concept)].filter((flag) => flag !== null)),
       original.fiscal_period,
     ],
   );

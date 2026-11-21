@@ -54,7 +54,7 @@ export type FinancialInspectedInput =
       precision_status: string
       derivation: FinancialDerivation | null
       /** Present for a value that stands for a metric its concept does not name. */
-      inference?: { kind: 'no_noncontrolling_interest'; concept: string; checked: ReadonlyArray<string> }
+      inference?: { kind: 'no_noncontrolling_interest'; concept: string; checked: ReadonlyArray<string> } | { kind: 'productive_assets_capex'; concept: 'PaymentsToAcquireProductiveAssets' }
       publication: { attestation_id: string; available_no_later_than: string; precision: string; source_timezone: string }
     }
   | {

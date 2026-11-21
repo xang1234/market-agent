@@ -16,7 +16,7 @@ import {
   type BoundFinancialInputV1,
   type DerivationProofV1,
   type LocalId,
-  type NoncontrollingInterestInferenceV1,
+  type FactInferenceV1,
   type PlanAssumption,
   scenarioAssumption,
   type PriceObservationKind,
@@ -48,7 +48,7 @@ export type InspectedInput = Readonly<
       period: Readonly<{ kind: string; start: string | null; end: string; fiscal_year: number; fiscal_period: string }>;
       precision_status: string;
       derivation: DerivationProofV1 | null;
-      inference?: NoncontrollingInterestInferenceV1;
+      inference?: FactInferenceV1;
       publication: Readonly<{ attestation_id: string; available_no_later_than: string; precision: string; source_timezone: string }>;
     }
   | {

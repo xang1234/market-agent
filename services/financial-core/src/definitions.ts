@@ -57,8 +57,10 @@ export const METRIC_CATALOG_V1: ReadonlyMap<MetricKey, MetricDefinition> = new M
     // Including discontinued operations, like capex (SEC ingestion certifies
     // only NetCashProvidedByUsedInOperatingActivities).
     metric("operating_cash_flow", "Operating cash flow", "flow", "currency"),
-    // Cash paid for PP&E, reported as a nonnegative outflow (SEC ingestion
-    // certifies only PaymentsToAcquirePropertyPlantAndEquipment).
+    // Cash paid for PP&E, reported as a nonnegative outflow. SEC ingestion
+    // certifies PaymentsToAcquirePropertyPlantAndEquipment, or
+    // PaymentsToAcquireProductiveAssets for a filer that tags that instead, with
+    // its scope recorded (ProductiveAssetsCapexV1, #731).
     metric("capex", "Capital expenditures (PP&E cash payments)", "flow", "currency"),
     // A Call's inputs (ADR 0005), each one reported us-gaap concept (#594),
     // never a sum of tags: net cash and total debt sum them (BALANCE_COMPONENTS).

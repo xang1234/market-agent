@@ -334,4 +334,36 @@ test("committed result inspection", { timeout: 300_000 }, async (t) => {
     const margin = available(await inspect("out_gm"));
     assert.ok(margin.inputs.every((other) => !("inference" in other)), "a figure a filing states under its own metric has no inference");
   });
+
+  await t.test("capex filed as productive assets binds and is inspected with its scope (#731)", async () => {
+    const scope = { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" };
+    const factId = await seedReportedFact(db, { metric_key: "capex", value: "30", fiscal_year: 2023 });
+    await db.query(`update facts set quality_flags = $2::jsonb where fact_id = $1`, [factId, JSON.stringify([scope])]);
+    const validated = validateFinancialPlan({
+      ...revenuePlan(),
+      plan_id: randomUUID(),
+      metric_definitions: [{ metric_key: "capex", definition_version: "capex.v1" }],
+      operations: [{ node_id: "a_capex", operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "capex", period: { kind: "fiscal_period", fiscal_year: 2023, fiscal_period: "FY" } }],
+      outputs: [{ output_id: "out_capex", node_id: "a_capex", unit_id: "capex_unit" }],
+      publication_units: [{ unit_id: "capex_unit", kind: "chat_section" }],
+    });
+    assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
+    const run = await completedRun(db, client, validated.value);
+    const inspected = available(await inspectCommittedResult(db, IDS.owner, run.results.out_capex!));
+    assert.equal(inspected.disposition, "verified");
+    const ajv = new Ajv2020({ strict: false, validateFormats: false });
+    for (const file of ["finance_research_block_schema.json", "financial_plan_schema.json", "financial_result_schema.json", "financial_answer_http_schema.json"]) {
+      ajv.addSchema(JSON.parse(readFileSync(new URL(`../../../spec/${file}`, import.meta.url), "utf8")));
+    }
+    const valid = ajv.getSchema("https://example.com/schemas/financial_answer_http_schema.json#/$defs/FinancialResultInspection")!;
+    assert.ok(valid(inspected), JSON.stringify(valid.errors));
+    const [input] = inspected.inputs;
+    assert.ok(input && "fact_id" in input);
+    assert.deepEqual([input.fact_id, input.value, input.inference], [factId, "30", scope]);
+    const bound = (await db.query<{ inference: unknown }>(
+      `select bound_payload -> 'inference' as inference from financial_run_inputs where run_id = $1 and fact_id = $2`,
+      [run.runId, factId],
+    )).rows[0];
+    assert.deepEqual(bound?.inference, scope, "the certificate covers the concept");
+  });
 });

@@ -512,9 +512,25 @@ export type NoncontrollingInterestInferenceV1 = {
   checked: string[];
 };
 
-/** What every inspector shows for an inferred figure. */
-export function noncontrollingInterestInferenceText(inference: Pick<NoncontrollingInterestInferenceV1, "concept">): string {
-  return `Equal to ${inference.concept}: the filer reports no noncontrolling interest for this period.`;
+/**
+ * Capex a filer tags as PaymentsToAcquireProductiveAssets instead of
+ * PaymentsToAcquirePropertyPlantAndEquipment (operator, 2026-11-21, #731).
+ * Productive assets can include purchased intangibles, so the figure may be
+ * broader than PP&E cash payments. A filing that tags both is read as PP&E.
+ */
+export type ProductiveAssetsCapexV1 = {
+  kind: "productive_assets_capex";
+  concept: "PaymentsToAcquireProductiveAssets";
+};
+
+/** Why a filed value stands for a metric its concept does not name. */
+export type FactInferenceV1 = NoncontrollingInterestInferenceV1 | ProductiveAssetsCapexV1;
+
+/** What every inspector shows beside such a figure. */
+export function inferenceNote(inference: Pick<FactInferenceV1, "kind" | "concept">): { label: string; text: string } {
+  return inference.kind === "no_noncontrolling_interest"
+    ? { label: "Inferred", text: `Equal to ${inference.concept}: the filer reports no noncontrolling interest for this period.` }
+    : { label: "Scope", text: `Capex is filed as ${inference.concept}, which may include purchased intangibles as well as PP&E.` };
 }
 
 /** An immutable bound input: a fact, or a share price from a stored price observation. */
@@ -571,7 +587,7 @@ export type BoundFactInputV1 = {
   /** Present exactly when precision_status is derived_from_source_tokens; `numeric.raw_token` is then its sum. */
   derivation?: DerivationProofV1;
   /** Present for a value that stands for a metric its concept does not name. */
-  inference?: NoncontrollingInterestInferenceV1;
+  inference?: FactInferenceV1;
   eligibility: {
     selection_policy_version: VersionTag;
     promotion_status: "authoritative" | "corroborated" | "reviewed_extraction";

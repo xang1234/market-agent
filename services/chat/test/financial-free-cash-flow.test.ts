@@ -1,10 +1,10 @@
 // Certified annual free cash flow end to end (#211): reported operating cash
 // flow less PP&E cash capex, from facts SEC ingestion wrote, planned from a chat
-// turn and sealed by the independent verifier. Capex v1 is only
-// PaymentsToAcquirePropertyPlantAndEquipment and OCF only the total
-// NetCashProvidedByUsedInOperatingActivities; a filer tagging only
-// PaymentsToAcquireProductiveAssets or the continuing-operations OCF gets a
-// named gap, never a substitute.
+// turn and sealed by the independent verifier. Capex v1 is
+// PaymentsToAcquirePropertyPlantAndEquipment, or PaymentsToAcquireProductiveAssets
+// for a filer that tags that instead, bound with its scope (#731). OCF is only the
+// total NetCashProvidedByUsedInOperatingActivities; a filer tagging only the
+// continuing-operations OCF gets a named gap, never a substitute.
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -114,13 +114,20 @@ test("certified annual free cash flow from SEC-ingested facts", { timeout: 300_0
     });
   });
 
-  await t.test("capex tagged only as productive-asset payments is a named gap, and free cash flow is not computed", async () => {
+  await t.test("capex tagged only as productive-asset payments certifies, bound with that concept as its scope (#731)", async () => {
     assert.deepEqual((await ask("PAX")).rows, [
       ["Operating cash flow", "verified", "USD 120000000000"],
-      ["Capital expenditures (PP&E cash payments)", "missing", null],
-      ["Free cash flow (OCF less PP&E cash capex)", "blocked_dependency", null],
+      ["Capital expenditures (PP&E cash payments)", "verified", "USD 30000000000"],
+      ["Free cash flow (OCF less PP&E cash capex)", "verified", "USD 90000000000"],
     ]);
-    assert.deepEqual(await bindings(), [{ input_slot: "capex", gap_reason: "context_unverified" }, { input_slot: "ocf", gap_reason: null }]);
+    assert.deepEqual(await bindings(), [{ input_slot: "capex", gap_reason: null }, { input_slot: "ocf", gap_reason: null }]);
+    const bound = (await db.query(
+      `select i.bound_payload -> 'inference' as inference
+         from financial_run_inputs i join financial_runs r on r.run_id = i.run_id
+        where r.parent_id = $1 and i.input_slot = 'capex' order by r.created_at desc limit 1`,
+      [threadId],
+    )).rows;
+    assert.deepEqual(bound, [{ inference: { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } }]);
   });
 
   await t.test("OCF tagged only for continuing operations is a named gap, and free cash flow is not computed (#335)", async () => {

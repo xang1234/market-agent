@@ -202,6 +202,14 @@ test('a figure standing in for another metric says what it equals and why', () =
   assert.ok(!(render(inspection()).body.textContent ?? '').includes('Inferred'), 'a figure a filing states shows no inference')
 })
 
+test('capex filed as productive assets names its concept and that it may include intangibles', () => {
+  const scoped = render(inspection({
+    inputs: [fact('capex', '30000000000', null, { inference: { kind: 'productive_assets_capex', concept: 'PaymentsToAcquireProductiveAssets' } })],
+  }))
+  assert.equal(rows(scoped).at(-1)?.[0], 'Scope: Capex is filed as PaymentsToAcquireProductiveAssets, which may include purchased intangibles as well as PP&E.')
+  assert.ok(!(render(inspection()).body.textContent ?? '').includes('Scope:'), 'PP&E capex shows no scope')
+})
+
 test('a tiny ratio keeps its exact canonical text and a P/E reads as a multiple', () => {
   const small = render(inspection({ payload: { kind: 'value', value: '0.000000000000000001', unit: { kind: 'ratio' }, exact: true, rounding: null }, formula: { operation: 'gross_margin', operation_version: 'gross_margin.v1', numeric_policy_version: 'numeric.v1', reads_as_multiple: false } }))
   assert.equal(text(small.querySelector('[data-testid="financial-inspector-value"]')), '0.00%')

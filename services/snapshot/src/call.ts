@@ -116,6 +116,7 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     return isRecord(payload?.period) && typeof payload.period.end === "string" ? payload.period.end : null;
   };
   const observed = bound.get("market_cap_px")?.bound_payload?.observed_at;
+  const capexInference = bound.get("capex")?.bound_payload?.inference;
 
   const callDate = localDate(plan.time.knowledge_cutoff);
   const evidence: CallEvidence = {
@@ -133,6 +134,9 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     citations,
     fiscal_year_end: period("operating_cash_flow"),
     price_date: typeof observed === "string" ? localDate(observed) : null,
+    capex_scope: isRecord(capexInference) && capexInference.kind === "productive_assets_capex"
+      ? { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" }
+      : null,
     consensus: await consensusCaptures(db, issuer, callDate),
   };
   const content = assembleCall(evidence);

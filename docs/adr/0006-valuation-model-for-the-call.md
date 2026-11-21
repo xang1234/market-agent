@@ -91,7 +91,7 @@ The solver outcomes (below or above the domain, `numeric_limit_exceeded`) and th
 
 | Condition | Outcome |
 |---|---|
-| No certified FY free cash flow (missing OCF or capex, or capex tagged only as `PaymentsToAcquireProductiveAssets`) | Free cash flow is `blocked_dependency` on the missing input: no starting free cash flow |
+| No certified FY free cash flow (missing OCF or capex) | Free cash flow is `blocked_dependency` on the missing input: no starting free cash flow |
 | `F0 ≤ 0` | `non_positive_base`: the model needs positive free cash flow |
 | Latest 10-K period ended more than 15 months before the Call date | `stale_input` |
 | Shares missing or zero | `missing_input` |
@@ -200,7 +200,7 @@ These figures were computed with a 20-line script during drafting (not committed
   3. #604: the Call block (ADR 0005) wired to them.
   4. #605: an exit-multiple anchor from the ten years of closes #601 captures and FY free cash flow.
 - **Until item 4 ships**, every Call shows required growth at today's multiple and declines its stance under ADR 0005 rule 1.
-- **NVDA-style capex tagging** keeps those issuers out until the owner reviews `PaymentsToAcquireProductiveAssets` as capex.
+- **NVDA-style capex tagging.** The operator reviewed `PaymentsToAcquireProductiveAssets` as capex on 2026-11-21 (#731). It certifies for a filer that tags it instead of `PaymentsToAcquirePropertyPlantAndEquipment`, and the Call's free cash flow basis names it, since it may include purchased intangibles.
 
 ## Owner decision
 
