@@ -1,4 +1,4 @@
-import { blockText, type ReleaseExhibit } from "./sec-earnings-release-extraction.ts";
+import { blockText, canonicalText, type ReleaseExhibit } from "./sec-earnings-release-extraction.ts";
 
 export const TEN_K_ITEMS = ["1", "1A"] as const;
 export type TenKItem = (typeof TEN_K_ITEMS)[number];
@@ -66,8 +66,8 @@ function letters(block: string): { key: string; at: number[] } {
 // past the title ("Item 1A. Risk Factors, above, describes") or names no
 // title ("Item 7 for details"), so it heads nothing. A note in parentheses
 // may close the heading ("ITEM 1. BUSINESS (dollars in millions)"), but a
-// page number, bare or in parentheses, is a contents entry's ("Item 1A. Risk
-// Factors 9", "Item 1A. Risk Factors (9)").
+// page, bare or in parentheses, is a contents entry's ("Item 1A. Risk Factors
+// 9", "Item 1A. Risk Factors (F-1)").
 // A title with no label heads its item when it ends the block, or when it
 // is in capitals and a full stop ends it ("RISK FACTORS. The following").
 // A run-in subheading is in sentence case ("Properties. The Company owns",
@@ -77,9 +77,13 @@ function letters(block: string): { key: string; at: number[] } {
 const TITLE_ENDS_BLOCK = /^[\s.:\-–—\])]*$/;
 const SENTENCE_FOLLOWS = /^\s*[.:\-–—]*\s+[\p{Lu}\p{N}]/u;
 const RUN_IN_SENTENCE_FOLLOWS = /^\s*[.:]\s+[\p{Lu}\p{N}]/u;
-const HEADING_NOTE = /^\s*\((?!\s*(?:pp?\.?\s*|pages?\s*)?\d)[^)]*\)/i;
+// A contents page reads "9", "9-21", "F-1 - F-40" or "IV", alone or after
+// "Page", "p." or "pp.".
 // ponytail: a 10-K contents page number has at most three digits; four reads as a year ("Risk Factors 2025").
-const CONTENTS_PAGE = /^[\s.:\-–—]*(?:pages?\s*)?\d{1,3}(?:\s*[-–]\s*\d{1,3})?\s*$/i;
+const PAGE = String.raw`(?:[a-z]-)?\d{1,3}|[ivx]+`;
+const PAGES = String.raw`(?:pages?|pp?\.)?\s*(?:${PAGE})(?:\s*-\s*(?:${PAGE}))?`;
+const HEADING_NOTE = new RegExp(String.raw`^\s*\((?!\s*(?:pages?|pp?\.?)?\s*\d|\s*${PAGES}\s*\))[^)]*\)`, "i");
+const CONTENTS_PAGE = new RegExp(String.raw`^[\s.:-]*${PAGES}\s*$`, "i");
 function headedItem(block: string): Heading | null {
   const { key, at } = letters(block);
   for (const { item, labeled, bare } of HEADINGS) {
@@ -103,6 +107,16 @@ function headedItem(block: string): Heading | null {
 // parent item.
 const LIST_ITEM = /<li\b[^>]*>([\s\S]*?)<\/li>/gi;
 const listItemBlock = (_: string, inner: string) => `<br><li>• ${inner.replace(/<\/?(?:p|div|br)\b[^>]*>/gi, " ")}</li>`;
+// A table row whose last cell is a page is a contents entry, read as one
+// block, so its title ends in that page ("Item 1A. | Risk Factors | 9") and
+// heads nothing. A page footer's number under a real heading is in a row or
+// block of its own. ponytail: a row with a table inside it ends at that
+// table's first row; balance nested rows when a filing shows one.
+const TABLE_ROW = /<tr\b[^>]*>[\s\S]*?<\/tr>/gi;
+function contentsRowBlock(row: string): string {
+  const cells = row.split(/<\/t[dh]\s*>/i).map(canonicalText).filter((cell) => cell !== "");
+  return cells.length > 1 && CONTENTS_PAGE.test(cells.at(-1)!) ? row.replace(/<\/?(?:p|div|br|t[dh])\b[^>]*>/gi, " ") : row;
+}
 
 export type TenKSection = ReleaseExhibit & { type: TenKItem };
 export type SectionNotFound = { type: TenKItem; error: "section_not_found" };
@@ -127,7 +141,7 @@ const MAX_UNLABELED_ITEM_CHARS = 300_000;
 // ponytail: a heading inside a block ("Employees: 100. Item 1A. Risk
 // Factors") heads nothing, so that 10-K's Item 1 runs through its Item 1A.
 export function tenKSections(html: string): Record<TenKItem, TenKSection | SectionNotFound> {
-  const { text, edges } = blockText(html.replace(LIST_ITEM, listItemBlock));
+  const { text, edges } = blockText(html.replace(LIST_ITEM, listItemBlock).replace(TABLE_ROW, contentsRowBlock));
   const sorted = [...edges].sort((a, b) => a - b);
   const blockEnd = (n: number) => sorted[n + 1] ?? text.length;
   const headings: Heading[] = [];
