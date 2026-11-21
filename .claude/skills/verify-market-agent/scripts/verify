@@ -22,12 +22,16 @@ if [[ "${1:-}" == "init-env" ]]; then
 fi
 
 # The example's default ports may belong to another checkout's stack.
-[[ -f "$ENV_FILE" ]] || { echo "no $ENV_FILE: run init-env first" >&2; exit 2; }
-
-set -a
-# shellcheck disable=SC1090
-. "$ENV_FILE"
-set +a
+# ten-k-sections reads only fixtures, so it runs without the file.
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+elif [[ "${1:-}" != "ten-k-sections" ]]; then
+  echo "no $ENV_FILE: run init-env first" >&2
+  exit 2
+fi
 PG_USER="${DEV_POSTGRES_USER:-postgres}"
 PG_PASSWORD="${DEV_POSTGRES_PASSWORD:-postgres}"
 PG_DB="${DEV_POSTGRES_DB:-market_agent}"
@@ -157,12 +161,20 @@ cmd_identity() {
 cmd_ten_k_sections() {
   mkdir -p "$EVIDENCE"
   local read=(env -i PATH="$NODE_APP:$PATH" node --experimental-strip-types --no-warnings "$HERE/ten-k-sections.ts")
+  # Read before writing or comparing, so a failed read exits here and never
+  # saves or matches an empty run.
+  local now
   case "${1:-}" in
     "") "${read[@]}" ;;
-    save) [[ -n "${2:-}" ]] || { echo "usage: ten-k-sections save NAME" >&2; return 2; }; "${read[@]}" | tee "$EVIDENCE/ten-k-sections-$2.txt" ;;
+    save)
+      [[ -n "${2:-}" ]] || { echo "usage: ten-k-sections save NAME" >&2; return 2; }
+      now="$("${read[@]}")"
+      printf '%s\n' "$now" | tee "$EVIDENCE/ten-k-sections-$2.txt"
+      ;;
     diff)
       [[ -f "$EVIDENCE/ten-k-sections-${2:-}.txt" ]] || { echo "no saved ten-k-sections named ${2:-}" >&2; return 2; }
-      diff "$EVIDENCE/ten-k-sections-$2.txt" <("${read[@]}") && echo "10-K sections unchanged since $2"
+      now="$("${read[@]}")"
+      diff "$EVIDENCE/ten-k-sections-$2.txt" <(printf '%s\n' "$now") && echo "10-K sections unchanged since $2"
       ;;
     *) echo "usage: ten-k-sections [save NAME | diff NAME]" >&2; return 2 ;;
   esac
