@@ -8,6 +8,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import {
   defineResource,
   forgetUserData,
+  NotOnFileError,
   resetResourcesForTests,
   useResource,
   type FetchedResult,
@@ -35,6 +36,7 @@ function controlledLoader<P, T>() {
 function describeState(state: VisibleFetchState<unknown>): string {
   if (state.status === 'idle' || state.status === 'loading') return state.status
   if (state.status === 'unavailable') return `unavailable:${state.reason}`
+  if (state.status === 'not_on_file') return `not_on_file:${state.reason}`
   return `ready:${String(state.data)}${state.refreshing ? '|refreshing' : ''}`
 }
 
@@ -111,6 +113,20 @@ test('a revisit renders the cached result in its first commit without reloading'
   const log: VisibleFetchState<string>[] = []
   await render(<Probe resource={profile} params="iss-1" log={log} />)
   assert.deepEqual(log[0], { status: 'ready', data: 'Apple', refreshing: false, refreshError: null })
+  assert.equal(loader.calls.length, 1)
+})
+
+test('a load that finds nothing on file settles as not_on_file and is not reloaded on revisit', async () => {
+  const loader = controlledLoader<string, string>()
+  const segments = defineResource({ freshness: 'filed', load: loader.load })
+
+  await render(<Probe resource={segments} params="iss-1" />)
+  await act(async () => loader.calls[0].fail(new NotOnFileError('business segments not found')))
+  assert.equal(text(), 'not_on_file:business segments not found')
+
+  await render(<></>)
+  await render(<Probe resource={segments} params="iss-1" />)
+  assert.equal(text(), 'not_on_file:business segments not found')
   assert.equal(loader.calls.length, 1)
 })
 

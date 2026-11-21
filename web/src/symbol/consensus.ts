@@ -1,5 +1,6 @@
 import type { SubjectRef } from './search.ts'
 import { defineResource } from '../fetch/resource.ts'
+import { notOnFileError } from './fundamentalsNotOnFile.ts'
 
 export type AnalystRating = 'strong_buy' | 'buy' | 'hold' | 'sell' | 'strong_sell'
 
@@ -97,7 +98,7 @@ export async function fetchConsensus(
   const url = `${FUNDAMENTALS_API_BASE}/consensus?subject_kind=issuer&subject_id=${encodeURIComponent(issuerId)}`
   const res = await fetchFn(url, { signal: init.signal })
   if (!res.ok) {
-    throw new ConsensusFetchError(res.status, `fundamentals consensus fetch failed: HTTP ${res.status}`)
+    throw (await notOnFileError(res)) ?? new ConsensusFetchError(res.status, `fundamentals consensus fetch failed: HTTP ${res.status}`)
   }
   const body = (await res.json()) as WireGetConsensusResponse
   return body.consensus

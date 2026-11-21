@@ -1,5 +1,6 @@
 import type { SubjectRef } from './search.ts'
 import { defineResource } from '../fetch/resource.ts'
+import { notOnFileError } from './fundamentalsNotOnFile.ts'
 
 export type EarningsSurpriseDirection = 'beat' | 'miss' | 'inline'
 
@@ -49,7 +50,7 @@ export async function fetchEarnings(
   const url = `${FUNDAMENTALS_API_BASE}/earnings?subject_kind=issuer&subject_id=${encodeURIComponent(issuerId)}`
   const res = await fetchFn(url, { signal: init.signal })
   if (!res.ok) {
-    throw new EarningsFetchError(res.status, `fundamentals earnings fetch failed: HTTP ${res.status}`)
+    throw (await notOnFileError(res)) ?? new EarningsFetchError(res.status, `fundamentals earnings fetch failed: HTTP ${res.status}`)
   }
   const body = (await res.json()) as WireGetEarningsResponse
   return body.earnings
