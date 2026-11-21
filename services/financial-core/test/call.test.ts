@@ -52,6 +52,11 @@ test("free cash flow from capex filed as productive assets names that concept in
   assert.deepEqual({ ...scoped, basis: ppe.basis }, ppe, "only the basis moves");
 });
 
+test("evidence from a caller that predates the capex scope assembles as PP&E capex (#731)", () => {
+  const { capex_scope: _, ...unscoped } = AAPL;
+  assert.deepEqual(assembleCall(unscoped as CallEvidence), assembleCall(AAPL));
+});
+
 test("AAPL: today's multiple is 36.15x, the price requires 7.3% a year, and the stance declines under rule 1", () => {
   const call = assembleCall(AAPL);
   assert.deepEqual(figures(call.facts), [

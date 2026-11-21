@@ -207,7 +207,8 @@ export function assembleCall(evidence: CallEvidence): CallContent {
     id: fact.id,
     label: fact.label,
     kind: fact.kind,
-    basis: fact.id === "free_cash_flow" && evidence.capex_scope !== null
+    // A caller written before #731 passes no capex_scope, and its capex is PP&E.
+    basis: fact.id === "free_cash_flow" && evidence.capex_scope != null
       ? `free_cash_flow.v1: operating cash flow less capex, as reported in the latest 10-K. ${inferenceNote(evidence.capex_scope).text}`
       : fact.basis,
     figure: engine[fact.id],
