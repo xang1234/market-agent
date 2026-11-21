@@ -195,7 +195,7 @@ async function subjectListing(db: QueryExecutor, issuerId: string, cutoff: strin
        left join listings l on l.instrument_id = n.instrument_id
         and (l.active_from is null or l.active_from <= $2::timestamptz)
         and (l.active_to is null or l.active_to > $2::timestamptz)
-      where i.issuer_id = $1::uuid`,
+      where i.issuer_id = current_issuer_id($1::uuid)`,
     [issuerId, cutoff],
   );
   // An instrument with no active listing joins as an empty row: it is no listing.
@@ -212,7 +212,7 @@ async function consensusCaptures(db: QueryExecutor, issuerId: string, callDate: 
   const { rows } = await db.query<{ source_id: string; captured_on: string; value: string | null }>(
     `select source_id::text as source_id, captured_on::text as captured_on, value::text as value
        from consensus_captures
-      where issuer_id = $1::uuid and field_key = 'eps_growth_next_5y' and captured_on <= $2::date and captured_on >= $2::date - 7
+      where issuer_id = current_issuer_id($1::uuid) and field_key = 'eps_growth_next_5y' and captured_on <= $2::date and captured_on >= $2::date - 7
       order by captured_on, source_id`,
     [issuerId, callDate],
   );

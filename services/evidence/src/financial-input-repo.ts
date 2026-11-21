@@ -160,7 +160,7 @@ export async function listFinancialInputCandidates(db: RowQueryExecutor, request
             and p.source_version_hash = normalized_content_hash(s.content_hash)
             and (p.document_id is null or d.deleted_at is null)
        ) pub on true
-      where f.subject_kind = $1::subject_kind and f.subject_id = $2::uuid and m.metric_key = $3
+      where f.subject_kind = $1::subject_kind and f.subject_id = (case when $1 = 'issuer' then current_issuer_id($2::uuid) else $2::uuid end) and m.metric_key = $3
         and ($4::int is null or f.fiscal_year = $4::int)
         and ($5::text is null or f.fiscal_period = $5::text)
         and ${ELIGIBLE_FACT_SQL}

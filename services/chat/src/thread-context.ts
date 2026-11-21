@@ -69,25 +69,27 @@ export async function loadPriorSubjects(
   // The labels that answer's scope gave its companies, by issuer.
   const labels = new Map((parseResearchScope(rows[0]?.research_scope ?? null)?.companies ?? [])
     .flatMap((company) => company.label === undefined ? [] : [[company.issuer_id.toLowerCase(), company.label] as const]));
-  const handoffs: HydratedSubjectHandoff[] = [];
+  const handoffs = new Map<string, HydratedSubjectHandoff>();
   for (const ref of refs) {
     if (!isCompanyRef(ref)) continue;
     try {
-      handoffs.push(withListingTicker(await hydrate(db, ref), labels));
+      // An issuer merged away since hydrates as the one it merged into (#705); two merged into one carry once.
+      const handoff = withListingTicker(await hydrate(db, ref), labels.get(ref.id.toLowerCase()));
+      const key = `${handoff.subject_ref.kind}:${handoff.subject_ref.id}`;
+      if (!handoffs.has(key)) handoffs.set(key, handoff);
     } catch (reason) {
       // A company that no longer hydrates is dropped; the turn still answers.
       console.warn("[chat] could not carry a previous subject forward", reason);
     }
   }
-  return handoffs.map(resolutionFromHandoff);
+  return [...handoffs.values()].map(resolutionFromHandoff);
 }
 
 // An engine answer seals its companies as issuers, which hydrate with no
 // ticker; each takes an active ticker, as answers name companies (#425): the
 // one its answer named (GOOGL, not GOOG), else its smallest.
-function withListingTicker(handoff: HydratedSubjectHandoff, labels: ReadonlyMap<string, string>): HydratedSubjectHandoff {
+function withListingTicker(handoff: HydratedSubjectHandoff, named: string | undefined): HydratedSubjectHandoff {
   const tickers = (handoff.context.active_listings ?? []).map((listing) => listing.ticker).sort();
-  const named = labels.get(handoff.subject_ref.id.toLowerCase());
   const ticker = named !== undefined && tickers.includes(named) ? named : tickers[0];
   return handoff.display_labels.ticker !== undefined || ticker === undefined
     ? handoff
@@ -114,7 +116,25 @@ export async function loadPriorScope(
       limit 1`,
     [input.threadId],
   );
-  return parseResearchScope(rows[0]?.research_scope ?? null);
+  const scope = parseResearchScope(rows[0]?.research_scope ?? null);
+  if (scope === null || scope.companies.length === 0) return scope;
+  // A company merged away since is the issuer it merged into (#705); two merged into one count once.
+  const currentOf = await currentIssuerIds(db, scope.companies.map((company) => company.issuer_id));
+  const companies = new Map<string, ResearchScope["companies"][number]>();
+  for (const company of scope.companies) {
+    const issuerId = currentOf.get(company.issuer_id.toLowerCase())!;
+    if (!companies.has(issuerId)) companies.set(issuerId, { ...company, issuer_id: issuerId });
+  }
+  return { ...scope, companies: [...companies.values()] };
+}
+
+/** The issuer each saved issuer id names now, by the id's lowercase text. A merged-away id names the issuer it merged into (#705). */
+export async function currentIssuerIds(db: QueryExecutor, ids: ReadonlyArray<string>): Promise<Map<string, string>> {
+  const { rows } = await db.query<{ id: string; current: string }>(
+    `select id::text as id, current_issuer_id(id)::text as current from unnest($1::uuid[]) as id`,
+    [ids],
+  );
+  return new Map(rows.map((row) => [row.id, row.current]));
 }
 
 // The answer an evidence follow-up in thread $1 re-reads: the latest that

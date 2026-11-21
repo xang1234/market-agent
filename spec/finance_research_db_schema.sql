@@ -102,6 +102,22 @@ create table issuer_aliases (
 create index issuer_aliases_normalized_name_idx on issuer_aliases(normalized_name);
 create unique index issuer_aliases_unique_idx on issuer_aliases(issuer_id, match_reason, raw_name);
 
+-- Each issuer repair:issuer-splits merged away, with the issuer it merged
+-- into (migration 0085). Readers of a saved issuer id follow it.
+create table issuer_merges (
+  dropped_issuer_id uuid primary key,
+  kept_issuer_id uuid not null references issuers(issuer_id),
+  merged_at timestamptz not null default now()
+);
+create index issuer_merges_kept_issuer_id_idx on issuer_merges(kept_issuer_id);
+
+-- The issuer an id names now: the one it merged into, else itself.
+create function current_issuer_id(issuer_id uuid) returns uuid
+language sql stable
+as $$
+  select coalesce((select m.kept_issuer_id from issuer_merges m where m.dropped_issuer_id = issuer_id), issuer_id)
+$$;
+
 create function normalize_issuer_alias_name(alias_name text) returns text
 language sql
 immutable

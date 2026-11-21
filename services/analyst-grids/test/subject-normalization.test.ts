@@ -56,6 +56,23 @@ test("normalizeUniverseToIssuers maps listings/instruments to issuers, dedupes, 
   ]);
 });
 
+test("normalizeUniverseToIssuers maps an issuer merged away to the issuer it merged into, once (#705)", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker not available");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "grid-subject-norm-merged");
+  const db = await connectedClient(t, databaseUrl);
+  const merged = "4f000000-0000-4000-8000-000000000705";
+  await db.query(`insert into issuers (issuer_id, legal_name) values ($1, 'Acme Corp')`, [ISSUER_A]);
+  await db.query(`insert into issuer_merges (dropped_issuer_id, kept_issuer_id) values ($1, $2)`, [merged, ISSUER_A]);
+
+  assert.deepEqual(await normalizeUniverseToIssuers(db, [{ kind: "issuer", id: merged }, { kind: "issuer", id: ISSUER_A }]), [
+    { kind: "issuer", id: ISSUER_A },
+  ]);
+});
+
 test("normalizeUniverseToIssuers with no refs issues no queries and returns empty", async () => {
   let queries = 0;
   const db = {

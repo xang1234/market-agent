@@ -13,6 +13,7 @@ export const READER_DOCUMENT_WINDOW_DAYS = 180;
 export const READER_DOCUMENTS_PER_CELL = 5;
 
 // Recent, non-ephemeral documents visible to `userId` mentioning the issuer,
+// or the issuer it merged into (#705),
 // preferring primary document kinds. Ranking: kind preference (filing >
 // transcript > press_release > article > everything else), then recency. The
 // ephemeral filter excludes metadata-only ingests (GDELT) whose raw text we
@@ -42,7 +43,7 @@ export async function selectReaderDocuments(
            join documents d on d.document_id = m.document_id
            join sources s on s.source_id = d.source_id
           where m.subject_kind = 'issuer'
-            and m.subject_id = $1
+            and m.subject_id = current_issuer_id($1::uuid)
             and d.deleted_at is null
             and s.license_class <> 'ephemeral'
             and d.raw_blob_id not like 'ephemeral:%'

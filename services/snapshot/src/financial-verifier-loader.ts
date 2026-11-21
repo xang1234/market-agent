@@ -344,7 +344,8 @@ export async function loadSubjectNames(
 ): Promise<ReadonlyArray<LoadedSubjectName>> {
   const ids = (kind: string) => refs.filter((ref) => ref.kind === kind).map((ref) => ref.id);
   return (await db.query<LoadedSubjectName>(
-    `select 'issuer' as kind, issuer_id::text as id, legal_name as name from issuers where issuer_id = any($1::uuid[])
+    `select 'issuer' as kind, r.id::text as id, iss.legal_name as name
+       from unnest($1::uuid[]) as r(id) join issuers iss on iss.issuer_id = current_issuer_id(r.id)
      union all
      select 'listing', listing_id::text, ticker || ' (' || mic || ')' from listings where listing_id = any($2::uuid[])
      order by kind, id`,

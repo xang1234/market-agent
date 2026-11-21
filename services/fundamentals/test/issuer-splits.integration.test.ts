@@ -723,6 +723,29 @@ test("a repair that waited while another merged its pair skips the pair", { time
   assert.deepEqual((await db.query(`select issuer_id::text as issuer_id from issuers`)).rows, [{ issuer_id: id(1) }]);
 });
 
+test("a merged issuer's id names the issuer it merged into, through a later merge of that one too (#705)", { timeout: 120_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for issuer split coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fin-issuer-merge-redirect");
+  const db = await connectedPool(t, databaseUrl);
+  await insertCikPair(db);
+  await repairIssuerSplits(db, new Map(), quiet);
+  // The kept issuer then merges into an older holder of its CIK.
+  await db.query(`insert into issuers (issuer_id, legal_name, cik, created_at) values ($1, 'Apple Inc.', '0320193', '2019-01-01')`, [id(3)]);
+  await repairIssuerSplits(db, new Map(), quiet);
+
+  const { rows } = await db.query(`select id::text as id, current_issuer_id(id)::text as current from unnest($1::uuid[]) as id`, [[id(1), id(2), id(3), id(4)]]);
+  assert.deepEqual(rows, [
+    { id: id(1), current: id(3) },
+    { id: id(2), current: id(3) },
+    { id: id(3), current: id(3) },
+    // An id no merge names is its own.
+    { id: id(4), current: id(4) },
+  ]);
+});
+
 test("two repairs at once give a golden listing one new issuer", { timeout: 120_000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for issuer split coverage");

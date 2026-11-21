@@ -87,6 +87,8 @@ export const ISSUER_KEYED_ROWS: ReadonlyArray<{
     combine: { rationale_claim_ids: "coalesce((select jsonb_agg(distinct e) from jsonb_array_elements(k.rationale_claim_ids || d.rationale_claim_ids) e), '[]')" },
   },
   { table: "chat_threads", id: "primary_subject_id", kind: "primary_subject_kind" },
+  // A redirect to the merged issuer moves on to the kept one, so every redirect is one hop (#705).
+  { table: "issuer_merges", id: "kept_issuer_id" },
 ];
 
 /**
@@ -277,6 +279,7 @@ async function mergeIssuer(db: Queryable, { keep, drop }: IssuerSplit): Promise<
     );
   }
   await retireGoldenFacts(db, keep);
+  await db.query(`insert into issuer_merges (dropped_issuer_id, kept_issuer_id) values ($1, $2)`, [drop, keep]);
   const { rows: [dropped] } = await db.query<{ cik: string | null; lei: string | null; domicile: string | null; sector: string | null; industry: string | null }>(
     `delete from issuers where issuer_id = $1::uuid returning cik, lei, domicile, sector, industry`,
     [drop],

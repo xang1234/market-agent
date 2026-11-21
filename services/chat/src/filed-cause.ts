@@ -20,7 +20,7 @@ import { stableUuid } from "./chat-ids.ts";
 import { createSealer } from "./prose-refs.ts";
 import { attributionSegments } from "./render-assertions.ts";
 import { INCOME_ITEM_FIGURE, SCOPE_METRICS } from "./scope-figures.ts";
-import { RE_READ_ANSWER_SQL } from "./thread-context.ts";
+import { currentIssuerIds, RE_READ_ANSWER_SQL } from "./thread-context.ts";
 import { FISCAL_PERIODS, isOneOf, readingAsks, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 
 /** Whether a turn asked for a cause and, when it did, whose its answer quotes, by the name it gives each company. */
@@ -318,12 +318,15 @@ export async function reReadExplained(db: QueryExecutor, threadId: string): Prom
   if (answer === undefined) return null;
   const block = (Array.isArray(answer.blocks) ? answer.blocks : []).find((candidate) => isRecord(candidate) && candidate.kind === "financial_answer");
   const results = isRecord(block) && isRecord(block.financial) && Array.isArray(block.financial.results) ? block.financial.results : [];
-  return explainedFigures({
+  const explained = explainedFigures({
     plan: answer.plan,
     verified: new Set(results.flatMap((result) => isRecord(result) && result.disposition === "verified" && typeof result.output_id === "string" ? [result.output_id] : [])),
     periods: await boundPeriods(db, answer.user_id, answer.run_id, answer.plan),
     named: () => true,
   });
+  // A company merged away since is the one the follow-up covers now.
+  const current = await currentIssuerIds(db, explained.map((company) => company.issuer));
+  return explained.map((company) => ({ ...company, issuer: current.get(company.issuer)! }));
 }
 
 // Each reported node's fiscal period, as its certified input bound it.

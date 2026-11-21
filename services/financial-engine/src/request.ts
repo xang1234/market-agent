@@ -185,7 +185,7 @@ function requestName(request: FinancialRequest): string {
 export async function issuerLabels(db: SqlExecutor, issuerIds: ReadonlyArray<string>): Promise<Map<string, string>> {
   if (issuerIds.length === 0) return new Map();
   const { rows } = await db.query<{ issuer_id: string; legal_name: string }>(
-    `select issuer_id::text, legal_name from issuers where issuer_id = any($1::uuid[])`,
+    `select r.id::text as issuer_id, iss.legal_name from unnest($1::uuid[]) as r(id) join issuers iss on iss.issuer_id = current_issuer_id(r.id)`,
     [[...issuerIds]],
   );
   return new Map(rows.map((row) => [row.issuer_id, row.legal_name]));

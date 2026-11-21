@@ -112,8 +112,9 @@ export async function loadLocalRuntimeEvidence(
   const selected = input.selection && prefixPatterns(input.selection.predicate_prefixes);
   const { rows } = await db.query<ClaimEvidenceRow>(
     `with input_refs as (
+       -- An issuer merged away, as a saved universe still names it, reads as the issuer it merged into (#705).
        select kind::subject_kind as subject_kind,
-              id::uuid as subject_id
+              case when kind = 'issuer' then current_issuer_id(id::uuid) else id::uuid end as subject_id
          from jsonb_to_recordset($1::jsonb) as refs(kind text, id text)
      ),
      subject_refs as (
@@ -396,7 +397,7 @@ export async function loadPeriodClaimEvidence(
               from claim_arguments ca
              where ca.claim_id = c.claim_id
                and ca.subject_kind = 'issuer'
-               and ca.subject_id = $1::uuid
+               and ca.subject_id = current_issuer_id($1::uuid)
                and ca.role = 'subject'
           )
           -- A binding made after the cutoff was not known at it.
@@ -696,9 +697,9 @@ async function loadFilingItemReads(
 
 export async function issuerLabels(db: RowQueryExecutor, issuerIds: ReadonlyArray<string>, asOf: string): Promise<Array<{ issuer_id: string; label: string }>> {
   const { rows } = await db.query<{ issuer_id: string; label: string }>(
-    `select i.issuer_id::text as issuer_id, ${issuerLabelSql("i", "$2::timestamptz")} as label
-       from issuers i where i.issuer_id = any($1::uuid[])
-      order by array_position($1::uuid[], i.issuer_id)`,
+    `select r.id::text as issuer_id, ${issuerLabelSql("i", "$2::timestamptz")} as label
+       from unnest($1::uuid[]) with ordinality as r(id, n) join issuers i on i.issuer_id = current_issuer_id(r.id)
+      order by r.n`,
     [issuerIds, asOf],
   );
   return rows;

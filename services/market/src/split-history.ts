@@ -36,7 +36,7 @@ export async function loadSubjectSplitHistory(
     `select l.listing_id::text as listing_id, l.timezone
        from listings l join instruments i on i.instrument_id = l.instrument_id
       where i.asset_type = 'common_stock'
-        and (case when $1 = 'issuer' then i.issuer_id else l.listing_id end) = $2::uuid
+        and (case when $1 = 'issuer' then i.issuer_id = current_issuer_id($2::uuid) else l.listing_id = $2::uuid end)
         and (l.active_from is null or l.active_from <= $3::timestamptz)
         and (l.active_to is null or l.active_to > $3::timestamptz)`,
     [subject.kind, subject.id, asOf],

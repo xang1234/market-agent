@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createClaim, listClaimsForDocument, type ClaimPeriod } from "../src/claim-repo.ts";
-import { joinedEvidence, loadPeriodClaimEvidence, lockCitableClaims } from "../src/local-runtime-evidence.ts";
+import { joinedEvidence, loadLocalRuntimeEvidence, loadPeriodClaimEvidence, lockCitableClaims } from "../src/local-runtime-evidence.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 
@@ -281,5 +281,21 @@ test("a period lookup returns a company's claims bound to that period (#542)", a
     const joined = await joinedEvidence(db, [{ kind: "issuer", id: acme }, { kind: "issuer", id: beta }], [await read(acme), await read(beta)]);
     assert.deepEqual(joined.claims.map((row) => [row.claim_id, row.subject_id]), [[acmeOnly, acme], [shared, acme], [disputed, beta]]);
     assert.deepEqual(joined.contradictions, [[acmeOnly, disputed]]);
+  });
+
+  await t.test("an issuer merged into the company since reads the company's claims (#705)", async () => {
+    const acme = await company(db);
+    const fell = await claim(db, acme, margin("Gross margin fell on a merger charge.", "2025-08-05T20:00:00Z", Q2));
+    const merged = "4f000000-0000-4000-8000-000000000705";
+    await db.query(`insert into issuer_merges (dropped_issuer_id, kept_issuer_id) values ($1, $2)`, [merged, acme]);
+    assert.deepEqual(await lookup(merged, Q2, [GROSS_MARGIN]), [fell]);
+  });
+
+  await t.test("a route read of an issuer merged into the company since, as a saved universe names it, reads the company's claims (#705)", async () => {
+    const acme = await company(db);
+    const rose = await claim(db, acme, margin("Gross margin rose on mix.", "2025-08-05T20:00:00Z"));
+    const merged = "4f000000-0000-4000-8000-000000000706";
+    await db.query(`insert into issuer_merges (dropped_issuer_id, kept_issuer_id) values ($1, $2)`, [merged, acme]);
+    assert.deepEqual((await loadLocalRuntimeEvidence(db, { subject_refs: [{ kind: "issuer", id: merged }] })).claim_refs, [rose]);
   });
 });

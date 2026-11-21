@@ -5,7 +5,9 @@ import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { executeRun } from "../../financial-engine/src/execute.ts";
+import { readClosureInputs } from "../../financial-engine/src/read-model.ts";
 import { authorityFor, databaseUrl, engineDatabase, IDS, leasedRun, marginPlan } from "../../financial-engine/test/db-fixtures.ts";
+import { mergeIssuerAway } from "../../fundamentals/test/issuer-merge-fixture.ts";
 import { loadUnitBoundFacts } from "../src/financial-verifier-loader.ts";
 import { verifyFinancialSeal } from "../src/financial-verifier.ts";
 import { buildFinancialSealInput } from "../src/seal-input.ts";
@@ -168,4 +170,37 @@ test("financial verification against ledger records", { timeout: 240_000 }, asyn
     });
     assert.ok(outcome.failures.some((failure) => failure.reason_code === "invalid_block_binding" && failure.details.reason === "unknown_block_kind"), JSON.stringify(outcome.failures));
   });
+});
+
+test("a plan on an issuer merged away presents under the kept issuer, its run in flight at the merge or run after (#705)", { timeout: 240_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for financial verifier coverage");
+    return;
+  }
+  const db = await engineDatabase(t, "snap-financial-merged");
+  const plan = marginPlan();
+  const run = async () => {
+    const { runId, lease } = await leasedRun(db, plan);
+    const report = await executeRun({ client: db, lease, plan, authority: authorityFor(), evidence: createEvidenceFinancialPort, parent_limits: {} });
+    assert.equal(report.outcome, "ready_to_seal");
+    return runId;
+  };
+  const inFlight = await run();
+  await mergeIssuerAway(await connectedPool(t, databaseUrl(db)), IDS.issuerA, "Alpha Holdings Corp.");
+  const after = await run();
+  const bound = async (runId: string) => (await loadUnitBoundFacts(db, runId, "margin_unit")).map((fact) => fact.fact_id);
+  assert.deepEqual(await bound(after), await bound(inFlight), "the run after the merge binds the figures the one before bound");
+  assert.notDeepEqual(await bound(after), []);
+
+  for (const runId of [inFlight, after]) {
+    const facts = await loadUnitBoundFacts(db, runId, "margin_unit");
+    const outcome = await verifyFinancialSeal(db, { owner_user_id: IDS.owner, run_id: runId, unit_id: "margin_unit" }, {
+      snapshot_id: SNAPSHOT,
+      manifest: { fact_refs: facts.map((fact) => fact.fact_id), source_ids: [...new Set(facts.map((fact) => fact.source_id))], as_of: new Date(plan.time.knowledge_cutoff).toISOString() },
+    });
+    assert.ok(outcome.ok, JSON.stringify(!outcome.ok && outcome.failures));
+    assert.match(JSON.stringify(outcome.block), /Alpha Holdings Corp\./);
+  }
+  const slots = (await db.query<{ input_slot: string }>(`select input_slot from financial_run_inputs where run_id = $1 and binding_status = 'bound'`, [inFlight])).rows.map((row) => row.input_slot);
+  assert.deepEqual([...new Set((await readClosureInputs(db, IDS.owner, inFlight, slots)).map((input) => input.company))], ["Alpha Holdings Corp."]);
 });

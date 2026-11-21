@@ -17,6 +17,7 @@ import type { FinancialPool } from "../../financial-engine/src/ports.ts";
 import { IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { createSecBackedStatementRepository } from "../../fundamentals/src/sec-facts-repository.ts";
 import { secCompanyFetcher } from "../../fundamentals/test/fakes.ts";
+import { mergeIssuerAway } from "../../fundamentals/test/issuer-merge-fixture.ts";
 import { aaplCallInputs } from "../../fundamentals/test/sec-call-inputs-fixture.ts";
 import { POLYGON_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import { callBlockHash, verifyCalls, type CallBlock } from "../../snapshot/src/call.ts";
@@ -276,5 +277,12 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     const publicBy = call.facts.flatMap((fact) => fact.citations.map((citation) => citation.text)).filter((text) => text.includes("public by"));
     assert.ok(publicBy.length > 0);
     assert.deepEqual([call.call_date, [...new Set(publicBy.map((text) => text.slice(-10)))]], ["2026-11-09", ["2026-11-09"]]);
+  });
+
+  // Last: AAPL's issuer is gone after it.
+  await t.test("a Call on an issuer merged away since regenerates as it was sealed (#705)", async () => {
+    const { threadId, block } = await ask("Make a Call on AAPL");
+    await mergeIssuerAway(pool, AAPL.issuer, "Apple Inc.");
+    assert.deepEqual(await verifyCalls([block], threadId, pool), []);
   });
 });
