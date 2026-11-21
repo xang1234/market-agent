@@ -227,7 +227,8 @@ const persistScreenerValuation: PersistParentArtifact = async (tx, publication) 
   await tx.client.query(
     `insert into screener_certified_valuations
        (issuer_id, valuation, knowledge_cutoff, session_date, value, currency, reason_code, listing_id, snapshot_id, financial_run_id, financial_unit_id)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     -- A run recovered after its issuer merged away certifies the issuer it merged into (#705).
+     values (current_issuer_id($1::uuid), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      on conflict (issuer_id, valuation) do update set
        knowledge_cutoff = excluded.knowledge_cutoff, session_date = excluded.session_date, value = excluded.value,
        currency = excluded.currency, reason_code = excluded.reason_code, listing_id = excluded.listing_id,

@@ -12,6 +12,7 @@ import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence
 import type { FinancialEvidencePort, PriceObservation, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { listRecoverableRuns, recoverRun } from "../../financial-engine/src/recovery.ts";
 import { databaseUrl, engineDatabase, IDS, NVDA, seedNvda, seedValuedIssuer, type ValuedIssuer } from "../../financial-engine/test/db-fixtures.ts";
+import { mergeIssuerAway } from "../../fundamentals/test/issuer-merge-fixture.ts";
 import { POLYGON_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import { createPostgresCandidateRepository, type ScreenerCandidateQueryExecutor } from "../../screener/src/db-candidates.ts";
 import { executeScreenerQuery } from "../../screener/src/executor.ts";
@@ -320,4 +321,44 @@ test("screener certification when a run fails or a price goes missing", { timeou
     assert.deepEqual((await certifyScreenerUniverse(unpriced, mondayClose)).map((chunk) => chunk.outcome), ["published"]);
     assert.deepEqual((await marketCaps()).filter((row) => row.startsWith("Loss Co")), [`Loss Co market_cap missing_input 2024-06-10 ${mondayClose}`]);
   });
+});
+
+test("a run recovered after one of its issuers merged away certifies the issuer it merged into (#705)", { timeout: 600_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for screener certification coverage");
+    return;
+  }
+  const db = await engineDatabase(t, "screener-certification-merged");
+  const pool = await connectedPool(t, databaseUrl(db));
+  await seedScreenerUniverse(db);
+  await db.query(`
+    create function fail_screener_pe() returns trigger language plpgsql as $$
+    begin
+      if new.valuation = 'pe_ratio' then raise exception 'read model unavailable' using errcode = '58030'; end if;
+      return new;
+    end $$;
+    create trigger fail_screener_pe before insert or update on screener_certified_valuations for each row execute function fail_screener_pe();`);
+  let interrupted;
+  try {
+    [interrupted] = await certifyScreenerUniverse({ pool, evidence: createEvidenceFinancialPort }, NVDA.cutoff);
+  } finally {
+    await db.query(`drop trigger fail_screener_pe on screener_certified_valuations; drop function fail_screener_pe();`);
+  }
+  assert.equal(interrupted?.outcome, "publication_failed");
+  await mergeIssuerAway(pool, LOSS.issuer, "Loss Holdings Co");
+
+  const parents = recoveryParents(pool);
+  const [run] = (await listRecoverableRuns(db, { parent_kinds: Object.keys(parents), limit: 50 })).filter((candidate) => candidate.parent_id === interrupted!.screener_valuation_run_id);
+  assert.ok(run, "the interrupted run is recoverable");
+  const client = snapshotTransactionClient(await pool.connect());
+  try {
+    const outcome = await recoverRun(client, run, { worker_id: "screener-merged-recovery-test", ttl_ms: 60_000, evidence: createEvidenceFinancialPort, parents });
+    assert.deepEqual([outcome.status, outcome.status === "resumed" && outcome.published], ["resumed", 3]);
+  } finally {
+    client.release();
+  }
+  assert.deepEqual((await figures(db)).filter((row) => row.startsWith("Loss")), [
+    `Loss Holdings Co market_cap 20000000000 2024-06-07 ${NVDA.cutoff}`,
+    `Loss Holdings Co pe_ratio non_positive_denominator 2024-06-07 ${NVDA.cutoff}`,
+  ]);
 });
