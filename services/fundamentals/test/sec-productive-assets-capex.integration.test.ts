@@ -1,7 +1,7 @@
 // Capex a filer tags as PaymentsToAcquireProductiveAssets instead of
 // PaymentsToAcquirePropertyPlantAndEquipment certifies (operator 2026-11-21,
 // #731), recording that concept, since productive assets may include purchased
-// intangibles. A filing that tags both keeps PP&E.
+// intangibles. A filing that tags both keeps PP&E, a later one included.
 
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -10,6 +10,7 @@ import test from "node:test";
 import { bootstrapDatabase, connectedPool, dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
 import { createSecCompanyFactsHttpFetcher } from "../src/sec-edgar-http.ts";
 import { backfillSecCompanionStatements, createSecBackedStatementRepository } from "../src/sec-facts-repository.ts";
+import { selectFiscalYear } from "./financial-selection.ts";
 
 const ISSUER_ID = "34731000-0000-4000-8000-000000000001";
 const FALLBACK_SOURCE_ID = "34731000-0000-4000-8000-000000000003";
@@ -54,7 +55,18 @@ async function setUp(t: test.TestContext, name: string) {
     [ISSUER_ID],
   )).rows;
   const shown = async () => (await capex()).map(({ fact_id: _, ...row }) => row);
-  return { db, download, lookup, backfill, capex, shown };
+  const relations = async () => (await db.query<{ method: string; value: string; flags: unknown[]; relation: string | null }>(
+    `select f.method::text as method, f.value_num::text as value, f.quality_flags as flags, c.disclosure_relation as relation
+       from facts f join metrics m on m.metric_id = f.metric_id left join fact_financial_contexts c on c.fact_id = f.fact_id
+      where f.subject_id = $1 and m.metric_key = 'capex' and f.invalidated_at is null
+      order by f.method, f.created_at`,
+    [ISSUER_ID],
+  )).rows;
+  const picked = async (basis: "as_reported" | "as_restated") => {
+    const selection = await selectFiscalYear(db, { issuerId: ISSUER_ID, metricKey: "capex", fiscalYear: 2024 }, "2026-06-01T00:00:00Z", basis);
+    return selection.status === "selected" ? selection.input.candidate.value_text : selection.reason_code;
+  };
+  return { db, download, lookup, backfill, capex, shown, relations, picked };
 }
 
 test("capex filed as productive assets certifies with its concept recorded", { timeout: 300_000 }, async (t) => {
@@ -97,12 +109,59 @@ test("capex filed as productive assets certifies with its concept recorded", { t
   });
 
   await t.test("a later 10-K's restatement of productive-assets capex keeps the scope", async (t) => {
-    const { download, lookup, shown } = await setUp(t, "fin-capex-productive-restated");
+    const { download, lookup, shown, picked } = await setUp(t, "fin-capex-productive-restated");
     download.text = companyFacts({ PaymentsToAcquireProductiveAssets: [year(2024, 2024, 30), year(2025, 2024, 31), year(2025, 2025, 40)] });
     await lookup();
     assert.deepEqual(await shown(), [
       { method: "reported", value: "30", flags: [SCOPE], certified: true },
       { method: "restated", value: "31", flags: [SCOPE], certified: true },
     ]);
+    assert.equal(await picked("as_restated"), "31");
+  });
+
+  // A later 10-K's capex for the year is its PP&E line when it has one, as for
+  // the original filing. Unless equal, a narrower line cannot tell an economic
+  // change from a change of scope.
+  await t.test("a later 10-K that tags both reads as PP&E, so it is an unverified restatement, never the broader line", async (t) => {
+    const { download, lookup, backfill, relations, picked } = await setUp(t, "fin-capex-productive-later-both");
+    download.text = companyFacts({
+      PaymentsToAcquireProductiveAssets: [year(2024, 2024, 30), year(2025, 2024, 35), year(2025, 2025, 40)],
+      PaymentsToAcquirePropertyPlantAndEquipment: [year(2025, 2024, 25), year(2025, 2025, 28)],
+    });
+    await lookup();
+    const rows = [
+      { method: "reported", value: "30", flags: [SCOPE], relation: "original" },
+      { method: "restated", value: "25", flags: [], relation: "unverified_restatement" },
+    ];
+    assert.deepEqual(await relations(), rows);
+    assert.deepEqual([await picked("as_reported"), await picked("as_restated")], ["30", "restatement_unverified"]);
+    await backfill();
+    assert.deepEqual(await relations(), rows, "a rerun adds nothing");
+  });
+
+  // CAT retagged FY2018 and FY2019 this way in its FY2020 10-K, at equal figures.
+  await t.test("a later 10-K that switches to PP&E at an equal figure states the same one", async (t) => {
+    const { download, lookup, relations, picked } = await setUp(t, "fin-capex-productive-switch-equal");
+    download.text = companyFacts({
+      PaymentsToAcquireProductiveAssets: [year(2024, 2024, 30)],
+      PaymentsToAcquirePropertyPlantAndEquipment: [year(2025, 2024, 30), year(2025, 2025, 28), year(2026, 2024, 30)],
+    });
+    await lookup();
+    assert.deepEqual(await relations(), [{ method: "reported", value: "30", flags: [SCOPE], relation: "original" }]);
+    assert.deepEqual([await picked("as_reported"), await picked("as_restated")], ["30", "30"]);
+  });
+
+  await t.test("a later 10-K that switches to PP&E at another figure is an unverified restatement", async (t) => {
+    const { download, lookup, relations, picked } = await setUp(t, "fin-capex-productive-switch-changed");
+    download.text = companyFacts({
+      PaymentsToAcquireProductiveAssets: [year(2024, 2024, 30)],
+      PaymentsToAcquirePropertyPlantAndEquipment: [year(2025, 2024, 26), year(2025, 2025, 28)],
+    });
+    await lookup();
+    assert.deepEqual(await relations(), [
+      { method: "reported", value: "30", flags: [SCOPE], relation: "original" },
+      { method: "restated", value: "26", flags: [], relation: "unverified_restatement" },
+    ]);
+    assert.deepEqual([await picked("as_reported"), await picked("as_restated")], ["30", "restatement_unverified"]);
   });
 });

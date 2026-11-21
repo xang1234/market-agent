@@ -112,7 +112,10 @@ npm test         # contract + AAPL FY2024 income statement verification
   `PaymentsToAcquireProductiveAssets` for a filing that tags only that
   (#731). That concept may add purchased intangibles, so its fact carries a
   `productive_assets_capex` inference in its `quality_flags` that the
-  inspectors and the Call's free cash flow basis show. Operating cash
+  inspectors and the Call's free cash flow basis show. The engine never
+  compares it with PP&E capex. A later filing's PP&E line for its period
+  is the same figure when equal within rounding, and otherwise an
+  unverified restatement. Operating cash
   flow is certified only from the total
   `NetCashProvidedByUsedInOperatingActivities`, the scope capex covers;
   the continuing-operations line gets no context. Net income is
