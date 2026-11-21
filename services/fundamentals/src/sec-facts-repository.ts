@@ -1534,14 +1534,22 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     const statements = periodStatements(values, original.period_start, original.period_end, original.fiscal_period === "FY");
     const isLater = ({ accession, filed }: PeriodStatement) => filed >= originalFiled && (derivation !== null || accession !== originalAccession);
     const unordered = unorderedDates([statements, ...(derivation?.terms ?? []).map((term) => termStatements(values, term))], roundings);
-    const rescoped = reviewedStatements(usGaap, original, concept!, unit!, roundingsFor).filter(isLater);
-    const rescopedFilings = new Set(rescoped.map(({ accession }) => accession));
-    const walked = [...statements.filter(({ accession }) => !rescopedFilings.has(accession)), ...rescoped];
+    const rescoped = reviewedLines(usGaap, original, concept!, unit!, roundingsFor).filter((line) => line.input !== undefined || isLater(line));
     let standing: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on, rounding: roundings.get(originalAccession!) ?? null };
     const inputs: RoundedFigure[] = derivation?.terms.map((term) => ({ value: term.raw_token, rounding: roundings.get(term.source.accession) ?? null })) ?? [];
     // A derived figure stands on its unmoved inputs, whose rounding a line may fall within.
     let asDerived = derivation !== null;
-    for (const filing of filingsInOrder(walked, derivation, values)) {
+    for (const filing of filingsInOrder(statements, derivation, values, rescoped)) {
+      // A line in another scope only ever repeats the figure that stands, or leaves it unverified (#731).
+      const changed = filing.rescoped.find((line) => sameRoundedFigure(line.term === null ? standing : inputs[line.term]!, { value: line.token, rounding: line.rounding }) !== true);
+      if (changed !== undefined) {
+        await record(changed, "unverified_restatement");
+        break;
+      }
+      if (filing.statement === null && filing.inputs.length === 0) {
+        await record(filing.rescoped[0]!, null);
+        continue;
+      }
       let moved: FiledInput | null = null;
       for (const input of filing.inputs) {
         const figure: RoundedFigure = { value: input.statement.token, rounding: roundings.get(input.statement.accession) ?? null };
@@ -1551,14 +1559,6 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
       }
       if (moved !== null) asDerived = false;
       const statement = filing.statement !== null && isLater(filing.statement) ? filing.statement : null;
-      const line = rescoped.find((one) => one === statement);
-      if (line !== undefined) {
-        // A figure in another scope is never compared as one measure (#731).
-        const relation = moved === null && sameRoundedFigure(standing, { value: line.token, rounding: line.rounding }) === true ? null : "unverified_restatement";
-        await record(line, relation);
-        if (relation !== null) break;
-        continue;
-      }
       if (statement === null) {
         if (moved !== null) {
           await record({ ...moved.statement, concept: concept!, unit: unit!, input: derivation!.terms[moved.term]! }, "unverified_restatement");
@@ -1604,25 +1604,34 @@ function periodStatements(values: ReadonlyArray<SecConceptValue>, start: string 
   }).sort((left, right) => left.filed.localeCompare(right.filed) || left.accession.localeCompare(right.accession));
 }
 
+/** A filing's line in the metric's reviewed concept, at that filing's rounding, for the period (term null) or one of a derived quarter's inputs. */
+type RescopedLine = LaterStatement & Readonly<{ rounding: number | null; term: number | null }>;
+
 /**
  * A filing's capex is its PP&E line when it states one, as extraction reads it
  * (US_GAAP_TO_METRIC_KEY's order). So for an original in a scoped concept
- * (secConceptScope), each filing's line in the metric's reviewed concept is that
- * filing's statement of the period, in another scope, at that filing's rounding.
+ * (secConceptScope), each filing's line in the metric's reviewed concept states
+ * the period, or a derived quarter's input, in another scope. An input's own
+ * filing is left out: its derivation already read that filing in this concept.
  */
-function reviewedStatements(
+function reviewedLines(
   usGaap: Readonly<Record<string, SecConcept>>,
   original: SecOriginal,
   concept: string,
   unit: string,
   roundingsOf: (values: ReadonlyArray<SecConceptValue>) => FilingRoundings,
-): Array<LaterStatement & Readonly<{ rounding: number | null }>> {
+): RescopedLine[] {
   const reviewed = SEC_CERTIFIED_CONCEPTS[original.metric_key];
   if (reviewed === undefined || secConceptScope(original.metric_key, concept) === null) return [];
   const values = usGaap[reviewed]?.units?.[unit] ?? [];
   const roundings = roundingsOf(values);
-  return periodStatements(values, original.period_start, original.period_end, original.fiscal_period === "FY")
-    .map((statement) => ({ ...statement, concept: reviewed, unit, rounding: roundings.get(statement.accession) ?? null }));
+  const line = (term: number | null, input?: DerivationTerm) => (statement: PeriodStatement): RescopedLine =>
+    ({ ...statement, concept: reviewed, unit, rounding: roundings.get(statement.accession) ?? null, term, ...(input ? { input } : {}) });
+  return [
+    ...periodStatements(values, original.period_start, original.period_end, original.fiscal_period === "FY").map(line(null)),
+    ...(original.derivation?.terms ?? []).flatMap((input, term) =>
+      termStatements(values, input).filter(({ accession }) => accession !== input.source.accession).map(line(term, input))),
+  ];
 }
 
 type DerivationTerm = DerivationProofV1["terms"][number];
@@ -1642,13 +1651,18 @@ function unorderedDates(statementLists: ReadonlyArray<ReadonlyArray<PeriodStatem
 /** A later filing's statement of one of a derived quarter's inputs, by its place among the terms. */
 type FiledInput = Readonly<{ term: number; statement: PeriodStatement }>;
 
-type WalkedFiling = { filed: string; accession: string; statement: PeriodStatement | null; inputs: FiledInput[] };
+type WalkedFiling = { filed: string; accession: string; statement: PeriodStatement | null; inputs: FiledInput[]; rescoped: RescopedLine[] };
 
-/** What each filing states of a period and of a derived quarter's inputs, in filing order. */
-function filingsInOrder(statements: ReadonlyArray<PeriodStatement>, derivation: DerivationProofV1 | null, values: ReadonlyArray<SecConceptValue>): WalkedFiling[] {
+/** What each filing states of a period and of a derived quarter's inputs, in either scope, in filing order. */
+function filingsInOrder(
+  statements: ReadonlyArray<PeriodStatement>,
+  derivation: DerivationProofV1 | null,
+  values: ReadonlyArray<SecConceptValue>,
+  rescoped: ReadonlyArray<RescopedLine>,
+): WalkedFiling[] {
   const filings = new Map<string, WalkedFiling>();
   const filingOf = ({ accession, filed }: PeriodStatement) => {
-    const filing = filings.get(accession) ?? { filed, accession, statement: null, inputs: [] };
+    const filing = filings.get(accession) ?? { filed, accession, statement: null, inputs: [], rescoped: [] };
     filings.set(accession, filing);
     return filing;
   };
@@ -1656,6 +1670,7 @@ function filingsInOrder(statements: ReadonlyArray<PeriodStatement>, derivation: 
   for (const [term, derived] of (derivation?.terms ?? []).entries()) {
     for (const statement of termStatements(values, derived)) filingOf(statement).inputs.push({ term, statement });
   }
+  for (const line of rescoped) filingOf(line).rescoped.push(line);
   return [...filings.values()].sort((left, right) => left.filed.localeCompare(right.filed) || left.accession.localeCompare(right.accession));
 }
 

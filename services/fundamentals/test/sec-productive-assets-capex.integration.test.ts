@@ -17,6 +17,7 @@ const FALLBACK_SOURCE_ID = "34731000-0000-4000-8000-000000000003";
 const SCOPE = { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" };
 
 type Value = { start: string; end: string; val: number; accn: string; fy: number; fp: string; form: string; filed: string };
+type Period = "Q1" | "Q2" | "Q3" | "Q4" | "FY";
 
 // Each fiscal year's 10-K, filed the February after it ends.
 const tenK = (fy: number) => ({ accn: `0000000731-${String(fy + 1).slice(2)}-000001`, fy, fp: "FY", form: "10-K", filed: `${fy + 1}-02-01` });
@@ -43,8 +44,8 @@ async function setUp(t: test.TestContext, name: string) {
     clock: () => new Date("2026-03-01T00:00:00.000Z"),
   });
   const options = { fetcher, sourceId: FALLBACK_SOURCE_ID, clock: () => new Date("2026-03-01T00:00:00.000Z"), logger: { warn: () => {} } } as const;
-  const lookup = () => createSecBackedStatementRepository(db, options)
-    .find({ issuer_id: ISSUER_ID, family: "income", basis: "as_reported", fiscal_year: 2024, fiscal_period: "FY" });
+  const lookup = (fiscal_period: Period = "FY") => createSecBackedStatementRepository(db, options)
+    .find({ issuer_id: ISSUER_ID, family: "income", basis: "as_reported", fiscal_year: 2024, fiscal_period });
   const backfill = () => backfillSecCompanionStatements(db, { issuerId: ISSUER_ID, ...options });
   const capex = async () => (await db.query<{ fact_id: string; method: string; value: string; flags: unknown[]; certified: boolean }>(
     `select f.fact_id::text as fact_id, f.method::text as method, f.value_num::text as value, f.quality_flags as flags,
@@ -62,8 +63,8 @@ async function setUp(t: test.TestContext, name: string) {
       order by f.method, f.created_at`,
     [ISSUER_ID],
   )).rows;
-  const picked = async (basis: "as_reported" | "as_restated") => {
-    const selection = await selectFiscalYear(db, { issuerId: ISSUER_ID, metricKey: "capex", fiscalYear: 2024 }, "2026-06-01T00:00:00Z", basis);
+  const picked = async (basis: "as_reported" | "as_restated", fiscalPeriod: Period = "FY") => {
+    const selection = await selectFiscalYear(db, { issuerId: ISSUER_ID, metricKey: "capex", fiscalYear: 2024, fiscalPeriod }, "2026-06-01T00:00:00Z", basis);
     return selection.status === "selected" ? selection.input.candidate.value_text : selection.reason_code;
   };
   return { db, download, lookup, backfill, capex, shown, relations, picked };
@@ -137,6 +138,58 @@ test("capex filed as productive assets certifies with its concept recorded", { t
     assert.deepEqual([await picked("as_reported"), await picked("as_restated")], ["30", "restatement_unverified"]);
     await backfill();
     assert.deepEqual(await relations(), rows, "a rerun adds nothing");
+  });
+
+  // The 10-K's PP&E line repeats the figure, so it was its productive-asset line that moved.
+  await t.test("a later 10-K that tags an equal PP&E figure and a changed productive-assets one restates the productive-assets figure", async (t) => {
+    const { download, lookup, backfill, relations, picked } = await setUp(t, "fin-capex-productive-later-both-equal");
+    download.text = companyFacts({
+      PaymentsToAcquireProductiveAssets: [year(2024, 2024, 30), year(2025, 2024, 35), year(2025, 2025, 40)],
+      PaymentsToAcquirePropertyPlantAndEquipment: [year(2025, 2024, 30), year(2025, 2025, 28)],
+    });
+    await lookup();
+    const rows = [
+      { method: "reported", value: "30", flags: [SCOPE], relation: "original" },
+      { method: "restated", value: "35", flags: [SCOPE], relation: "economic_restatement" },
+    ];
+    assert.deepEqual(await relations(), rows);
+    assert.deepEqual([await picked("as_reported"), await picked("as_restated")], ["30", "35"]);
+    await backfill();
+    assert.deepEqual(await relations(), rows, "a rerun adds nothing");
+  });
+
+  // FY2024's quarters derive from year-to-date productive-asset lines, and the
+  // FY2025 filings state FY2024's figures as PP&E: Q1 4 (was 5), six months 15
+  // (was 12), the year 26 (was 30). A derived quarter reads its inputs' later
+  // lines in either concept, so none stands on a figure a later filing moved.
+  await t.test("a derived quarter of productive-assets capex is unverified from the filing that states one of its inputs as a different PP&E figure", async (t) => {
+    const { download, lookup, relations, picked } = await setUp(t, "fin-capex-productive-derived-quarters");
+    const filed = (accn: string, fy: number, fp: string, form: string, date: string) => (start: string, end: string, val: number): Value => ({ start, end, val, accn, fy, fp, form, filed: date });
+    const q1 = filed("0000000731-24-000101", 2024, "Q1", "10-Q", "2024-05-01");
+    const q2 = filed("0000000731-24-000102", 2024, "Q2", "10-Q", "2024-08-01");
+    const q3 = filed("0000000731-24-000103", 2024, "Q3", "10-Q", "2024-11-01");
+    const k = filed("0000000731-25-000001", 2024, "FY", "10-K", "2025-02-01");
+    const nextQ1 = filed("0000000731-25-000101", 2025, "Q1", "10-Q", "2025-05-01");
+    const nextQ2 = filed("0000000731-25-000102", 2025, "Q2", "10-Q", "2025-08-01");
+    const nextK = filed("0000000731-26-000001", 2025, "FY", "10-K", "2026-02-01");
+    download.text = companyFacts({
+      Revenues: [q1("2024-01-01", "2024-03-31", 100), q2("2024-04-01", "2024-06-30", 100), q3("2024-07-01", "2024-09-30", 100), k("2024-01-01", "2024-12-31", 400)],
+      PaymentsToAcquireProductiveAssets: [q1("2024-01-01", "2024-03-31", 5), q2("2024-01-01", "2024-06-30", 12), q3("2024-01-01", "2024-09-30", 20), k("2024-01-01", "2024-12-31", 30)],
+      PaymentsToAcquirePropertyPlantAndEquipment: [
+        nextQ1("2024-01-01", "2024-03-31", 4), nextQ1("2025-01-01", "2025-03-31", 6),
+        nextQ2("2024-01-01", "2024-06-30", 15), nextQ2("2025-01-01", "2025-06-30", 14),
+        nextK("2024-01-01", "2024-12-31", 26), nextK("2025-01-01", "2025-12-31", 32),
+      ],
+    });
+    const periods: Period[] = ["Q1", "Q2", "Q3", "Q4", "FY"];
+    for (const period of periods) await lookup(period);
+    const originals = (await relations()).filter((row) => row.relation === "original");
+    // A derived quarter's flags also name the inputs it was derived from.
+    assert.deepEqual(originals.map((row) => [row.value, row.flags.some((flag) => (flag as { kind?: string }).kind === SCOPE.kind)]), ["5", "7", "8", "10", "30"].map((value) => [value, true]));
+    const asReported = await Promise.all(periods.map((period) => picked("as_reported", period)));
+    const asRestated = await Promise.all(periods.map((period) => picked("as_restated", period)));
+    assert.deepEqual(asReported, ["5", "7", "8", "10", "30"]);
+    assert.deepEqual(asRestated, periods.map(() => "restatement_unverified"));
   });
 
   // CAT retagged FY2018 and FY2019 this way in its FY2020 10-K, at equal figures.
