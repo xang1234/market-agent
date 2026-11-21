@@ -69,7 +69,7 @@ export function SegmentedToggle<T extends string>({
             onKeyDown={(event) => handleKeyDown(event, index)}
             className={
               active
-                ? 'bg-accent-soft px-3 py-1 text-xs font-medium text-accent'
+                ? 'bg-accent-soft px-3 py-1 text-xs font-medium text-accent-ink'
                 : 'px-3 py-1 text-xs font-medium text-muted hover:text-fg'
             }
           >

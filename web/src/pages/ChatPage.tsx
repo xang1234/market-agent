@@ -339,7 +339,7 @@ function ThreadList({
                   aria-current={active ? 'page' : undefined}
                   className={`block rounded-md py-2 pl-2.5 pr-14 text-sm transition-colors ${active ? 'bg-accent-soft' : 'hover:bg-surface-hover'}`}
                 >
-                  <span className={`block truncate font-medium ${active ? 'text-accent' : 'text-fg'}`}>{name}</span>
+                  <span className={`block truncate font-medium ${active ? 'text-accent-ink' : 'text-fg'}`}>{name}</span>
                   <time
                     dateTime={thread.updated_at}
                     title={new Date(thread.updated_at).toLocaleString()}

@@ -280,7 +280,7 @@ function FindingRow({ card }: { card: HomeFindingCardSummary }) {
   )
   if (path === null) return body
   return (
-    <Link to={path} className="block hover:text-accent">
+    <Link to={path} className="block hover:text-accent-ink">
       {body}
     </Link>
   )

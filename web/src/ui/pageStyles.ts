@@ -33,4 +33,4 @@ export const FIELDSET_CLASS = 'flex min-w-0 flex-col gap-3 rounded-lg border bor
 // and has-focus-visible draw the input's state on the label, so controlled and
 // uncontrolled checkboxes both work.
 export const TOGGLE_CHIP_CLASS =
-  'relative cursor-pointer select-none rounded-full border border-line-strong bg-surface px-3 py-1 text-xs font-medium text-fg-soft transition-colors hover:border-accent-border has-checked:border-accent-border has-checked:bg-accent-soft has-checked:text-accent has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-accent'
+  'relative cursor-pointer select-none rounded-full border border-line-strong bg-surface px-3 py-1 text-xs font-medium text-fg-soft transition-colors hover:border-accent-border has-checked:border-accent-border has-checked:bg-accent-soft has-checked:text-accent-ink has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-accent'

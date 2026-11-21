@@ -42,5 +42,5 @@ function Badge({ label, tone }: { label: string; tone: 'watchlist' | 'held' }) {
 
 const TONE_CLASS: Readonly<Record<'watchlist' | 'held', string>> = {
   watchlist: 'bg-warning-soft text-warning',
-  held: 'bg-accent-soft text-accent',
+  held: 'bg-accent-soft text-accent-ink',
 }

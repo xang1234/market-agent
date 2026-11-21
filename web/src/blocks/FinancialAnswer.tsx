@@ -261,7 +261,7 @@ function Cell({ content, result, period, shown }: { content: FinancialAnswerCont
 }
 
 // A certified value opens the inspector; it reads as a plain figure until hovered or focused.
-const VALUE_BUTTON = '-mx-1 cursor-pointer rounded px-1 transition-colors hover:bg-accent-soft hover:text-accent-strong'
+const VALUE_BUTTON = '-mx-1 cursor-pointer rounded px-1 transition-colors hover:bg-accent-soft hover:text-accent-ink'
 
 const HEAD = 'border-b border-line-strong px-3 pb-1.5 align-bottom text-xs font-medium text-muted first:pl-0'
 const CELL = 'border-b border-line px-3 py-1.5 align-top first:pl-0 group-hover/row:bg-surface-hover'

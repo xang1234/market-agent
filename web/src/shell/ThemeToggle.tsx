@@ -35,7 +35,7 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
             className={[
               compact ? 'grid h-6 w-6 place-items-center rounded transition-colors' : 'flex-1 rounded px-2 py-1 transition-colors',
               active
-                ? 'bg-accent-soft text-accent'
+                ? 'bg-accent-soft text-accent-ink'
                 : 'text-muted hover:bg-surface-hover',
             ].join(' ')}
           >
