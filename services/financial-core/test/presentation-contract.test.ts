@@ -47,7 +47,7 @@ function block(content: FinancialAnswerContent) {
 function comparison(): FinancialAnswerContent {
   return presentFinancialUnit({
     plan: planFixture(), run_id: RUN_ID, unit_id: "section",
-    subject_names: { a: "Apple Inc.", b: "Microsoft Corp." }, periods: new Map(),
+    subject_names: { a: "Apple Inc.", b: "Microsoft Corp." }, periods: new Map(), concept_scopes: new Map(),
     results: [
       committed(1, "out_a_rev", "a_rev", usd("391035000000")),
       committed(2, "out_a_gm", "a_gm", ratio("0.46206")),
@@ -74,7 +74,7 @@ function series(): FinancialAnswerContent {
   ];
   plan.thresholds = [];
   return presentFinancialUnit({
-    plan, run_id: RUN_ID, unit_id: "section", subject_names: { a: "Apple Inc." }, periods: new Map(),
+    plan, run_id: RUN_ID, unit_id: "section", subject_names: { a: "Apple Inc." }, periods: new Map(), concept_scopes: new Map(),
     results: [committed(6, "o22", "rev22", usd("100")), committed(7, "o23", "rev23", usd("125")), committed(8, "og", "growth", { kind: "value", value: "25", unit: { kind: "percent" }, exact: true, rounding: null })],
   });
 }
@@ -91,7 +91,7 @@ function nvdaAmdOnTheirOwnCalendars(): FinancialAnswerContent {
   return presentFinancialUnit({
     plan: overviewComparisonPlan([{ slot: "a", newest: [2026, "Q4"] }, { slot: "b", newest: [2026, "Q2"] }]),
     run_id: RUN_ID, unit_id: "section",
-    subject_names: { a: "NVIDIA Corp", b: "Advanced Micro Devices, Inc." }, periods: new Map(),
+    subject_names: { a: "NVIDIA Corp", b: "Advanced Micro Devices, Inc." }, periods: new Map(), concept_scopes: new Map(),
     results: [
       ...lines("a", 1, [usd("68000000000"), usd("51000000000"), usd("44200000000"), usd("37400000000"), ratio("0.75"), ratio("0.65"), ratio("0.55"), percent("19.3"), percent("73.2")]),
       ...lines("b", 10, [usd("7700000000"), usd("3080000000"), usd("770000000"), usd("693000000"), ratio("0.4"), ratio("0.1"), ratio("0.09"), percent("4.8"), missing]),
@@ -105,7 +105,7 @@ function leadAcrossCalendars(): FinancialAnswerContent {
   plan.outputs = [{ output_id: "out_a_gm", node_id: "a_gm", unit_id: "section" }, { output_id: "out_b_gm", node_id: "b_gm", unit_id: "section" }, { output_id: "out_gm_lead", node_id: "gm_lead", unit_id: "section" }];
   return presentFinancialUnit({
     plan, run_id: RUN_ID, unit_id: "section",
-    subject_names: { a: "NVIDIA Corp", b: "Advanced Micro Devices, Inc." }, periods: new Map(),
+    subject_names: { a: "NVIDIA Corp", b: "Advanced Micro Devices, Inc." }, periods: new Map(), concept_scopes: new Map(),
     results: [
       committed(1, "out_a_gm", "a_gm", ratio("0.75")),
       committed(2, "out_b_gm", "b_gm", ratio("0.4")),
@@ -128,7 +128,7 @@ function windowHighAndLow(): FinancialAnswerContent {
   plan.thresholds = [];
   const ranks = (order: number[]) => members.map((node_id, index) => ({ node_id, rank: order[index]! })).filter((entry) => entry.rank > 0);
   return presentFinancialUnit({
-    plan, run_id: RUN_ID, unit_id: "section", subject_names: { a: "NVIDIA Corp" }, periods: new Map(),
+    plan, run_id: RUN_ID, unit_id: "section", subject_names: { a: "NVIDIA Corp" }, periods: new Map(), concept_scopes: new Map(),
     results: [
       committed(1, "out_rev_3", "rev_3", usd("44062000000")),
       committed(2, "out_rev_2", "rev_2", missing, "missing"),
@@ -140,11 +140,28 @@ function windowHighAndLow(): FinancialAnswerContent {
   });
 }
 
+/** Apple's capex filed as PP&E and NVIDIA's as productive assets, each with its free cash flow (#731). */
+function productiveAssets(): FinancialAnswerContent {
+  const plan = mutable(planFixture()) as FinancialPlanV1;
+  const fy2023 = { kind: "fiscal_period" as const, fiscal_year: 2023, fiscal_period: "FY" as const };
+  plan.operations = ["a", "b"].flatMap((slot) => [
+    reportedAt(`${slot}_ocf`, slot, "operating_cash_flow", fy2023),
+    reportedAt(`${slot}_capex`, slot, "capex", fy2023),
+    { node_id: `${slot}_fcf`, operation: "free_cash_flow", operation_version: "free_cash_flow.v1", operating_cash_flow: `${slot}_ocf`, capex: `${slot}_capex` },
+  ]);
+  plan.outputs = ["a_fcf", "b_fcf"].map((node_id) => ({ output_id: `out_${node_id}`, node_id, unit_id: "section" }));
+  plan.thresholds = [];
+  return presentFinancialUnit({
+    plan, run_id: RUN_ID, unit_id: "section", subject_names: { a: "Apple Inc.", b: "NVIDIA Corp" }, periods: new Map(), concept_scopes: new Map([["b_capex", { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const]]),
+    results: [committed(1, "out_a_fcf", "a_fcf", usd("108807000000")), committed(2, "out_b_fcf", "b_fcf", usd("60853000000"))],
+  });
+}
+
 /** EPS of 4 at 20x, 25x, and 30x: the web's scenarios fixture. */
 function scenarios(): FinancialAnswerContent {
   return presentFinancialUnit({
     plan: scenarioPlanFixture(), run_id: RUN_ID, unit_id: "section", subject_names: { a: "Apple Inc." },
-    periods: new Map([["eps", { fiscal_year: 2023, fiscal_period: "FY", end: "2023-09-30" }]]),
+    periods: new Map([["eps", { fiscal_year: 2023, fiscal_period: "FY", end: "2023-09-30" }]]), concept_scopes: new Map(),
     results: [
       committed(1, "out_eps", "eps", perShare("4")),
       committed(2, "out_bear", "bear", perShare("80")),
@@ -169,6 +186,7 @@ test("every presentation shape the generator produces satisfies the canonical bl
   valid(block(leadAcrossCalendars()), "a lead in percentage points between two companies' own quarters");
   valid(block(windowHighAndLow()), "a window's high and low, with a quarter missing");
   valid(block(scenarios()), "P/E scenarios over one EPS, under v3");
+  valid(block(productiveAssets()), "free cash flow from productive-assets capex beside PP&E's, under v4");
   valid(JSON.parse(readFileSync(WEB_V1_FIXTURE, "utf8")), "a stored v1 answer");
 });
 
@@ -195,11 +213,11 @@ test("each version's table is checked against its own shape: only v2 columns may
   assert.deepEqual([withRows((rows) => [...rows]), withRows((rows) => rows.slice(0, 2)), withRows(([bear, base, bull]) => [base, bear, bull]), withRows((rows) => [...rows, rows[2]])], [true, false, false, false], "bear, base and bull, each once, in order");
 });
 
-test("v3 content is v2 content with its own version and presentations", () => {
+test("v3 and v4 content is v2 content with its own versions and presentations", () => {
   const { FinancialAnswerContentV2: v2, FinancialAnswerContentV3: v3, FinancialPresentationV3: presentation } = SCHEMA.$defs;
   const strip = (content: any) => ({ ...content, description: undefined, properties: { ...content.properties, presentation_version: undefined, presentations: { ...content.properties.presentations, items: undefined } } });
   assert.deepEqual(strip(v3), strip(v2));
-  assert.deepEqual([v3.properties.presentation_version, v3.properties.presentations.items], [{ const: "financial-presentation.v3" }, { $ref: "#/$defs/FinancialPresentationV3" }]);
+  assert.deepEqual([v3.properties.presentation_version, v3.properties.presentations.items], [{ enum: ["financial-presentation.v3", "financial-presentation.v4"] }, { $ref: "#/$defs/FinancialPresentationV3" }]);
   assert.deepEqual(presentation.anyOf, [{ $ref: "#/$defs/FinancialPresentationV2" }, { $ref: "#/$defs/FinancialScenariosPresentationV3" }]);
 });
 

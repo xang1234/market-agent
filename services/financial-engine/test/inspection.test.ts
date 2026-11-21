@@ -351,6 +351,7 @@ test("committed result inspection", { timeout: 300_000 }, async (t) => {
     const run = await completedRun(db, client, validated.value);
     const inspected = available(await inspectCommittedResult(db, IDS.owner, run.results.out_capex!));
     assert.equal(inspected.disposition, "verified");
+    assert.equal(inspected.measure, "Capital expenditures (productive-asset cash payments, may include intangibles)", "the measure the answer labels it with");
     const ajv = new Ajv2020({ strict: false, validateFormats: false });
     for (const file of ["finance_research_block_schema.json", "financial_plan_schema.json", "financial_result_schema.json", "financial_answer_http_schema.json"]) {
       ajv.addSchema(JSON.parse(readFileSync(new URL(`../../../spec/${file}`, import.meta.url), "utf8")));

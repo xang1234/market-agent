@@ -152,11 +152,11 @@ test("certified annual free cash flow from SEC-ingested facts", { timeout: 300_0
     });
   });
 
-  await t.test("capex tagged only as productive-asset payments certifies, bound with that concept as its scope (#731)", async () => {
+  await t.test("capex tagged only as productive-asset payments certifies, bound with that concept as its scope, under labels of its own (#731)", async () => {
     assert.deepEqual((await ask("PAX")).rows, [
       ["Operating cash flow", "verified", "USD 120000000000"],
-      ["Capital expenditures (PP&E cash payments)", "verified", "USD 30000000000"],
-      ["Free cash flow (OCF less PP&E cash capex)", "verified", "USD 90000000000"],
+      ["Capital expenditures (productive-asset cash payments, may include intangibles)", "verified", "USD 30000000000"],
+      ["Free cash flow (OCF less productive-asset capex)", "verified", "USD 90000000000"],
     ]);
     assert.deepEqual(await bindings(), [{ input_slot: "capex", gap_reason: null }, { input_slot: "ocf", gap_reason: null }]);
     const bound = (await db.query(

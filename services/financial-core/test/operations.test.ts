@@ -326,7 +326,7 @@ test("free_cash_flow is reported OCF less reported capex, exactly, whatever the 
   assert.equal(value(freeCashFlow(fcf, ocfOf("-10"), capexOf("30"))), "-40");
   assert.equal(value(freeCashFlow(fcf, ocfOf("118254000000.123456789012345678"), capexOf("9447000000.000000000000000001"))), "108807000000.123456789012345677");
   const result = freeCashFlow(fcf, ocfOf("120"), capexOf("30"));
-  assert.deepEqual(result.ok && result.operand.measure, { metric_key: "free_cash_flow", definition_version: "free_cash_flow.v1", derivations: [], concept_scope: null });
+  assert.deepEqual(result.ok && result.operand.measure, { metric_key: "free_cash_flow", definition_version: "free_cash_flow.v1", derivations: [], concept_scopes: [] });
   assert.deepEqual(result.ok && result.payload.unit, { kind: "currency", currency: "USD" });
 });
 

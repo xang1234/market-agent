@@ -413,6 +413,8 @@ test('a column heading drops the formula and abbreviates a quarter or year chang
     ['Net margin (net income / revenue)', 'Net margin (net income / sales)', 'Net margin (net income / revenue) (GAAP)'],
     'a heading that reads as another column\'s kept heading is kept whole too',
   )
+  const scopes = ['Free cash flow (OCF less PP&E cash capex)', 'Free cash flow (OCF less productive-asset capex)']
+  assert.deepEqual(columnNames(scopes), scopes, 'free cash flow over either capex scope keeps its scope (#731)')
 })
 
 test('a company reads without its legal suffix, unless two companies would then read alike', () => {

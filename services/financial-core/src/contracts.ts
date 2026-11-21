@@ -526,6 +526,19 @@ export type ProductiveAssetsCapexV1 = {
 /** Why a filed value stands for a metric its concept does not name. */
 export type FactInferenceV1 = NoncontrollingInterestInferenceV1 | ProductiveAssetsCapexV1;
 
+/**
+ * A figure filed under a concept that measures more or less than its metric's
+ * reviewed one, so it is a measure of its own, never compared with that
+ * concept's (#731). A second scope (OCF from continuing operations, #743) joins
+ * this union and conceptScope.
+ */
+export type ConceptScopeV1 = ProductiveAssetsCapexV1;
+
+/** A bound figure's concept scope; null for its metric's reviewed concept, and for an inference that equals it. */
+export function conceptScope(inference: FactInferenceV1 | null | undefined): ConceptScopeV1 | null {
+  return inference?.kind === "productive_assets_capex" ? inference : null;
+}
+
 /** What every inspector shows beside such a figure. */
 export function inferenceNote(inference: Pick<FactInferenceV1, "kind" | "concept">): { label: string; text: string } {
   return inference.kind === "no_noncontrolling_interest"

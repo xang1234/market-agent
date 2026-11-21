@@ -5,7 +5,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { FinancialAnswerContent, FinancialPlanV1, PresentedResult } from "../../financial-core/src/index.ts";
+import { presentFinancialUnit, type FinancialAnswerContent, type FinancialPlanV1, type OperationNode, type PresentedResult } from "../../financial-core/src/index.ts";
+import { mutable, planFixture, reportedAt } from "../../financial-core/test/fixtures.ts";
 import type { LlmChatRequest } from "../../llm/src/index.ts";
 import { answerTurn } from "../src/answer-trace.ts";
 import type { DroppedClaims } from "../src/llm-runtime.ts";
@@ -306,6 +307,56 @@ test("negative engine amounts compare by their sign", () => {
   ], ["a", "b"]), TICKERS, null);
   const report = checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F2"], op: "lowest", result: "F1" }], losses);
   assert.deepEqual(report.rejected, []);
+});
+
+// Results the generator presents from a plan over companies a and b, with the capex nodes bound to productive assets.
+function presented(names: Record<string, string>, operations: OperationNode[], values: Record<string, string>, productiveAssets: string[]): FinancialAnswerContent {
+  const plan = mutable(planFixture()) as FinancialPlanV1;
+  const members = plan.subjects.members.filter((member) => member.slot_id in names);
+  plan.subjects = { ...plan.subjects, requested_count: members.length, resolved_count: members.length, members };
+  plan.operations = operations;
+  plan.outputs = Object.keys(values).map((node_id) => ({ output_id: `out_${node_id}`, node_id, unit_id: "section" }));
+  plan.thresholds = [];
+  return presentFinancialUnit({
+    plan, run_id: "run", unit_id: "section", subject_names: names, periods: new Map(), concept_scopes: new Map(productiveAssets.map((node) => [node, { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const])),
+    results: Object.entries(values).map(([node_id, value], index) => ({
+      result_id: RESULT(80 + index), output_id: `out_${node_id}`, node_id, disposition: "computed",
+      payload: { kind: "value", value, unit: { kind: "currency", currency: "USD" }, exact: true, rounding: null }, result_hash: "0".repeat(64),
+    })),
+  });
+}
+
+// AAPL tags its capex as PP&E and NVIDIA as productive assets. CAT tagged productive assets through FY2019 and PP&E from FY2020.
+test("free cash flow over productive-assets capex is never ranked against PP&E's, nor capex trended across a change of tag (#731)", () => {
+  const fy = (fiscal_year: number) => ({ kind: "fiscal_period" as const, fiscal_year, fiscal_period: "FY" as const });
+  const freeCashFlow = (productiveAssets: string[]) => enginePacket(presented(
+    { a: "Apple Inc.", b: "NVIDIA Corporation" },
+    ["a", "b"].flatMap((slot) => [
+      reportedAt(`${slot}_ocf`, slot, "operating_cash_flow", fy(2025)),
+      reportedAt(`${slot}_capex`, slot, "capex", fy(2025)),
+      { node_id: `${slot}_fcf`, operation: "free_cash_flow", operation_version: "free_cash_flow.v1", operating_cash_flow: `${slot}_ocf`, capex: `${slot}_capex` } as const,
+    ]),
+    { a_fcf: "98767000000", b_fcf: "60853000000" },
+    productiveAssets,
+  ), new Map([["a", "AAPL"], ["b", "NVDA"]]), null);
+  const ranked = [
+    { kind: "comparison", text: "x", evidence: ["F1", "F2"], op: "highest", result: "F1" },
+    { kind: "comparison", text: "y", evidence: ["F1", "F2"], op: "order", result: ["F1", "F2"] },
+  ];
+  const refused = (texts: string[]) => texts.map((text, index) => ({ index, text, check: "comparative", reason: "comparison: a comparison is of one metric" }));
+  assert.deepEqual(freeCashFlow(["b_capex"]).figures.map((figure) => figure.metric), ["Free cash flow (OCF less PP&E cash capex)", "Free cash flow (OCF less productive-asset capex)"]);
+  assert.deepEqual(checkAssertions(ranked, freeCashFlow(["b_capex"])).rejected, refused(["x", "y"]));
+  assert.deepEqual(checkAssertions(ranked, freeCashFlow([])).rejected, [], "two PP&E figures rank");
+
+  const capex = (productiveAssets: string[]) => enginePacket(presented(
+    { a: "Caterpillar Inc." },
+    [reportedAt("capex2019", "a", "capex", fy(2019)), reportedAt("capex2020", "a", "capex", fy(2020))],
+    { capex2019: "1056000000", capex2020: "978000000" },
+    productiveAssets,
+  ), new Map([["a", "CAT"]]), null);
+  const trend = [{ kind: "comparison", text: "z", evidence: ["F1", "F2"], op: "trend", result: "fell" }];
+  assert.deepEqual(checkAssertions(trend, capex(["capex2019"])).rejected, refused(["z"]));
+  assert.deepEqual(checkAssertions(trend, capex([])).rejected, [], "two PP&E years trend");
 });
 
 test("amounts that read alike at their scale still compare by their exact values, and show as they read", () => {

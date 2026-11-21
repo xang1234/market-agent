@@ -30,8 +30,11 @@ function comparisonResults(overrides: Partial<Record<string, CommittedResult>> =
   return Object.entries({ ...defaults, ...overrides }).map(([, value]) => value!);
 }
 
-function present(plan: FinancialPlanV1 = planFixture(), results = comparisonResults(), names: Record<string, string> = NAMES, periods: Record<string, BoundPeriod> = {}): FinancialAnswerContent {
-  return presentFinancialUnit({ plan, run_id: "run-1", unit_id: "section", results, subject_names: names, periods: new Map(Object.entries(periods)) });
+function present(plan: FinancialPlanV1 = planFixture(), results = comparisonResults(), names: Record<string, string> = NAMES, periods: Record<string, BoundPeriod> = {}, productiveAssets: ReadonlyArray<string> = []): FinancialAnswerContent {
+  return presentFinancialUnit({
+    plan, run_id: "run-1", unit_id: "section", results, subject_names: names, periods: new Map(Object.entries(periods)),
+    concept_scopes: new Map(productiveAssets.map((node) => [node, { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const])),
+  });
 }
 
 function result(content: FinancialAnswerContent, outputId: string) {
@@ -206,6 +209,56 @@ const FY = (fiscal_year: number) => ({ kind: "fiscal_period" as const, fiscal_ye
 const balance = (node_id: string, metric_key: string, fiscal_year = 2023) =>
   ({ node_id, operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot: "a", metric_key, period: FY(fiscal_year) });
 const valueOf = (value: string, unit: unknown) => ({ kind: "value", value, unit, exact: true, rounding: null });
+
+const PRODUCTIVE_ASSETS_CAPEX = "Capital expenditures (productive-asset cash payments, may include intangibles)";
+const PRODUCTIVE_ASSETS_FCF = "Free cash flow (OCF less productive-asset capex)";
+
+// Alpha tags its capex as PP&E and Beta as productive assets, as AAPL and NVDA do.
+test("capex filed as productive assets, and free cash flow from it, are measures of their own: never one column with PP&E's (#731)", () => {
+  const operations = ["a", "b"].flatMap((slot) => [
+    reportedAt(`${slot}_ocf`, slot, "operating_cash_flow", FY(2023)),
+    reportedAt(`${slot}_capex`, slot, "capex", FY(2023)),
+    { node_id: `${slot}_fcf`, operation: "free_cash_flow" as const, operation_version: "free_cash_flow.v1", operating_cash_flow: `${slot}_ocf`, capex: `${slot}_capex` },
+  ]);
+  const plan = comparisonPlan(operations, ["a_capex", "a_fcf", "b_capex", "b_fcf"]);
+  const results = [["a_capex", "9447000000"], ["a_fcf", "108807000000"], ["b_capex", "3236000000"], ["b_fcf", "60853000000"]]
+    .map(([node, value]) => committed(`o_${node}`, node!, usdValue(value!)));
+  const content = present(plan, results, NAMES, {}, ["b_capex"]);
+
+  assert.deepEqual(["o_a_capex", "o_a_fcf", "o_b_capex", "o_b_fcf"].map((output) => labelTexts(content, output)[1]), [
+    "Capital expenditures (PP&E cash payments)", "Free cash flow (OCF less PP&E cash capex)", PRODUCTIVE_ASSETS_CAPEX, PRODUCTIVE_ASSETS_FCF,
+  ]);
+  assert.equal(content.presentation_version, "financial-presentation.v4");
+  const table = content.presentations.find((presentation) => presentation.kind === "table");
+  assert.ok(table?.kind === "table");
+  assert.equal(table.columns.length, 4);
+  assert.ok(table.columns.every((_, index) => table.rows.filter((row) => row.cells[index] !== null).length === 1), "no column ranks one company's figure against the other's");
+  assert.equal(table.caption, `Capital expenditures (PP&E cash payments), Free cash flow (OCF less PP&E cash capex), ${PRODUCTIVE_ASSETS_CAPEX}, ${PRODUCTIVE_ASSETS_FCF} by company`);
+
+  // The same figures with every capex PP&E: shared labels, as every answer before #731 has them.
+  const ppe = present(plan, results, NAMES);
+  assert.equal(ppe.presentation_version, "financial-presentation.v2");
+  assert.equal(result(ppe, "o_a_fcf").measure_label_id, result(ppe, "o_b_fcf").measure_label_id);
+  assert.equal(content.results.length, ppe.results.length);
+});
+
+// CAT tagged productive assets through its FY2019 10-K and PP&E from FY2020.
+test("one company's capex is a series only within one scope: never across its switch to PP&E (#731)", () => {
+  const plan = singleSubjectPlan([2018, 2019, 2020].map((year) => balance(`capex${year}`, "capex", year)), ["capex2018", "capex2019", "capex2020"]);
+  const content = present(plan, [
+    committed("o_capex2018", "capex2018", usdValue("1276000000")),
+    committed("o_capex2019", "capex2019", usdValue("1056000000")),
+    committed("o_capex2020", "capex2020", usdValue("978000000")),
+  ], { a: "Caterpillar Inc." }, {}, ["capex2018", "capex2019"]);
+  assert.deepEqual(content.presentations, [
+    { kind: "series", subject_label_id: "subject:a", measure_label_id: result(content, "o_capex2018").measure_label_id, points: [
+      { period_label_id: result(content, "o_capex2018").period_label_id, result_id: "r-o_capex2018" },
+      { period_label_id: result(content, "o_capex2019").period_label_id, result_id: "r-o_capex2019" },
+    ] },
+    { kind: "scalar", result_id: "r-o_capex2020" },
+  ]);
+  assert.deepEqual(["o_capex2019", "o_capex2020"].map((output) => labelTexts(content, output)[1]), [PRODUCTIVE_ASSETS_CAPEX, "Capital expenditures (PP&E cash payments)"]);
+});
 
 test("a threshold on an approved ratio reads as a multiple, like the ratio's value", () => {
   const plan = singleSubjectPlan(

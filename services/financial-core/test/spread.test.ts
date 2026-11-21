@@ -67,7 +67,7 @@ test("two quarters pair only while their ends lie within half a quarter of each 
 test("a spread of multiples has no percentage points", () => {
   const ratio = (nodeId: string, slot: "a" | "b") => ({
     ...operand(nodeId, { slot, metric: "revenue", value: "2", ...NVDA_Q4 }),
-    measure: { metric_key: "pe_ratio", definition_version: "pe_ratio.v1", derivations: [], concept_scope: null },
+    measure: { metric_key: "pe_ratio", definition_version: "pe_ratio.v1", derivations: [], concept_scopes: [] },
     measurement: { unit: { kind: "ratio" as const }, dimensions: { scope: "consolidated" as const, members: [] }, basis: { reporting: "as_reported" as const, adjustment: "unadjusted" as const, share_basis: "not_applicable" as const } },
   });
   assert.deepEqual(gap(spread(SPREAD, ratio("a_pe", "a"), ratio("b_pe", "b"))), ["unsupported", "unsupported_operation"]);
@@ -110,7 +110,7 @@ test("the presentation names each side's company and period, and reads the lead 
     plan,
     run_id: "44444444-4444-4444-8444-444444444444",
     unit_id: "section",
-    subject_names: { a: "NVIDIA", b: "AMD" }, periods: new Map(),
+    subject_names: { a: "NVIDIA", b: "AMD" }, periods: new Map(), concept_scopes: new Map(),
     results: plan.outputs.map((output, index) => ({
       result_id: `55555555-5555-4555-8555-00000000000${index}`,
       output_id: output.output_id,

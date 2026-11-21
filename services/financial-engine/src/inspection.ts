@@ -10,6 +10,7 @@
 import {
   assumptionHash,
   BOUND_PRICE_INPUT_SCHEMA_VERSION,
+  conceptScope,
   dependencyClosure,
   measureText,
   readsAsMultiple,
@@ -146,7 +147,11 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
       numeric_policy_version: record.computation.numeric_policy_version,
       reads_as_multiple: readsAsMultiple(plan, node),
     },
-    measure: measureText(plan, node),
+    measure: measureText(plan, node, new Map(inputs.flatMap((input) => {
+      const bound = input.binding_status === "bound" ? input.bound_payload as BoundFinancialInputV1 : null;
+      const scope = bound && "inference" in bound ? conceptScope(bound.inference) : null;
+      return scope ? [[input.input_slot, scope] as const] : [];
+    }))),
     definitions: plan.metric_definitions.filter((definition) => metricKeys.has(definition.metric_key)),
     inputs: inputs.map((input): InspectedInput => {
       if (input.binding_status === "gap") return { input_slot: input.input_slot, status: "gap", reason_code: input.gap_reason };
