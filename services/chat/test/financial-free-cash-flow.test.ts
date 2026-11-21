@@ -191,7 +191,7 @@ test("certified annual free cash flow from SEC-ingested facts", { timeout: 300_0
     const block = (read!.messages.find((candidate) => candidate.message_id === done.message_id)!.blocks as Array<{ financial: any }>)[0]!;
     const { results, labels } = block.financial;
     assert.deepEqual(results.map((result: any) => [labels[result.measure_label_id].text, result.disposition, result.presented.text]), [[
-      "Year-over-year percent change in Capital expenditures (PP&E cash payments)",
+      "Year-over-year percent change in Capital expenditures (productive-asset cash payments, may include intangibles)",
       "incompatible",
       "One figure's capex is filed as PaymentsToAcquireProductiveAssets, which may include purchased intangibles, and the other's as PP&E only, so they do not measure the same spending.",
     ]]);

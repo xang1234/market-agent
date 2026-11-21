@@ -367,4 +367,29 @@ test("committed result inspection", { timeout: 300_000 }, async (t) => {
     )).rows[0];
     assert.deepEqual(bound?.inference, scope, "the certificate covers the concept");
   });
+
+  await t.test("a period ranking is inspected in the scope of the years it ranks, though its first year has no filing (#731)", async () => {
+    const scope = { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" };
+    for (const [fiscal_year, value] of [[2020, "1000"], [2021, "2000"]] as const) {
+      const factId = await seedReportedFact(db, { metric_key: "capex", value, fiscal_year });
+      await db.query(`update facts set quality_flags = $2::jsonb where fact_id = $1`, [factId, JSON.stringify([scope])]);
+    }
+    const year = (fiscal_year: number) => ({
+      node_id: `c${fiscal_year}`, operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "capex",
+      period: { kind: "fiscal_period", fiscal_year, fiscal_period: "FY" },
+    });
+    const validated = validateFinancialPlan({
+      ...revenuePlan(),
+      plan_id: randomUUID(),
+      metric_definitions: [{ metric_key: "capex", definition_version: "capex.v1" }],
+      operations: [year(2019), year(2020), year(2021), { node_id: "window", operation: "period_rank", operation_version: "period_rank.v1", members: ["c2019", "c2020", "c2021"], direction: "highest" }],
+      outputs: [{ output_id: "out_window", node_id: "window", unit_id: "window_unit" }],
+      publication_units: [{ unit_id: "window_unit", kind: "chat_section" }],
+    });
+    assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
+    const run = await completedRun(db, client, validated.value);
+    const inspected = available(await inspectCommittedResult(db, IDS.owner, run.results.out_window!));
+    assert.equal(inspected.measure, "Capital expenditures (productive-asset cash payments, may include intangibles) ranked across periods");
+    assert.deepEqual(inspected.inputs.map((input) => input.input_slot), ["c2019", "c2020", "c2021"]);
+  });
 });

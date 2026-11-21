@@ -210,6 +210,27 @@ test('capex filed as productive assets names its concept and that it may include
   assert.ok(!(render(inspection()).body.textContent ?? '').includes('Scope:'), 'PP&E capex shows no scope')
 })
 
+// NVIDIA files its capex as productive assets and Apple as PP&E (#731).
+test('each input reads in its own scope: its row, its source and its details, never PP&E for productive-asset capex', () => {
+  const scope = { kind: 'productive_assets_capex', concept: 'PaymentsToAcquireProductiveAssets' } as const
+  const fy = (fiscal_year: number, start: string, end: string) => ({ kind: 'duration', start, end, fiscal_year, fiscal_period: 'FY' })
+  const filed = (source_id: string, date: string) => ({ source_id, document_id: null, source_version_hash: 'v'.repeat(64), locator: null, filed: date })
+  const document = render(inspection({
+    measure: 'Free cash flow (OCF less productive-asset capex)',
+    formula: { operation: 'free_cash_flow', operation_version: 'free_cash_flow.v1', numeric_policy_version: 'numeric-policy.v1', reads_as_multiple: false },
+    inputs: [
+      fact('capex', '3236000000', null, { input_slot: 'b_capex', company: 'NVIDIA Corp', inference: scope, source: filed('src-nvda', '2025-02-26'), period: fy(2025, '2024-01-29', '2025-01-26') }),
+      fact('capex', '9447000000', null, { input_slot: 'a_capex', company: 'Apple Inc.', source: filed('src-aapl', '2024-11-01'), period: fy(2024, '2023-10-01', '2024-09-28') }),
+    ],
+  }))
+  const PRODUCTIVE = 'Capital expenditures (productive-asset cash payments, may include intangibles)'
+  const PPE = 'Capital expenditures (PP&E cash payments)'
+  assert.deepEqual(rows(document).filter((row) => row.length === 3).map((row) => row[0]), [`NVIDIA Corp · ${PRODUCTIVE}`, `Apple Inc. · ${PPE}`], 'the Inputs rows')
+  assert.deepEqual(sources(document), [`NVIDIA Corp · Filed Feb 26, 2025 | ${PRODUCTIVE} FY2025`, `Apple Inc. · Filed Nov 1, 2024 | ${PPE} FY2024`], 'each source and what it supports')
+  assert.deepEqual([...document.querySelectorAll('[aria-labelledby="inspector-sources"] p[title]')].map((line) => line.getAttribute('title')), [`${PRODUCTIVE} FY2025`, `${PPE} FY2024`])
+  assert.deepEqual([...document.querySelectorAll('[data-testid="inspector-details"] h4')].map(text).filter((title) => title?.startsWith('Capital')), [`${PRODUCTIVE} FY2025`, `${PPE} FY2024`], 'the Audit Details headings')
+})
+
 test('a tiny ratio keeps its exact canonical text and a P/E reads as a multiple', () => {
   const small = render(inspection({ payload: { kind: 'value', value: '0.000000000000000001', unit: { kind: 'ratio' }, exact: true, rounding: null }, formula: { operation: 'gross_margin', operation_version: 'gross_margin.v1', numeric_policy_version: 'numeric.v1', reads_as_multiple: false } }))
   assert.equal(text(small.querySelector('[data-testid="financial-inspector-value"]')), '0.00%')

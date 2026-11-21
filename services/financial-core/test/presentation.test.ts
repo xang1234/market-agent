@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { BoundFinancialInputV1, FinancialPlanV1, PeriodSelector, ValuePayload } from "../src/contracts.ts";
+import { conceptScope, type BoundFactInputV1, type BoundFinancialInputV1, type FinancialPlanV1, type PeriodSelector, type ValuePayload } from "../src/contracts.ts";
 import { evaluatePlan } from "../src/coverage.ts";
 import { parseDerivedDecimalText } from "../src/exact-decimal.ts";
-import { operandFromBoundInput } from "../src/operations.ts";
+import { operandFromBoundInput, operationGap } from "../src/operations.ts";
 import { fixed } from "../src/value-text.ts";
 import { presentationHash, presentFinancialUnit, type BoundPeriod, type CommittedResult, type FinancialAnswerContent } from "../src/presentation.ts";
 import { change, mutable, overviewComparisonPlan, planFixture, quarterBack, reportedAt } from "./fixtures.ts";
-import { boundInput, operand, priceInput, SLOTS, SPLIT_CUTOFF, splitAdjustment } from "./operand-fixtures.ts";
+import { boundInput, KNOWLEDGE_CUTOFF, operand, priceInput, SLOTS, SPLIT_CUTOFF, splitAdjustment } from "./operand-fixtures.ts";
 
 const HASH = "a".repeat(64);
 const NAMES = { a: "Alpha Corp", b: "Beta Inc" };
@@ -30,11 +30,38 @@ function comparisonResults(overrides: Partial<Record<string, CommittedResult>> =
   return Object.entries({ ...defaults, ...overrides }).map(([, value]) => value!);
 }
 
+const PRODUCTIVE_ASSETS = { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const;
+
+/** Every reported node bound: those named filed as productive assets, the rest in their metric's reviewed concept. */
 function present(plan: FinancialPlanV1 = planFixture(), results = comparisonResults(), names: Record<string, string> = NAMES, periods: Record<string, BoundPeriod> = {}, productiveAssets: ReadonlyArray<string> = []): FinancialAnswerContent {
   return presentFinancialUnit({
     plan, run_id: "run-1", unit_id: "section", results, subject_names: names, periods: new Map(Object.entries(periods)),
-    concept_scopes: new Map(productiveAssets.map((node) => [node, { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const])),
+    concept_scopes: new Map(plan.operations.flatMap((node) => node.operation === "reported_metric" ? [[node.node_id, productiveAssets.includes(node.node_id) ? PRODUCTIVE_ASSETS : null] as const] : [])),
   });
+}
+
+/** The plan evaluated by the engine over these facts by reported node, a node with none missing, and presented with their scopes. */
+function engineAnswer(plan: FinancialPlanV1, facts: Readonly<Record<string, BoundFactInputV1>>, names: Record<string, string>): FinancialAnswerContent {
+  const evaluation = evaluatePlan(plan, (node) => {
+    const input = facts[node.node_id];
+    if (!input) return operationGap("missing_input", "No eligible input.");
+    return operandFromBoundInput(input, node, { slot: SLOTS[node.subject_slot as keyof typeof SLOTS], definition_version: `${node.metric_key}.v1`, knowledge_cutoff: KNOWLEDGE_CUTOFF, reporting_basis: "as_reported" });
+  });
+  const results = evaluation.outputs.map(({ output_id, node_id, state }) => {
+    if (state.status === "integrity_failure") assert.fail(`${node_id}: ${state.explanation}`);
+    return state.status === "computed"
+      ? committed(output_id, node_id, state.payload)
+      : committed(output_id, node_id, { kind: "gap", reason_code: state.reason_code, explanation: state.explanation }, state.disposition);
+  });
+  return presentFinancialUnit({
+    plan, run_id: "run-1", unit_id: "section", results, subject_names: names, periods: new Map(),
+    concept_scopes: new Map(Object.entries(facts).map(([node, input]) => [node, conceptScope(input.inference)])),
+  });
+}
+
+/** Every ordering of the items. */
+function orderings<T>(items: ReadonlyArray<T>): T[][] {
+  return items.length <= 1 ? [[...items]] : items.flatMap((item, index) => orderings([...items.slice(0, index), ...items.slice(index + 1)]).map((rest) => [item, ...rest]));
 }
 
 function result(content: FinancialAnswerContent, outputId: string) {
@@ -258,6 +285,88 @@ test("one company's capex is a series only within one scope: never across its sw
     { kind: "scalar", result_id: "r-o_capex2020" },
   ]);
   assert.deepEqual(["o_capex2019", "o_capex2020"].map((output) => labelTexts(content, output)[1]), [PRODUCTIVE_ASSETS_CAPEX, "Capital expenditures (PP&E cash payments)"]);
+});
+
+const fiscalYearFact = (slot: "a" | "b" | "c", metric: string, fiscal_year: number, value: string, inference?: typeof PRODUCTIVE_ASSETS) =>
+  boundInput({ slot, metric, value, start: `${fiscal_year}-01-01`, end: `${fiscal_year}-12-31`, fiscal_year, ...(inference ? { inference } : {}) });
+
+const capexWindow = (members: string[], outputs: string[]) => singleSubjectPlan([
+  ...[2019, 2020, 2021].map((year) => balance(`c${year}`, "capex", year)),
+  { node_id: "window", operation: "period_rank", operation_version: "period_rank.v1", members, direction: "highest" },
+], outputs);
+
+// CAT's FY2019 capex has no filing here; FY2020 and FY2021 are filed as productive assets.
+test("a period ranking reads in the scope of the figures it ranks, never its first member's, and a missing year joins them (#731)", () => {
+  const facts = { c2020: fiscalYearFact("a", "capex", 2020, "1000000000", PRODUCTIVE_ASSETS), c2021: fiscalYearFact("a", "capex", 2021, "2000000000", PRODUCTIVE_ASSETS) };
+  for (const members of orderings(["c2019", "c2020", "c2021"])) {
+    const content = engineAnswer(capexWindow(members, ["c2019", "c2020", "c2021", "window"]), facts, { a: "Caterpillar Inc." });
+    assert.equal(labelTexts(content, "o_window")[1], `${PRODUCTIVE_ASSETS_CAPEX} ranked across periods`, members.join());
+    assert.equal(resultText(content, "o_window"), "FY2021 has the highest capital expenditures (productive-asset cash payments, may include intangibles) of the 2 of 3 fiscal years ranked", members.join());
+    assert.equal(labelTexts(content, "o_c2019")[1], PRODUCTIVE_ASSETS_CAPEX, "the missing year reads as the years ranked beside it");
+    assert.deepEqual(content.presentations.map((presentation) => presentation.kind), ["series", "predicate"], "one series, the missing year a point of it");
+  }
+});
+
+test("a period ranking across a change of capex scope is the engine's named gap under one label, in every member order (#731)", () => {
+  const facts = { c2019: fiscalYearFact("a", "capex", 2019, "1500000000"), c2020: fiscalYearFact("a", "capex", 2020, "1000000000", PRODUCTIVE_ASSETS), c2021: fiscalYearFact("a", "capex", 2021, "2000000000", PRODUCTIVE_ASSETS) };
+  const labels = new Set<string>();
+  for (const members of orderings(["c2019", "c2020", "c2021"])) {
+    const window = engineAnswer(capexWindow(members, ["window"]), facts, { a: "Caterpillar Inc." });
+    const { disposition, presented } = result(window, "o_window");
+    assert.deepEqual([disposition, presented.kind === "gap" && presented.reason_code], ["incompatible", "incompatible_definition"], members.join());
+    labels.add(labelTexts(window, "o_window")[1]);
+  }
+  assert.deepEqual([...labels], [`${PRODUCTIVE_ASSETS_CAPEX} ranked across periods`]);
+});
+
+/** AAA, BBB and CCC's FY2023 free cash flow, each from its own OCF and capex, ranked in the given member order. */
+function freeCashFlowRanking(members: string[]): FinancialPlanV1 {
+  const plan = comparisonPlan([
+    ...["a", "b", "c"].flatMap((slot) => [
+      reportedAt(`${slot}_ocf`, slot, "operating_cash_flow", FY(2023)),
+      reportedAt(`${slot}_capex`, slot, "capex", FY(2023)),
+      { node_id: `${slot}_fcf`, operation: "free_cash_flow" as const, operation_version: "free_cash_flow.v1", operating_cash_flow: `${slot}_ocf`, capex: `${slot}_capex` },
+    ]),
+    { node_id: "rank", operation: "peer_compare", operation_version: "peer_compare.v1", members, direction: "highest" },
+  ], ["a_fcf", "b_fcf", "c_fcf", "rank"]);
+  plan.subjects = { ...plan.subjects, requested_count: 3, resolved_count: 3, members: [...plan.subjects.members, SLOTS.c] };
+  return plan;
+}
+
+const THREE = { a: "AAA Corp", b: "BBB Inc", c: "CCC Ltd" };
+const FREE_CASH_FLOW_FACTS = {
+  a_ocf: fiscalYearFact("a", "operating_cash_flow", 2023, "500"),
+  b_ocf: fiscalYearFact("b", "operating_cash_flow", 2023, "900"),
+  b_capex: fiscalYearFact("b", "capex", 2023, "100", PRODUCTIVE_ASSETS),
+  c_ocf: fiscalYearFact("c", "operating_cash_flow", 2023, "700"),
+  c_capex: fiscalYearFact("c", "capex", 2023, "200", PRODUCTIVE_ASSETS),
+};
+
+// AAA's capex has no filing here; BBB and CCC file theirs as productive assets.
+test("a peer ranking reads in the scope of the companies it ranks, and a company missing its figure keeps their column (#731)", () => {
+  for (const members of orderings(["a_fcf", "b_fcf", "c_fcf"])) {
+    const content = engineAnswer(freeCashFlowRanking(members), FREE_CASH_FLOW_FACTS, THREE);
+    assert.equal(labelTexts(content, "o_rank")[1], `${PRODUCTIVE_ASSETS_FCF} ranking`, members.join());
+    assert.equal(resultText(content, "o_rank"), "Ranked 2 of 3 companies; no overall highest can be stated for an incomplete group");
+    const table = content.presentations.find((presentation) => presentation.kind === "table");
+    assert.ok(table?.kind === "table");
+    assert.deepEqual(table.columns.map((column) => content.labels[column.measure_label_id]!.text), [PRODUCTIVE_ASSETS_FCF], "no column of PP&E free cash flow for a company that has none");
+    assert.deepEqual(table.rows.map((row) => row.cells), [["r-o_a_fcf"], ["r-o_b_fcf"], ["r-o_c_fcf"]]);
+    assert.ok(Object.values(content.labels).every((label) => !label.text.includes("PP&E")), members.join());
+  }
+});
+
+test("a peer ranking across capex scopes is the engine's named gap under one label, in every member order (#731)", () => {
+  const facts = { ...FREE_CASH_FLOW_FACTS, a_capex: fiscalYearFact("a", "capex", 2023, "50") };
+  const labels = new Set<string>();
+  for (const members of orderings(["a_fcf", "b_fcf", "c_fcf"])) {
+    const content = engineAnswer(freeCashFlowRanking(members), facts, THREE);
+    const { disposition, presented } = result(content, "o_rank");
+    assert.deepEqual([disposition, presented.kind === "gap" && presented.reason_code], ["incompatible", "incompatible_definition"], members.join());
+    labels.add(labelTexts(content, "o_rank")[1]);
+    assert.equal(labelTexts(content, "o_a_fcf")[1], "Free cash flow (OCF less PP&E cash capex)", "a figure filed as PP&E keeps its own label");
+  }
+  assert.deepEqual([...labels], [`${PRODUCTIVE_ASSETS_FCF} ranking`]);
 });
 
 test("a threshold on an approved ratio reads as a multiple, like the ratio's value", () => {

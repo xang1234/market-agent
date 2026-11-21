@@ -309,7 +309,7 @@ test("negative engine amounts compare by their sign", () => {
   assert.deepEqual(report.rejected, []);
 });
 
-// Results the generator presents from a plan over companies a and b, with the capex nodes bound to productive assets.
+// Results the generator presents from a plan over companies a and b, every reported node bound, the named capex nodes to productive assets.
 function presented(names: Record<string, string>, operations: OperationNode[], values: Record<string, string>, productiveAssets: string[]): FinancialAnswerContent {
   const plan = mutable(planFixture()) as FinancialPlanV1;
   const members = plan.subjects.members.filter((member) => member.slot_id in names);
@@ -318,7 +318,9 @@ function presented(names: Record<string, string>, operations: OperationNode[], v
   plan.outputs = Object.keys(values).map((node_id) => ({ output_id: `out_${node_id}`, node_id, unit_id: "section" }));
   plan.thresholds = [];
   return presentFinancialUnit({
-    plan, run_id: "run", unit_id: "section", subject_names: names, periods: new Map(), concept_scopes: new Map(productiveAssets.map((node) => [node, { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const])),
+    plan, run_id: "run", unit_id: "section", subject_names: names, periods: new Map(), concept_scopes: new Map(operations.flatMap((node) => node.operation === "reported_metric"
+      ? [[node.node_id, productiveAssets.includes(node.node_id) ? { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const : null] as const]
+      : [])),
     results: Object.entries(values).map(([node_id, value], index) => ({
       result_id: RESULT(80 + index), output_id: `out_${node_id}`, node_id, disposition: "computed",
       payload: { kind: "value", value, unit: { kind: "currency", currency: "USD" }, exact: true, rounding: null }, result_hash: "0".repeat(64),

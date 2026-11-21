@@ -1,5 +1,5 @@
 // The presentation contract: everything presentFinancialUnit can produce must
-// satisfy the canonical block schema, and the web's v2 and v3 financial_answer fixtures
+// satisfy the canonical block schema, and the web's v2, v3 and v4 financial_answer fixtures
 // are this generator's output, not hand-maintained copies. Regenerate the fixtures
 // with `UPDATE_FIXTURES=1 node --experimental-strip-types --test
 // test/presentation-contract.test.ts` after an intentional change.
@@ -17,6 +17,7 @@ const WEB_FIXTURE = new URL("../../../web/src/blocks/financialAnswer.fixture.jso
 const WEB_FISCAL_CALENDARS_FIXTURE = new URL("../../../web/src/blocks/financialAnswer.fiscalCalendars.fixture.json", import.meta.url);
 const WEB_V1_FIXTURE = new URL("../../../web/src/blocks/financialAnswer.v1.fixture.json", import.meta.url);
 const WEB_SCENARIOS_FIXTURE = new URL("../../../web/src/blocks/financialAnswer.scenarios.fixture.json", import.meta.url);
+const WEB_PRODUCTIVE_ASSETS_FIXTURE = new URL("../../../web/src/blocks/financialAnswer.productiveAssets.fixture.json", import.meta.url);
 const HASH = "a".repeat(64);
 const RUN_ID = "99999999-9999-4999-9999-999999999999";
 const SNAPSHOT_ID = "11111111-1111-4111-9111-111111111111";
@@ -29,6 +30,7 @@ const usd = (value: string) => ({ kind: "value", value, unit: { kind: "currency"
 const perShare = (value: string) => ({ kind: "value", value, unit: { kind: "currency_per_share", currency: "USD" }, exact: true, rounding: null });
 const percent = (value: string) => ({ kind: "value", value, unit: { kind: "percent" }, exact: true, rounding: null });
 const missing = { kind: "gap", reason_code: "missing_input", explanation: "A required input or calculation is unavailable." };
+const PRODUCTIVE_ASSETS = { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const;
 
 function block(content: FinancialAnswerContent) {
   return {
@@ -152,8 +154,40 @@ function productiveAssets(): FinancialAnswerContent {
   plan.outputs = ["a_fcf", "b_fcf"].map((node_id) => ({ output_id: `out_${node_id}`, node_id, unit_id: "section" }));
   plan.thresholds = [];
   return presentFinancialUnit({
-    plan, run_id: RUN_ID, unit_id: "section", subject_names: { a: "Apple Inc.", b: "NVIDIA Corp" }, periods: new Map(), concept_scopes: new Map([["b_capex", { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const]]),
+    plan, run_id: RUN_ID, unit_id: "section", subject_names: { a: "Apple Inc.", b: "NVIDIA Corp" }, periods: new Map(),
+    concept_scopes: new Map([["a_ocf", null], ["a_capex", null], ["b_ocf", null], ["b_capex", PRODUCTIVE_ASSETS]]),
     results: [committed(1, "out_a_fcf", "a_fcf", usd("108807000000")), committed(2, "out_b_fcf", "b_fcf", usd("60853000000"))],
+  });
+}
+
+/** Free cash flow of three companies ranked: two from capex filed as productive assets, one missing its capex (#731). The web's v4 fixture. */
+function productiveAssetsRanking(): FinancialAnswerContent {
+  const plan = mutable(planFixture()) as FinancialPlanV1;
+  const fy2023 = { kind: "fiscal_period" as const, fiscal_year: 2023, fiscal_period: "FY" as const };
+  plan.subjects = {
+    ...plan.subjects, requested_count: 3, resolved_count: 3,
+    members: [...plan.subjects.members, { slot_id: "c", subject_ref: { kind: "issuer", id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" }, display_order: 2, role: "peer" }],
+  };
+  plan.operations = [
+    ...["a", "b", "c"].flatMap((slot) => [
+      reportedAt(`${slot}_ocf`, slot, "operating_cash_flow", fy2023),
+      reportedAt(`${slot}_capex`, slot, "capex", fy2023),
+      { node_id: `${slot}_fcf`, operation: "free_cash_flow" as const, operation_version: "free_cash_flow.v1", operating_cash_flow: `${slot}_ocf`, capex: `${slot}_capex` },
+    ]),
+    { node_id: "rank", operation: "peer_compare", operation_version: "peer_compare.v1", members: ["a_fcf", "b_fcf", "c_fcf"], direction: "highest" },
+  ];
+  plan.outputs = ["a_fcf", "b_fcf", "c_fcf", "rank"].map((node_id) => ({ output_id: `out_${node_id}`, node_id, unit_id: "section" }));
+  plan.thresholds = [];
+  const blocked = { kind: "gap", reason_code: "blocked_by_dependency", explanation: "A required input or calculation is unavailable." };
+  return presentFinancialUnit({
+    plan, run_id: RUN_ID, unit_id: "section", subject_names: { a: "Alpha Corp", b: "Beta Inc.", c: "Gamma Ltd" }, periods: new Map(),
+    concept_scopes: new Map([["a_ocf", null], ["b_ocf", null], ["b_capex", PRODUCTIVE_ASSETS], ["c_ocf", null], ["c_capex", PRODUCTIVE_ASSETS]]),
+    results: [
+      committed(1, "out_a_fcf", "a_fcf", blocked, "blocked_dependency"),
+      committed(2, "out_b_fcf", "b_fcf", usd("800000000")),
+      committed(3, "out_c_fcf", "c_fcf", usd("500000000")),
+      committed(4, "out_rank", "rank", { kind: "ranking", direction: "highest", population: { requested: 3, evaluated: 2 }, complete: false, ranks: [{ node_id: "b_fcf", rank: 1 }, { node_id: "c_fcf", rank: 2 }], extreme: null }),
+    ],
   });
 }
 
@@ -187,6 +221,7 @@ test("every presentation shape the generator produces satisfies the canonical bl
   valid(block(windowHighAndLow()), "a window's high and low, with a quarter missing");
   valid(block(scenarios()), "P/E scenarios over one EPS, under v3");
   valid(block(productiveAssets()), "free cash flow from productive-assets capex beside PP&E's, under v4");
+  valid(block(productiveAssetsRanking()), "a ranking of free cash flow from productive-assets capex with a company missing, under v4");
   valid(JSON.parse(readFileSync(WEB_V1_FIXTURE, "utf8")), "a stored v1 answer");
 });
 
@@ -222,7 +257,7 @@ test("v3 and v4 content is v2 content with its own versions and presentations", 
 });
 
 test("the web financial_answer fixtures are the generator's output", () => {
-  for (const [fixture, content] of [[WEB_FIXTURE, comparison()], [WEB_FISCAL_CALENDARS_FIXTURE, nvdaAmdOnTheirOwnCalendars()], [WEB_SCENARIOS_FIXTURE, scenarios()]] as const) {
+  for (const [fixture, content] of [[WEB_FIXTURE, comparison()], [WEB_FISCAL_CALENDARS_FIXTURE, nvdaAmdOnTheirOwnCalendars()], [WEB_SCENARIOS_FIXTURE, scenarios()], [WEB_PRODUCTIVE_ASSETS_FIXTURE, productiveAssetsRanking()]] as const) {
     const expected = `${JSON.stringify(block(content), null, 2)}\n`;
     if (process.env.UPDATE_FIXTURES === "1") writeFileSync(fixture, expected);
     assert.equal(readFileSync(fixture, "utf8"), expected, "regenerate with UPDATE_FIXTURES=1");

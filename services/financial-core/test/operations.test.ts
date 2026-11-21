@@ -347,6 +347,11 @@ test("free_cash_flow takes reported fiscal-year values only, never a trailing su
 
 test("free_cash_flow never flips a negative capex; it is a gap", () => {
   assert.deepEqual(gap(freeCashFlow(fcf, ocfOf("120"), capexOf("-30"))), ["incompatible", "incompatible_definition"]);
+  const explanation = (outcome: ReturnType<typeof freeCashFlow>) => (outcome.ok ? "" : outcome.explanation);
+  assert.equal(explanation(freeCashFlow(fcf, ocfOf("120"), capexOf("-30"))), "Capex v1 is a nonnegative PP&E cash payment; a negative reported value is not one.");
+  const scoped = freeCashFlow(fcf, ocfOf("120"), capexOf("-30", { inference: PRODUCTIVE_ASSETS }));
+  assert.deepEqual(gap(scoped), ["incompatible", "incompatible_definition"]);
+  assert.doesNotMatch(explanation(scoped), /PP&E/, "capex filed as productive assets is not called a PP&E payment (#731)");
 });
 
 test("free_cash_flow combines one fiscal year only, in one currency, scope, and basis", () => {
