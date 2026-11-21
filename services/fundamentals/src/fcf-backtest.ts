@@ -659,10 +659,14 @@ function trailingGaps(rows: ReadonlyArray<BacktestRow>): string[] {
 }
 
 // Realized growth per share beside the total: what buybacks added that required growth leaves out.
+// Every median is over the same rows, so a row with no d leaves all four.
 function buybacks(rows: ReadonlyArray<BacktestRow>): string {
-  const both = rows.filter((row): row is ReadRow => row.kind === "read" && row.period === null && value(row.realized.fcf) !== null && value(row.realized.per_share) !== null);
-  const medianOf = (figure: (row: ReadRow) => Figure) => medianText(both.flatMap((row) => value(figure(row)) ?? []));
-  return `- **Buybacks.** ${rowCount(both.length)} have realized growth in total and per share. Median a year: total ${medianOf((row) => row.realized.fcf)}, per share ${medianOf((row) => row.realized.per_share)}, realized share change ${medianOf((row) => row.realized.shares)}, d ${medianOf((row) => row.share_change)}.`;
+  const figures = (row: ReadRow) => [row.realized.fcf, row.realized.per_share, row.realized.shares, row.share_change];
+  const realized = rows.filter((row): row is ReadRow => row.kind === "read" && row.period === null && value(row.realized.fcf) !== null && value(row.realized.per_share) !== null);
+  const all = realized.filter((row) => figures(row).every((figure) => value(figure) !== null));
+  const noD = realized.length - all.length;
+  const medianOf = (index: number) => medianText(all.map((row) => value(figures(row)[index]!)!));
+  return `- **Buybacks.** ${rowCount(all.length)} ${all.length === 1 ? "has" : "have"} realized growth in total and per share and a d${noD === 0 ? "" : `; ${noD} more ${noD === 1 ? "has" : "have"} no d`}. Median a year: total ${medianOf(0)}, per share ${medianOf(1)}, realized share change ${medianOf(2)}, d ${medianOf(3)}.`;
 }
 
 const COLUMNS = ["free_cash_flow", "net_cash", "stock_based_compensation", "shares_outstanding", "price", "multiple", "required_growth", "trailing_3y", "trailing_3y_per_share", "trailing_5y", "trailing_5y_per_share", "realized_growth", "realized_per_share", "share_change", "realized_share_change", "price_return"] as const;

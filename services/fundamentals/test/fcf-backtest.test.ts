@@ -264,7 +264,7 @@ test("the summary counts a tie with the required growth and with the hurdle as a
     "    - Middle third: 0 rows.",
     "    - Highest third: 0 rows.",
     // FY2016 to FY2019 have both realized figures; FY2020 is a period_mismatch.
-    "- **Buybacks.** 4 rows have realized growth in total and per share. Median a year: total 7.00%, per share 9.00%, realized share change -2.00%, d 1.00%.",
+    "- **Buybacks.** 4 rows have realized growth in total and per share and a d. Median a year: total 7.00%, per share 9.00%, realized share change -2.00%, d 1.00%.",
   ].join("\n"));
   assert.match(text, /^## Caveats\n\n- Small N\.$/mu);
   assert.match(text, /^\| T \| 2020 \| 2020-01-31 \| 2020-02-01 \|.* \| \*\*period_mismatch\*\* \(FY2021\); trailing_3y: \*\*no_fy_facts\*\*.* \|$/mu);
@@ -317,4 +317,11 @@ test("the gap, trailing minus required, splits the 5-year price return by sign a
     "    - Middle third, gap 2.00 to 2.00 points: 1 row, 0 at or above 10% a year, median 5.00%.",
     "    - Highest third: 0 rows.",
   ]);
+});
+
+test("every buybacks median is over the same rows, so a row with no d leaves all four", () => {
+  // PG FY2020 (2026-11-11 run): both realized measures, and no d.
+  const noD = { ...read(2020, 0.01, 0.3, 0.1), share_change: { kind: "outcome", outcome: "numeric_limit_exceeded", text: "share change" } } as BacktestRow;
+  const text = renderBacktest({ rows: [read(2019, 0.01, 0.05, 0.1), noD], issuers: [] }, { ranOn: "2026-11-21", command: "c", notes: "" });
+  assert.match(text, /^- \*\*Buybacks\.\*\* 1 row has realized growth in total and per share and a d; 1 more has no d\. Median a year: total 5\.00%, per share 7\.00%, realized share change -2\.00%, d 1\.00%\.$/mu);
 });
