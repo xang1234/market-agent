@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import {
   DEFAULT_PEER_LIMIT,
   createSqlPeerSetResolver,
@@ -58,7 +59,7 @@ test("resolvePeers query ranks same-industry peers by market cap and excludes th
   // Latest market_cap is picked deterministically (co-dated facts tie-broken).
   assert.match(sql, /order by f\.as_of desc, f\.created_at desc/);
   assert.match(sql, /peer\.industry = primary_issuer\.industry/);
-  assert.match(sql, /peer\.issuer_id <> \$1/);
+  assert.match(sql, /peer\.issuer_id <> primary_issuer\.issuer_id/);
   assert.match(sql, /order by cap\.value_num desc nulls last/);
   assert.match(sql, /limit \$2/);
 });
@@ -74,4 +75,21 @@ test("resolvePeers rejects an invalid issuer id and a non-positive limit", async
   const resolver = createSqlPeerSetResolver(db);
   await assert.rejects(() => resolver.resolvePeers("not-a-uuid"), /issuer_id/);
   await assert.rejects(() => resolver.resolvePeers(PRIMARY, { limit: 0 }), /limit/);
+});
+
+test("resolvePeers for an issuer merged away returns the peers of the issuer it merged into (#705)", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker not available");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "peer-set-merged");
+  const db = await connectedClient(t, databaseUrl);
+  const merged = "4f000000-0000-4000-8000-000000000705";
+  await db.query(
+    `insert into issuers (issuer_id, legal_name, industry) values ($1, 'Primary', 'Semiconductors'), ($2, 'Peer A', 'Semiconductors')`,
+    [PRIMARY, PEER_A],
+  );
+  await db.query(`insert into issuer_merges (dropped_issuer_id, kept_issuer_id) values ($1, $2)`, [merged, PRIMARY]);
+
+  assert.deepEqual(await createSqlPeerSetResolver(db).resolvePeers(merged), [{ kind: "issuer", id: PEER_A }]);
 });

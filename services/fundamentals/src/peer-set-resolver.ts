@@ -30,7 +30,8 @@ export function createSqlPeerSetResolver(db: FundamentalsQueryExecutor): PeerSet
       const { rows } = await db.query<{ issuer_id: string }>(
         `select peer.issuer_id::text as issuer_id
            from issuers peer
-           join issuers primary_issuer on primary_issuer.issuer_id = $1
+           -- An issuer merged away has the peers of the issuer it merged into (#705).
+           join issuers primary_issuer on primary_issuer.issuer_id = current_issuer_id($1::uuid)
            left join lateral (
              select f.value_num
                from facts f
@@ -44,7 +45,7 @@ export function createSqlPeerSetResolver(db: FundamentalsQueryExecutor): PeerSet
               order by f.as_of desc, f.created_at desc
               limit 1
            ) cap on true
-          where peer.issuer_id <> $1
+          where peer.issuer_id <> primary_issuer.issuer_id
             and peer.industry is not null
             and peer.industry = primary_issuer.industry
           order by cap.value_num desc nulls last, peer.issuer_id
