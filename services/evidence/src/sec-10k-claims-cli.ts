@@ -77,9 +77,10 @@ export function checkFiler(html: string, ticker: string, issuerCik: string | nul
   return null;
 }
 
-// A model reply that left an item unread exits 1, so a scheduler reruns it.
+// A model reply that left an item unread exits 1, so a scheduler reruns it, as
+// does a CIK the fill moved to an issuer this run did not queue.
 const needsRerun = (result: { outcome: string; unread?: ReadonlyArray<TenKItem> }) =>
-  result.outcome === "unparseable" || (result.unread?.length ?? 0) > 0;
+  result.outcome === "unparseable" || result.outcome === "cik_moved" || (result.unread?.length ?? 0) > 0;
 
 type CliArgs = { file?: string; accession: string | null; filed: string | null; backfill: boolean; tickers: string[]; limit: number; concurrency: number };
 export function parseCliArgs(args: string[]): CliArgs {
@@ -133,9 +134,11 @@ async function main(): Promise<void> {
       const html = bytes.toString("utf8");
       const warning = checkFiler(html, tickers[0]!, issuer.cik);
       if (warning !== null) console.warn(`${file}: warning: ${warning}`);
-      const cik = filerCik(html) ?? (issuer.cik === null ? null : Number(issuer.cik));
+      const issuerCik = issuer.cik === null ? null : Number(issuer.cik);
+      const cik = filerCik(html) ?? issuerCik;
       const url = accession === null || cik === null ? null : filingIndexUrl({ cik, accession_number: accession });
-      const doc = await storeTenK(deps, { issuerId: issuer.issuer_id, bytes, url, accession, filedDate: filed, retrievedAt: new Date().toISOString() });
+      const doc = await storeTenK(deps, { issuerId: issuer.issuer_id, cik: issuerCik, bytes, url, accession, filedDate: filed, retrievedAt: new Date().toISOString() });
+      if (doc === null) throw new Error(`${tickers[0]} no longer holds CIK ${issuerCik}; stored nothing`);
       const effectiveTime = filed === null ? null : `${filed}T00:00:00Z`;
       const result = await extract10kClaims(deps, { ...doc, issuerId: issuer.issuer_id, html, effectiveTime });
       console.log(resultLine(result, Date.now() - started));
@@ -161,7 +164,7 @@ async function main(): Promise<void> {
             const result = await backfillIssuer10k(deps, { issuerId: issuer.issuer_id, cik: Number(issuer.cik) });
             results.push(result);
             if (needsRerun(result)) failed = true;
-            console.log(`${label}: ${"accession" in result ? `${result.accession} ${resultLine(result, Date.now() - started)}` : "outcome=no_10k"}`);
+            console.log(`${label}: ${"accession" in result ? `${result.accession} ${resultLine(result, Date.now() - started)}` : `outcome=${result.outcome}`}`);
           } catch (error) {
             failed = true;
             results.push({ outcome: "failed" });

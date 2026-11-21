@@ -287,8 +287,9 @@ export function ScreenerWorkspace() {
     }
   }
 
+  // Columns follow the canvas, not the viewport, because the evidence inspector narrows it.
   return (
-    <div className={PAGE_CLASS}>
+    <div className={`@container ${PAGE_CLASS}`}>
       <PageHeader
         title="Screener"
         description="Start from a template or set your own filters, then run and save the screen."
@@ -298,7 +299,7 @@ export function ScreenerWorkspace() {
 
       <form
         onSubmit={handleSubmit}
-        className={`grid gap-4 ${PAGE_PANEL_CLASS} lg:grid-cols-3`}
+        className={`grid gap-4 ${PAGE_PANEL_CLASS} @2xl:grid-cols-3`}
         aria-label="Screener query controls"
       >
         <UniverseControls draft={draft} onChange={setDraft} />
@@ -318,12 +319,12 @@ export function ScreenerWorkspace() {
           fields={FUNDAMENTALS_NUMERIC_FIELDS}
           draft={draft}
           onChange={setDraft}
-          className="lg:col-span-2"
-          fieldsClassName="grid gap-3 sm:grid-cols-2"
+          className="@2xl:col-span-2"
+          fieldsClassName="grid gap-3 @sm:grid-cols-2"
         />
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4 lg:col-span-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4 @2xl:col-span-3">
           <RunStatus status={status} errorMessage={errorMessage} savedMessage={savedMessage} />
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <input
               type="text"
               value={screenName}
@@ -383,7 +384,7 @@ export function ScreenerWorkspace() {
 
 function QueryTemplates({ onApply }: { onApply: (template: QueryTemplate) => void }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" role="group" aria-label="Starter screens">
+    <div className="grid gap-3 @sm:grid-cols-2 @lg:grid-cols-3" role="group" aria-label="Starter screens">
       {QUERY_TEMPLATES.map((template) => (
         <button
           key={template.name}
@@ -407,7 +408,7 @@ function UniverseControls({
   onChange: (next: QueryDraft) => void
 }) {
   return (
-    <fieldset className={`${FIELDSET_CLASS} lg:col-span-3`}>
+    <fieldset className={`${FIELDSET_CLASS} @2xl:col-span-3`}>
       <legend className={`px-1 ${SECTION_LABEL_CLASS}`}>Universe</legend>
       <div className="flex flex-wrap gap-x-8 gap-y-4">
         {UNIVERSE_ENUM_FIELDS.map((spec) => {

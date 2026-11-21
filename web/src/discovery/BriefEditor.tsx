@@ -196,7 +196,7 @@ const GROUP_CLASS = "flex min-w-0 flex-col gap-3";
 const GROUP_LEGEND_CLASS = "mb-2 text-sm font-medium text-fg";
 const ITEM_CLASS = "grid gap-3 rounded-lg border border-line p-3";
 const REMOVE_CLASS = "w-fit text-sm text-muted underline hover:text-fg";
-const ADD_CLASS = "w-fit text-sm font-medium text-accent hover:underline";
+const ADD_CLASS = "w-fit text-sm font-medium text-accent-ink hover:underline";
 
 function Mechanisms({ value, onChange }: { value: Mechanism[]; onChange(value: Mechanism[]): void }) {
   return (

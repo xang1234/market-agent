@@ -68,7 +68,7 @@ function MetricDistribution({ dist, label }: { dist: Distribution; label: string
       <VerticalBars bars={bars} minBarPct={8} ariaLabel={`${label} distribution across shown rows`} />
       <div className="flex justify-between text-[10px] num text-faint">
         <span>{dist.min === null ? '' : dist.min.toFixed(0)}</span>
-        {dist.median !== null ? <span className="text-accent">med {dist.median.toFixed(1)}</span> : null}
+        {dist.median !== null ? <span className="text-accent-ink">med {dist.median.toFixed(1)}</span> : null}
         <span>{dist.maxValue === null ? '' : dist.maxValue.toFixed(0)}</span>
       </div>
     </div>

@@ -30,6 +30,8 @@
   /* brand + semantic */
   --color-accent: #2f7fe0;
   --color-accent-strong: #2563c9;
+  /* Accent for text on a surface or accent-soft fill; the fill accents are below 4.5:1 there. */
+  --color-accent-ink: #2460c4;
   --color-accent-soft: rgba(47, 127, 224, 0.1);
   --color-accent-border: rgba(47, 127, 224, 0.35);
   /* Foreground for text/glyphs sitting on an accent/cyan fill (brand mark,
@@ -75,6 +77,7 @@
 
   --color-accent: #4da3ff;
   --color-accent-strong: #2f7fe0;
+  --color-accent-ink: #4da3ff;
   --color-accent-soft: rgba(77, 163, 255, 0.14);
   --color-accent-border: rgba(77, 163, 255, 0.35);
   --color-cyan: #38d0c8;

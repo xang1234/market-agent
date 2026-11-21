@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { webDevFlags } from '../devFlags'
 import { PAGE_CLASS, PAGE_PANEL_CLASS, PANEL_TITLE_CLASS } from '../ui/pageStyles.ts'
 import { homeCardPath } from '../home/deepLinks.ts'
-import { authenticatedFetch } from '../http/authFetch.ts'
+import { authenticatedFetch, authenticatedJson } from '../http/authFetch.ts'
 import {
   fetchHomeSummary,
   type HomeAgentSummaryRow,
@@ -52,7 +52,13 @@ type ParsedRunActivity = {
   activity: HomeRunActivity
 }
 
-const EMPTY_HOME_ACTIVITIES: ReadonlyArray<HomeRunActivity> = []
+type HomeActivityState = {
+  activities: ReadonlyArray<HomeRunActivity>
+  // Stored activity failed to load, so an empty rail does not mean nothing ran.
+  storedFailed: boolean
+}
+
+const EMPTY_ACTIVITY_STATE: HomeActivityState = { activities: [], storedFailed: false }
 
 export type LoadState =
   | { kind: 'loading' }
@@ -63,24 +69,44 @@ export function HomePage() {
   const { setContent } = useRightRail()
   const { session } = useAuth()
   const userId = session?.userId ?? null
-  const [activityState, setActivityState] = useState<{
-    userId: string | null
-    lastSeq: number | null
-    activities: ReadonlyArray<HomeRunActivity>
-  }>(() => ({ userId: null, lastSeq: null, activities: [] }))
-  const activities = activityState.userId === userId ? activityState.activities : EMPTY_HOME_ACTIVITIES
+  const [activityState, setActivityState] = useState<{ userId: string | null } & HomeActivityState>(
+    () => ({ userId: null, ...EMPTY_ACTIVITY_STATE }),
+  )
+  const { activities, storedFailed } = activityState.userId === userId ? activityState : EMPTY_ACTIVITY_STATE
 
   useEffect(() => {
     setContent(
-      <HomeActivityRail activities={rateLimitActivityStream(activities, { perAgentLimit: 2 })} />,
+      <HomeActivityRail
+        activities={rateLimitActivityStream(activities, { perAgentLimit: 2 })}
+        storedFailed={storedFailed}
+      />,
     )
     return () => setContent(null)
-  }, [activities, setContent])
+  }, [activities, storedFailed, setContent])
 
   useEffect(() => {
     if (userId === null) return
 
     const controller = new AbortController()
+    const update = (change: (state: HomeActivityState) => Partial<HomeActivityState>) =>
+      setActivityState((state) => {
+        const mine = state.userId === userId ? state : { userId, ...EMPTY_ACTIVITY_STATE }
+        return { ...mine, ...change(mine) }
+      })
+    // Agent runs persist their activity from another service, so the rail
+    // starts from what is stored and the stream adds what happens after.
+    authenticatedJson<{ activities: HomeRunActivity[] }>('/v1/run-activities', {
+      userId,
+      credentials: 'same-origin',
+      signal: controller.signal,
+    }).then(
+      (stored) => {
+        if (!controller.signal.aborted) update((state) => ({ activities: mergeActivities(stored.activities, state.activities), storedFailed: false }))
+      },
+      () => {
+        if (!controller.signal.aborted) update(() => ({ storedFailed: true }))
+      },
+    )
     let lastEventId: number | null = null
     void consumeRunActivityStreamWithRetry({
       signal: controller.signal,
@@ -91,14 +117,7 @@ export function HomePage() {
       },
       onEvent: (event) => {
         lastEventId = event.seq
-        setActivityState((current) => ({
-          userId,
-          lastSeq: event.seq,
-          activities: mergeActivities(
-            [event.activity],
-            current.userId === userId ? current.activities : [],
-          ),
-        }))
+        update((state) => ({ activities: mergeActivities([event.activity], state.activities) }))
       },
     })
     return () => controller.abort()
@@ -280,7 +299,7 @@ function FindingRow({ card }: { card: HomeFindingCardSummary }) {
   )
   if (path === null) return body
   return (
-    <Link to={path} className="block hover:text-accent">
+    <Link to={path} className="block hover:text-accent-ink">
       {body}
     </Link>
   )
@@ -423,15 +442,22 @@ function SavedScreensSection({ rows }: { rows: ReadonlyArray<HomeSavedScreenRow>
   )
 }
 
-function HomeActivityRail({ activities }: { activities: ReadonlyArray<HomeRunActivity> }) {
+function HomeActivityRail({
+  activities,
+  storedFailed,
+}: {
+  activities: ReadonlyArray<HomeRunActivity>
+  storedFailed: boolean
+}) {
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-line px-4 py-3 text-xs uppercase tracking-wide text-muted">
         Activity
       </div>
       <div className="flex flex-col gap-3 overflow-auto p-4">
+        {storedFailed ? <p className="text-xs leading-5 text-muted">Couldn't load earlier activity.</p> : null}
         {activities.length === 0 ? (
-          <p className="text-xs leading-5 text-muted">No recent activity.</p>
+          storedFailed ? null : <p className="text-xs leading-5 text-muted">No recent activity.</p>
         ) : (
           activities.map((activity) => (
             <div key={activity.run_activity_id} className="rounded border border-line p-3">

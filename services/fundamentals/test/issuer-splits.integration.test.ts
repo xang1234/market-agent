@@ -4,15 +4,15 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { Pool, PoolClient } from "pg";
 import { bootstrapDatabase, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { GOLDEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
-import { findIssuerSplits, ISSUER_KEYED_ROWS, repairIssuerSplits } from "../src/issuer-splits.ts";
+import { findGoldenListings, findIssuerSplits, ISSUER_KEYED_ROWS, repairIssuerSplits } from "../src/issuer-splits.ts";
 
 const id = (n: number) => `39000000-0000-4000-8000-0000000011${String(n).padStart(2, "0")}`;
 const quiet = { log: () => {} };
 
-async function insertListedIssuer(db: Pool, issuerId: string, name: string, cik: string | null, ticker: string): Promise<void> {
+async function insertListedIssuer(db: Pool, issuerId: string, name: string, cik: string | null, ticker: string, mic = "XNAS"): Promise<void> {
   await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, $2, $3)`, [issuerId, name, cik]);
   await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $1, 'common_stock')`, [issuerId]);
-  await db.query(`insert into listings (instrument_id, mic, ticker, trading_currency, timezone) values ($1, 'XNAS', $2, 'USD', 'America/New_York')`, [issuerId, ticker]);
+  await db.query(`insert into listings (instrument_id, mic, ticker, trading_currency, timezone) values ($1, $3, $2, 'USD', 'America/New_York')`, [issuerId, ticker, mic]);
 }
 
 async function insertSource(db: Pool, provider: string): Promise<string> {
@@ -57,11 +57,11 @@ async function withoutForeignKeys(db: Pool, sql: string, params: unknown[]): Pro
   }
 }
 
-// Returns once n sessions wait on an advisory lock, or once work settles without waiting.
+// Returns once n sessions wait on a lock, or once work settles without waiting. Each test runs its own Postgres.
 async function lockWaiters(db: Pool, n: number, work: Promise<unknown>): Promise<void> {
   let settled = false;
   work.then(() => (settled = true), () => (settled = true));
-  const waiting = async () => (await db.query<{ n: number }>(`select count(*)::int as n from pg_locks where locktype = 'advisory' and not granted`)).rows[0]!.n;
+  const waiting = async () => (await db.query<{ n: number }>(`select count(distinct pid)::int as n from pg_locks where not granted`)).rows[0]!.n;
   while (!settled && (await waiting()) < n) await sleep(20);
 }
 
@@ -176,6 +176,92 @@ test("each split pair merges onto the issuer with the SEC identity, and a rerun 
   assert.deepEqual(await repairIssuerSplits(db, ciks, { log: (line: string) => rerun.push(line) }), { merged: [], skipped: [] }, "a rerun merges nothing");
   assert.deepEqual(rerun, []);
   assert.deepEqual(await identity(db), merged);
+});
+
+// The root DB after #702's repair: golden NVDA and AMD merged into their live issuers, and golden AAPL still lists AAPL.
+async function insertPartlyLiveDataset(db: Pool): Promise<void> {
+  const golden = await insertSource(db, "golden_fixture");
+  await insertListedIssuer(db, GOLDEN_ISSUER_IDS.AAPL, "Apple Inc.", "320193", "AAPL");
+  await insertFact(db, GOLDEN_ISSUER_IDS.AAPL, golden);
+  await insertListedIssuer(db, id(2), "Nvidia Corp", "1045810", "NVDA");
+  await insertFact(db, id(2), golden);
+}
+
+const liveIssuerOf = async (db: Pool, ticker: string) =>
+  (await db.query<{ issuer_id: string }>(`select i.issuer_id::text as issuer_id from listings l join instruments i using (instrument_id) where l.ticker = $1`, [ticker])).rows[0]!.issuer_id;
+
+test("a golden issuer that alone lists its ticker goes live once another golden issuer has (#716)", { timeout: 120_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for issuer split coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fin-issuer-golden-listing");
+  const db = await connectedPool(t, databaseUrl);
+  await insertPartlyLiveDataset(db);
+  // Rule 1 pairs a golden issuer by its own ticker only, so one listing another ticker stays as it is.
+  await insertListedIssuer(db, GOLDEN_ISSUER_IDS.AMD, "Advanced Micro Devices, Inc.", null, "AMD.WS");
+  const ciks = new Map([["AAPL", "320193"], ["NVDA", "1045810"]]);
+
+  assert.deepEqual(await findGoldenListings(db), [{ issuer_id: GOLDEN_ISSUER_IDS.AAPL, legal_name: "Apple Inc.", ticker: "AAPL" }]);
+  assert.deepEqual(await findIssuerSplits(db, ciks), []);
+
+  const lines: string[] = [];
+  assert.equal((await repairIssuerSplits(db, ciks, { log: (line: string) => lines.push(line) })).merged.length, 1);
+  const live = await liveIssuerOf(db, "AAPL");
+  assert.deepEqual(lines, [
+    `moved AAPL off golden issuer ${GOLDEN_ISSUER_IDS.AAPL} (Apple Inc.) onto new issuer ${live}`,
+    `merged issuer ${GOLDEN_ISSUER_IDS.AAPL} (Apple Inc.) into ${live} (Apple Inc.): golden issuer of AAPL`,
+  ]);
+  // The new issuer takes the golden one's name, CIK and figures, as NVIDIA's live issuer did.
+  const repaired = await identity(db);
+  assert.deepEqual(repaired, [
+    { ticker: "AAPL", issuer_id: live, legal_name: "Apple Inc.", former_names: [], cik: "320193" },
+    { ticker: "AMD.WS", issuer_id: GOLDEN_ISSUER_IDS.AMD, legal_name: "Advanced Micro Devices, Inc.", former_names: [], cik: null },
+    { ticker: "NVDA", issuer_id: id(2), legal_name: "Nvidia Corp", former_names: [], cik: "1045810" },
+  ]);
+  const { rows: facts } = await db.query<{ issuer_id: string }>(`select subject_id::text as issuer_id from facts where invalidated_at is null`);
+  assert.deepEqual(facts.map((fact) => fact.issuer_id).sort(), [id(2), live].sort());
+
+  assert.deepEqual(await findGoldenListings(db), []);
+  assert.deepEqual(await findIssuerSplits(db, ciks), []);
+  const rerun: string[] = [];
+  assert.deepEqual(await repairIssuerSplits(db, ciks, { log: (line: string) => rerun.push(line) }), { merged: [], skipped: [] }, "a rerun merges nothing");
+  assert.deepEqual(rerun, []);
+  assert.deepEqual(await identity(db), repaired);
+});
+
+test("a golden issuer whose ticker a live issuer also lists merges into it, and the rest go live", { timeout: 120_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for issuer split coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fin-issuer-golden-listing-run");
+  const db = await connectedPool(t, databaseUrl);
+  await insertListedIssuer(db, GOLDEN_ISSUER_IDS.NVDA, "NVIDIA Corporation", "1045810", "NVDA");
+  await insertListedIssuer(db, GOLDEN_ISSUER_IDS.AMD, "Advanced Micro Devices, Inc.", "2488", "AMD");
+  await insertListedIssuer(db, GOLDEN_ISSUER_IDS.AAPL, "Apple Inc.", "320193", "AAPL");
+  // A CIK-less issuer lists AMD on another exchange beside the golden one, so rule 1 merges golden AMD into it.
+  await insertListedIssuer(db, id(10), "Advanced Micro Devices", null, "AMD", "XNYS");
+  const ciks = new Map([["NVDA", "1045810"], ["AMD", "2488"], ["AAPL", "320193"]]);
+
+  assert.deepEqual(await findGoldenListings(db), [
+    { issuer_id: GOLDEN_ISSUER_IDS.AAPL, legal_name: "Apple Inc.", ticker: "AAPL" },
+    { issuer_id: GOLDEN_ISSUER_IDS.NVDA, legal_name: "NVIDIA Corporation", ticker: "NVDA" },
+  ]);
+  const lines: string[] = [];
+  assert.equal((await repairIssuerSplits(db, ciks, { log: (line: string) => lines.push(line) })).merged.length, 3);
+  const [aapl, nvda] = [await liveIssuerOf(db, "AAPL"), await liveIssuerOf(db, "NVDA")];
+  assert.deepEqual(lines, [
+    `moved AAPL off golden issuer ${GOLDEN_ISSUER_IDS.AAPL} (Apple Inc.) onto new issuer ${aapl}`,
+    `moved NVDA off golden issuer ${GOLDEN_ISSUER_IDS.NVDA} (NVIDIA Corporation) onto new issuer ${nvda}`,
+    `merged issuer ${GOLDEN_ISSUER_IDS.AMD} (Advanced Micro Devices, Inc.) into ${id(10)} (Advanced Micro Devices): golden issuer of AMD`,
+    `merged issuer ${GOLDEN_ISSUER_IDS.AAPL} (Apple Inc.) into ${aapl} (Apple Inc.): golden issuer of AAPL`,
+    `merged issuer ${GOLDEN_ISSUER_IDS.NVDA} (NVIDIA Corporation) into ${nvda} (NVIDIA Corporation): golden issuer of NVDA`,
+  ]);
+  assert.deepEqual(await findGoldenListings(db), []);
+  assert.deepEqual(await findIssuerSplits(db, ciks), []);
+  const { rows: [left] } = await db.query<{ n: number }>(`select count(*)::int as n from issuers where issuer_id = any($1::uuid[])`, [Object.values(GOLDEN_ISSUER_IDS)]);
+  assert.equal(left!.n, 0);
 });
 
 test("a merge moves every row keyed by the merged issuer, the kept issuer's own row wins a clash, and the newest download date is kept", { timeout: 120_000 }, async (t) => {
@@ -576,6 +662,7 @@ test("a fresh frozen stack's golden issuers, each listing its own ticker, merge 
   const ciks = new Map([["NVDA", "1045810"], ["AMD", "2488"], ["AAPL", "320193"]]);
   const before = await identity(db);
 
+  assert.deepEqual(await findGoldenListings(db), []);
   assert.deepEqual(await findIssuerSplits(db, ciks), []);
   assert.deepEqual(await repairIssuerSplits(db, ciks, quiet), { merged: [], skipped: [] });
   assert.deepEqual(await identity(db), before);
@@ -657,4 +744,35 @@ test("a merged issuer's id names the issuer it merged into, through a later merg
     // An id no merge names is its own.
     { id: id(4), current: id(4) },
   ]);
+});
+
+test("two repairs at once give a golden listing one new issuer", { timeout: 120_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for issuer split coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fin-issuer-golden-listing-twice");
+  const db = await connectedPool(t, databaseUrl);
+  await insertPartlyLiveDataset(db);
+  const ciks = new Map([["AAPL", "320193"], ["NVDA", "1045810"]]);
+  const writer = await db.connect();
+  let repairs: Promise<Array<{ merged: unknown[] }>>;
+  try {
+    await writer.query("begin");
+    await writer.query("select 1 from issuers where issuer_id = $1 for update", [GOLDEN_ISSUER_IDS.AAPL]);
+    const first = repairIssuerSplits(db, ciks, quiet);
+    await lockWaiters(db, 1, first);
+    const second = repairIssuerSplits(db, ciks, quiet);
+    repairs = Promise.all([first, second]);
+    await lockWaiters(db, 2, repairs);
+    await writer.query("commit");
+  } finally {
+    writer.release();
+  }
+
+  assert.deepEqual((await repairs).map(({ merged }) => merged.length).sort(), [0, 1]);
+  assert.deepEqual(
+    (await identity(db)).map(({ ticker, legal_name }) => ({ ticker, legal_name })),
+    [{ ticker: "AAPL", legal_name: "Apple Inc." }, { ticker: "NVDA", legal_name: "Nvidia Corp" }],
+  );
 });

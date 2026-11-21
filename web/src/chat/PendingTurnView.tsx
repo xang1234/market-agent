@@ -142,7 +142,7 @@ function StreamedTurn({ phase, runId, stream, blocks, messages, children }: { ph
 function StartingLine(): ReactElement {
   return (
     <p className="flex items-center gap-2 text-sm text-muted">
-      <LoaderCircle aria-hidden="true" className="size-4 shrink-0 text-accent motion-safe:animate-spin" />
+      <LoaderCircle aria-hidden="true" className="size-4 shrink-0 text-accent-ink motion-safe:animate-spin" />
       <span className="live-shine">Starting…</span>
     </p>
   )

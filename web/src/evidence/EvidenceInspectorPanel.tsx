@@ -35,7 +35,7 @@ const DATE_ROWS: ReadonlyArray<readonly [label: string, shown: string]> = [
   ['Retrieved', 'Retrieved'],
 ]
 
-const LINK_CLASS = 'text-accent-strong underline underline-offset-2 dark:text-accent'
+const LINK_CLASS = 'text-accent-ink underline underline-offset-2'
 
 /**
  * The inspector docked beside the main column. It shows the top page of the
@@ -217,7 +217,7 @@ function PageSections({ subtitle, badges, rows, links, snapshot_id, related_refs
                 title={link.href}
                 className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-line-strong px-3 py-2 hover:bg-surface-2"
               >
-                <span className="shrink-0 text-sm font-medium text-accent-strong dark:text-accent">{link.label} <span aria-hidden="true">↗</span></span>
+                <span className="shrink-0 text-sm font-medium text-accent-ink">{link.label} <span aria-hidden="true">↗</span></span>
                 <span className="min-w-0 truncate text-xs text-muted">{link.href.replace(/^https?:\/\//u, '')}</span>
               </a>
             </li>

@@ -3,8 +3,10 @@
 // reference import carries no CIK, so it makes one issuer per name, GOOG's
 // "Alphabet Inc" apart from GOOGL's "Alphabet Inc. Class A Common Stock". The
 // CIK fill then gives the CIK to one of them. Each run follows that fill
-// (scripts/dev-shell.sh reference-import). --census lists the merges and
-// writes nothing.
+// (scripts/dev-shell.sh reference-import). A golden issuer that alone lists
+// its own ticker, once the frozen dataset is partly live, first moves the
+// listing onto a new issuer and then merges into it (#716). --census lists
+// the merges and writes nothing.
 //
 //   DATABASE_URL=... npm run repair:issuer-splits -- --file company_tickers.json [--census]
 //
@@ -21,6 +23,8 @@ import { type TransactionalQueryExecutor, withPinnedTransaction } from "./pinned
 import { retireGoldenFacts } from "./sec-facts-repository.ts";
 
 export type IssuerSplit = { keep: string; keep_name: string; drop: string; drop_name: string; basis: string };
+export type GoldenListing = { issuer_id: string; legal_name: string; ticker: string };
+type MovedListing = GoldenListing & { live: string };
 export type SkippedSplit = IssuerSplit & { constraint: string };
 type Queryable = Pick<TransactionalQueryExecutor, "query">;
 
@@ -146,19 +150,65 @@ export async function findIssuerSplits(db: Queryable, ciks: ReadonlyMap<string, 
 }
 
 /**
- * Merges every split in one transaction, rereading after each merge, since a
- * kept issuer can be another split's merged one. A split whose rows clash
- * where the merge cannot combine them stays apart, reported, and the rest
- * still merge. Then stores each CIK without leading zeros, as every lookup by
- * CIK writes it, unless a split left apart holds it too. The golden seed once
- * wrote them with zeros.
+ * Each golden issuer that alone lists its own ticker, once another golden
+ * issuer does not. The frozen dataset is then partly live, as on a database
+ * where rule 1 merged golden NVDA and AMD into their live issuers, so the rest
+ * goes live too (#716). A golden issuer whose ticker a live issuer also lists
+ * is rule 1's, so no merge changes which golden issuers these are. A fresh
+ * frozen stack's golden issuers each alone list their own ticker, and stay
+ * frozen.
+ */
+export async function findGoldenListings(db: Queryable): Promise<GoldenListing[]> {
+  const golden = Object.entries(GOLDEN_ISSUER_IDS);
+  const { rows } = await db.query<GoldenListing>(
+    `with listed as (
+       select distinct i.issuer_id, l.ticker
+         from instruments i join listings l on l.instrument_id = i.instrument_id
+        where l.active_to is null and l.mic = any($3::text[]) and l.ticker = any($1::text[])
+     ), held as (
+       select iss.issuer_id::text as issuer_id, iss.legal_name, g.ticker
+         from unnest($1::text[], $2::uuid[]) as g(ticker, issuer_id)
+         join issuers iss on iss.issuer_id = g.issuer_id
+        where (select array_agg(listed.issuer_id) from listed where listed.ticker = g.ticker) = array[g.issuer_id]
+     )
+     select * from held where (select count(*) from held) < cardinality($1::text[]) order by ticker`,
+    [golden.map(([ticker]) => ticker), golden.map(([, id]) => id), US_EQUITY_MICS],
+  );
+  return rows;
+}
+
+// Moves each golden listing onto a new issuer of the golden issuer's name, which rule 1 then merges the golden issuer into.
+async function moveGoldenListings(db: Queryable): Promise<MovedListing[]> {
+  const moved: MovedListing[] = [];
+  for (const listing of await findGoldenListings(db)) {
+    // A repair beside this one that moved it first holds this lock until it has merged the golden issuer away.
+    const { rows: [locked] } = await db.query(`select 1 from issuers where issuer_id = $1::uuid for update`, [listing.issuer_id]);
+    if (!locked) continue;
+    const { rows: [live] } = await db.query<{ issuer_id: string }>(
+      `insert into issuers (legal_name) values ($1) returning issuer_id::text as issuer_id`,
+      [listing.legal_name],
+    );
+    await db.query(`update instruments set issuer_id = $1::uuid where issuer_id = $2::uuid`, [live!.issuer_id, listing.issuer_id]);
+    moved.push({ ...listing, live: live!.issuer_id });
+  }
+  return moved;
+}
+
+/**
+ * Moves each golden listing onto a new issuer, then merges every split in one
+ * transaction, rereading after each merge, since a kept issuer can be another
+ * split's merged one. A split whose rows clash where the merge cannot combine
+ * them stays apart, reported, and the rest still merge. Then stores each CIK
+ * without leading zeros, as every lookup by CIK writes it, unless a split left
+ * apart holds it too. The golden seed once wrote them with zeros.
  */
 export async function repairIssuerSplits(
   db: TransactionalQueryExecutor,
   ciks: ReadonlyMap<string, string>,
   out: Pick<Console, "log"> = console,
 ): Promise<{ merged: IssuerSplit[]; skipped: SkippedSplit[] }> {
-  const { merged, skipped, stored } = await withPinnedTransaction(db, async (tx) => {
+  const { moved, merged, skipped, stored } = await withPinnedTransaction(db, async (tx) => {
+    const moved = await moveGoldenListings(tx);
     const merged: IssuerSplit[] = [];
     const skipped: SkippedSplit[] = [];
     const next = async () => (await findIssuerSplits(tx, ciks)).find((split) => !skipped.some(({ drop }) => drop === split.drop));
@@ -180,8 +230,9 @@ export async function repairIssuerSplits(
           and not exists (select 1 from issuers other where other.issuer_id <> iss.issuer_id and ltrim(other.cik, '0') = ltrim(iss.cik, '0'))
         returning iss.issuer_id::text as issuer_id, iss.legal_name, old.cik as padded, iss.cik`,
     );
-    return { merged, skipped, stored };
+    return { moved, merged, skipped, stored };
   });
+  for (const listing of moved) out.log(`moved ${listing.ticker} off golden issuer ${listing.issuer_id} (${listing.legal_name}) onto new issuer ${listing.live}`);
   for (const split of merged) out.log(`merged issuer ${split.drop} (${split.drop_name}) into ${split.keep} (${split.keep_name}): ${split.basis}`);
   for (const split of skipped) {
     out.log(`skipped issuer ${split.drop} (${split.drop_name}) into ${split.keep} (${split.keep_name}): ${split.basis}; both hold a row under ${split.constraint}`);
@@ -267,9 +318,11 @@ async function main(): Promise<void> {
   try {
     if (values.census) {
       const splits = await findIssuerSplits(pool, ciks);
+      const golden = await findGoldenListings(pool);
       for (const split of splits) console.log([split.drop, split.drop_name, "->", split.keep, split.keep_name, split.basis].join("\t"));
+      for (const listing of golden) console.log([listing.issuer_id, listing.legal_name, "->", "new issuer", listing.legal_name, `golden issuer of ${listing.ticker}`].join("\t"));
       const { rows: [padded] } = await pool.query<{ n: number }>(`select count(*)::int as n from issuers where cik like '0%' and ltrim(cik, '0') <> ''`);
-      console.log(`issuer-splits: ${splits.length} to merge, ${padded!.n} CIKs to store without leading zeros`);
+      console.log(`issuer-splits: ${splits.length + golden.length} to merge, ${padded!.n} CIKs to store without leading zeros`);
     } else {
       const { merged, skipped } = await repairIssuerSplits(pool, ciks);
       console.log(`issuer-splits: merged=${merged.length} skipped=${skipped.length}`);

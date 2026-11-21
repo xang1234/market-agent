@@ -51,7 +51,7 @@ export function SidebarNav({ compact = false }: { compact?: boolean }) {
                 ? 'grid h-9 w-9 place-items-center rounded-md transition-colors'
                 : 'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors',
               isActive
-                ? 'bg-accent-soft text-accent shadow-[inset_0_0_0_1px_var(--color-accent-border)]'
+                ? 'bg-accent-soft text-accent-ink shadow-[inset_0_0_0_1px_var(--color-accent-border)]'
                 : 'text-muted hover:bg-surface-hover hover:text-fg',
             ].join(' ')
           }

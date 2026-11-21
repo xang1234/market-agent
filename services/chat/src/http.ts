@@ -28,6 +28,7 @@ import {
 } from "./threads-repo.ts";
 import {
   createRunActivityHub,
+  listRecentRunActivities,
   type RunActivitySseEvent,
   type RunActivityHub,
 } from "../../observability/src/run-activity.ts";
@@ -111,6 +112,11 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
 
   return createServer(async (req, res) => {
     if (threadsDb && (await tryHandleThreadsRequest(threadsDb, req, res, coordinator, options.auth))) {
+      return;
+    }
+
+    if (threadsDb && matchRecentRunActivitiesRoute(req.method ?? "GET", req.url ?? "/")) {
+      await handleRecentRunActivitiesRequest(threadsDb, req, res, options.auth);
       return;
     }
 
@@ -253,6 +259,28 @@ async function callerMayUseThread(
       return false;
     }
     throw error;
+  }
+}
+
+const RECENT_RUN_ACTIVITY_LIMIT = 50;
+
+async function handleRecentRunActivitiesRequest(
+  db: ChatThreadsDb,
+  req: IncomingMessage,
+  res: ServerResponse,
+  auth: RequestAuthConfig = {},
+) {
+  const userId = readAuthenticatedUserId(req, auth);
+  if (userId === null) {
+    respondJson(res, 401, { error: authenticatedUserRequiredMessage(auth) });
+    return;
+  }
+  try {
+    const rows = await listRecentRunActivities(db, userId, RECENT_RUN_ACTIVITY_LIMIT);
+    respondJson(res, 200, { activities: rows.map((row) => ({ ...row, ts: row.ts.toISOString() })) });
+  } catch (error) {
+    console.error("recent run activities request failed", error);
+    respondJson(res, 500, { error: "internal run activities error" });
   }
 }
 
@@ -415,6 +443,10 @@ function matchStopRoute(method: string, rawUrl: string): { threadId: string; run
   } catch {
     return INVALID_STREAM_ROUTE;
   }
+}
+
+function matchRecentRunActivitiesRoute(method: string, rawUrl: string): boolean {
+  return method === "GET" && new URL(rawUrl, "http://localhost").pathname === "/v1/run-activities";
 }
 
 function matchRunActivityStreamRoute(method: string, rawUrl: string): boolean {

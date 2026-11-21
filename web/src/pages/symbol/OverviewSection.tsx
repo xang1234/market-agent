@@ -61,10 +61,12 @@ export function OverviewSection() {
     currency: quote?.currency ?? priceSeries?.currency ?? 'USD',
   })
 
+  // Columns follow the canvas, not the viewport, because the evidence inspector and the
+  // right rail narrow it.
   return (
     <div
       data-testid="section-overview"
-      className={SECTION_STACK_CLASS}
+      className={`@container ${SECTION_STACK_CLASS}`}
     >
       <Card
         testId="overview-performance"
@@ -101,7 +103,7 @@ export function OverviewSection() {
       {stats.status === 'ready' && stats.refreshError !== null && (
         <RefreshFailedNote noun="key stats" error={stats.refreshError} />
       )}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+      <div className="grid gap-4 @2xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
         <Card testId="overview-profile" headingId="overview-profile-heading" heading="Company profile">
           <FetchStateView
             state={profile}
@@ -150,7 +152,7 @@ export function OverviewSection() {
 
 function ProfileBody({ profile }: { profile: IssuerProfile }) {
   return (
-    <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+    <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm @sm:grid-cols-2">
       <ProfileRow label="Legal name" value={profile.legal_name} />
       {profile.sector && (
         <div className="flex flex-col">
@@ -165,7 +167,7 @@ function ProfileBody({ profile }: { profile: IssuerProfile }) {
       {profile.cik && <ProfileRow label="CIK" value={profile.cik} mono />}
       {profile.lei && <ProfileRow label="LEI" value={profile.lei} mono />}
       {profile.exchanges.length > 0 && (
-        <div className="sm:col-span-2">
+        <div className="@sm:col-span-2">
           <ProfileLabel>Listed on</ProfileLabel>
           <ul className="mt-1 flex flex-wrap gap-2">
             {profile.exchanges.map((exchange) => (
@@ -175,7 +177,7 @@ function ProfileBody({ profile }: { profile: IssuerProfile }) {
         </div>
       )}
       {profile.former_names.length > 0 && (
-        <div className="sm:col-span-2">
+        <div className="@sm:col-span-2">
           <ProfileLabel>Former names</ProfileLabel>
           <p className="mt-1 text-fg">{profile.former_names.join(', ')}</p>
         </div>

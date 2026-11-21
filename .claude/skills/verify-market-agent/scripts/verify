@@ -159,7 +159,7 @@ cmd_import() {
   PATH="$NODE_APP:$PATH" caffeinate -ims "$ROOT/scripts/dev-shell.sh" reference-import "$@" > "$log" 2>&1 || code=$?
   line="$(grep '^weekly-reference' "$log" | tail -1 || true)"
   echo "$line"
-  grep -E '^(fill-ciks|issuer-splits|merged issuer|skipped issuer)' "$log" || true
+  grep -E '^(fill-ciks|issuer-splits|moved|merged issuer|skipped issuer)' "$log" || true
   echo "log: $log"
   if [[ "$code" != "0" ]]; then
     tail -5 "$log" >&2
@@ -257,6 +257,15 @@ cmd_analyze_layout() {
   mkdir -p "$EVIDENCE"
   PATH="$NODE_APP:$PATH" ROOT="$ROOT" WEB_URL="$WEB_URL" LISTING_ID="$listing" OUT="$EVIDENCE/analyze-layout-$ticker-$(stamp)" \
     node "$HERE/analyze-layout.mjs"
+}
+
+# page-layout [TICKER]: opens the inspector from the newest stored memo, or generates one.
+cmd_page_layout() {
+  local ticker="${1:-NVDA}" listing
+  listing="$(resolved_listing "$ticker")" || return 1
+  mkdir -p "$EVIDENCE"
+  PATH="$NODE_APP:$PATH" ROOT="$ROOT" WEB_URL="$WEB_URL" LISTING_ID="$listing" OUT="$EVIDENCE/page-layout-$ticker-$(stamp)" \
+    node "$HERE/page-layout.mjs"
 }
 
 # agents [TICKER] [--stored] [--conditions=FILE]: --stored opens the subject's newest
@@ -386,11 +395,12 @@ case "${1:-}" in
   restatements) shift; cmd_restatements "$@" ;;
   memo) shift; cmd_memo "$@" ;;
   analyze-layout) shift; cmd_analyze_layout "$@" ;;
+  page-layout) shift; cmd_page_layout "$@" ;;
   agents) shift; cmd_agents "$@" ;;
   lease-race) shift; cmd_lease_race "$@" ;;
   chat) shift; cmd_chat "$@" ;;
   scroll) shift; cmd_scroll "$@" ;;
   scorecard) shift; cmd_scorecard "$@" ;;
   suite) shift; cmd_suite "$@" ;;
-  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|fill-ciks|splits [--repair]|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|analyze-layout [TICKER]|agents [TICKER] [--stored] [--conditions=FILE]|lease-race [run-now|scheduled] [--thesis]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
+  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|fill-ciks|splits [--repair]|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|analyze-layout [TICKER]|page-layout [TICKER]|agents [TICKER] [--stored] [--conditions=FILE]|lease-race [run-now|scheduled] [--thesis]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
 esac

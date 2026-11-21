@@ -262,6 +262,7 @@ test("a labeled heading may set its label apart from its title, and close with a
   for (const [heading, opening] of [
     ["<span>ITEM 1A.  </span><span>I  </span><span>Risk Factors</span>", "ITEM 1A. I Risk Factors risk"],
     ["Item No. 1A - Risk Factors", "Item No. 1A - Risk Factors risk"],
+    ["Item 1A. Risk Factors 2025", "Item 1A. Risk Factors 2025 risk"],
     ["ITEM 1A. RISK FACTORS (dollars in millions, except per share amounts)", "ITEM 1A. RISK FACTORS (dollars in millions, except per share amounts) risk"],
   ]) {
     const sections = tenKSections(tenK(`<div>${heading}</div>`, "<div>Item 1B. Unresolved Staff Comments</div>"));
@@ -270,8 +271,8 @@ test("a labeled heading may set its label apart from its title, and close with a
   }
 });
 
-test("a contents entry that closes with its page number in parentheses heads nothing, though a long preface follows it", () => {
-  for (const page of ["(9)", "(page 9)", "(Pages 9-21)", "(p. 9)", "(pp. 9-21)"]) {
+test("a contents entry that closes with its page number heads nothing, though a long preface follows it", () => {
+  for (const page of ["(9)", "(page 9)", "(Pages 9-21)", "(p. 9)", "(pp. 9-21)", "9", "9-21", "........ 9", "Page 9"]) {
     const html = [
       `<div>Item 1. Business (3)</div><div>Item 1A. Risk Factors ${page}</div>${paragraphs("preface", 50)}`,
       `<div>Item 1. Business</div>${paragraphs("business", 30)}<div>Item 1A. Risk Factors</div>${paragraphs("risk", 30)}`,
