@@ -66,7 +66,7 @@ test("each FY 10-K's required growth, realized growth and price return, as of it
   const summary = run.rows.flatMap((row) => row.kind === "unread" ? [] : [[
     row.fiscal_year, row.filed, row.inputs.as_of,
     row.inputs.figures.free_cash_flow.text, row.inputs.figures.shares_outstanding.text,
-    text(row.price), text(row.required_growth), text(row.realized_fcf_cagr), text(row.share_change), text(row.realized_share_change), text(row.price_return),
+    text(row.price), text(row.required_growth), text(row.realized.fcf), text(row.share_change), text(row.realized.shares), text(row.price_return),
   ]]);
   assert.deepEqual(summary.find((row) => row[0] === 2017), [
     2017, "2018-02-15", "2018-02-16", "1100000000", "100000000",
@@ -92,8 +92,21 @@ test("each FY 10-K's required growth, realized growth and price return, as of it
   assert.deepEqual(run.issuers, [{ ticker: "NONE", outcome: "subject_unresolved", text: "0 active US common-stock listings" }]);
   assert.match(
     renderBacktest(run, { ranOn: "2026-11-11", command: "npm run backtest:fcf -- --tickers HIST,NONE", notes: "" }),
-    /^\| HIST \| 2017 \| 2018-02-15 \| 2018-02-16 \| 1100000000 \| 200000000 \| 50000000 \| 100000000 \| 115\.449 \(2018-02-16, dev close, never certified\) \| 10\.31x \| 0\.7% \| 7\.78% \| 0\.43% \| 0\.00% \| 12\.00%, at or above \| {2}\|$/mu,
+    /^\| HIST \| 2017 \| 2018-02-15 \| 2018-02-16 \| 1100000000 \| 200000000 \| 50000000 \| 100000000 \| 115\.449 \(2018-02-16, dev close, never certified\) \| 10\.31x \| 0\.7% \| n\/a \| n\/a \| n\/a \| n\/a \| 7\.78% \| 7\.78% \| 0\.43% \| 0\.00% \| 12\.00%, at or above \| FY-3: \*\*no_fy_facts\*\* \(No SEC facts labeled FY2014 on file\.\); FY-5: \*\*no_fy_facts\*\* \(No SEC facts labeled FY2012 on file\.\) \|$/mu,
   );
+  // Free cash flow is 900M in FY2015 and 100M more each year after. FY2020's 3-year base is FY2017 as first filed,
+  // 1,100M, not the 1,150M the FY2018 10-K restated it to: (14 / 11)^(1/3) - 1, where the restated figure gives 6.78%.
+  const trailing = (fiscalYear: number) => {
+    const row = run.rows.find((entry) => entry.fiscal_year === fiscalYear);
+    return row?.kind === "read" ? [3, 5].map((years) => text(row.trailing[years as 3 | 5].fcf)) : [];
+  };
+  assert.deepEqual([trailing(2018), trailing(2020)], [
+    ["10.06%", "no_fy_facts: No SEC facts labeled FY2013 on file."],
+    ["8.37%", "9.24%"],
+  ]);
+  // FY2015's 100M shares are 200M after the 2020 split, as FY2020's are, so per share is the total.
+  const fy2020 = run.rows.find((entry) => entry.fiscal_year === 2020);
+  assert.deepEqual(fy2020?.kind === "read" && [text(fy2020.trailing[5].per_share), text(fy2020.trailing[5].shares)], ["9.24%", "0.00%"]);
   for (const row of run.rows) if (row.kind === "read") assertPublicByFilingDate(row.inputs);
 });
 
