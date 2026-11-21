@@ -11,7 +11,7 @@ export function KeyStatsGrid({ cells }: { cells: ReadonlyArray<KeyStatCell> }): 
   return (
     <dl
       data-testid="key-stats-grid"
-      className="grid grid-cols-2 overflow-hidden rounded-lg border border-line bg-surface sm:grid-cols-3 lg:grid-cols-6"
+      className="grid grid-cols-2 overflow-hidden rounded-lg border border-line bg-surface @sm:grid-cols-3 @2xl:grid-cols-6"
     >
       {cells.map((cell) => (
         <div
