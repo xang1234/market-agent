@@ -136,6 +136,17 @@ test("a missing free cash flow at either end of any window is named, and the sha
   assert.match(renderBacktest({ rows: [own, others], issuers: [] }, { ranOn: "2026-11-21", command: "c", notes: "" }), /FY\+5 free_cash_flow: \*\*missing_input\*\*/u);
 });
 
+test("a growth ratio far below one keeps its precision before the root", () => {
+  // 10 billion to 4,000 over five years: a ratio of 0.0000004, which six decimal places round to zero.
+  const row = backtestRow({
+    ticker: "POW", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
+    base: inputs("2018-02-16", "2017-12-31", "10000000000", "100000000"),
+    later: inputs("2023-02-16", "2022-12-31", "4000", "100000000"),
+    earlier: powers, closes, splits: early,
+  });
+  assert.equal(row.realized.fcf.text, "-94.75%");
+});
+
 test("a zero share count at either end names the share figures and keeps the free cash flow growth", () => {
   const zeroShares = { kind: "outcome", outcome: "non_positive_shares", text: "A share count at one end is zero or negative, so it has no growth rate." };
   for (const [base, later] of [["0", "100000000"], ["161051000", "0"]]) {

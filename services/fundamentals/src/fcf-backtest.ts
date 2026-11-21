@@ -734,7 +734,9 @@ function decimal(text: string) {
 }
 
 const rational = (text: string): ExactRational => rationalFromDecimal(decimal(text))!;
-const toNumber = (value: ExactRational): number => Number(decimalText(value));
+// Relative precision, not six decimal places: a growth ratio of 0.0000004 must not round to zero before its root.
+const decimalNumber = (value: ExactRational["numerator"]): number => Number(value.coefficient) / 10 ** value.scale;
+const toNumber = (value: ExactRational): number => decimalNumber(value.numerator) / decimalNumber(value.denominator);
 
 function decimalText(value: ExactRational): string {
   return canonicalDecimalString(roundRational(value, 6));
