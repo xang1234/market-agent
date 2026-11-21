@@ -15,6 +15,7 @@ import {
   type FinancialUnit,
 } from './types.ts'
 import type { FinancialResultShown } from './financialInspection.ts'
+import { namesConceptScope } from '../../../services/financial-core/src/definitions.ts'
 
 export function supportedFinancialContent(block: FinancialAnswerBlock): FinancialAnswerContent | null {
   const version = block.financial.presentation_version
@@ -102,9 +103,9 @@ function columnName(measure: string): string {
   return `${HORIZON[horizon]} ${subject}${kind === 'change' ? ' change' : ''}`
 }
 
-/** Each measure's column heading, unless two columns would then read alike. */
+/** Each measure's column heading, unless two columns would then read alike, or the measure names a concept scope (#731), which a heading never drops. */
 export function columnNames(measures: ReadonlyArray<string>): string[] {
-  return distinct(measures, columnName)
+  return distinct(measures, columnName).map((name, index) => (namesConceptScope(measures[index]!) ? measures[index]! : name))
 }
 
 /** Each company without its legal suffix ("Apple Inc." reads "Apple"), unless two would then read alike. */

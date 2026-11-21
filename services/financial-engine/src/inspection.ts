@@ -148,9 +148,9 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
       reads_as_multiple: readsAsMultiple(plan, node),
     },
     measure: measureText(plan, node, new Map(inputs.flatMap((input) => {
-      const bound = input.binding_status === "bound" ? input.bound_payload as BoundFinancialInputV1 : null;
-      const scope = bound && "inference" in bound ? conceptScope(bound.inference) : null;
-      return scope ? [[input.input_slot, scope] as const] : [];
+      if (input.binding_status !== "bound") return [];
+      const bound = input.bound_payload as BoundFinancialInputV1;
+      return [[input.input_slot, "inference" in bound ? conceptScope(bound.inference) : null] as const];
     }))),
     definitions: plan.metric_definitions.filter((definition) => metricKeys.has(definition.metric_key)),
     inputs: inputs.map((input): InspectedInput => {

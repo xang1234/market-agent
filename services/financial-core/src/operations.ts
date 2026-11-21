@@ -330,7 +330,9 @@ export function freeCashFlow(node: FreeCashFlowNode, operatingCashFlow: Financia
   if (incompatible) return incompatible;
   if (operatingCashFlow.period.fiscal_period !== "FY" || classifyDuration(operatingCashFlow.period) !== "annual") return operationGap("unsupported_period", "Free cash flow v1 is defined for a fiscal year only.");
   if (rationalSign(capex.value) < 0) {
-    return operationGap("incompatible_definition", "Capex v1 is a nonnegative PP&E cash payment; a negative reported value is not one.");
+    // PP&E's text keeps its result hashes; a scoped capex's measure label names its concept (#731).
+    const payment = capex.measure.concept_scopes.length === 0 ? "PP&E cash payment" : "cash payment";
+    return operationGap("incompatible_definition", `Capex v1 is a nonnegative ${payment}; a negative reported value is not one.`);
   }
   const value = subtractRationals(operatingCashFlow.value, capex.value);
   if (value === null) return operationGap("numeric_limit_exceeded", "Free cash flow exceeds supported numeric limits.");

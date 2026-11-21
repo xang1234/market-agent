@@ -350,12 +350,11 @@ function presentVerifiedUnit(plan: FinancialPlan, records: FinancialUnitRecords,
     if (name === undefined) return null;
     subjectNames[member.slot_id] = name;
   }
-  const facts = [...bindings].flatMap(([slot, binding]) => binding.status === "bound" && binding.input.schema_version !== BOUND_PRICE_INPUT_SCHEMA_VERSION ? [[slot, binding.input] as const] : []);
-  const periods = new Map(facts.map(([slot, input]) => [slot, { fiscal_year: input.period.fiscal_year, fiscal_period: input.period.fiscal_period, end: input.period.end }] as const));
-  const scopes = new Map(facts.flatMap(([slot, input]) => {
-    const scope = conceptScope(input.inference);
-    return scope ? [[slot, scope] as const] : [];
-  }));
+  const bound = [...bindings].flatMap(([slot, binding]) => (binding.status === "bound" ? [[slot, binding.input] as const] : []));
+  const periods = new Map(bound.flatMap(([slot, input]) => input.schema_version !== BOUND_PRICE_INPUT_SCHEMA_VERSION
+    ? [[slot, { fiscal_year: input.period.fiscal_year, fiscal_period: input.period.fiscal_period, end: input.period.end }] as const]
+    : []));
+  const scopes = new Map(bound.map(([slot, input]) => [slot, "inference" in input ? conceptScope(input.inference) : null] as const));
   return presentFinancialUnit({ plan, run_id: records.run.run_id, unit_id: unitId, results, subject_names: subjectNames, periods, concept_scopes: scopes });
 }
 

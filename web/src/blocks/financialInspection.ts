@@ -6,7 +6,7 @@
 // with this exact text beside it.
 
 import { authenticatedJson, type FetchImpl } from '../http/authFetch.ts'
-import { resolveMetricDefinition } from '../../../services/financial-core/src/definitions.ts'
+import { figureLabel } from '../../../services/financial-core/src/definitions.ts'
 import { humanize, MONTHS } from '../evidence/readable.ts'
 
 export const SUPPORTED_INSPECTION_SCHEMA_VERSION = 'financial_result_inspection.v1'
@@ -133,9 +133,9 @@ export function fiscalPeriodText(period: { fiscal_year: number; fiscal_period: s
   return end ? `${name} · ended ${MONTHS[Number(end[2]) - 1]} ${end[1]}` : name
 }
 
-/** A metric as the answer labels it ("EPS (diluted)"); a key the catalog does not know reads in words. */
-export function metricLabel(metricKey: string): string {
-  return resolveMetricDefinition(metricKey)?.label ?? humanize(metricKey)
+/** A metric as the answer labels it ("EPS (diluted)"), in the concept scope its input's inference names (#731); a key the catalog does not know reads in words. */
+export function metricLabel(metricKey: string, inference: Extract<FinancialInspectedInput, { fact_id: string }>['inference']): string {
+  return figureLabel(metricKey, inference) ?? humanize(metricKey)
 }
 
 /** A term as its derivation writes it: signed, except a leading added term. */

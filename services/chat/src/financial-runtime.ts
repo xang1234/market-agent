@@ -17,10 +17,10 @@ import {
   boundPeriodText,
   createRuntimeAuthority,
   dependencyClosure,
+  figureLabel,
   hashCanonical,
   lowercaseUnlessAcronym,
   operationDependencies,
-  resolveMetricDefinition,
   SEC_DERIVATION_LOCATOR,
   type BoundFactInputV1,
   type FinancialAnswerContent,
@@ -1158,8 +1158,8 @@ async function laterFigures(client: SqlExecutor, runId: string, names: ReadonlyM
       where i.run_id = $1 and f.method = 'restated' order by i.input_slot`,
     [runId, SEC_DERIVATION_LOCATOR],
   );
-  const figures = (kept: typeof rows) => [...new Set(kept.map(({ bound_payload: { subject_ref, metric, period } }) => {
-    const measure = lowercaseUnlessAcronym(resolveMetricDefinition(metric.metric_key)?.label ?? metric.metric_key);
+  const figures = (kept: typeof rows) => [...new Set(kept.map(({ bound_payload: { subject_ref, metric, period, inference } }) => {
+    const measure = lowercaseUnlessAcronym(figureLabel(metric.metric_key, inference) ?? metric.metric_key);
     const name = names.get(subject_ref.id.toLowerCase());
     return `${name === undefined ? "" : `${name}'s `}${measure} in ${boundPeriodText(period, period.kind === "instant")}`;
   }))];
