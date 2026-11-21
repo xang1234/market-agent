@@ -280,11 +280,11 @@ test("the summary counts a tie with the required growth and with the hurdle as a
     "- **Realized against required.** 3 rows have both. In 2, realized growth was at or above the required growth, compared unrounded. 1 of the 3 (T FY2016) differs by less than 0.005 points, the required-growth solver's precision, so its side is not settled. The median gap, realized minus required, is 0.00 points.",
     "- **Against the hurdle.** Of the 2 at or above required growth, 2 have a 5-year price return, 2 at or above 10% a year, median 11.00%. Of the 1 below, 1 has a 5-year price return, 0 at or above 10% a year, median 9.99%.",
     ...GAP_LEAD,
-    "  - **3-year gap.** 0 rows, and 0 more with no 5-year price return. At or above 0, 0 rows, 0 at or above 10% a year, median n/a. Below 0, 0 rows, 0 at or above 10% a year, median n/a.",
+    "  - **3-year gap.** 0 rows from 0 issuers, and 0 more with no 5-year price return. At or above 0, 0 rows from 0 issuers, 0 at or above 10% a year, median n/a. Below 0, 0 rows from 0 issuers, 0 at or above 10% a year, median n/a.",
     "    - Lowest third: 0 rows.",
     "    - Middle third: 0 rows.",
     "    - Highest third: 0 rows.",
-    "  - **5-year gap.** 0 rows, and 0 more with no 5-year price return. At or above 0, 0 rows, 0 at or above 10% a year, median n/a. Below 0, 0 rows, 0 at or above 10% a year, median n/a.",
+    "  - **5-year gap.** 0 rows from 0 issuers, and 0 more with no 5-year price return. At or above 0, 0 rows from 0 issuers, 0 at or above 10% a year, median n/a. Below 0, 0 rows from 0 issuers, 0 at or above 10% a year, median n/a.",
     "    - Lowest third: 0 rows.",
     "    - Middle third: 0 rows.",
     "    - Highest third: 0 rows.",
@@ -316,8 +316,9 @@ const GAP_LEAD = ["- **Trailing against required, ex ante.** The gap is trailing
 test("the gap, trailing minus required, splits the 5-year price return by sign and by third, with N for each", () => {
   const rows: BacktestRow[] = [
     // Required 5% each; 3-year gaps -4, -2, -1, 0, +1, +3 and +6 points.
-    read(2016, 0.05, 0.05, 0.02, null, { 3: 0.01, 5: 0.0 }),
-    read(2017, 0.05, 0.05, 0.05, null, { 3: 0.03, 5: 0.07 }),
+    // FY2016 and FY2017 are another issuer's, so a bucket counts its issuers apart from its rows.
+    { ...read(2016, 0.05, 0.05, 0.02, null, { 3: 0.01, 5: 0.0 }), ticker: "A" },
+    { ...read(2017, 0.05, 0.05, 0.05, null, { 3: 0.03, 5: 0.07 }), ticker: "A" },
     read(2018, 0.05, 0.05, 0.08, null, { 3: 0.04 }),
     read(2019, 0.05, 0.05, 0.1, null, { 3: 0.05 }),
     read(2020, 0.05, 0.05, 0.12, null, { 3: 0.06 }),
@@ -332,14 +333,14 @@ test("the gap, trailing minus required, splits the 5-year price return by sign a
   const lines = text.split("\n");
   const from = lines.indexOf(GAP_LEAD[0]!);
   assert.deepEqual(lines.slice(from + 1, from + 9), [
-    "  - **3-year gap.** 7 rows, and 1 more with no 5-year price return. At or above 0, 4 rows, 4 at or above 10% a year, median 13.50%. Below 0, 3 rows, 0 at or above 10% a year, median 5.00%.",
+    "  - **3-year gap.** 7 rows from 2 issuers, and 1 more with no 5-year price return. At or above 0, 4 rows from 1 issuer, 4 at or above 10% a year, median 13.50%. Below 0, 3 rows from 2 issuers, 0 at or above 10% a year, median 5.00%.",
     // Seven rows split 3, 2 and 2, lowest gap first.
-    "    - Lowest third, gap -4.00 to -1.00 points: 3 rows, 0 at or above 10% a year, median 5.00%.",
-    "    - Middle third, gap 0.00 to 1.00 points: 2 rows, 2 at or above 10% a year, median 11.00%.",
-    "    - Highest third, gap 3.00 to 6.00 points: 2 rows, 2 at or above 10% a year, median 17.50%.",
-    "  - **5-year gap.** 2 rows, and 0 more with no 5-year price return. At or above 0, 1 row, 0 at or above 10% a year, median 5.00%. Below 0, 1 row, 0 at or above 10% a year, median 2.00%.",
-    "    - Lowest third, gap -5.00 to -5.00 points: 1 row, 0 at or above 10% a year, median 2.00%.",
-    "    - Middle third, gap 2.00 to 2.00 points: 1 row, 0 at or above 10% a year, median 5.00%.",
+    "    - Lowest third, gap -4.00 to -1.00 points: 3 rows from 2 issuers, 0 at or above 10% a year, median 5.00%.",
+    "    - Middle third, gap 0.00 to 1.00 points: 2 rows from 1 issuer, 2 at or above 10% a year, median 11.00%.",
+    "    - Highest third, gap 3.00 to 6.00 points: 2 rows from 1 issuer, 2 at or above 10% a year, median 17.50%.",
+    "  - **5-year gap.** 2 rows from 1 issuer, and 0 more with no 5-year price return. At or above 0, 1 row from 1 issuer, 0 at or above 10% a year, median 5.00%. Below 0, 1 row from 1 issuer, 0 at or above 10% a year, median 2.00%.",
+    "    - Lowest third, gap -5.00 to -5.00 points: 1 row from 1 issuer, 0 at or above 10% a year, median 2.00%.",
+    "    - Middle third, gap 2.00 to 2.00 points: 1 row from 1 issuer, 0 at or above 10% a year, median 5.00%.",
     "    - Highest third: 0 rows.",
   ]);
 });

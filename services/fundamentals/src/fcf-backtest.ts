@@ -647,9 +647,14 @@ function trailingGaps(rows: ReadonlyArray<BacktestRow>): string[] {
     });
     const priced = gaps.flatMap((entry) => entry.price_return === null ? [] : [{ ...entry, price_return: entry.price_return }])
       .sort((a, b) => a.gap - b.gap || a.row.ticker.localeCompare(b.row.ticker) || a.row.fiscal_year - b.row.fiscal_year);
-    const bucket = (group: typeof priced) => `${rowCount(group.length)}, ${aboveHurdle(group.map((entry) => entry.price_return))}`;
+    // Rows of one issuer move together, so each bucket also counts its issuers.
+    const fromIssuers = (group: typeof priced) => {
+      const issuers = new Set(group.map((entry) => entry.row.ticker)).size;
+      return `${rowCount(group.length)} from ${issuers} issuer${issuers === 1 ? "" : "s"}`;
+    };
+    const bucket = (group: typeof priced) => `${fromIssuers(group)}, ${aboveHurdle(group.map((entry) => entry.price_return))}`;
     const points = (gap: number) => (gap * 100).toFixed(2);
-    lines.push(`  - **${years}-year gap.** ${rowCount(priced.length)}, and ${gaps.length - priced.length} more with no ${HORIZON_YEARS}-year price return. At or above 0, ${bucket(priced.filter((entry) => entry.gap >= 0))}. Below 0, ${bucket(priced.filter((entry) => entry.gap < 0))}.`);
+    lines.push(`  - **${years}-year gap.** ${fromIssuers(priced)}, and ${gaps.length - priced.length} more with no ${HORIZON_YEARS}-year price return. At or above 0, ${bucket(priced.filter((entry) => entry.gap >= 0))}. Below 0, ${bucket(priced.filter((entry) => entry.gap < 0))}.`);
     // Thirds go by rank, so gaps tied across a boundary split by ticker and FY.
     ["Lowest", "Middle", "Highest"].forEach((name, third) => {
       const group = priced.filter((_, index) => Math.floor((3 * index) / priced.length) === third);
