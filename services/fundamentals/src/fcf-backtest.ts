@@ -56,6 +56,7 @@ import { Pool } from "pg";
 import {
   callInputOperations,
   canonicalDecimalString,
+  conceptScope,
   createRuntimeAuthority,
   DEFAULT_CALL_SETTINGS,
   divideRationals,
@@ -71,6 +72,7 @@ import {
   type FinancialPlan,
   type FinancialRuntimeAuthority,
   type IsoDate,
+  type ConceptScopeV1,
   type ValuationInputs,
   type ValuationOutcomeResult,
 } from "../../financial-core/src/index.ts";
@@ -113,6 +115,8 @@ export type AsOfInputs = Readonly<{
   exact: Readonly<Partial<Record<InputId, ExactRational>>>;
   currency: string | null;
   fiscal_year_end: IsoDate | null;
+  /** Present when the bound capex is filed as productive assets (#731). */
+  capex_scope: ConceptScopeV1 | null;
   bound: ReadonlyArray<BoundInput>;
 }>;
 
@@ -272,7 +276,9 @@ export async function inputsAsOf(client: SqlExecutor, issuerId: string, asOf: Is
     }]
     : []);
   const operating = bound.find((input) => input.slot === "operating_cash_flow");
-  return { as_of: asOf, figures, exact, currency, fiscal_year_end: operating?.period_end ?? null, bound };
+  const capex = bindings.get("capex");
+  const capexScope = capex?.status === "bound" && "fact_id" in capex.input ? conceptScope(capex.input.inference) : null;
+  return { as_of: asOf, figures, exact, currency, fiscal_year_end: operating?.period_end ?? null, capex_scope: capexScope, bound };
 }
 
 /**
@@ -371,13 +377,16 @@ function realizedGrowth(base: AsOfInputs, later: AsOfInputs | Absent, splits: Sp
     const [f0, f5] = [amount(base, "free_cash_flow"), amount(later as AsOfInputs, "free_cash_flow")];
     return f0 <= 0 || f5 <= 0 ? outcome("non_positive_base", "Free cash flow at one end is zero or negative, so it has no growth rate.") : annual(f0, f5);
   };
+  // Free cash flow over capex in two scopes is no growth of one measure (#731).
+  const rescoped = (): Figure | null => (base.capex_scope === null) === ((later as AsOfInputs).capex_scope === null) ? null
+    : outcome("incompatible_definition", "Capex is filed as PaymentsToAcquireProductiveAssets at one end and as PP&E at the other, so the two free cash flows do not measure the same spending.");
   const shares = (): Figure => {
     if (splits.status === "gap") return outcome(splits.reason_code, "No split history to put both share counts on one basis.");
     // The engine states each count on its own as-of day's basis; the splits between them restate the earlier one.
     const restatedS0 = amount(base, "shares_outstanding") * toNumber(splitFactor(splits, base.as_of, (later as AsOfInputs).as_of));
     return annual(restatedS0, amount(later as AsOfInputs, "shares_outstanding"));
   };
-  return { fcf: missing("free_cash_flow") ?? fcf(), shares: missing("shares_outstanding") ?? shares() };
+  return { fcf: missing("free_cash_flow") ?? rescoped() ?? fcf(), shares: missing("shares_outstanding") ?? shares() };
 }
 
 // From the close the Call priced to the first close on or after five years after it.

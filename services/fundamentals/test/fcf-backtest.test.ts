@@ -12,7 +12,9 @@ const exact = (text: string): ExactRational => {
   return rationalFromDecimal(parsed.value)!;
 };
 
-function inputs(asOf: string, periodEnd: string, fcf: string, shares: string): AsOfInputs {
+const PRODUCTIVE_ASSETS = { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const;
+
+function inputs(asOf: string, periodEnd: string, fcf: string, shares: string, capexScope: AsOfInputs["capex_scope"] = null): AsOfInputs {
   const figure = (text: string): Figure => ({ kind: "value", value: Number(text), text });
   const values = { free_cash_flow: fcf, net_cash: "200000000", stock_based_compensation: "50000000", shares_outstanding: shares };
   return {
@@ -21,6 +23,7 @@ function inputs(asOf: string, periodEnd: string, fcf: string, shares: string): A
     exact: Object.fromEntries(Object.entries(values).map(([id, text]) => [id, exact(text)])),
     currency: "USD",
     fiscal_year_end: periodEnd,
+    capex_scope: capexScope,
     bound: [
       { slot: "operating_cash_flow", fiscal_year: Number(periodEnd.slice(0, 4)), period_end: periodEnd, public_by: `${asOf}T04:59:59.999Z`, locator: null },
       { slot: "market_cap_shares", fiscal_year: Number(asOf.slice(0, 4)), period_end: asOf, public_by: `${asOf}T04:59:59.999Z`, locator: null },
@@ -78,6 +81,19 @@ test("realized growth is total free cash flow, as required growth is, and buybac
     "0.87%",
     "-4.36%",
   ]);
+});
+
+// CAT filed capex as productive assets through FY2019 and as PP&E from FY2020.
+test("realized growth from free cash flow over productive-assets capex to one over PP&E capex is a named outcome, never a rate (#731)", () => {
+  const row = (base: AsOfInputs["capex_scope"], later: AsOfInputs["capex_scope"]) => backtestRow({
+    ticker: "SWCH", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
+    base: inputs("2018-02-16", "2017-12-31", "1100000000", "100000000", base),
+    later: inputs("2023-02-16", "2022-12-31", "1600000000", "100000000", later),
+    closes, splits: split,
+  });
+  const realized = (figure: Figure) => (figure.kind === "outcome" ? figure.outcome : figure.text);
+  assert.deepEqual([row(PRODUCTIVE_ASSETS, null), row(null, PRODUCTIVE_ASSETS), row(PRODUCTIVE_ASSETS, PRODUCTIVE_ASSETS), row(null, null)].map((one) => one.kind === "read" && realized(one.realized_fcf_cagr)),
+    ["incompatible_definition", "incompatible_definition", "7.78%", "7.78%"]);
 });
 
 test("a missing later 10-K is named once, as FY+5's, for both realized figures", () => {
