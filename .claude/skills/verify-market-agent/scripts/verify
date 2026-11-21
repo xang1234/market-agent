@@ -22,12 +22,17 @@ if [[ "${1:-}" == "init-env" ]]; then
 fi
 
 # The example's default ports may belong to another checkout's stack.
-[[ -f "$ENV_FILE" ]] || { echo "no $ENV_FILE: run init-env first" >&2; exit 2; }
-
-set -a
-# shellcheck disable=SC1090
-. "$ENV_FILE"
-set +a
+# ten-k-sections reads only fixtures, and suite runs each file under env -i,
+# so both run without the file.
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+elif [[ "${1:-}" != "ten-k-sections" && "${1:-}" != "suite" ]]; then
+  echo "no $ENV_FILE: run init-env first" >&2
+  exit 2
+fi
 PG_USER="${DEV_POSTGRES_USER:-postgres}"
 PG_PASSWORD="${DEV_POSTGRES_PASSWORD:-postgres}"
 PG_DB="${DEV_POSTGRES_DB:-market_agent}"
@@ -148,6 +153,31 @@ cmd_identity() {
       diff "$EVIDENCE/identity-$2.txt" <(identity_state) && echo "identity unchanged since $2"
       ;;
     *) echo "usage: identity [save NAME | diff NAME]" >&2; return 2 ;;
+  esac
+}
+
+# ten-k-sections            where each 10-K fixture's Items 1 and 1A open and close
+# ten-k-sections save NAME  store that as evidence
+# ten-k-sections diff NAME  compare with a stored run; exit 1 when a section moved
+cmd_ten_k_sections() {
+  mkdir -p "$EVIDENCE"
+  local read=(env -i PATH="$NODE_APP:$PATH" node --experimental-strip-types --no-warnings "$HERE/ten-k-sections.ts")
+  # Read before writing or comparing, so a failed read exits here and never
+  # saves or matches an empty run.
+  local now
+  case "${1:-}" in
+    "") "${read[@]}" ;;
+    save)
+      [[ -n "${2:-}" ]] || { echo "usage: ten-k-sections save NAME" >&2; return 2; }
+      now="$("${read[@]}")"
+      printf '%s\n' "$now" | tee "$EVIDENCE/ten-k-sections-$2.txt"
+      ;;
+    diff)
+      [[ -f "$EVIDENCE/ten-k-sections-${2:-}.txt" ]] || { echo "no saved ten-k-sections named ${2:-}" >&2; return 2; }
+      now="$("${read[@]}")"
+      diff "$EVIDENCE/ten-k-sections-$2.txt" <(printf '%s\n' "$now") && echo "10-K sections unchanged since $2"
+      ;;
+    *) echo "usage: ten-k-sections [save NAME | diff NAME]" >&2; return 2 ;;
   esac
 }
 
@@ -388,6 +418,7 @@ case "${1:-}" in
   sql) sql "${2:?usage: sql QUERY}" ;;
   resolve) shift; cmd_resolve "$@" ;;
   identity) shift; cmd_identity "$@" ;;
+  ten-k-sections) shift; cmd_ten_k_sections "$@" ;;
   import) shift; cmd_import "$@" ;;
   fill-ciks) cmd_fill_ciks ;;
   splits) shift; cmd_splits "$@" ;;
@@ -402,5 +433,5 @@ case "${1:-}" in
   scroll) shift; cmd_scroll "$@" ;;
   scorecard) shift; cmd_scorecard "$@" ;;
   suite) shift; cmd_suite "$@" ;;
-  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|fill-ciks|splits [--repair]|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|analyze-layout [TICKER]|page-layout [TICKER]|agents [TICKER] [--stored] [--conditions=FILE]|lease-race [run-now|scheduled] [--thesis]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
+  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|ten-k-sections [save|diff NAME]|import [--force]|fill-ciks|splits [--repair]|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|analyze-layout [TICKER]|page-layout [TICKER]|agents [TICKER] [--stored] [--conditions=FILE]|lease-race [run-now|scheduled] [--thesis]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
 esac
