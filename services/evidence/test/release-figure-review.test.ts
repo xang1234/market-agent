@@ -1,12 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
-import { Pool } from "pg";
 
 import { approveFactReview } from "../src/fact-repo.ts";
 import { storeReleaseFigures } from "../src/release-figures.ts";
 import { createEvidenceReviewServer } from "../src/review-http.ts";
-import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { bootstrapDatabase, connectedClient, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 
 const REVIEWER = "00000000-0000-4000-8000-000000000001";
 const QUOTE = "Non-GAAP gross margin is expected to be approximately 54%.";
@@ -25,15 +24,14 @@ async function seedQueuedGuide(client: Awaited<ReturnType<typeof connectedClient
     [QUOTE],
   )).rows[0]!;
   await storeReleaseFigures(client, { documentId: ids.document_id, issuerId: ids.issuer_id, sourceId: ids.source_id, quarterEnd: "2025-06-28", filedOn: "2025-08-05" }, [
-    { kind: "guidance", metric: "gross_margin", quote: QUOTE, claimId: ids.claim_id, raw: { basis: "gaap", value: "54%" }, read: { review: "its sentence does not state a GAAP figure" } },
+    { kind: "guidance", metric: "gross_margin", quote: QUOTE, claimId: ids.claim_id, raw: { basis: "gaap", value: "54%" }, read: { review: 'its sentence does not state "54%" as a GAAP figure' } },
   ]);
   const review = (await client.query<{ review_id: string; candidate: Record<string, unknown> }>(`select review_id::text, candidate from fact_review_queue`)).rows[0]!;
   return { ...ids, ...review };
 }
 
 async function reviewServer(t: test.TestContext, databaseUrl: string) {
-  const pool = new Pool({ connectionString: databaseUrl });
-  t.after(() => pool.end());
+  const pool = await connectedPool(t, databaseUrl);
   const server = createEvidenceReviewServer(pool, { auth: { mode: "dev_user_header", env: {} } });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
@@ -87,4 +85,23 @@ test("a queued release figure can be edited, staying queued, or rejected, storin
   assert.deepEqual((await client.query(`select status, release_figure_id from fact_review_queue`)).rows, [{ status: "dismissed", release_figure_id: null }]);
   assert.equal((await client.query(`select 1 from earnings_release_figures`)).rowCount, 0);
   assert.deepEqual((await client.query(`select action from fact_review_actions order by created_at`)).rows.map((row) => row.action), ["edited", "rejected"]);
+});
+
+test("approving a figure for a sentence that already has one on that basis replaces its bounds with the reviewer's", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-figure-rebound");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedQueuedGuide(client);
+  const { rows: [stored] } = await client.query<{ figure_id: string }>(
+    `insert into earnings_release_figures (document_id, claim_id, kind, metric, basis, low, high, quote)
+     values ($1, $2, 'guidance', 'gross_margin', 'non_gaap', 50, 50, $3) returning figure_id::text`,
+    [seeded.document_id, seeded.claim_id, QUOTE],
+  );
+  const send = await reviewServer(t, databaseUrl);
+
+  assert.equal((await send(seeded.review_id, "approve", { candidate: { ...seeded.candidate, basis: "non_gaap", low: 53.5, high: 54.5 } })).status, 200);
+  assert.deepEqual(
+    (await client.query(`select figure_id::text, low::float8 as low, high::float8 as high from earnings_release_figures`)).rows,
+    [{ figure_id: stored!.figure_id, low: 53.5, high: 54.5 }],
+  );
+  assert.deepEqual((await client.query(`select release_figure_id::text from fact_review_queue`)).rows, [{ release_figure_id: stored!.figure_id }]);
 });

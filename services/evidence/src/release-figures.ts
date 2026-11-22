@@ -294,14 +294,16 @@ async function insertFigure(db: QueryExecutor, row: FigureRow): Promise<number> 
 // A reviewer's approved candidate as the figure it stores, with its basis, low
 // and high as the reviewer set them and the rest as queued. Throws, with a message
 // starting "release_figure: ", on a candidate that is no figure. A figure
-// stored already for that sentence is kept, and its id returned.
+// stored already for that sentence on that basis takes the reviewer's low and
+// high, and its id is returned.
 export async function storeReviewedFigure(db: QueryExecutor, candidate: unknown, queued: unknown): Promise<string> {
   const row = reviewedFigure(candidate, queued);
-  await insertFigure(db, row);
   const { rows } = await db.query<{ figure_id: string }>(
-    `select figure_id::text as figure_id from earnings_release_figures
-      where document_id = $1 and kind = $2 and metric = $3 and basis = $4 and quote = $5`,
-    [row.document_id, row.kind, row.metric, row.basis, row.quote],
+    `insert into earnings_release_figures (document_id, claim_id, kind, metric, basis, low, high, quote)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)
+     on conflict (document_id, kind, metric, basis, quote) do update set low = excluded.low, high = excluded.high
+     returning figure_id::text as figure_id`,
+    [row.document_id, row.claim_id, row.kind, row.metric, row.basis, row.low, row.high, row.quote],
   );
   return rows[0]!.figure_id;
 }

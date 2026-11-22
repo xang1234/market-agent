@@ -41,6 +41,8 @@ function figure(value: number, unit: GuidanceComparison['unit']): string {
 function whyNotCompared(row: GuidanceComparison): string {
   if (row.reason === 'conflicting_guidance') return 'The release gives different figures for this guide, so it is not compared.'
   if (row.reason === 'conflicting_actuals') return 'The releases report different actuals for this quarter, so the guide is not compared.'
+  if (row.reason === 'split_between_releases') return 'A stock split between the two releases puts their EPS on different share counts, so the guide is not compared.'
+  if (row.reason === 'split_history_missing') return "This company's stock split history is not on file through the later release, so its EPS is not compared."
   return `No ${BASIS_LABEL[row.basis]} actual for this quarter was read from the next release, and a guide is never compared across bases.`
 }
 

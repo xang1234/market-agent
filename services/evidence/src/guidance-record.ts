@@ -4,7 +4,9 @@
 // guide is compared with the actual on its own basis, a non-GAAP guide only with
 // the next release's non-GAAP actual and a GAAP guide with its GAAP one. A guide
 // whose quarter is reported with no actual on that basis is not comparable;
-// nothing is compared across bases.
+// nothing is compared across bases. EPS is compared only on one share count, so
+// not across a stock split between the two releases, nor without the issuer's
+// split history (listing_splits) through the actual's release.
 
 import type { IsoDate } from "../../financial-core/src/contracts.ts";
 import { FIGURE_BASES, figureUnit, RELEASE_METRICS, type FigureBasis, type FigureUnit, type ReleaseMetric } from "./release-figures.ts";
@@ -28,7 +30,15 @@ export type StoredFigure = {
 
 export type FigureSource = { document_id: string; claim_id: string | null; filed_on: IsoDate; url: string | null; quote: string };
 export type GuidanceOutcome = "beat" | "in_line" | "miss" | "not_comparable" | "not_yet_reported";
-export type NotComparableReason = "no_same_basis_actual" | "conflicting_guidance" | "conflicting_actuals";
+export type NotComparableReason =
+  | "no_same_basis_actual"
+  | "conflicting_guidance"
+  | "conflicting_actuals"
+  | "split_between_releases"
+  | "split_history_missing";
+// The issuer's recorded stock splits, by execution date, and the day its split
+// history was last checked through (null when never, or not for every listing).
+export type SplitHistory = { checked_through: IsoDate | null; splits: ReadonlyArray<IsoDate> };
 export type GuidanceComparison = {
   // The quarter guided, null until a release reports it.
   quarter_end: IsoDate | null;
@@ -74,7 +84,17 @@ export async function loadGuidanceRecord(db: QueryExecutor, issuerId: string): P
         and (f.claim_id is null or (c.status in ('extracted', 'corroborated') and c.superseded_at is null))`,
     [issuerId],
   );
-  return guidanceRecord(releases.map(({ accession, cik, ...release }) => ({ ...release, url: releaseUrl(cik, accession) })), figures);
+  // Of each common-stock listing the issuer has had.
+  const { rows: [splits] } = await db.query<SplitHistory>(
+    `with listing as (
+       select l.listing_id from listings l join instruments i on i.instrument_id = l.instrument_id
+        where i.asset_type = 'common_stock' and current_issuer_id(i.issuer_id) = current_issuer_id($1::uuid))
+     select (select case when count(*) > 0 and count(*) = count(c.checked_at) then (min(c.checked_at) at time zone 'UTC')::date::text end
+               from listing left join listing_split_coverage c using (listing_id)) as checked_through,
+            array(select distinct s.execution_date::text from listing join listing_splits s using (listing_id) order by 1) as splits`,
+    [issuerId],
+  );
+  return guidanceRecord(releases.map(({ accession, cik, ...release }) => ({ ...release, url: releaseUrl(cik, accession) })), figures, splits!);
 }
 
 // The filing's EDGAR index, or null for a release whose CIK or accession is
@@ -89,7 +109,7 @@ function releaseUrl(cik: string | null, accession: string | null): string | null
 // The record over the issuer's last RECORD_QUARTERS reported quarters, and the
 // guides for the quarter after its latest, which no release reports yet. A
 // figure of a release not given is ignored.
-export function guidanceRecord(releases: ReadonlyArray<StoredRelease>, figures: ReadonlyArray<StoredFigure>): GuidanceRecord {
+export function guidanceRecord(releases: ReadonlyArray<StoredRelease>, figures: ReadonlyArray<StoredFigure>, splits: SplitHistory): GuidanceRecord {
   const byDocument = new Map(releases.map((release) => [release.document_id, release]));
   const ends = [...new Set(releases.map((release) => release.quarter_end))].sort();
   const recorded = new Set(ends.slice(-RECORD_QUARTERS));
@@ -108,7 +128,7 @@ export function guidanceRecord(releases: ReadonlyArray<StoredRelease>, figures: 
     if (target === null ? release.quarter_end !== ends.at(-1) : !recorded.has(target)) continue;
     push(guides, seriesKey(target, figure), { ...figure, release });
   }
-  const rows = [...guides.entries()].map(([key, picks]) => compare(key, picks, actuals.get(key) ?? []));
+  const rows = [...guides.entries()].map(([key, picks]) => compare(key, picks, actuals.get(key) ?? [], splits));
   rows.sort((a, b) =>
     (b.quarter_end ?? "9999").localeCompare(a.quarter_end ?? "9999") ||
     RELEASE_METRICS.indexOf(a.metric) - RELEASE_METRICS.indexOf(b.metric) ||
@@ -120,6 +140,7 @@ function compare(
   key: string,
   picks: ReadonlyArray<StoredFigure & { release: StoredRelease }>,
   reported: ReadonlyArray<StoredFigure & { release: StoredRelease }>,
+  splits: SplitHistory,
 ): GuidanceComparison {
   const [guide, ...others] = latestFirst(picks);
   const quarterEnd = JSON.parse(key)[0] as IsoDate | null;
@@ -130,15 +151,20 @@ function compare(
     unit: figureUnit(guide!.metric),
     guided: { low: guide!.low, high: guide!.high, source: sourceOf(guide!) },
   };
-  if (quarterEnd === null) return { ...base, actual: null, outcome: "not_yet_reported" };
   const [actual, ...restated] = latestFirst(reported);
   const shown = actual === undefined ? null : { value: actual.low, source: sourceOf(actual) };
   if (others.some((other) => other.low !== guide!.low || other.high !== guide!.high)) {
     return { ...base, actual: shown, outcome: "not_comparable", reason: "conflicting_guidance" };
   }
+  if (quarterEnd === null) return { ...base, actual: null, outcome: "not_yet_reported" };
   if (actual === undefined) return { ...base, actual: null, outcome: "not_comparable", reason: "no_same_basis_actual" };
   if (restated.some((other) => other.low !== actual.low)) {
     return { ...base, actual: shown, outcome: "not_comparable", reason: "conflicting_actuals" };
+  }
+  if (guide!.metric === "eps") {
+    const [from, to] = [guide!.release.filed_on, actual.release.filed_on];
+    if (splits.splits.some((split) => split >= from && split <= to)) return { ...base, actual: shown, outcome: "not_comparable", reason: "split_between_releases" };
+    if (splits.checked_through === null || splits.checked_through < to) return { ...base, actual: shown, outcome: "not_comparable", reason: "split_history_missing" };
   }
   const position = actual.low < guide!.low ? -1 : actual.low > guide!.high ? 1 : 0;
   const better = LOWER_IS_BETTER.has(guide!.metric) ? -position : position;

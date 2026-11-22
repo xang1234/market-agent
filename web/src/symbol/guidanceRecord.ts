@@ -15,7 +15,7 @@ export type GuidanceComparison = {
   guided: { low: number; high: number; source: GuidanceSource }
   actual: { value: number; source: GuidanceSource } | null
   outcome: GuidanceOutcome
-  reason?: 'no_same_basis_actual' | 'conflicting_guidance' | 'conflicting_actuals'
+  reason?: 'no_same_basis_actual' | 'conflicting_guidance' | 'conflicting_actuals' | 'split_between_releases' | 'split_history_missing'
 }
 
 export type GuidanceHitRate = { metric: string; basis: GuidanceBasis; hits: number; compared: number }

@@ -79,3 +79,36 @@ test('an issuer with no guidance figures says so', async () => {
     await done()
   }
 })
+
+test('a guide not compared says why: conflicting guides for the next quarter, or EPS across a stock split or without split history', async () => {
+  const eps = (quarter_end: string, reason: 'split_between_releases' | 'split_history_missing') => ({
+    quarter_end, metric: 'eps', basis: 'non_gaap' as const, unit: 'usd_per_share' as const,
+    guided: { low: 10.5, high: 10.5, source: source('2024-05-22', 'Non-GAAP diluted EPS is expected to be $10.50.') },
+    actual: { value: 1.2, source: source('2024-08-28', 'Non-GAAP diluted EPS was $1.20.') },
+    outcome: 'not_comparable' as const, reason,
+  })
+  const { doc, done } = await render({
+    ...ENVELOPE,
+    record: {
+      rows: [
+        { ...ENVELOPE.record.rows[0]!, outcome: 'not_comparable', reason: 'conflicting_guidance' },
+        eps('2024-07-28', 'split_between_releases'),
+        eps('2024-04-28', 'split_history_missing'),
+      ],
+      hit_rates: [],
+    },
+  })
+  try {
+    assert.match(doc.querySelector('[data-testid="guidance-row-next-revenue-gaap"]')!.textContent!, /Next quarterNot comparable.*The release gives different figures for this guide, so it is not compared\./)
+    assert.match(
+      doc.querySelector('[data-testid="guidance-row-2024-07-28-eps-non_gaap"]')!.textContent!,
+      /Reported \$1\.20.*A stock split between the two releases puts their EPS on different share counts, so the guide is not compared\./,
+    )
+    assert.match(
+      doc.querySelector('[data-testid="guidance-row-2024-04-28-eps-non_gaap"]')!.textContent!,
+      /This company's stock split history is not on file through the later release, so its EPS is not compared\./,
+    )
+  } finally {
+    await done()
+  }
+})
