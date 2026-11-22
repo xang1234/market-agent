@@ -420,6 +420,37 @@ test("a peer ranking across OCF scopes is the engine's named gap under one label
   assert.deepEqual([...labels], [`${BOTH_SCOPES_FCF} ranking`]);
 });
 
+// Cash conversion over a continuing-operations OCF is the engine's incompatible_definition gap (operations.ts ratio), so
+// its measure, and with it its label and its key, carries no scope.
+const cashConversion = (slot: string, year: number) => [
+  reportedAt(`${slot}_ocf${year}`, slot, "operating_cash_flow", FY(year)),
+  reportedAt(`${slot}_ni${year}`, slot, "net_income_consolidated", FY(year)),
+  { node_id: `${slot}_cc${year}`, operation: "ratio" as const, operation_version: "ratio.v1", ratio_key: "operating_cash_flow_to_net_income", numerator: `${slot}_ocf${year}`, denominator: `${slot}_ni${year}` },
+];
+const cashConversionFacts = (slot: "a" | "b", year: number, ocf: string, scope?: FactInferenceV1) => ({
+  [`${slot}_ocf${year}`]: fiscalYearFact(slot, "operating_cash_flow", year, ocf, scope),
+  [`${slot}_ni${year}`]: fiscalYearFact(slot, "net_income_consolidated", year, "100"),
+});
+
+test("cash conversion beside a continuing-operations gap is one column, the gap in its own company's row (#743)", () => {
+  const plan = comparisonPlan([...cashConversion("a", 2023), ...cashConversion("b", 2023)], ["a_cc2023", "b_cc2023"]);
+  const content = engineAnswer(plan, { ...cashConversionFacts("a", 2023, "120"), ...cashConversionFacts("b", 2023, "90", CONTINUING_OPERATIONS) }, { a: "Apple Inc.", b: "Caterpillar Inc." });
+  assert.deepEqual([resultText(content, "o_a_cc2023"), result(content, "o_b_cc2023").disposition], ["1.20x", "incompatible"]);
+  assert.equal(result(content, "o_a_cc2023").measure_label_id, result(content, "o_b_cc2023").measure_label_id);
+  const table = content.presentations.find((presentation) => presentation.kind === "table");
+  assert.ok(table?.kind === "table");
+  assert.deepEqual([table.columns.length, table.rows.map((row) => row.cells.length)], [1, [1, 1]]);
+});
+
+test("one company's cash conversion across its switch from continuing-operations OCF to the total is one series (#743)", () => {
+  const years = [2017, 2018, 2019];
+  const plan = singleSubjectPlan(years.flatMap((year) => cashConversion("a", year)), years.map((year) => `a_cc${year}`));
+  const content = engineAnswer(plan, Object.assign({}, ...years.map((year) => cashConversionFacts("a", year, "120", year < 2019 ? CONTINUING_OPERATIONS : undefined))), { a: "Caterpillar Inc." });
+  assert.deepEqual(years.map((year) => result(content, `o_a_cc${year}`).disposition), ["incompatible", "incompatible", "verified"]);
+  assert.equal(new Set(years.map((year) => result(content, `o_a_cc${year}`).measure_label_id)).size, 1);
+  assert.deepEqual(content.presentations.map((presentation) => [presentation.kind, presentation.kind === "series" ? presentation.points.length : 1]), [["series", 3]]);
+});
+
 test("a threshold on an approved ratio reads as a multiple, like the ratio's value", () => {
   const plan = singleSubjectPlan(
     [

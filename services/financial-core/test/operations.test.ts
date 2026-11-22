@@ -414,6 +414,13 @@ test("OCF filed for continuing operations never compares with total OCF as one m
       else assert.deepEqual(gap(outcome), ["incompatible", "incompatible_definition"], `${i} over ${j}`);
     }
   }
+  // Each operand in one scope the other lacks names the same one, in either order.
+  const explanation = (current: typeof pairs[number], prior: typeof pairs[number]) => {
+    const outcome = absoluteChange(change("absolute_change"), freeCash(current[0], current[1]), freeCash(prior[0], prior[1], FY2022));
+    return outcome.ok ? "" : outcome.explanation;
+  };
+  assert.equal(explanation(pairs[1], pairs[2]), explanation(pairs[2], pairs[1]));
+  assert.match(explanation(pairs[2], pairs[1]), /^One figure's operating cash flow/u);
 });
 
 // Net income includes discontinued operations, so continuing-operations OCF over it is not the approved ratio.

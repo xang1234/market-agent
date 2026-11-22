@@ -615,7 +615,7 @@ export function measureMismatch(left: FinancialOperand, right: FinancialOperand)
     a.derivations.length === b.derivations.length &&
     a.derivations.every((step, index) => step.operation === b.derivations[index]!.operation && step.operation_version === b.derivations[index]!.operation_version);
   if (!same) return operationGap("incompatible_definition", "The operands use different metric definitions.");
-  const apart = [...a.concept_scopes.filter((scope) => !b.concept_scopes.includes(scope)), ...b.concept_scopes.filter((scope) => !a.concept_scopes.includes(scope))];
+  const apart = [...a.concept_scopes.filter((scope) => !b.concept_scopes.includes(scope)), ...b.concept_scopes.filter((scope) => !a.concept_scopes.includes(scope))].sort();
   return apart.length === 0 ? null : operationGap("incompatible_definition", SCOPE_MISMATCH[apart[0]!]);
 }
 
