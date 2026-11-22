@@ -73,6 +73,7 @@ test("the agent's tools name companies as the agent takes them, by issuer", () =
     ["get_analyst_consensus", [["issuer"]]],
     ["get_claims", [["issuer"], ["issuer"]]],
     ["get_company_profile", [["issuer"]]],
+    ["get_non_gaap_history", [["issuer"]]],
     ["get_peer_set", [["issuer"]]],
     ["get_price_performance", [["issuer"]]],
   ]);

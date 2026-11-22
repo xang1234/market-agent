@@ -7,13 +7,22 @@ import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { createS3Client, S3ObjectStore } from "./s3-object-store.ts";
 import { SecEdgarClient } from "./sec-edgar.ts";
 
-export type EvidenceCliRuntime = {
+export type EvidenceStoreRuntime = {
   db: Pool;
   objectStore: S3ObjectStore;
+};
+
+export type EvidenceCliRuntime = EvidenceStoreRuntime & {
   secClient: SecEdgarClient;
 };
 
 export function createEvidenceCliRuntime(): EvidenceCliRuntime {
+  const store = createEvidenceStoreRuntime();
+  return { ...store, secClient: SecEdgarClient.fromEnv() };
+}
+
+// The database and object store alone, for a CLI that makes no SEC request.
+export function createEvidenceStoreRuntime(): EvidenceStoreRuntime {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
   if (!process.env.S3_BUCKET || !process.env.S3_REGION) {
@@ -31,7 +40,6 @@ export function createEvidenceCliRuntime(): EvidenceCliRuntime {
     );
   }
 
-  const secClient = SecEdgarClient.fromEnv();
   const s3 = createS3Client({
     region: process.env.S3_REGION,
     endpoint: process.env.S3_ENDPOINT,
@@ -48,5 +56,5 @@ export function createEvidenceCliRuntime(): EvidenceCliRuntime {
   const objectStore = new S3ObjectStore({ client: s3, bucket: process.env.S3_BUCKET });
   const db = logPoolErrors(new Pool({ connectionString: databaseUrl }));
 
-  return { db, objectStore, secClient };
+  return { db, objectStore };
 }

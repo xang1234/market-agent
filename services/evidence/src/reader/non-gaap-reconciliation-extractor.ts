@@ -5,6 +5,9 @@ export type NonGaapValue = {
 
 export type NonGaapAdjustment = NonGaapValue;
 
+// The table's own "(In millions ...)" note, which every figure in it is in.
+export type TableScale = "thousands" | "millions" | "billions";
+
 export type NonGaapReconciliationItem = {
   item_type: "non_gaap_reconciliation";
   measure_key: string;
@@ -14,6 +17,7 @@ export type NonGaapReconciliationItem = {
   adjustments: ReadonlyArray<NonGaapAdjustment>;
   unit: "currency" | "number";
   currency?: string;
+  scale?: TableScale;
   source_id: string;
   as_of: string;
 };
@@ -28,14 +32,37 @@ export type ExtractNonGaapReconciliationsResult = {
   items: ReadonlyArray<NonGaapReconciliationItem>;
 };
 
-type TableRow = {
-  cells: ReadonlyArray<string>;
-};
+// A cell on the table's grid: the column it starts in, once the cells before
+// it in its row and those spanning down from rows above are counted, and how
+// many columns it spans. A cell spanning rows sits in each row it covers.
+type GridCell = { text: string; column: number; span: number };
 
 type ParsedValue = {
   value_num: number;
-  unit: "currency" | "number";
+  unit: "currency" | "number" | "percent";
   currency?: string;
+};
+
+// A figure and the columns it covers with the "$" cell before it.
+type Figure = { first: number; last: number; value: ParsedValue; year: boolean };
+
+export type TableRow = {
+  // The first text left of the table's figures, past any blank cells that indent it.
+  label: string;
+  // Each figure by its slot.
+  values: ReadonlyArray<readonly [slot: number, ParsedValue]>;
+};
+
+// A slot's header: the text of every header cell over it, top to bottom.
+export type Period = ReadonlyArray<string>;
+
+// A slot is one column of figures: the grid columns the figures cover, those
+// that overlap being one, so "$" | "1,270" lines up with a "419" printed across both.
+export type ParsedTable = {
+  rows: ReadonlyArray<TableRow>;
+  periods: ReadonlyArray<Period>;
+  scale?: TableScale;
+  text: string;
 };
 
 type GaapAnchor = {
@@ -43,10 +70,21 @@ type GaapAnchor = {
   value: ParsedValue;
   measure_key: string;
   adjustments: NonGaapAdjustment[];
+  // The section in force at the GAAP row, which a bare "Non-GAAP" row closing it names.
+  section: string;
 };
 
 const NON_GAAP_PATTERN = /\bnon(?:[\s\u00a0]|[-\u2010-\u2015])*gaap\b/i;
 const GAAP_PATTERN = /\bgaap\b/i;
+const BARE_YEAR = /^(?:19|20)\d{2}$/;
+const DASH = /^[\u2012-\u2015-]+$/;
+// A margin is a ratio of the reconciled figures, unless printed in dollars.
+const MARGIN_PATTERN = /\bmargins?\b/i;
+const MEASURES = new Set(["eps_basic", "eps_diluted", "operating_income", "net_income", "gross_profit", "ebitda"]);
+const ROW = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+// Inline XBRL closes an empty cell in its tag: <td colspan="3"/>.
+const CELL = /<t[dh]\b([^>]*?)(?:\/>|>([\s\S]*?)<\/t[dh]>)/gi;
+const SCALE = /\bin\s+(thousands|millions|billions)\b/i;
 
 export function extractNonGaapReconciliations(
   input: ExtractNonGaapReconciliationsInput,
@@ -56,63 +94,58 @@ export function extractNonGaapReconciliations(
   }
 
   const items: NonGaapReconciliationItem[] = [];
-  for (const table of parseTables(input.html)) {
-    const tableText = table.flatMap((row) => row.cells).join(" ");
-    if (!NON_GAAP_PATTERN.test(tableText) || !GAAP_PATTERN.test(tableText)) continue;
+  for (const table of readTables(input.html)) {
+    if (!NON_GAAP_PATTERN.test(table.text) || !GAAP_PATTERN.test(table.text)) continue;
 
-    const periodLabels = readPeriodLabels(table);
+    const periods = table.periods.map((period) => period.join(" "));
     const anchors = new Map<number, GaapAnchor>();
-    for (const row of table) {
-      if (row.cells.length < 2) continue;
-      const label = row.cells[0]!;
+    // The last row with a label and no figures, which names the measure of a
+    // row labelled "GAAP" or "Non-GAAP" alone.
+    let section = "";
+    for (const { label, values } of table.rows) {
+      if (label === "") continue;
+      if (values.length === 0) {
+        section = label;
+        continue;
+      }
+      const margin = MARGIN_PATTERN.test(label);
+      const amounts = values.filter(([, value]) => (margin ? value.unit === "currency" : value.unit !== "percent"));
+      const measureAt = (slot: number, under: string) => measureOf(periods, amounts, slot, label, under);
 
       if (isGaapLabel(label)) {
-        for (const [column, value] of valuesByColumn(row)) {
-          anchors.set(column, {
-            label,
-            value,
-            measure_key: measureKeyFromLabel(label),
-            adjustments: [],
-          });
+        for (const [slot, value] of amounts) {
+          const measure_key = measureAt(slot, section);
+          if (measure_key !== null) anchors.set(slot, { label, value, measure_key, adjustments: [], section });
         }
         continue;
       }
 
-      if (isNonGaapLabel(label)) {
-        const measure_key = measureKeyFromLabel(label);
-        for (const [column, value] of valuesByColumn(row)) {
-          const anchor = anchors.get(column);
-          if (!anchor || measure_key !== anchor.measure_key) continue;
-          const item: NonGaapReconciliationItem = {
-            item_type: "non_gaap_reconciliation",
-            measure_key,
-            period_label: periodLabels.get(column) ?? null,
-            gaap: Object.freeze({
-              label: anchor.label,
-              value_num: anchor.value.value_num,
-            }),
-            non_gaap: Object.freeze({
-              label,
-              value_num: value.value_num,
-            }),
-            adjustments: Object.freeze(anchor.adjustments.map((adjustment) => Object.freeze({ ...adjustment }))),
-            unit: value.unit === "currency" || anchor.value.unit === "currency" ? "currency" : "number",
-            source_id: input.source_id,
-            as_of: input.as_of,
-          };
-          const currency = value.currency ?? anchor.value.currency;
-          if (currency !== undefined) item.currency = currency;
-          items.push(Object.freeze(item));
-          anchors.delete(column);
+      for (const [slot, value] of amounts) {
+        const anchor = anchors.get(slot);
+        if (!anchor) continue;
+        if (!NON_GAAP_PATTERN.test(label) || measureAt(slot, anchor.section) !== anchor.measure_key) {
+          // A total restates the lines above it, and one with none above is
+          // the add-back itself. A non-GAAP row that closes nothing, such as
+          // the tax impact of the adjustments, is a line.
+          if (!/^total\b/i.test(label) || anchor.adjustments.length === 0) anchor.adjustments.push(Object.freeze({ label, value_num: value.value_num }));
+          continue;
         }
-        continue;
-      }
-
-      for (const [column, value] of valuesByColumn(row)) {
-        const anchor = anchors.get(column);
-        if (anchor) {
-          anchor.adjustments.push(Object.freeze({ label, value_num: value.value_num }));
-        }
+        const item: NonGaapReconciliationItem = {
+          item_type: "non_gaap_reconciliation",
+          measure_key: anchor.measure_key,
+          period_label: periods[slot] || null,
+          gaap: Object.freeze({ label: anchor.label, value_num: anchor.value.value_num }),
+          non_gaap: Object.freeze({ label, value_num: value.value_num }),
+          adjustments: Object.freeze([...anchor.adjustments]),
+          unit: value.unit === "currency" || anchor.value.unit === "currency" ? "currency" : "number",
+          source_id: input.source_id,
+          as_of: input.as_of,
+        };
+        const currency = value.currency ?? anchor.value.currency;
+        if (currency !== undefined) item.currency = currency;
+        if (table.scale !== undefined) item.scale = table.scale;
+        items.push(Object.freeze(item));
+        anchors.delete(slot);
       }
     }
   }
@@ -120,80 +153,215 @@ export function extractNonGaapReconciliations(
   return Object.freeze({ items: Object.freeze(items) });
 }
 
-function parseTables(html: string): ReadonlyArray<ReadonlyArray<TableRow>> {
-  const tables: TableRow[][] = [];
-  const tablePattern = /<table\b[^>]*>([\s\S]*?)<\/table>/gi;
-  for (const tableMatch of html.matchAll(tablePattern)) {
-    const rows: TableRow[] = [];
-    const rowPattern = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
-    for (const rowMatch of (tableMatch[1] ?? "").matchAll(rowPattern)) {
-      const cells: string[] = [];
-      const cellPattern = /<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi;
-      for (const cellMatch of (rowMatch[1] ?? "").matchAll(cellPattern)) {
-        cells.push(textContent(cellMatch[1] ?? ""));
-      }
-      if (cells.length > 0) rows.push(Object.freeze({ cells: Object.freeze(cells) }));
-    }
-    if (rows.length > 0) tables.push(rows);
+// Every table in the markup, its rows read as a label and figures by slot.
+export function readTables(html: string): ReadonlyArray<ParsedTable> {
+  const tables: ParsedTable[] = [];
+  let after = 0;
+  for (const match of html.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)) {
+    // A statement's "(In millions ...)" can sit above its table.
+    const above = textContent(html.slice(after, match.index));
+    after = match.index! + match[0].length;
+    const table = tableOf(gridOf(match[1] ?? ""), above);
+    if (table) tables.push(table);
   }
-  return Object.freeze(tables.map((table) => Object.freeze(table)));
+  return Object.freeze(tables);
 }
 
-function readPeriodLabels(table: ReadonlyArray<TableRow>): Map<number, string> {
-  const labels = new Map<number, string>();
-  for (const row of table) {
-    for (let column = 1; column < row.cells.length; column++) {
-      const cell = row.cells[column]!;
-      if (/fiscal|quarter|year|month|ended|\d{4}/i.test(cell)) {
-        labels.set(column, cell);
+function gridOf(markup: string): GridCell[][] {
+  const rows: GridCell[][] = [];
+  // Each column a cell from a row above still covers, to the last row it reaches.
+  const down = new Map<number, { cell: GridCell; last: number }>();
+  for (const [index, rowMatch] of [...markup.matchAll(ROW)].entries()) {
+    const above = (column: number) => {
+      const held = down.get(column);
+      return held && held.last >= index ? held.cell : undefined;
+    };
+    const row: GridCell[] = [];
+    let column = 0;
+    for (const [, attributes = "", inner = ""] of (rowMatch[1] ?? "").matchAll(CELL)) {
+      for (let cell = above(column); cell; cell = above(column)) column = cell.column + cell.span;
+      const cell = { text: textContent(inner), column, span: spanOf(attributes, "colspan") };
+      row.push(cell);
+      const rowspan = spanOf(attributes, "rowspan");
+      if (rowspan > 1) {
+        const held = { cell, last: index + rowspan - 1 };
+        for (let covered = column; covered < column + cell.span; covered++) down.set(covered, held);
       }
+      column += cell.span;
     }
+    for (const held of new Set(down.values())) {
+      if (held.last >= index && !row.includes(held.cell)) row.push(held.cell);
+    }
+    rows.push(row.sort((a, b) => a.column - b.column));
   }
-  return labels;
+  return rows;
 }
 
-function valuesByColumn(row: TableRow): ReadonlyArray<readonly [number, ParsedValue]> {
-  const values: Array<readonly [number, ParsedValue]> = [];
-  for (let column = 1; column < row.cells.length; column++) {
-    const value = parseValue(row.cells[column]!);
-    if (value) values.push([column, value]);
+function spanOf(attributes: string, name: "colspan" | "rowspan"): number {
+  return Math.max(1, Number(new RegExp(`\\b${name}\\s*=\\s*["']?(\\d+)`, "i").exec(attributes)?.[1] ?? 1));
+}
+
+// The header is the rows above the first with text before a figure that is
+// no bare year. ponytail: a header partway down a table is not read; the periods above apply.
+function tableOf(grid: ReadonlyArray<ReadonlyArray<GridCell>>, above: string): ParsedTable | null {
+  const cells = grid.filter((row) => row.length > 0);
+  if (cells.length === 0) return null;
+  const figures = cells.map(figuresOf);
+  const isText = (cell: GridCell) => cell.text !== "" && parseValue(cell.text) === null;
+  const found = cells.findIndex((row, index) =>
+    figures[index]!.some((figure) => !figure.year && row.some((cell) => cell.column < figure.first && isText(cell))));
+  const start = found === -1 ? cells.length : found;
+
+  const { slots, slotOf } = slotsOf(figures.slice(start));
+  const firstSlot = slots[0]?.[0] ?? Number.POSITIVE_INFINITY;
+  const labels = cells.map((row) => row.find((cell) => cell.column < firstSlot && isText(cell)));
+  // A column's header cells start right of the labels, over an empty "$" column too.
+  const headed = Math.min(firstSlot, ...labels.slice(start).flatMap((cell, index) =>
+    (cell && figures[start + index]!.length > 0 ? [cell.column + cell.span] : [])));
+  const periods = slots.map(([first, last]) => Object.freeze([...new Set(cells.slice(0, start).flatMap((row) =>
+    row.filter((cell) => cell.text !== "" && cell.column >= headed && cell.column <= last && cell.column + cell.span > first)))]
+    .map((cell) => cell.text)));
+  // A row of dashes alone ("Restructuring | — | —") states no figure and heads nothing.
+  const dashes = (row: ReadonlyArray<GridCell>, label: GridCell | undefined) => {
+    const rest = row.filter((cell) => cell !== label && cell.text !== "" && cell.text !== "$");
+    return rest.length > 0 && rest.every((cell) => DASH.test(cell.text));
+  };
+  const rows = cells.flatMap((row, index) => index >= start && figures[index]!.length === 0 && dashes(row, labels[index]) ? [] : [Object.freeze({
+    label: labels[index]?.text ?? "",
+    values: index < start ? [] : figures[index]!.flatMap((figure) => {
+      const slot = slotOf.get(figure);
+      return slot === undefined ? [] : [[slot, figure.value] as const];
+    }),
+  })]);
+  const text = cells.flat().map((cell) => cell.text).join(" ");
+  const scale = scalesIn(text)[0] ?? scalesIn(above).at(-1);
+  return Object.freeze({ rows: Object.freeze(rows), periods: Object.freeze(periods), text, ...(scale ? { scale } : {}) });
+}
+
+// Each slot: the columns of figures that overlap, unless one row tells them
+// apart, so two figures of one row never share a slot. Narrow figures go
+// first, and one over the columns of two a row tells apart, as a year cell
+// over both, joins neither and is no value.
+function slotsOf(rows: ReadonlyArray<ReadonlyArray<Figure>>): { slots: Array<[first: number, last: number]>; slotOf: Map<Figure, number> } {
+  type Slot = { first: number; last: number; rows: number[]; figures: Figure[] };
+  let slots: Slot[] = [];
+  const width = (figure: Figure) => figure.last - figure.first;
+  const placed = rows.flatMap((row, index) => row.map((figure) => ({ figure, index })))
+    .sort((a, b) => width(a.figure) - width(b.figure) || a.figure.first - b.figure.first);
+  for (const { figure, index } of placed) {
+    const over = slots.filter((slot) => figure.first <= slot.last && figure.last >= slot.first);
+    const held = [index, ...over.flatMap((slot) => slot.rows)];
+    if (new Set(held).size < held.length) continue;
+    slots = [...slots.filter((slot) => !over.includes(slot)), {
+      first: Math.min(figure.first, ...over.map((slot) => slot.first)),
+      last: Math.max(figure.last, ...over.map((slot) => slot.last)),
+      rows: held,
+      figures: [figure, ...over.flatMap((slot) => slot.figures)],
+    }];
   }
-  return values;
+  slots.sort((a, b) => a.first - b.first);
+  return {
+    slots: slots.map((slot) => [slot.first, slot.last]),
+    slotOf: new Map(slots.flatMap((slot, n) => slot.figures.map((figure) => [figure, n] as const))),
+  };
+}
+
+// The scale each note names: its first, as "(In millions, except number of
+// shares, which are reflected in thousands)" is in millions.
+function scalesIn(text: string): TableScale[] {
+  return text.split(/[()]|\.\s/).flatMap((note) => {
+    const scale = SCALE.exec(note)?.[1];
+    return scale ? [scale.toLowerCase() as TableScale] : [];
+  });
+}
+
+// A row's figures: a "$" in the cell before one is its currency, and a "%" in
+// the next cell with text makes it a percent, past a ")" split from "(2.5".
+function figuresOf(row: ReadonlyArray<GridCell>): Figure[] {
+  const isWords = (cell: GridCell) => cell.text !== "" && cell.text !== "$" && !/^\)?%?$/.test(cell.text) && parseValue(cell.text) === null;
+  return row.flatMap((cell, index) => {
+    const parsed = parseValue(cell.text);
+    if (!parsed) return [];
+    // A number leading a row of words, as "(1) | Excludes …", marks a footnote and is no figure.
+    if (!row.slice(0, index).some(isWords) && row.slice(index + 1).some(isWords)) return [];
+    const dollar = row[index - 1]?.text === "$" ? row[index - 1]! : undefined;
+    const percent = /^\)?%$/.test(row.slice(index + 1).find((next) => next.text !== "" && next.text !== ")")?.text ?? "");
+    const value: ParsedValue = percent
+      ? { value_num: parsed.value_num, unit: "percent" }
+      : dollar && parsed.currency === undefined ? { ...parsed, unit: "currency", currency: "USD" } : parsed;
+    return [{ first: dollar?.column ?? cell.column, last: cell.column + cell.span - 1, value, year: BARE_YEAR.test(cell.text) }];
+  });
 }
 
 function isGaapLabel(label: string): boolean {
   return GAAP_PATTERN.test(label) && !NON_GAAP_PATTERN.test(label);
 }
 
-function isNonGaapLabel(label: string): boolean {
-  return NON_GAAP_PATTERN.test(label);
+// The measure a GAAP or non-GAAP row names at a slot. A row naming several,
+// as "net income / earnings per share", names one per figure of the slot's
+// period in order, and none when the counts differ. A row naming none, as
+// "GAAP" alone, takes its section's.
+function measureOf(
+  periods: ReadonlyArray<string>,
+  amounts: ReadonlyArray<readonly [number, ParsedValue]>,
+  slot: number,
+  label: string,
+  section: string,
+): string | null {
+  const own = measuresIn(label, true);
+  const measures = own.length > 0 ? own : measuresIn(section, false);
+  if (measures.length < 2) return measures[0] ?? "";
+  const together = periods[slot] ? amounts.map(([other]) => other).filter((other) => periods[other] === periods[slot]) : [slot];
+  return measures.length === together.length ? measures[together.indexOf(slot)]! : null;
 }
 
-function measureKeyFromLabel(label: string): string {
+// Several measures where "/" joins two, but "income/(loss) per share" is one.
+function measuresIn(text: string, head: boolean): string[] {
+  const joined = text.split("/")
+    .filter((part) => !/^\s*per\b/i.test(part.replace(/\([^)]*\)/g, "")))
+    .map((part) => measureKeyFromLabel(part, head))
+    .filter((key) => MEASURES.has(key));
+  if (joined.length > 1) return joined;
+  const key = measureKeyFromLabel(text, head);
+  return key === "" ? [] : [key];
+}
+
+// A row label names the measure its head names, so "Impact of non-GAAP
+// adjustments to operating income" is an impact; a section header names any.
+function measureKeyFromLabel(label: string, head: boolean): string {
+  // Read before the parentheses go, as "per share (basic)" prints it.
+  const basic = /\bbasic\b/i.test(label) && !/\bdiluted\b/i.test(label);
   const normalized = label
     .replace(NON_GAAP_PATTERN, "")
     .replace(GAAP_PATTERN, "")
     .replace(/\badjusted\b/gi, "")
     .replace(/\([^)]*\)/g, "")
+    .replace(/^\s*total\b/i, "")
     .trim()
     .toLowerCase();
+  const named = head ? normalized.split(/\s(?:of|to|on|in|from|for)\s/)[0]! : normalized;
 
-  if (/operating\s+(income|loss)/.test(normalized)) return "operating_income";
-  if (/net\s+(income|loss)/.test(normalized)) return "net_income";
-  if (/gross\s+profit|gross\s+margin/.test(normalized)) return "gross_profit";
-  if (/earnings per share|eps/.test(normalized)) return "eps_diluted";
-  if (/ebitda/.test(normalized)) return "ebitda";
+  if (/\bper\s+(?:diluted\s+|basic\s+)?(?:common\s+)?share\b|earnings per share|\beps\b/.test(named)) {
+    return basic ? "eps_basic" : "eps_diluted";
+  }
+  if (/operating\s+(income|loss)/.test(named)) return "operating_income";
+  if (/net\s+(income|loss)/.test(named)) return "net_income";
+  if (/gross\s+(?:profit|margin)/.test(named)) return "gross_profit";
+  if (/ebitda/.test(named)) return "ebitda";
   return normalized.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
+// A figure as a release prints it: "$1,234", "(56)", "(56" with its ")" in
+// the next cell, "−56" with a Unicode minus, or "21.5%".
 function parseValue(raw: string): ParsedValue | null {
-  const text = raw.trim();
-  const negative = /^\(.*\)$/.test(text);
+  const text = raw.trim().replace(/\u2212/g, "-");
+  const negative = /^\$?\s*\(/.test(text);
   const currency = text.includes("$") ? "USD" : undefined;
-  const normalized = text.replace(/[,$\s()]/g, "");
+  const normalized = text.replace(/[,$\s()%]/g, "");
   if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return null;
   const value = Number(normalized);
   if (!Number.isFinite(value)) return null;
+  if (/%\)?$/.test(text)) return { value_num: negative ? -value : value, unit: "percent" };
   const parsed: ParsedValue = {
     value_num: negative ? -value : value,
     unit: currency ? "currency" : "number",
@@ -203,14 +371,15 @@ function parseValue(raw: string): ParsedValue | null {
 }
 
 function textContent(raw: string): string {
-  return decodeHtml(raw.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim());
+  return decodeHtml(raw.replace(/<br\b[^>]*>/gi, " ").replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
 }
 
+const NAMED_ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: "\u00a0", minus: "\u2212" };
+
 function decodeHtml(raw: string): string {
-  return raw
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, "\"")
-    .replace(/&apos;/g, "'");
+  return raw.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, name: string) => {
+    if (name[0] !== "#") return NAMED_ENTITIES[name.toLowerCase()] ?? entity;
+    const code = name[1] === "x" || name[1] === "X" ? Number.parseInt(name.slice(2), 16) : Number(name.slice(1));
+    return Number.isInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
+  });
 }

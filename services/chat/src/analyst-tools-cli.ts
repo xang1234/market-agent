@@ -63,6 +63,7 @@ function entryRef(entry: AnalystPacketEntry): string[] {
     case "peer": return [`issuer=${entry.peer_issuer_id}`, `sources=${[...new Set(entry.sources.map((source) => source.source_id))].join(",")}`];
     case "filing_read": return [`document=${entry.document_id}`, `state=${entry.state}`, ...(entry.newer_unread ? [`newer=${entry.newer_unread.document_id}`, `newer_state=${entry.newer_unread.state}`] : [])];
     case "no_filing": return [`issuer=${entry.issuer_id}`];
+    case "non_gaap": return [`sources=${[...new Set((entry.sources ?? [entry]).map((source) => source.source_id))].join(",")}`];
   }
 }
 

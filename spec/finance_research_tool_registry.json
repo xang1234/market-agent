@@ -1921,6 +1921,306 @@
       ]
     },
     {
+      "name": "get_non_gaap_history",
+      "audience": "analyst",
+      "bundles": [
+        "analyst_agent"
+      ],
+      "description": "The GAAP to non-GAAP reconciliations of a company's stored earnings releases (Item 2.02 8-Ks) for its last 8 quarters on file, each quarter naming its release: diluted EPS GAAP, non-GAAP and their spread; operating income and, on the release's own revenue, the operating margin spread in percentage points; stock-based compensation added back and its share of non-GAAP net income. Each add-back category counts the quarters it appears in, and recurring means in 5 or more of the last 8: a count, never a judgment. no_releases: no release read for its reconciliation is on file. Every result has a status. no_subject: a subject_ref names no stored company. invalid_arguments: an argument is not one this tool reads. unavailable: the database could not be read, which says nothing about what is on file.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "quarterly",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_ref": {
+            "type": "object",
+            "description": "A company the turn names, as its prompt lists it.",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "query": {
+            "type": "string",
+            "description": "The question this read serves."
+          }
+        },
+        "required": [
+          "subject_ref"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "const": "get_non_gaap_history"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "no_releases",
+              "no_subject",
+              "invalid_arguments",
+              "unavailable"
+            ]
+          },
+          "company": {
+            "type": "string"
+          },
+          "quarters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "document_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "source_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "accession": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "filed_on": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "quarter_end": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "eps": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "gaap": {
+                      "type": "number"
+                    },
+                    "non_gaap": {
+                      "type": "number"
+                    },
+                    "spread": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "gaap",
+                    "non_gaap",
+                    "spread"
+                  ],
+                  "additionalProperties": false
+                },
+                "operating_income": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "gaap": {
+                      "type": "number"
+                    },
+                    "non_gaap": {
+                      "type": "number"
+                    },
+                    "scale": {
+                      "enum": [
+                        "thousands",
+                        "millions",
+                        "billions",
+                        null
+                      ]
+                    }
+                  },
+                  "required": [
+                    "gaap",
+                    "non_gaap",
+                    "scale"
+                  ],
+                  "additionalProperties": false
+                },
+                "operating_margin": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "revenue": {
+                      "type": "number"
+                    },
+                    "gaap_pct": {
+                      "type": "number"
+                    },
+                    "non_gaap_pct": {
+                      "type": "number"
+                    },
+                    "spread_pp": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "revenue",
+                    "gaap_pct",
+                    "non_gaap_pct",
+                    "spread_pp"
+                  ],
+                  "additionalProperties": false
+                },
+                "sbc": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "value": {
+                      "type": "number"
+                    },
+                    "basis": {
+                      "enum": [
+                        "net_income",
+                        "operating_income",
+                        "gross_profit_and_operating_expenses"
+                      ]
+                    },
+                    "scale": {
+                      "enum": [
+                        "thousands",
+                        "millions",
+                        "billions",
+                        null
+                      ]
+                    },
+                    "non_gaap_net_income": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "share_pct": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "basis",
+                    "scale",
+                    "non_gaap_net_income",
+                    "share_pct"
+                  ],
+                  "additionalProperties": false
+                },
+                "categories": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "reconciled": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "document_id",
+                "source_id",
+                "accession",
+                "filed_on",
+                "quarter_end",
+                "eps",
+                "operating_income",
+                "operating_margin",
+                "sbc",
+                "categories",
+                "reconciled"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "quarters": {
+                  "type": "integer"
+                },
+                "of": {
+                  "type": "integer"
+                },
+                "recurring": {
+                  "type": "boolean"
+                },
+                "quarter_ends": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "date"
+                  }
+                }
+              },
+              "required": [
+                "key",
+                "label",
+                "quarters",
+                "of",
+                "recurring",
+                "quarter_ends"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "undated": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
       "name": "get_price_performance",
       "audience": "analyst",
       "bundles": [

@@ -16,6 +16,7 @@ import { returnLabel } from "../../market/src/perf-points.ts";
 import { QUARTERS_SHOWN, type ResearchScope, type ScopeQuarter } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
 import type { AnalystToolResult } from "./analyst-tools.ts";
+import { HISTORY_QUARTERS, RECURRING_QUARTERS, type NonGaapQuarter, type SbcBasis, type TableScale } from "../../evidence/src/non-gaap-history.ts";
 import type { FilingItemRead, TenKFiling } from "../../evidence/src/local-runtime-evidence.ts";
 
 type Block = Record<string, unknown>;
@@ -127,6 +128,7 @@ export type ClaimSource = { source_id: string; company?: string; what: "source" 
 export type AnalystPacketEntry =
   | (PacketClaim & { kind: "claim"; filing: string })
   | { kind: "consensus"; id: string; text: string; predicate: string; company: string; captured_on: string; capture_id: string; source_id: string }
+  | { kind: "non_gaap"; id: string; text: string; predicate: "non_gaap.quarter" | "non_gaap.add_back"; company: string; key: string; source_id: string; sources?: ReadonlyArray<ClaimSource> }
   | { kind: "peer"; id: string; text: string; predicate: "peer_set.industry"; company: string; peer_issuer_id: string; sources: ReadonlyArray<ClaimSource> }
   // The chosen filing's item state, and the newer 10-K that left the item unread.
   | {
@@ -179,6 +181,28 @@ function resultEntries(result: AnalystToolResult): Array<readonly [string, Unnum
         capture_id: value.capture_id,
         source_id: value.source_id,
       }] as const);
+    case "get_non_gaap_history": {
+      const quarters = result.quarters.map((quarter) => [`non_gaap:${quarter.document_id}`, {
+        kind: "non_gaap",
+        text: nonGaapQuarterText(quarter),
+        predicate: "non_gaap.quarter",
+        company: result.company,
+        key: `non_gaap:${quarter.document_id}`,
+        source_id: quarter.source_id,
+      }] as const);
+      const sourceOf = new Map(result.quarters.map((quarter) => [quarter.quarter_end, quarter.source_id]));
+      const categories = result.categories.map((category) => [`non_gaap:${result.company}:${category.key}`, {
+        kind: "non_gaap",
+        text: `non-GAAP add-back "${category.label}": in ${category.quarters} of the ${category.of} latest quarters on file (${category.quarter_ends.join(", ")}); `
+          + `recurring means in ${RECURRING_QUARTERS} or more of the last ${HISTORY_QUARTERS} quarters, which this is${category.recurring ? "" : " not"}`,
+        predicate: "non_gaap.add_back",
+        company: result.company,
+        key: `non_gaap:${result.company}:${category.key}`,
+        source_id: sourceOf.get(category.quarter_ends[0]!)!,
+        sources: category.quarter_ends.map((end) => ({ source_id: sourceOf.get(end)!, company: result.company, what: "source" as const })),
+      }] as const);
+      return [...quarters, ...categories];
+    }
     case "get_peer_set":
       return result.peers.map((peer) => [`peer:${result.company}:${peer.issuer_id}`, {
         kind: "peer",
@@ -265,10 +289,39 @@ function packetClaim(entry: AnalystPacketEntry): Omit<PacketClaim, "id">[] {
       return [{ text: entry.text, predicate: entry.predicate, stance: "neutral", company: entry.company, published_at: entry.captured_on, claim_id: `consensus:${entry.capture_id}`, source_id: entry.source_id }];
     case "peer":
       return [{ text: `Industry peer: ${entry.text}`, predicate: entry.predicate, stance: "neutral", company: entry.company, claim_id: `peer:${entry.company}:${entry.peer_issuer_id}`, source_id: entry.sources[0]!.source_id, sources: entry.sources }];
+    // Undated, so a ref opens the release: the text says when it was filed.
+    case "non_gaap":
+      return [{ text: entry.text, predicate: entry.predicate, stance: "neutral", company: entry.company, claim_id: entry.key, source_id: entry.source_id, ...(entry.sources ? { sources: entry.sources } : {}) }];
     case "filing_read":
     case "no_filing":
       return [];
   }
+}
+
+const SBC_BASIS_TEXT: Readonly<Record<SbcBasis, string>> = {
+  net_income: "net income line",
+  operating_income: "operating income line",
+  gross_profit_and_operating_expenses: "gross profit and operating expenses lines",
+};
+
+const amount = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 4 });
+
+const inScale = (scale: TableScale | null) => (scale ? ` in ${scale}` : "");
+
+// Each figure as the release states it, in its own table's scale, or a difference or ratio of its figures.
+function nonGaapQuarterText(quarter: NonGaapQuarter): string {
+  const head = `non-GAAP reconciliation for the quarter ended ${quarter.quarter_end} (8-K accession ${quarter.accession ?? "unknown"}, filed ${quarter.filed_on})`;
+  // The reader's rules found none, which says nothing of what the release discloses.
+  if (!quarter.reconciled) return `${head}: no GAAP to non-GAAP reconciliation could be read from the release`;
+  const { eps, operating_income: income, operating_margin: margin, sbc } = quarter;
+  const parts = [
+    eps && `diluted EPS GAAP ${eps.gaap.toFixed(2)}, non-GAAP ${eps.non_gaap.toFixed(2)}, a spread of ${eps.spread.toFixed(2)}`,
+    income && `operating income GAAP ${amount(income.gaap)}, non-GAAP ${amount(income.non_gaap)}${inScale(income.scale)}`,
+    // A margin is shown only when revenue is in operating income's scale.
+    margin && `operating margin on revenue of ${amount(margin.revenue)}${inScale(income!.scale)}, GAAP ${margin.gaap_pct.toFixed(1)}%, non-GAAP ${margin.non_gaap_pct.toFixed(1)}%, a spread of ${margin.spread_pp.toFixed(1)} percentage points`,
+    sbc && `stock-based compensation added back ${amount(sbc.value)}${inScale(sbc.scale)} (${SBC_BASIS_TEXT[sbc.basis]})${sbc.share_pct === null ? "" : `, ${sbc.share_pct.toFixed(1)}% of non-GAAP net income of ${amount(sbc.non_gaap_net_income!)}`}`,
+  ].filter(Boolean);
+  return `${head}: ${parts.join("; ") || "the release reconciles none of diluted EPS, operating income and stock-based compensation"}`;
 }
 
 function relabelled(result: AnalystToolResult, labels: ReadonlyMap<string, string>): AnalystToolResult {
