@@ -215,6 +215,26 @@ test("realized growth across a change of OCF scope is a named outcome, never a r
   assert.match(realized(row(pairs[1]!, pairs[0]!).realized.fcf), /continuing operations at one end and as the total at the other/u);
 });
 
+test("a row's free cash flow names each concept scope it was computed in, and a total over PP&E reads bare (#731, #743)", () => {
+  type Scopes = readonly [ocf: AsOfInputs["ocf_scope"], capex: AsOfInputs["capex_scope"]];
+  const cell = ([ocf, capex]: Scopes) => {
+    const row = backtestRow({
+      ticker: "SCOP", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
+      base: inputs("2018-02-16", "2017-12-31", "1100000000", "100000000", capex, ocf),
+      later: inputs("2023-02-16", "2022-12-31", "1600000000", "100000000", capex, ocf),
+      earlier: noEarlier, closes, splits: split,
+    });
+    const text = renderBacktest({ rows: [row], issuers: [] }, { ranOn: "2026-11-22", command: "c", notes: "" });
+    return /^\| SCOP \| 2017 \| 2018-02-15 \| 2018-02-16 \| ([^|]+) \|/mu.exec(text)![1];
+  };
+  assert.deepEqual([cell([null, null]), cell([CONTINUING_OPERATIONS, null]), cell([null, PRODUCTIVE_ASSETS]), cell([CONTINUING_OPERATIONS, PRODUCTIVE_ASSETS])], [
+    "1100000000",
+    "1100000000; Free cash flow (continuing-operations OCF less PP&E cash capex)",
+    "1100000000; Free cash flow (OCF less productive-asset capex)",
+    "1100000000; Free cash flow (continuing-operations OCF less productive-asset capex)",
+  ]);
+});
+
 test("a missing later 10-K is named once, as FY+5's, for both realized figures", () => {
   const row = backtestRow({
     ticker: "HIST", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,

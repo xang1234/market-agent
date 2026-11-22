@@ -69,6 +69,7 @@ import {
   divideRationals,
   endOfLocalDay,
   evaluateBoundPlan,
+  figureLabel,
   localDateOf,
   multiplyRationals,
   parseFinancialDecimal,
@@ -716,7 +717,11 @@ function tableRow(row: BacktestRow): string {
     return [`${label}: **${figure.outcome}** (${escape(figure.text)})`];
   });
   const outcomes = [...(row.period === null ? [] : [`**${row.period.outcome}** (${escape(row.period.text)})`]), ...named];
-  return `| ${[row.ticker, row.fiscal_year, row.filed, row.inputs.as_of, ...figures.map((figure) => figure.kind === "value" ? escape(figure.text) : "n/a"), outcomes.join("; ")].join(" | ")} |`;
+  // Growth reads only within one scope, so a row's scope is its growths' too.
+  const scopes = [row.inputs.ocf_scope, row.inputs.capex_scope].flatMap((scope) => (scope === null ? [] : [scope.kind]));
+  const cells = figures.map((figure) => figure.kind === "value" ? escape(figure.text) : "n/a");
+  if (scopes.length > 0 && free_cash_flow.kind === "value") cells[0] = `${cells[0]}; ${figureLabel("free_cash_flow", scopes)}`;
+  return `| ${[row.ticker, row.fiscal_year, row.filed, row.inputs.as_of, ...cells, outcomes.join("; ")].join(" | ")} |`;
 }
 
 /** The run's doc: the command that made it, the summary, the run's own notes, then one row per issuer-year and each issuer with no rows. */
