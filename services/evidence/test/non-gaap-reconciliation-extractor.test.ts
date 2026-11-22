@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { extractNonGaapReconciliations } from "../src/reader/non-gaap-reconciliation-extractor.ts";
+import { EX99_RELEASE_HTML } from "./fixtures/sec-8k-release.ts";
 
 const SAMPLE_SOURCE_UUID = "11111111-1111-4111-a111-111111111111";
 
@@ -125,4 +126,59 @@ test("extractNonGaapReconciliations recognizes non GAAP spelling variants", () =
 
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0]!.non_gaap.label, "Non GAAP operating income");
+});
+
+test("extractNonGaapReconciliations reads an EDGAR-built table: spanned headers, split cells and section headers", () => {
+  const result = extractNonGaapReconciliations({ html: EX99_RELEASE_HTML, source_id: SAMPLE_SOURCE_UUID, as_of: "2026-05-06T00:00:00.000Z" });
+  const quarter = "Three Months Ended October 26, 2025";
+  const reported = result.items.filter((item) => item.period_label === quarter);
+  assert.deepEqual(
+    reported.map((item) => ({
+      measure: item.measure_key,
+      gaap: item.gaap.value_num,
+      non_gaap: item.non_gaap.value_num,
+      adjustments: item.adjustments.map((adjustment) => [adjustment.label, adjustment.value_num]),
+      scale: item.scale,
+    })),
+    [
+      // A margin row is no anchor, and a negative split as "(2" and ")" keeps its sign.
+      { measure: "gross_profit", gaap: 41_849, non_gaap: 42_147, scale: "millions", adjustments: [
+        ["Acquisition-related and other costs (A)", 122], ["Stock-based compensation expense (B)", 178], ["Other (C)", -2],
+      ] },
+      { measure: "operating_expenses", gaap: 5_839, non_gaap: 4_325, scale: "millions", adjustments: [
+        ["Stock-based compensation expense (B)", -1_474], ["Acquisition-related and other costs (A)", -40],
+      ] },
+      // A total of the adjustments is no adjustment itself.
+      { measure: "operating_income", gaap: 36_010, non_gaap: 37_822, scale: "millions", adjustments: [] },
+      { measure: "net_income", gaap: 31_910, non_gaap: 33_366, scale: "millions", adjustments: [["Income tax impact of non-GAAP adjustments (D)", -356]] },
+      // "GAAP" alone takes its measure from the section header above it.
+      { measure: "eps_diluted", gaap: 1.3, non_gaap: 1.36, scale: "millions", adjustments: [] },
+    ],
+  );
+  assert.deepEqual(
+    [...new Set(result.items.map((item) => item.period_label))],
+    [quarter, "Three Months Ended July 27, 2025", "Three Months Ended October 27, 2024", "Nine Months Ended October 26, 2025", "Nine Months Ended October 27, 2024"],
+  );
+  assert.equal(result.items.length, 25);
+});
+
+test("extractNonGaapReconciliations keys per-share rows as EPS, never as net income", () => {
+  const result = extractNonGaapReconciliations({
+    html: `
+      <table>
+        <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th></tr>
+        <tr><td>GAAP net income</td><td>$100</td></tr>
+        <tr><td>Stock-based compensation</td><td>10</td></tr>
+        <tr><td>Non-GAAP net income</td><td>$110</td></tr>
+        <tr><td>GAAP net income per diluted share</td><td>$1.00</td></tr>
+        <tr><td>Stock-based compensation</td><td>0.10</td></tr>
+        <tr><td>Non-GAAP net income per diluted share</td><td>$1.10</td></tr>
+      </table>`,
+    source_id: SAMPLE_SOURCE_UUID,
+    as_of: "2026-05-06T00:00:00.000Z",
+  });
+  assert.deepEqual(result.items.map((item) => [item.measure_key, item.gaap.value_num, item.non_gaap.value_num]), [
+    ["net_income", 100, 110],
+    ["eps_diluted", 1, 1.1],
+  ]);
 });
