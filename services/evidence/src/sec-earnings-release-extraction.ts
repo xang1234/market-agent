@@ -38,7 +38,7 @@ import { createClaimEvidence } from "./claim-evidence-repo.ts";
 import { createClaim, type ClaimPeriod } from "./claim-repo.ts";
 import type { SecFilingFetcher } from "./sec-edgar.ts";
 import { withTransaction } from "./transaction.ts";
-import { readFigure, storeReleaseFigures, type RawFigure } from "./release-figures.ts";
+import { readFigure, RELEASE_METRICS, storeReleaseFigures, type RawFigure, type ReleaseMetric } from "./release-figures.ts";
 import type { QueryExecutor } from "./types.ts";
 import { isIsoDate } from "./validators.ts";
 
@@ -52,21 +52,6 @@ const PERIOD_KIND_OF = { quarter: "fiscal_q", year: "fiscal_y", other: null } as
 export type ReleaseStatementAbout = keyof typeof PERIOD_KIND_OF;
 const RELEASE_STATEMENT_ABOUTS = Object.keys(PERIOD_KIND_OF) as ReadonlyArray<ReleaseStatementAbout>;
 
-// The metric a statement concerns. "other" keeps a real explanation whose
-// subject is none of these (a segment, a product line).
-export const RELEASE_METRICS = [
-  "revenue",
-  "gross_margin",
-  "operating_expenses",
-  "operating_income",
-  "net_income",
-  "eps",
-  "operating_cash_flow",
-  "free_cash_flow",
-  "capex",
-  "other",
-] as const;
-export type ReleaseMetric = (typeof RELEASE_METRICS)[number];
 
 // The claim's confidence: the words are verified, their reading as an
 // explanation or guidance is the model's (as for enriched 8-K narratives).

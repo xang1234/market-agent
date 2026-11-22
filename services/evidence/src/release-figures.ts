@@ -9,8 +9,23 @@
 import { createHash } from "node:crypto";
 
 import type { IsoDate } from "../../financial-core/src/contracts.ts";
-import type { ReleaseMetric } from "./sec-earnings-release-extraction.ts";
 import type { QueryExecutor } from "./types.ts";
+
+// The metric a statement concerns. "other" keeps a real explanation whose
+// subject is none of these (a segment, a product line).
+export const RELEASE_METRICS = [
+  "revenue",
+  "gross_margin",
+  "operating_expenses",
+  "operating_income",
+  "net_income",
+  "eps",
+  "operating_cash_flow",
+  "free_cash_flow",
+  "capex",
+  "other",
+] as const;
+export type ReleaseMetric = (typeof RELEASE_METRICS)[number];
 
 export const FIGURE_BASES = ["gaap", "non_gaap"] as const;
 export type FigureBasis = (typeof FIGURE_BASES)[number];

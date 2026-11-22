@@ -7,8 +7,7 @@
 // nothing is compared across bases.
 
 import type { IsoDate } from "../../financial-core/src/contracts.ts";
-import { FIGURE_BASES, figureUnit, type FigureBasis, type FigureUnit } from "./release-figures.ts";
-import { RELEASE_METRICS, type ReleaseMetric } from "./sec-earnings-release-extraction.ts";
+import { FIGURE_BASES, figureUnit, RELEASE_METRICS, type FigureBasis, type FigureUnit, type ReleaseMetric } from "./release-figures.ts";
 import { ACCESSION_PATTERN, filingIndexUrl } from "./sec-edgar.ts";
 import type { QueryExecutor } from "./types.ts";
 
