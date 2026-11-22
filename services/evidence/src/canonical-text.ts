@@ -63,10 +63,10 @@ export const SENTENCE_START = /^["'($•[0-9A-Z]/;
 
 // An abbreviation's full stop, which ends no sentence even before a capital
 // ("the U.S. Data Center market"): initials ("U.S.", "e.g.", "J.") or a word
-// shortened by convention ("Inc.", "approx.", "Dec."). ponytail: a sentence that ends
+// shortened by convention ("Inc.", "approx.", "excl.", "Dec."). ponytail: a sentence that ends
 // in one ("...sales in the U.S.") counts only at a block edge.
 const INITIALS = /(?:^|[\s("'])(?:(?:[A-Za-z]\.){2,}|[A-Z]\.)$/;
-const SHORTENED = /(?:^|[\s("'])(?:inc|corp|co|ltd|no|nos|approx|vs|mr|ms|dr|jr|sr|st|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\.$/i;
+const SHORTENED = /(?:^|[\s("'])(?:inc|incl|excl|exh|corp|co|ltd|no|nos|approx|vs|mr|ms|dr|jr|sr|st|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\.$/i;
 
 // Whether the text before `at` ends a sentence with one of `marks` (and a
 // closing quote or bracket), not with an abbreviation's full stop.
