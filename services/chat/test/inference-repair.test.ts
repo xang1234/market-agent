@@ -12,6 +12,7 @@ import { assertionList, checkAssertions } from "../src/assertions.ts";
 import type { EvidencePacket, PacketFigure } from "../src/evidence-packet.ts";
 import { judgeCases, judgeMessages } from "../src/inference-judge.ts";
 import { REPAIR_INSTRUCTIONS, repairMessages, repairRequests } from "../src/inference-repair.ts";
+import { COUNTERPOINT_LEFT_OUT, NO_COUNTERPOINT } from "../src/llm-runtime.ts";
 import { mutationRepairSummary, mutationVariants, repairMutation, type MutationRepair } from "../scripts/answer-lab.ts";
 import { asCommentary, repairUnderTodaysPrompt } from "./answer-lab/trace-views.ts";
 
@@ -793,3 +794,27 @@ test("judge_prompt_changed reports a judge prompt edit from either round's recor
   assert.deepEqual(await replay(otherCase, under(repairRound, today)), [null, true]);
 });
 
+
+test("in an answer that must argue against its takeaway, an inference that names no role is sent to repair: one that comes back as the case against shows as it, and one that does not is said to be left out (#735)", async (t) => {
+  t.mock.method(console, "info", () => {});
+  const CUSHION = "Counterpoint: only one quarter of segment data is shown, so the data cannot show whether this concentration is rising or falling.";
+  const typed = SEGMENTS.exchange!.text.replace(`{"kind":"analyst_inference","subject":"NVDA","text":"Its revenue`, `{"kind":"analyst_inference","subject":"NVDA","role":"takeaway","text":"Its revenue`);
+  assert.notEqual(typed, SEGMENTS.exchange!.text);
+  const recorded = { ...SEGMENTS, input: { ...SEGMENTS.input, counterpoint: true as const }, exchange: { ...SEGMENTS.exchange!, text: typed } };
+  const run = async (repaired: LlmChatResult) => {
+    const { calls, repairs, createClient } = models(recorded, { judge: (ask) => verdict(ask.id, "entailed"), repair: () => repaired });
+    const done = await (await answerTurn(recorded.input, turn(recorded), { env: JUDGED_ENV, createClient })).judging!.done;
+    return { calls: calls.sort(), asked: repairs.map((request) => (repairAsked(request).rejected as Array<{ index: number; check: string }>).map(({ index, check }) => [index, check])), text: text(done.blocks) };
+  };
+
+  const answered = await run(fenced([inference(4, CUSHION, { role: "counterpoint" })]));
+  assert.deepEqual(answered.asked, [[[4, "format"]]]);
+  assert.deepEqual(answered.calls, ["answer", "judge 3", "judge 4", "repair"]);
+  assert.ok(answered.text.includes(`> **Case against** (from NVDA's revenue ranking by segment): ${CUSHION}`), answered.text);
+  assert.ok(!answered.text.includes(COUNTERPOINT_LEFT_OUT) && !answered.text.includes(NO_COUNTERPOINT));
+
+  for (const failed of [fenced([inference(4, "Counterpoint: only 1 quarter is shown.", { role: "counterpoint" })]), fenced([])]) {
+    const left = await run(failed);
+    assert.ok(!left.text.includes("Case against") && left.text.endsWith(COUNTERPOINT_LEFT_OUT), left.text);
+  }
+});

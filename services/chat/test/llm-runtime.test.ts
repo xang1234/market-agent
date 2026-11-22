@@ -1589,7 +1589,7 @@ test("an industry peer cites every source its line rests on, and a source cited 
 });
 
 test("an answer that must argue against its takeaway labels its case against, and says so when none is shown (#735)", () => {
-  const takeaway = { kind: "analyst_inference", text: "Outlook: it expects a better year.", supports: [0] };
+  const takeaway = { kind: "analyst_inference", role: "takeaway", text: "Outlook: it expects a better year.", supports: [0] };
   const against = { kind: "analyst_inference", role: "counterpoint", text: "Buyback: it is returning less cash to holders.", supports: [2] };
   const answer = (list: unknown[], counterpoint?: true) => renderedAnswer(
     { blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [SEALED_TOOL_CALL], factBlocks: A_BLOCKS, ...(counterpoint ? { counterpoint } : {}) },
@@ -1599,7 +1599,7 @@ test("an answer that must argue against its takeaway labels its case against, an
       takeaway,
       { kind: "management_attribution", text: "Management cut its buyback.", evidence: ["C3"] },
       ...list,
-    ], SEALED_PACKET),
+    ], SEALED_PACKET, counterpoint ? { roles: true } : {}),
   ).blocks;
   const of = (blocks: ReturnType<typeof answer>, states: Array<[number, "shown" | "unverified" | "pending"]>) => {
     const [block] = blocks(new Map(states));
@@ -1625,26 +1625,33 @@ test("an answer that must argue against its takeaway labels its case against, an
   assert.deepEqual(notes(answer([]), [[1, "shown"]]), [], "an answer not asked for one says nothing of it");
 });
 
-test("in an answer whose counterpoint is its last inference, an untyped second inference is its case against, and no note says none was found (#735)", () => {
-  const list = [
-    { kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] },
-    { kind: "analyst_inference", text: "Outlook: it expects a better year.", supports: [0] },
-    { kind: "management_attribution", text: "Management cut its buyback.", evidence: ["C3"] },
-    { kind: "analyst_inference", text: "Buyback: it is returning less cash to holders.", supports: [2] },
-  ];
-  const [block] = renderedAnswer(
-    { blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [SEALED_TOOL_CALL], factBlocks: A_BLOCKS, counterpoint: "last" },
+test("only an inference that says it argues against the takeaway is shown as the case against, and one written and dropped at any check is said to be left out (#735)", () => {
+  const argued = (list: unknown[]) => renderedAnswer(
+    { blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [SEALED_TOOL_CALL], factBlocks: A_BLOCKS, counterpoint: true },
     SEALED_PACKET,
-    checkAssertions(list, SEALED_PACKET),
-  ).blocks(new Map([[1, "shown"], [3, "shown"]]));
-  const commentary = block!.commentary as Array<Record<string, unknown>>;
-  assert.deepEqual(commentary.filter((part) => part.kind === "inference").map((part) => part.against), [undefined, true]);
-  assert.deepEqual(commentary.filter((part) => part.kind === "note"), []);
-  assert.match(plain(block!), /> \*\*Case against:\*\* Buyback/);
-  const one = renderedAnswer(
-    { blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [SEALED_TOOL_CALL], factBlocks: A_BLOCKS, counterpoint: "last" },
-    SEALED_PACKET,
-    checkAssertions(list.slice(0, 2), SEALED_PACKET),
-  ).blocks(new Map([[1, "shown"]]))[0]!.commentary as Array<Record<string, unknown>>;
-  assert.deepEqual(one.map((part) => [part.kind, part.against ?? part.text]), [["inference", "Outlook: it expects a better year."], ["note", NO_COUNTERPOINT]], "a lone takeaway is no case against itself");
+    checkAssertions([
+      { kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] },
+      { kind: "analyst_inference", role: "takeaway", text: "Outlook: it expects a better year.", supports: [0] },
+      { kind: "management_attribution", text: "Management expects higher margins and cut its buyback.", evidence: ["C2", "C3"] },
+      ...list,
+    ], SEALED_PACKET, { roles: true }),
+  ).blocks;
+  const shown = (blocks: ReturnType<typeof argued>, dropped?: { withdrawn: string[]; unchecked: string[] }) => {
+    const [block] = blocks(new Map([[1, "shown"], [3, "shown"]]), dropped);
+    return { text: plain(block!), notes: (block!.commentary as Array<Record<string, unknown>>).filter((part) => part.kind === "note").map((part) => part.text) };
+  };
+  const inference = (fields: Record<string, unknown>) => ({ kind: "analyst_inference", text: "Margins: it expects to keep more of each sale.", supports: [2], ...fields });
+
+  const second = shown(argued([inference({ role: "takeaway" })]));
+  assert.ok(!second.text.includes("Case against"), "a second inference for the takeaway is no case against it");
+  assert.deepEqual(second.notes, [NO_COUNTERPOINT]);
+
+  const untyped = shown(argued([inference({})]));
+  assert.ok(!untyped.text.includes("Case against") && !untyped.text.includes("Margins:"), "one that never said what it argues is not shown, nor guessed at");
+  assert.deepEqual(untyped.notes, [COUNTERPOINT_LEFT_OUT], "it may have been the case against, so none is said to be absent");
+
+  assert.deepEqual(shown(argued([inference({ role: "counterpoint", text: "Margins: it expects margins of 70%." })])).notes, [COUNTERPOINT_LEFT_OUT], "rejected by the checks");
+  const sealed = shown(argued([inference({ role: "counterpoint" })]), { withdrawn: [SEALED_CLAIM(3)], unchecked: [] });
+  assert.ok(!sealed.text.includes("Case against"));
+  assert.deepEqual(sealed.notes, ["A claim this answer quoted is no longer citable, so it is left out.", COUNTERPOINT_LEFT_OUT], "left out with a claim its seal dropped");
 });

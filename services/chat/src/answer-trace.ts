@@ -15,7 +15,7 @@ import { ANALYST_AGENT_BUNDLE_ID } from "./bundle-routing.ts";
 import { judgeCases, judgeInferences, judgeMessages, verdictsOf, type JudgeCase, type JudgeRecord, type ModelRecord } from "./inference-judge.ts";
 import { repairRequests, repairRound, requestRepair, type RepairRequest, type RepairTrace } from "./inference-repair.ts";
 import { sentToRepair, shownAs, verdictText, type AnswerPath, type InferenceVerdict, type ShownAs } from "./verdicts.ts";
-import { composeAnalystBlocksWithLlm, renderedAnswer, restated, turnPacket, type AnswerBlocks, type AnswerUsage, type DroppedClaims, type InferenceState, type Inferences, type ModelDeadlines } from "./llm-runtime.ts";
+import { composeAnalystBlocksWithLlm, renderedAnswer, restated, rolesOf, turnPacket, type AnswerBlocks, type AnswerUsage, type DroppedClaims, type InferenceState, type Inferences, type ModelDeadlines } from "./llm-runtime.ts";
 
 export type AnswerTraceInput = Omit<
   Parameters<typeof composeAnalystBlocksWithLlm>[0],
@@ -181,12 +181,13 @@ async function repairedAnswer(
   const packet = input.packet ?? turnPacket(input);
   const original = assertionList(answer.exchange!.text) ?? [];
   const restoredReport = (list: ReadonlyArray<unknown>, report: AssertionReport, restored: ReadonlyArray<number>) =>
-    restored.length === 0 ? report : checkAssertions(list.map((entry, index) => (restored.includes(index) ? original[index] : entry)), packet);
+    restored.length === 0 ? report : checkAssertions(list.map((entry, index) => (restored.includes(index) ? original[index] : entry)), packet, rolesOf(input));
   const round = await repairRound({
     messages: answer.exchange!.messages,
     list: original,
     requests,
     packet,
+    checks: rolesOf(input),
     factBlocks: input.factBlocks ?? [],
     repair: calls.repair,
     judge: calls.judge,

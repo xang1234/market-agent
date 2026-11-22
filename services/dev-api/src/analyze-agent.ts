@@ -16,7 +16,7 @@ import { DevApiHttpError } from "./dev-api-shared.ts";
 const GOALS: Readonly<Record<string, Readonly<{ ask: (company: string) => string; claimsRequired?: true; argued?: true }>>> = {
   investment_thesis: {
     ask: (company) =>
-      `What is the investment case for ${company} as its stored sources state it: what the business does and sells, and its latest fiscal year's revenue, gross margin and operating margin?`,
+      `What is the investment case for ${company} as its stored sources state it: what the business does and sells, its latest fiscal year's revenue, gross margin and operating margin, and the risk factors its 10-K states that cut against that case?`,
     argued: true,
   },
   growth_drivers: {

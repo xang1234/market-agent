@@ -41,7 +41,6 @@ import type { AssertionReport } from "./assertions.ts";
 const MAX_STEPS = 4;
 const TURN_CALLS = 8;
 const ANSWER_CALLS = 3;
-const SECTION_CALLS = MAX_STEPS + ANSWER_CALLS;
 const DEADLINES = { readMs: 75_000, turnMs: 120_000 };
 
 type AgentModels = Readonly<{
@@ -132,6 +131,8 @@ type AgentAsk = Readonly<{
   // A certified call's cutoff, read when it is made, so a company's filings fetched earlier in the turn are in it.
   clock: () => string;
   meter: Meter;
+  // The calls the meter keeps for writing and checking the answer, which reading never spends.
+  answerCalls: number;
   snapshotId: string;
   scopedKey: (name: string) => string;
   noFilingAsOfCutoff: boolean;
@@ -195,6 +196,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       asOf: deps.asOf(),
       clock: deps.asOf,
       meter,
+      answerCalls: ANSWER_CALLS,
       snapshotId: randomUUID(),
       scopedKey: (name) => name,
       noFilingAsOfCutoff: false,
@@ -252,6 +254,8 @@ export type AnalystSection = Readonly<{
 export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystSectionInput) => Promise<AnalystSection> {
   const section = async (input: AnalystSectionInput, signal: AbortSignal): Promise<AnalystSection> => {
     const issuer = input.subject.issuer_id.toLowerCase();
+    // A case against is one more inference, so one more judge call (#735).
+    const answerCalls = ANSWER_CALLS + (input.argued ? 1 : 0);
     const job: AgentAsk = {
       question: input.goal,
       named: [{ mention: input.subject.label, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: issuer }, label: input.subject.label } }],
@@ -265,8 +269,8 @@ export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystS
       conversation: async () => [],
       asOf: input.asOf,
       clock: () => input.asOf,
-      // A case against is one more inference, so one more judge call (#735).
-      meter: callMeter(SECTION_CALLS + (input.argued ? 1 : 0)),
+      meter: callMeter(MAX_STEPS + answerCalls),
+      answerCalls,
       snapshotId: input.snapshotId,
       scopedKey: (name) => `${input.sectionId}:${name}`,
       noFilingAsOfCutoff: true,
@@ -306,7 +310,7 @@ let defaultRegistry: ToolRegistry | undefined;
 
 async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Promise<Gathered | null> {
   let loopRefused = false;
-  const router = await deps.router(job.meter(ANSWER_CALLS, () => {
+  const router = await deps.router(job.meter(job.answerCalls, () => {
     loopRefused = true;
   }));
   if (!router) return null;
@@ -362,7 +366,7 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
       const { clarificationAnswer: _picked, ...turn } = context;
       let plannerRefused = false;
       // A planner call leaves one for the loop's next step, beside the answer's.
-      const planningModel = deps.planner?.(meter(ANSWER_CALLS + 1, () => {
+      const planningModel = deps.planner?.(meter(job.answerCalls + 1, () => {
         plannerRefused = true;
       })) ?? null;
       const outcome = await certifiedFinancials({ ...deps.financial, planningModel, clock: () => new Date(job.clock()) }, {
@@ -671,13 +675,15 @@ const ANSWER_RULES = [
   "A price return or last close is a figure: state it in an observation citing its F id, and set companies' price returns side by side in a comparison.",
 ];
 // The bear section (#735): a case against the conclusion from sourced facts, never a stance (ADR 0005).
-const counterpointRule = (conclusion: string) => [
-  `The counterpoint is the strongest case the evidence makes against ${conclusion}: one analyst_inference with "role":"counterpoint", listed last,`,
+const counterpointRule = (conclusion: string, takeaways: string) => [
+  `Every analyst_inference says what it argues: "role":"takeaway" for ${takeaways}, or "role":"counterpoint" for the case against ${conclusion}.`,
+  `The counterpoint is the strongest case the evidence makes against ${conclusion}: one analyst_inference, listed last,`,
   "whose supports are observations, comparisons or management_attributions other than the ones the case for it rests on, where the evidence holds them",
   "(a figure that fell or trails, a period that breaks the trend, a risk or cost a claim states). It argues from those facts and is no rating, stance or price target.",
+  "An inference that adds to the case for it is a takeaway, never the counterpoint.",
   "If nothing in the evidence cuts against it, write no counterpoint, and the answer says none was found: never invent one.",
 ];
-const ANALYSIS_RULES = ["Write at most two analyst_inference entries: the takeaway and the counterpoint.", ...counterpointRule("the takeaway")];
+const ANALYSIS_RULES = ["Write at most two analyst_inference entries: the takeaway and the counterpoint.", ...counterpointRule("the takeaway", "the takeaway")];
 const DESCRIPTION_SHAPE = [
   "Answer with what the stored sources say: list management_attribution entries alone, each citing a claim that answers the question as asked,",
   "and write no analyst_inference, neither a takeaway nor a counterpoint.",
@@ -699,14 +705,14 @@ const THEME_SHAPE = [
 
 const WRITING = {
   chat: (askedFigures: boolean) => (askedFigures
-    ? { instructions: [...ANSWER_RULES, ...ANALYSIS_RULES], counterpoint: "last" as const }
+    ? { instructions: [...ANSWER_RULES, ...ANALYSIS_RULES], counterpoint: true as const }
     : { instructions: ANSWER_RULES, answerShape: DESCRIPTION_SHAPE, inferences: false as const }),
   themes: () => ({ instructions: ANSWER_RULES, answerShape: THEME_SHAPE }),
   thesis: () => ({
     instructions: ANSWER_RULES,
     answerShape: [
       ...THEME_SHAPE,
-      ...counterpointRule("the investment case its themes make"),
+      ...counterpointRule("the investment case its themes make", "each theme"),
       "Like a theme, it weighs its claims in their own terms, what the filing says is at stake and what a figure shows, never what they could do to later results or margins.",
     ],
     counterpoint: true as const,

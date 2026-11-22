@@ -518,17 +518,33 @@ test("an inference writes no link: an address the page would render as one rejec
   ]);
 });
 
-test("an inference may be the answer's case against its takeaway, and only an inference is (#735)", () => {
+test("an inference may say it is the answer's takeaway or its case against it, and only an inference says either (#735)", () => {
   const report = check([
     { kind: "observation", text: "NVDA's gross margin was [[F1]].", evidence: ["F1"] },
     { kind: "analyst_inference", text: "It keeps more of each sale.", supports: [0] },
     { kind: "analyst_inference", role: "counterpoint", text: "Its margin may not hold at that level.", supports: [0] },
     { kind: "analyst_inference", role: "bull_case", text: "It keeps more of each sale.", supports: [0] },
     { kind: "observation", role: "counterpoint", text: "NVDA's gross margin was [[F1]].", evidence: ["F1"] },
+    { kind: "analyst_inference", role: "takeaway", text: "It keeps more of each sale.", supports: [0] },
   ]);
-  assert.deepEqual(report.accepted.map((entry) => [entry.index, entry.role]), [[0, undefined], [1, undefined], [2, "counterpoint"]]);
+  assert.deepEqual(report.accepted.map((entry) => [entry.index, entry.role]), [[0, undefined], [1, undefined], [2, "counterpoint"], [5, "takeaway"]]);
   assert.deepEqual(report.rejected.map((entry) => [entry.index, entry.check, entry.reason]), [
-    [3, "format", "an inference's role is counterpoint, or it has none"],
+    [3, "format", "an inference's role is takeaway or counterpoint"],
     [4, "format", "only an analyst inference has a role"],
   ]);
+});
+
+test("an answer that must argue against its takeaway rejects an inference that names no role, so its case against is never guessed (#735)", () => {
+  const list = [
+    { kind: "observation", text: "NVDA's gross margin was [[F1]].", evidence: ["F1"] },
+    { kind: "analyst_inference", role: "takeaway", text: "It keeps more of each sale.", supports: [0] },
+    { kind: "analyst_inference", text: "Its margin may not hold at that level.", supports: [0] },
+    { kind: "analyst_inference", role: "counterpoint", text: "Its margin was 74% at its peak.", supports: [0] },
+  ];
+  const report = checkAssertions(list, PACKET, { roles: true });
+  assert.deepEqual(report.accepted.map((entry) => [entry.index, entry.role]), [[0, undefined], [1, "takeaway"]]);
+  assert.deepEqual(report.rejected.map((entry) => [entry.index, entry.check, entry.role]), [[2, "format", "unstated"], [3, "binding", "counterpoint"]],
+    "each rejected inference keeps what it argued, or that it never said");
+  assert.match(report.rejected[0]!.reason, /"role":"takeaway".*"role":"counterpoint"/);
+  assert.deepEqual(check(list).accepted.map((entry) => entry.index), [0, 1, 2], "an answer not asked to argue against itself takes an inference with no role");
 });

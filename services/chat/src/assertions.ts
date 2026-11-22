@@ -31,9 +31,10 @@ export type Assertion = {
   // The company an inference is about, one its evidence covers: across
   // companies its text names none, so the label names it (#308).
   subject?: string;
-  // counterpoint: the answer's case against its takeaway (#735), judged like
-  // any other inference and labelled as such when shown.
-  role?: "counterpoint";
+  // What an inference argues, where its answer must argue against its takeaway
+  // (#735): the takeaway (a theme, in a memo section), or the case against it,
+  // judged like any other inference and labelled as such when shown.
+  role?: InferenceRole;
   // A comparison's operation and claimed result (comparisons.ts): the high or
   // low's id, the ids highest first, or a trend's result.
   op?: ComparisonOp;
@@ -77,6 +78,9 @@ export type AssertionReport = {
 // counterpoint; at 8, counterpoints fell past the cap (2026-10-13 eval).
 export const MAX_ASSERTIONS = 12;
 
+export type InferenceRole = "takeaway" | "counterpoint";
+const ROLES: ReadonlySet<unknown> = new Set(["takeaway", "counterpoint"]);
+
 // The check a rejection failed, named so a report can tell a wrong number or
 // citation (binding) from a wrong ranking or trend (comparative), and so a
 // held-out mutation fails one named check (#221). judge: an inference the
@@ -84,8 +88,9 @@ export const MAX_ASSERTIONS = 12;
 export type RejectionCheck =
   | "binding" | "comparative" | "reference" | "kind" | "support" | "limit" | "format" | "rendering" | "judge";
 // part: the metric it failed on, of a comparison over several (comparisons.ts).
-// role: a rejected case against, so the answer says one was left out, not that none was found.
-export type Rejection = { index: number; text?: string; check: RejectionCheck; reason: string; part?: ClaimFailure; role?: "counterpoint" };
+// role: what a rejected inference argued, or unstated where its answer asks each to say,
+// so an answer whose case against was rejected says one was left out, never that none was found.
+export type Rejection = { index: number; text?: string; check: RejectionCheck; reason: string; part?: ClaimFailure; role?: InferenceRole | "unstated" };
 
 // The list closes the answer in a fenced block, closed or not (a reply cut
 // off inside it). The first block is the one read, so a second (a corrected
@@ -105,7 +110,13 @@ export function assertionList(text: string): unknown[] | null | undefined {
   }
 }
 
-export function checkAssertions(list: unknown[] | null | undefined, packet: EvidencePacket): AssertionReport {
+function roleOf(role: unknown, options: { roles?: true }): Pick<Rejection, "role"> {
+  if (ROLES.has(role)) return { role: role as InferenceRole };
+  return options.roles ? { role: "unstated" } : {};
+}
+
+// roles: each inference must say what it argues (#735), so none is taken for the case against unasked.
+export function checkAssertions(list: unknown[] | null | undefined, packet: EvidencePacket, options: { roles?: true } = {}): AssertionReport {
   if (packet.figures.length === 0 && packet.claims.length === 0) return { status: "skipped", accepted: [], rejected: [] };
   if (list === undefined) return { status: "missing", accepted: [], rejected: [] };
   if (list === null) return { status: "malformed", accepted: [], rejected: [] };
@@ -116,7 +127,7 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
   const reject = (index: number, item: unknown, check: RejectionCheck, reason: string, part?: ClaimFailure) =>
     rejected.push({
       index, ...(isRecord(item) && typeof item.text === "string" ? { text: item.text } : {}), check, reason, ...(part ? { part } : {}),
-      ...(isRecord(item) && item.kind === "analyst_inference" && item.role === "counterpoint" ? { role: "counterpoint" as const } : {}),
+      ...(isRecord(item) && item.kind === "analyst_inference" ? roleOf(item.role, options) : {}),
     });
 
   // Inferences last, so the observations they rest on are already checked.
@@ -155,8 +166,12 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
       reject(index, item, "format", "only an analyst inference has a role");
       continue;
     }
-    if (item.role !== undefined && item.role !== "counterpoint") {
-      reject(index, item, "format", "an inference's role is counterpoint, or it has none");
+    if (item.role !== undefined && !ROLES.has(item.role)) {
+      reject(index, item, "format", "an inference's role is takeaway or counterpoint");
+      continue;
+    }
+    if (options.roles && kind === "analyst_inference" && item.role === undefined) {
+      reject(index, item, "format", 'this answer\'s inferences each say what they argue: "role":"takeaway" for the case it makes, or "role":"counterpoint" for the case against it');
       continue;
     }
     if ((item.op !== undefined || item.result !== undefined) && kind !== "comparison") {
@@ -236,7 +251,7 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
       kind,
       text: item.text,
       evidence: comparison?.standing?.evidence ?? evidence,
-      ...(kind === "analyst_inference" ? { supports, ...(item.subject !== undefined ? { subject: item.subject as string } : {}), ...(item.role === "counterpoint" ? { role: item.role } : {}) } : {}),
+      ...(kind === "analyst_inference" ? { supports, ...(item.subject !== undefined ? { subject: item.subject as string } : {}), ...(item.role !== undefined ? { role: item.role as InferenceRole } : {}) } : {}),
       ...(comparison?.standing ? { op: item.op as ComparisonOp, result: comparison.standing.result as string | string[] } : {}),
     });
   }

@@ -5,7 +5,7 @@ import test from "node:test";
 import { dockerAvailable, registerLifoCleanup } from "../../../db/test/docker-pg.ts";
 import { createMemoRun, memoDatabase, playbook } from "../../analyze/test/financial-fixtures.ts";
 import { meteredModels, statesStance } from "../../chat/src/analyst-agent.ts";
-import { NO_COUNTERPOINT } from "../../chat/src/llm-runtime.ts";
+import { COUNTERPOINT_LEFT_OUT, NO_COUNTERPOINT } from "../../chat/src/llm-runtime.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { LlmClientError, type LlmChatClient, type LlmChatRequest, type LlmToolCall } from "../../llm/src/router.ts";
 import { analyzeAgentWorkflow } from "../src/analyze-agent.ts";
@@ -30,6 +30,8 @@ type Section = { kind: string; title?: string; data_ref: { params?: { playbook_s
 
 type Script = Readonly<{
   inferences?: ReadonlyArray<string>;
+  // The thesis's case against, listed after its themes.
+  against?: string;
   themes?: boolean;
   // The risks reading finds figures and no risk factor.
   risksWithoutClaims?: boolean;
@@ -87,7 +89,8 @@ function scriptedModel(calls: string[], script: Script = {}): () => LlmChatClien
     const assertions = [
       ...observed,
       ...quoted,
-      ...(script.inferences ?? []).map((text) => ({ kind: "analyst_inference", text, supports: theme })),
+      ...(script.inferences ?? []).map((text) => ({ kind: "analyst_inference", role: "takeaway", text, supports: theme })),
+      ...(script.against && question.includes("investment case") ? [{ kind: "analyst_inference", role: "counterpoint", text: script.against, supports: theme }] : []),
     ];
     return { text: `\`\`\`assertions\n${JSON.stringify(assertions)}\n\`\`\`` };
   };
@@ -335,6 +338,15 @@ test("the analyst agent writes an investment memo's sections from stored sources
     const askedAgainst = answered.map((entry) => [entry.question.includes("investment case"), entry.system.includes('"role":"counterpoint"')]);
     assert.deepEqual(askedAgainst.filter(([thesis]) => thesis), [[true, true]]);
     assert.ok(askedAgainst.every(([thesis, against]) => thesis === against), "only the thesis is asked for one");
+    assert.ok(answered.some((entry) => entry.question.includes("investment case") && /risk/.test(entry.question)), "its reading looks for what cuts against the case too");
+  });
+
+  await t.test("a thesis whose case against states a stance says it was left out, never that none was found (#735)", async () => {
+    const judged = adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps({ ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" }, scriptedModel([], { inferences: ["Customers buy the devices in bulk."], against: "The upside looks limited." }))));
+    const run = await judged.analyze.createRun({ userId: IDS.owner, body: memoBody });
+    const saved = (await db.query(`select blocks from analyze_template_runs where run_id = $1`, [run.run_id])).rows[0].blocks;
+    const thesis = JSON.stringify(sectionsOf(saved).find((section) => section.data_ref.params?.playbook_section_id === "investment_thesis")!.children);
+    assert.deepEqual([thesis.includes(COUNTERPOINT_LEFT_OUT), thesis.includes(NO_COUNTERPOINT), thesis.includes("upside")], [true, false, false]);
   });
 
   await t.test("a theme cites the claims it rests on, sealed with the memo, and its quotes come back when the judge does not entail it", async () => {

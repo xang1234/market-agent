@@ -408,9 +408,9 @@ test("a section argued against gets one more model call, as its case against tak
       },
     });
     await section({ subject: { issuer_id: A, label: "AAA" }, goal: "What is AAA's investment case?", ...(argued ? { argued: true as const } : {}), sectionId: "investment_thesis", userId: IDS.owner, runId, authority: chatAuthority(IDS.owner, runId, runId), snapshotId: randomUUID(), asOf: "2026-11-17T05:51:00.000Z" });
-    return router.sent.length + answered;
+    return [router.sent.length, answered];
   };
-  assert.deepEqual([await calls(false), await calls(true)], [7, 8]);
+  assert.deepEqual([await calls(false), await calls(true)], [[4, 3], [4, 4]]);
 });
 
 test("only a company a certified call asked figures of can be said to have none", () => {
@@ -453,7 +453,7 @@ test("an answer given a shape is asked for in the shape's words, and an inferenc
     inferences: false,
     createClient: () => async (_deployment, request) => {
       sent.push(String(request.messages[0]!.content));
-      return { text: '```assertions\n[{"kind":"observation","text":"Revenue was $1.0B.","evidence":["F1"]},{"kind":"analyst_inference","text":"It is a strong franchise.","supports":[0]}]\n```' };
+      return { text: '```assertions\n[{"kind":"observation","text":"Revenue was $1.0B.","evidence":["F1"]},{"kind":"analyst_inference","role":"takeaway","text":"It is a strong franchise.","supports":[0]}]\n```' };
     },
     onAssertions: (checked) => {
       report = checked;
@@ -595,7 +595,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
         createClient: () => async (_deployment, request) => {
           const transcript = request.messages.map((message) => message.content).join("\n");
           if (transcript.startsWith("You check the analyst inferences")) return { text: '{"verdicts":[{"id":1,"verdict":"entailed","worded_amount":false}]}' };
-          return { text: '```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]},{"kind":"analyst_inference","text":"Its revenue base gives it scale.","supports":[0]}]\n```' };
+          return { text: '```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]},{"kind":"analyst_inference","role":"takeaway","text":"Its revenue base gives it scale.","supports":[0]}]\n```' };
         },
         onAnswered,
       }),
@@ -1116,7 +1116,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
         env: { ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" },
         createClient: () => async (_deployment, request) => {
           if (request.messages.map((message) => message.content).join("\n").startsWith("You check the analyst inferences")) return { text: '{"verdicts":[{"id":1,"verdict":"entailed","worded_amount":true}]}' };
-          return { text: `\`\`\`assertions\n[{"kind":"management_attribution","text":"Analysts target 250.","evidence":["C1"]},{"kind":"analyst_inference","text":"${worded}","supports":[0]}]\n\`\`\`` };
+          return { text: `\`\`\`assertions\n[{"kind":"management_attribution","text":"Analysts target 250.","evidence":["C1"]},{"kind":"analyst_inference","role":"takeaway","text":"${worded}","supports":[0]}]\n\`\`\`` };
         },
         onAnswered,
       }),
@@ -1146,7 +1146,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
       { toolCalls: [call("get_company_profile", PROFILE)] },
     ]);
     const kinds: string[] = [];
-    const list = '```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]},{"kind":"analyst_inference","text":"Its revenue base gives it scale.","supports":[0]},{"kind":"analyst_inference","text":"Scale may help it absorb costs.","supports":[0]}]\n```';
+    const list = '```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]},{"kind":"analyst_inference","role":"takeaway","text":"Its revenue base gives it scale.","supports":[0]},{"kind":"analyst_inference","role":"takeaway","text":"Scale may help it absorb costs.","supports":[0]}]\n```';
     const agent = analystAgentRunner({
       financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
       router: async (beforeModelCall) => metered(router, beforeModelCall),
@@ -1172,6 +1172,35 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.equal(router.sent.length + planner.calls + kinds.length, 8, JSON.stringify({ loop: router.sent.length, planner: planner.calls, answer: kinds }));
     assert.ok(savedText(done).includes("Reading stopped at the turn's limit of model calls, so part of the question may be unanswered."), savedText(done));
     assert.ok(savedText(done).includes("Some of the analysis was left out, as the turn reached its limit of model calls."), "the repair it could not make");
+  });
+
+  await t.test("a section argued against keeps its extra call for its answer: the reading and the planner leave it (#735)", async () => {
+    const answerCalls = async (argued: boolean) => {
+      let answered = 0;
+      const ask = (n: number) => call("certified_financials", { ...REVENUE, question: `AAA revenue in fiscal 2023, ask ${n}` });
+      const router = scripted(Array.from({ length: 8 }, (_, i) => ({ toolCalls: [ask(2 * i), ask(2 * i + 1), call("get_company_profile", { subject_ref: { kind: "issuer", id: A } })] })));
+      const runId = randomUUID();
+      const section = analystSectionRunner({
+        financial: { pool, evidence: createEvidenceFinancialPort },
+        router: async (beforeModelCall) => metered(router, beforeModelCall),
+        planner: (beforeModelCall) => meteredPlanner(revenueModel(["AAA"]), beforeModelCall),
+        read: async (name) => ({ tool: name, status: "ok", truncated: false, reads: [readOf(A)], no_filing: [], claims: [filingClaim(randomUUID(), "We sell widgets.")] }) as AnalystToolResult,
+        compose: async (_input, _turn, _onAnswered, beforeModelCall) => {
+          try {
+            for (;;) {
+              beforeModelCall();
+              answered += 1;
+            }
+          } catch (spent) {
+            if (!(spent instanceof LlmClientError)) throw spent;
+          }
+          return { assertions: null, blocks: [], without: () => ({ blocks: [] }) } as never;
+        },
+      });
+      await section({ subject: { issuer_id: A, label: "AAA" }, goal: "What is AAA's investment case?", ...(argued ? { argued: true as const } : {}), sectionId: "investment_thesis", userId: IDS.owner, runId, authority: chatAuthority(IDS.owner, runId, runId), snapshotId: randomUUID(), asOf: "2026-11-17T05:51:00.000Z" });
+      return answered;
+    };
+    assert.deepEqual([await answerCalls(false), await answerCalls(true)], [3, 4]);
   });
 
   await t.test("a turn's reading ends at its own deadline, and the answer is still written from what it read, with figures or without", async () => {
@@ -1393,7 +1422,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     completed(await run(recording(scripted([{ toolCalls: [call("get_company_profile", PROFILE), call("certified_financials", REVENUE)] }, { text: "DONE" }]), profileOf("We sell widgets.")), { ...base, turnId: randomUUID(), userIntent: "AAA revenue, and what it sells" }));
     assert.deepEqual(rules.map((given) => [given.some((rule) => rule.includes("write no analyst_inference")), given.some((rule) => rule.includes("the takeaway and the counterpoint"))]), [[true, false], [false, true], [true, false]], "an ask whose figures were not computed is described");
     assert.deepEqual(against, [false, true, false], "only an answer with a takeaway must argue against it");
-    assert.ok(['"role":"counterpoint"', "never invent one"].every((words) => rules[1]!.join(" ").includes(words)), "the case against is typed, and none is said rather than made up");
+    assert.ok(['"role":"takeaway"', '"role":"counterpoint"', "never invent one"].every((words) => rules[1]!.join(" ").includes(words)), "the case against is typed, and none is said rather than made up");
     assert.ok(!savedText(describe).includes("No figures are shown"), "a company no certified call asked about lacks none");
   });
 
@@ -1473,7 +1502,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     kinds.push(kinds.includes("answer") ? "repair" : "answer");
     return { text: kinds.at(-1) === "answer" ? answer : "```assertions\n[]\n```" };
   };
-  const TWO_INFERENCES = '```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]},{"kind":"analyst_inference","text":"Its revenue base gives it scale.","supports":[0]},{"kind":"analyst_inference","text":"Scale may help it absorb costs.","supports":[0]}]\n```';
+  const TWO_INFERENCES = '```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]},{"kind":"analyst_inference","role":"takeaway","text":"Its revenue base gives it scale.","supports":[0]},{"kind":"analyst_inference","role":"takeaway","text":"Scale may help it absorb costs.","supports":[0]}]\n```';
 
   await t.test("the turn's reading of its question is one of its eight model calls", async () => {
     made.readings = 0;
@@ -1537,7 +1566,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
       }),
       compose: (input, turn, onAnswered) => answerTurn(input, turn, {
         env: { ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" },
-        createClient: judgedBy('```assertions\n[{"kind":"management_attribution","text":"Analysts target 250.","evidence":["C1"]},{"kind":"analyst_inference","text":"AAA looks undervalued against that target.","supports":[0]}]\n```', "entailed", kinds),
+        createClient: judgedBy('```assertions\n[{"kind":"management_attribution","text":"Analysts target 250.","evidence":["C1"]},{"kind":"analyst_inference","role":"takeaway","text":"AAA looks undervalued against that target.","supports":[0]}]\n```', "entailed", kinds),
         onAnswered,
       }),
       asOf: () => new Date().toISOString(),
@@ -1558,7 +1587,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
       }),
       compose: (input, turn, onAnswered) => answerTurn(input, turn, {
         env: { ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" },
-        createClient: judgedBy('```assertions\n[{"kind":"management_attribution","text":"Analysts target 250.","evidence":["C1"]},{"kind":"analyst_inference","text":"AAA looks undervalued against that target.","supports":[7]}]\n```', "entailed", repairing),
+        createClient: judgedBy('```assertions\n[{"kind":"management_attribution","text":"Analysts target 250.","evidence":["C1"]},{"kind":"analyst_inference","role":"takeaway","text":"AAA looks undervalued against that target.","supports":[7]}]\n```', "entailed", repairing),
         onAnswered,
       }),
       asOf: () => new Date().toISOString(),
@@ -1577,7 +1606,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
       read: noRead,
       compose: (input, turn, onAnswered) => answerTurn(input, turn, {
         env: { ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" },
-        createClient: judgedBy('```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]},{"kind":"analyst_inference","text":"Its revenue leaves it exposed to memory competitors.","supports":[0]}]\n```', "unsupported", kinds),
+        createClient: judgedBy('```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]},{"kind":"analyst_inference","role":"takeaway","text":"Its revenue leaves it exposed to memory competitors.","supports":[0]}]\n```', "unsupported", kinds),
         onAnswered,
       }),
       asOf: () => new Date().toISOString(),

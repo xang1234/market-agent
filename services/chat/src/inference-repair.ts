@@ -136,6 +136,8 @@ export async function repairRound(input: {
   list: ReadonlyArray<unknown>;
   requests: ReadonlyArray<RepairRequest>;
   packet: EvidencePacket;
+  // The checks the answer's own list went through (assertions.ts checkAssertions).
+  checks?: { roles?: true };
   factBlocks: ReadonlyArray<Record<string, unknown>>;
   repair: (messages: LlmChatMessage[]) => Promise<ModelRecord>;
   judge: (inference: JudgeCase, i: number) => Promise<ModelRecord>;
@@ -143,7 +145,7 @@ export async function repairRound(input: {
 }): Promise<{ record: ModelRecord; list: unknown[]; repaired: number[]; report: AssertionReport; cases: JudgeCase[]; records: ModelRecord[] }> {
   const record = await input.repair(repairMessages(input.messages, input.list, input.requests));
   const { list, repaired } = repairedList(input.list, input.requests, record);
-  const report = checkAssertions(list, input.packet);
+  const report = checkAssertions(list, input.packet, input.checks);
   if (repaired.length === 0) return { record, list, repaired, report, cases: [], records: [] };
   input.checked?.({ list, repaired, report });
   const cases = judgeCases(report, input.packet, input.factBlocks).filter((inference) => repaired.includes(inference.index));

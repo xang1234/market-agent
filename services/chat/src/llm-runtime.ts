@@ -168,9 +168,9 @@ export async function composeAnalystBlocksWithLlm(input: {
   answerShape?: ReadonlyArray<string>;
   // Set false to reject every analyst_inference the answer lists, with no repair asked for one.
   inferences?: false;
-  // Set when the answer must argue against its takeaway (#735): with a takeaway shown and no case against, it says why none shows.
-  // last: its rules list the counterpoint as its last inference, so the last of two or more is the case against when none is typed.
-  counterpoint?: true | "last";
+  // Set when the answer must argue against its takeaway (#735): each inference says what it argues, and with a
+  // takeaway shown and no case against, the answer says why none shows.
+  counterpoint?: true;
   // Set when a model failed before the turn read anything, so an answer with nothing to write from says so (#695).
   modelFailed?: true;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
@@ -294,7 +294,7 @@ export async function composeAnalystBlocksWithLlm(input: {
   });
   if (usage) input.onUsage?.(usage);
   const list = assertionList(result.text);
-  const checked = checkAssertions(list, packet);
+  const checked = checkAssertions(list, packet, rolesOf(input));
   const report = input.inferences === false ? withoutInferences(checked, list ?? []) : checked;
   if (report.status !== "checked" || report.rejected.length > 0) {
     console.info(`[chat] assertions ${report.status}: ${report.accepted.length} accepted, ${report.rejected.length} rejected`);
@@ -327,6 +327,9 @@ function withoutInferences(report: AssertionReport, list: ReadonlyArray<unknown>
   };
 }
 
+// The checks an answer's list goes through: an answer that must argue against its takeaway has each inference say what it argues.
+export const rolesOf = (input: Pick<AnswerInput, "counterpoint">): { roles?: true } => (input.counterpoint ? { roles: true } : {});
+
 export type AnswerInput = Pick<Parameters<typeof composeAnalystBlocksWithLlm>[0], "blocks" | "toolCalls" | "factBlocks" | "scope" | "modelFailed" | "counterpoint">;
 
 // The answer the accepted assertions render, or the fallback sentence, and
@@ -339,7 +342,7 @@ export function renderedAnswer(input: AnswerInput, packet: EvidencePacket, repor
     blocks: (inferences, dropped) => {
       if (dropped === undefined) return withAnswer(input.blocks, answer, inferences);
       const left = withoutClaims(packet, dropped);
-      return withAnswer(input.blocks, answerOf(input, left, rechecked(report, left), droppedNotes(dropped)).answer, inferences);
+      return withAnswer(input.blocks, answerOf(input, left, rechecked(report, left, rolesOf(input)), droppedNotes(dropped)).answer, inferences);
     },
   };
 }
@@ -356,14 +359,14 @@ function withoutClaims(packet: EvidencePacket, dropped: DroppedClaims): Evidence
 // each citing only the claims still in it: an attribution with none left
 // fails the checks it passed. An inference that lost any claim it rests on
 // goes too: it was judged, and may be worded, on the claim that is gone.
-function rechecked(report: AssertionReport, packet: EvidencePacket): AssertionReport {
+function rechecked(report: AssertionReport, packet: EvidencePacket, options: { roles?: true }): AssertionReport {
   if (report.status !== "checked") return report;
   const cited = new Set([...packet.figures.map((figure) => figure.id), ...packet.claims.map((claim) => claim.id)]);
   const list = Array.from({ length: Math.max(-1, ...report.accepted.map((entry) => entry.index)) + 1 }, (_, i) => {
     const entry = report.accepted.find((assertion) => assertion.index === i);
     return entry && { ...entry, evidence: entry.evidence.filter((id) => cited.has(id)) };
   });
-  const checked = checkAssertions(list, packet);
+  const checked = checkAssertions(list, packet, options);
   const accepted = new Map(report.accepted.map((entry) => [entry.index, entry]));
   const lost = new Set(report.accepted.filter((entry) => entry.kind === "analyst_inference" &&
     [entry, ...(entry.supports ?? []).flatMap((n) => accepted.get(n) ?? [])].some((cites) => cites.evidence.some((id) => !cited.has(id))))
@@ -375,7 +378,7 @@ function rechecked(report: AssertionReport, packet: EvidencePacket): AssertionRe
       ...report.rejected,
       ...checked.rejected.filter((entry) => accepted.has(entry.index)),
       ...checked.accepted.filter((entry) => lost.has(entry.index))
-        .map((entry) => ({ index: entry.index, text: entry.text, check: "support" as const, reason: "rests on a claim its seal left out" })),
+        .map((entry) => ({ index: entry.index, text: entry.text, check: "support" as const, reason: "rests on a claim its seal left out", ...(entry.role ? { role: entry.role } : {}) })),
     ].sort((a, b) => a.index - b.index),
   };
 }
@@ -393,8 +396,7 @@ function droppedNotes(dropped: DroppedClaims): string[] {
 }
 
 // notes: said after the rest, rendered or not.
-function answerOf(input: AnswerInput, packet: EvidencePacket, written: AssertionReport, notes: ReadonlyArray<string> = []): { report: AssertionReport; answer: Answer } {
-  const report = input.counterpoint === "last" ? lastArgues(written) : written;
+function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionReport, notes: ReadonlyArray<string> = []): { report: AssertionReport; answer: Answer } {
   const factBlocks = input.factBlocks ?? [];
   const renderAccepted = (): Rendering => {
     if (report.status !== "checked" || report.accepted.length === 0) return { answer: null, report };
@@ -494,7 +496,8 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, written: Assertion
       notes: [...(periods.note === undefined ? [] : [periods.note]), ...others],
       commentaryNotes: [...(periods.note === undefined || packet.periods_shown ? [] : [periods.note]), ...others],
       restating,
-      against: input.counterpoint ? { written: [...report.accepted, ...report.rejected].some((entry) => entry.role === "counterpoint") } : null,
+      // One that never said what it argued may have been the case against, so none is said to be absent.
+      against: input.counterpoint ? { written: [...report.accepted, ...report.rejected].some((entry) => entry.role === "counterpoint" || entry.role === "unstated") } : null,
     };
     return { answer, report: { ...report, rendered: true, ...(repeated.length > 0 ? { repeated } : {}), ...(restating.length > 0 ? { restating } : {}) } };
   };
@@ -626,14 +629,6 @@ function statements(segments: ReadonlyArray<Segment>): CommentaryPart[] {
     else parts.at(-1)!.push({ ...segment });
   }
   return parts.filter((part) => part.length > 0).map((part) => ({ kind: "figures", segments: part }));
-}
-
-// The report with its last inference typed as the case against, when it lists two or more and types none.
-function lastArgues(report: AssertionReport): AssertionReport {
-  const inferences = report.accepted.filter((entry) => entry.kind === "analyst_inference");
-  if (inferences.length < 2 || inferences.some((entry) => entry.role === "counterpoint")) return report;
-  const last = inferences.at(-1)!.index;
-  return { ...report, accepted: report.accepted.map((entry) => (entry.index === last ? { ...entry, role: "counterpoint" as const } : entry)) };
 }
 
 // Why an answer asked to argue against its takeaway shows no case against,
