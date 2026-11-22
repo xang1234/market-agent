@@ -1547,27 +1547,41 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     };
     const statements = periodStatements(values, original.period_start, original.period_end, original.fiscal_period === "FY");
     const isLater = ({ accession, filed }: PeriodStatement) => filed >= originalFiled && (derivation !== null || accession !== originalAccession);
-    const unordered = unorderedDates([statements, ...(derivation?.terms ?? []).map((term) => termStatements(values, term))], roundings);
     const rescoped = reviewedLines(usGaap, original, concept!, unit!, roundingsFor).filter((line) => line.input !== undefined || isLater(line));
+    const rounded = (statement: PeriodStatement): DatedFigure => ({ accession: statement.accession, filed: statement.filed, value: statement.token, rounding: roundings.get(statement.accession) ?? null });
+    const linesOf = (term: number | null) => rescoped.filter((line) => line.term === term).map((line): DatedFigure => ({ accession: line.accession, filed: line.filed, value: line.token, rounding: line.rounding }));
+    const unordered = unorderedDates([
+      [...statements.map(rounded), ...linesOf(null)],
+      ...(derivation?.terms ?? []).map((term, index) => [...termStatements(values, term).map(rounded), ...linesOf(index)]),
+    ]);
     let standing: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on, rounding: roundings.get(originalAccession!) ?? null };
     const inputs: RoundedFigure[] = derivation?.terms.map((term) => ({ value: term.raw_token, rounding: roundings.get(term.source.accession) ?? null })) ?? [];
     // A derived figure stands on its unmoved inputs, whose rounding a line may fall within.
     let asDerived = derivation !== null;
-    // The first filing that states continuing-operations OCF only as an equal
-    // total restates it in that scope, so growth to a total year reads one
-    // measure (operator 2026-11-22, #752). Capex keeps #731's rule.
-    let toTotal = secConceptScope(original.metric_key, concept!)?.kind === "continuing_operations_ocf";
+    // Continuing-operations OCF changes scope at an equal figure (operator
+    // 2026-11-22, #752): a filing that states it only as the total restates it
+    // there, and a later one stating it for continuing operations again
+    // restates it back. Capex keeps #731's rule. Equal is within rounding, so
+    // the restatement keeps the figure that stands, from the filing it stands on.
+    const switches = secConceptScope(original.metric_key, concept!)?.kind === "continuing_operations_ocf";
+    let asTotal = false;
+    let standsOn: LaterStatement | null = null;
+    const rescope = (later: LaterStatement): LaterStatement => later.token === standing.value || (standsOn === null && original.token_proof_hash === null)
+      ? later
+      : { ...later, stands: standsOn ?? "original" };
     for (const filing of filingsInOrder(statements, derivation, values, rescoped)) {
       // A line in another scope only ever repeats the figure that stands, or leaves it unverified (#731).
-      const changed = filing.rescoped.find((line) => sameRoundedFigure(line.term === null ? standing : inputs[line.term]!, { value: line.token, rounding: line.rounding }) !== true);
+      const changed = unordered.has(filing.filed) && filing.rescoped.length > 0
+        ? filing.rescoped[0]
+        : filing.rescoped.find((line) => sameRoundedFigure(line.term === null ? standing : inputs[line.term]!, { value: line.token, rounding: line.rounding }) !== true);
       if (changed !== undefined) {
         await record(changed, "unverified_restatement");
         break;
       }
       if (filing.statement === null && filing.inputs.length === 0) {
-        const total = toTotal ? filing.rescoped.find((line) => line.term === null) : undefined;
-        await record(total ?? filing.rescoped[0]!, total ? "economic_restatement" : null);
-        if (total) toTotal = false;
+        const total = switches && !asTotal ? filing.rescoped.find((line) => line.term === null) : undefined;
+        await record(total ? rescope(total) : filing.rescoped[0]!, total ? "economic_restatement" : null);
+        if (total) asTotal = true;
         continue;
       }
       let moved: FiledInput | null = null;
@@ -1591,10 +1605,14 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
       const relation = unordered.has(statement.filed) || (derivation !== null && !inputsGive(derivation, inputs, figure))
         ? "unverified_restatement"
         : asDerived ? null : await laterRelation(original.metric_key, standing, figure, splitsOn);
-      await record({ ...statement, concept: concept!, unit: unit! }, relation);
+      const later: LaterStatement = { ...statement, concept: concept!, unit: unit! };
+      const back = asTotal && relation === null;
+      await record(back ? rescope(later) : later, back ? "economic_restatement" : relation);
       if (relation === "unverified_restatement") break;
+      if (relation !== null || back) asTotal = false;
       if (relation !== null) {
         standing = figure;
+        standsOn = later;
         asDerived = false;
       }
     }
@@ -1660,11 +1678,12 @@ function termStatements(values: ReadonlyArray<SecConceptValue>, term: Derivation
   return periodStatements(values, term.start, term.end, term.span === "fiscal_year").filter(({ filed }) => filed >= term.source.filed);
 }
 
-/** The dates two filings state one figure differently, beyond rounding. Accession order is not filing order, so nothing tells which stands. */
-function unorderedDates(statementLists: ReadonlyArray<ReadonlyArray<PeriodStatement>>, roundings: FilingRoundings): Set<string> {
-  const figure = ({ accession, token }: PeriodStatement): RoundedFigure => ({ value: token, rounding: roundings.get(accession) ?? null });
-  return new Set(statementLists.flatMap((statements) => statements
-    .filter((one, index) => statements.slice(index + 1).some((other) => other.filed === one.filed && sameRoundedFigure(figure(one), figure(other)) !== true))
+type DatedFigure = RoundedFigure & Readonly<{ accession: string; filed: string }>;
+
+/** The dates two filings state one figure differently, beyond rounding, in either scope. One filing's two scopes are its own to reconcile (#743). Accession order is not filing order, so nothing tells which stands. */
+function unorderedDates(figureLists: ReadonlyArray<ReadonlyArray<DatedFigure>>): Set<string> {
+  return new Set(figureLists.flatMap((figures) => figures
+    .filter((one, index) => figures.slice(index + 1).some((other) => other.filed === one.filed && other.accession !== one.accession && sameRoundedFigure(one, other) !== true))
     .map(({ filed }) => filed)));
 }
 
@@ -1779,7 +1798,13 @@ async function laterRelation(
  * A later filing's statement of an original's period, or, for a derived quarter
  * whose `input` it changes, of that input alone.
  */
-type LaterStatement = PeriodStatement & Readonly<{ concept: string; unit: string; input?: DerivationTerm }>;
+type LaterStatement = PeriodStatement & Readonly<{
+  concept: string;
+  unit: string;
+  input?: DerivationTerm;
+  /** For a change of scope only: the statement whose figure it repeats within rounding and stores, or the original (#752). */
+  stands?: LaterStatement | "original";
+}>;
 
 /**
  * Stores a later filing's statement of an original's period on the restating
@@ -1802,17 +1827,21 @@ async function storeLaterStatement(
     sourceId = await upsertSecFilingSource(db, secFilingSource(input.cik, later.accession, asOf));
     memo.sources.set(later.accession, sourceId);
   }
-  const value = later.input ? original.value : later.token;
-  const token: SecSourceToken = {
-    token: value,
-    concept: later.concept,
-    unit: later.unit,
-    accn: later.accession,
-    form: later.form,
-    filed: later.filed,
-    start: later.input ? later.input.start : original.period_start,
-    end: later.input ? later.input.end : original.period_end,
-  };
+  const sourceToken = (statement: LaterStatement): SecSourceToken => ({
+    token: statement.token,
+    concept: statement.concept,
+    unit: statement.unit,
+    accn: statement.accession,
+    form: statement.form,
+    filed: statement.filed,
+    start: statement.input ? statement.input.start : original.period_start,
+    end: statement.input ? statement.input.end : original.period_end,
+  });
+  // A changed input, or a change of scope, stores the figure that stands, proved by its own token.
+  const kept = later.input || later.stands === "original"
+    ? { value: original.value, proof: original.token_proof_hash! }
+    : later.stands ? { value: later.stands.token, proof: secTokenProofHash(input.cik, sourceToken(later.stands)) } : null;
+  const token: SecSourceToken = { ...sourceToken(later), token: kept?.value ?? later.token };
   const inserted = await db.query<{ fact_id: string }>(
     `insert into facts (
        subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
@@ -1846,9 +1875,9 @@ async function storeLaterStatement(
     fact_id: factId,
     precision_class: "source_token_preserved",
     raw_token: token.token,
-    token_proof_hash: later.input ? original.token_proof_hash! : secTokenProofHash(input.cik, token),
+    token_proof_hash: kept?.proof ?? secTokenProofHash(input.cik, token),
     source_locator: locator,
-    validation_method: later.input ? "sec_companyfacts_changed_input.v1" : "sec_companyfacts_lossless_json.v1",
+    validation_method: later.input ? "sec_companyfacts_changed_input.v1" : later.stands ? "sec_companyfacts_rescoped_figure.v1" : "sec_companyfacts_lossless_json.v1",
   });
   await recordFactFinancialContext(db, {
     fact_id: factId,

@@ -123,10 +123,13 @@ npm test         # contract + AAPL FY2024 income statement verification
   filing that tags only that (#743). That line excludes discontinued
   operations, so its fact carries a `continuing_operations_ocf` inference that
   is read the same way as the capex one, later filings included, with one
-  exception (#752). The first later filing that states the period only as
-  an equal total restates it in that scope, so as_restated growth from it
-  to a total year computes, and the FCF backtest counts such a window
-  once that filing is public by its end. A
+  exception (#752). A later filing that states the period only as the total
+  at an equal figure, within the coarser rounding, restates it in that scope,
+  and one that states it for continuing operations again restates it back.
+  Each such restatement stores the figure that stands, so no number changes.
+  as_restated growth from a restated-as-total year to a total year computes,
+  and the FCF backtest counts such a window only when every restatement of
+  the start public by its end states it as that equal total. A
   discontinuation changes which businesses that line covers under the same
   concept, so a quarter derived from another filing's year to date stays
   uncertified. Net income is

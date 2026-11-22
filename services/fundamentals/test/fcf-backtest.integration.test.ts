@@ -227,3 +227,24 @@ test("growth from continuing-operations OCF to the total counts only from a year
     [2021, "5.92%", "7.72%"],
   ]);
 });
+
+test("a later filing that disagrees with the equal total gaps every window it is public by the end of (#752)", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for backtest coverage");
+    return;
+  }
+  // The FY2020 10-K, filed 2021-02-15, states FY2018 OCF as the total at 1,450M, so as_restated is unverified from then.
+  const { db } = await seeded(t, () => {
+    const facts = switchingCompanyFacts();
+    const ocf = facts.facts["us-gaap"].NetCashProvidedByUsedInOperatingActivities!.units.USD;
+    ocf.push({ ...ocf.find((value) => value.fy === 2020)!, start: "2018-01-01", end: "2018-12-31", val: 1_450_000_000, val_token: "1450000000" });
+    return facts;
+  });
+  const run = await runBacktest(db, ["HIST"]);
+  const text = (figure: { kind: string; text: string; outcome?: string }) => figure.kind === "value" ? figure.text : figure.outcome;
+  const growths = run.rows.flatMap((row) => row.kind === "read" ? [[row.fiscal_year, text(row.realized.fcf), text(row.trailing[3].fcf)]] : []);
+  assert.deepEqual(growths.filter(([year]) => year === 2018 || year === 2021), [
+    [2018, "incompatible_definition", "10.06%"],
+    [2021, "5.92%", "incompatible_definition"],
+  ]);
+});

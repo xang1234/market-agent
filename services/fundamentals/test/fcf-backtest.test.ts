@@ -16,7 +16,7 @@ const PRODUCTIVE_ASSETS = { kind: "productive_assets_capex", concept: "PaymentsT
 
 const CONTINUING_OPERATIONS = { kind: "continuing_operations_ocf", concept: "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations" } as const;
 
-function inputs(asOf: string, periodEnd: string, fcf: string, shares: string, capexScope: AsOfInputs["capex_scope"] = null, ocfScope: AsOfInputs["ocf_scope"] = null, ocfTotalFrom: string | null = null): AsOfInputs {
+function inputs(asOf: string, periodEnd: string, fcf: string, shares: string, capexScope: AsOfInputs["capex_scope"] = null, ocfScope: AsOfInputs["ocf_scope"] = null, ocfRestated: AsOfInputs["ocf_restated"] = []): AsOfInputs {
   const figure = (text: string): Figure => ({ kind: "value", value: Number(text), text });
   const values = { free_cash_flow: fcf, net_cash: "200000000", stock_based_compensation: "50000000", shares_outstanding: shares };
   return {
@@ -27,7 +27,7 @@ function inputs(asOf: string, periodEnd: string, fcf: string, shares: string, ca
     fiscal_year_end: periodEnd,
     capex_scope: capexScope,
     ocf_scope: ocfScope,
-    ocf_total_from: ocfTotalFrom,
+    ocf_restated: ocfRestated,
     bound: [
       { slot: "operating_cash_flow", fiscal_year: Number(periodEnd.slice(0, 4)), period_end: periodEnd, public_by: `${asOf}T04:59:59.999Z`, locator: null },
       { slot: "market_cap_shares", fiscal_year: Number(asOf.slice(0, 4)), period_end: asOf, public_by: `${asOf}T04:59:59.999Z`, locator: null },
@@ -217,22 +217,32 @@ test("realized growth across a change of OCF scope is a named outcome, never a r
 });
 
 // CAT's FY2019 10-K, filed 2020-02-19, states FY2018 OCF as the total at its continuing-operations figure.
-test("growth from continuing-operations OCF to the total counts once a filing public by the window's end restates the start as an equal total (#752)", () => {
+test("growth from continuing-operations OCF to the total counts only while every later filing public by the window's end states the start as an equal total (#752)", () => {
   const row = (base: AsOfInputs, later: AsOfInputs) => backtestRow({
     ticker: "SWCH", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0, base, later, earlier: noEarlier, closes, splits: split,
   });
   const realized = (one: BacktestRow) => one.kind === "read" ? [one.realized.fcf, one.realized.per_share].map((figure) => figure.kind === "outcome" ? figure.outcome : figure.text) : [];
-  const start = (scope: AsOfInputs["ocf_scope"], totalFrom: string | null) => inputs("2018-02-16", "2017-12-31", "1100000000", "100000000", null, scope, totalFrom);
-  const end = (scope: AsOfInputs["ocf_scope"], totalFrom: string | null = null) => inputs("2023-02-16", "2022-12-31", "1600000000", "100000000", null, scope, totalFrom);
+  const start = (restated: AsOfInputs["ocf_restated"], scope: AsOfInputs["ocf_scope"] = CONTINUING_OPERATIONS) => inputs("2018-02-16", "2017-12-31", "1100000000", "100000000", null, scope, restated);
+  const end = (scope: AsOfInputs["ocf_scope"] = null, restated: AsOfInputs["ocf_restated"] = []) => inputs("2023-02-16", "2022-12-31", "1600000000", "100000000", null, scope, restated);
+  const total = (filed: string) => ({ filed, as_total: true });
+  const other = (filed: string) => ({ filed, as_total: false });
   assert.deepEqual([
-    row(start(CONTINUING_OPERATIONS, "2020-02-19"), end(null)),
-    row(start(CONTINUING_OPERATIONS, "2023-02-16"), end(null)),
-    row(start(CONTINUING_OPERATIONS, "2023-02-17"), end(null)),
-    row(start(CONTINUING_OPERATIONS, null), end(null)),
-    row(start(null, null), end(CONTINUING_OPERATIONS, "2024-02-20")),
+    row(start([total("2020-02-19")]), end()),
+    row(start([total("2023-02-16")]), end()),
+    row(start([total("2020-02-19"), other("2024-02-20")]), end()),
+    row(start([total("2020-02-19"), total("2021-02-18")]), end()),
+    row(start([total("2023-02-17")]), end()),
+    row(start([]), end()),
+    row(start([total("2020-02-19"), other("2021-02-18")]), end()),
+    row(start([other("2019-02-18"), total("2020-02-19")]), end()),
+    row(start([], null), end(CONTINUING_OPERATIONS, [total("2024-02-20")])),
   ].map(realized), [
     ["7.78%", "23.81%"],
     ["7.78%", "23.81%"],
+    ["7.78%", "23.81%"],
+    ["7.78%", "23.81%"],
+    ["incompatible_definition", "incompatible_definition"],
+    ["incompatible_definition", "incompatible_definition"],
     ["incompatible_definition", "incompatible_definition"],
     ["incompatible_definition", "incompatible_definition"],
     ["incompatible_definition", "incompatible_definition"],
