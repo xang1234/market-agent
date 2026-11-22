@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { isUnavailableRead, runAnalystTool, runRegisteredAnalystTool } from "../src/analyst-tools.ts";
 import { parseCliArgs, entryLine } from "../src/analyst-tools-cli.ts";
+import { statusNote } from "../src/analyst-agent.ts";
 import { analystPacketEntries } from "../src/evidence-packet.ts";
 import { fakeQuery } from "./fake-query.ts";
 
@@ -105,6 +106,7 @@ function stackDb(seen: Array<{ text: string; values?: unknown[] }> = []) {
         return { rows: values?.[0] === MU ? [peer(MU, null), peer(WDC, "cap-WDC")] : [] };
       }
       if (text.includes("from consensus_captures cc")) return { rows: values?.[0] === AAPL ? CONSENSUS : [] };
+      if (text.includes("from non_gaap_reconciliations r")) return { rows: values?.[0] === NVDA ? RELEASES : [] };
       if (text.includes("jsonb_array_elements")) {
         const refs = JSON.parse(String(values?.[0])) as Array<{ kind: string; id: string }>;
         return { rows: refs.map((ref, i) => ({ ord: i + 1, issuer_id: ref.id === AAPL_LISTING ? AAPL : ref.kind === "issuer" && LABELS[ref.id] ? ref.id : null })) };
@@ -119,6 +121,33 @@ const CONSENSUS = [
   { capture_id: "e0000000-0000-4000-8000-000000000001", source_id: "00000000-0000-4000-a000-000000000015", provider: "finviz_dev_consensus", captured_on: "2026-11-14", field_key: "eps_next_y", raw_value: "8.49", unit: "usd_per_share", fiscal_period: null },
   { capture_id: "e0000000-0000-4000-8000-000000000002", source_id: "00000000-0000-4000-a000-000000000015", provider: "finviz_dev_consensus", captured_on: "2026-11-14", field_key: "target_price", raw_value: "290.50", unit: "usd", fiscal_period: null },
   { capture_id: "e0000000-0000-4000-8000-000000000003", source_id: "00000000-0000-4000-a000-000000000015", provider: "finviz_dev_consensus", captured_on: "2026-11-14", field_key: "recommendation_mean", raw_value: "2.10", unit: "recommendation_1_to_5", fiscal_period: null },
+];
+
+const reconciliation = (measure_key: string, gaap: number, non_gaap: number, adjustments: Array<[string, number]> = []) => ({
+  exhibit: "EX-99.1", measure_key, gaap: { label: `GAAP ${measure_key}`, value_num: gaap }, non_gaap: { label: `Non-GAAP ${measure_key}`, value_num: non_gaap },
+  adjustments: adjustments.map(([label, value_num]) => ({ label, value_num })), unit: "currency", scale: "millions",
+});
+const RELEASES = [
+  {
+    document_id: "f0000000-0000-4000-8000-000000000001", source_id: "f1000000-0000-4000-8000-000000000001", accession: "0001045810-25-000230",
+    filed_on: "2025-11-19", quarter_end: "2025-10-26",
+    revenue: { exhibit: "EX-99.1", label: "Revenue", value_num: 57_006, scale: "millions" },
+    reconciliations: [
+      reconciliation("gross_profit", 41_849, 42_147, [["Stock-based compensation expense (B)", 178], ["Other (C)", -2]]),
+      reconciliation("operating_expenses", 5_839, 4_325, [["Stock-based compensation expense (B)", -1_474]]),
+      reconciliation("operating_income", 36_010, 37_822),
+      reconciliation("net_income", 31_910, 33_366, [["Income tax impact of non-GAAP adjustments (D)", -356]]),
+      reconciliation("eps_diluted", 1.3, 1.36),
+    ],
+  },
+  {
+    document_id: "f0000000-0000-4000-8000-000000000002", source_id: "f1000000-0000-4000-8000-000000000002", accession: "0001045810-25-000200",
+    filed_on: "2025-08-27", quarter_end: "2025-07-27", revenue: null, reconciliations: [],
+  },
+  {
+    document_id: "f0000000-0000-4000-8000-000000000003", source_id: "f1000000-0000-4000-8000-000000000003", accession: "0001045810-25-000100",
+    filed_on: "2025-05-28", quarter_end: null, revenue: null, reconciliations: [],
+  },
 ];
 
 const NVDA_FILING = `10-K, accession 0001045810-26-000021, filed 2026-02-25, ${NVDA_LINK}`;
@@ -150,6 +179,24 @@ test("consensus is each value labelled an attributed expectation with its captur
     ["C3", "AAPL", "attributed consensus: Finviz mean recommendation score (recommendation_mean, on a 1 to 5 scale), captured 2026-11-14: 2.10"],
   ]);
   assert.doesNotMatch(analystPacketEntries([result]).map((entry) => entry.text).join("\n"), /buy|sell|hold/i, "ADR 0005: no stance words in a factual label");
+});
+
+test("non-GAAP history is each quarter's reconciled figures and each add-back's count of quarters, citing the releases", async () => {
+  const result = await runAnalystTool(stackDb(), "get_non_gaap_history", { issuer_ids: [NVDA], as_of: AS_OF });
+  assert.equal(result.status, "ok");
+  assert.deepEqual(analystPacketEntries([result]).map((entry) => [entry.id, entry.company, entry.predicate, entry.text]), [
+    ["C1", "NVDA", "non_gaap.quarter", "non-GAAP reconciliation for the quarter ended 2025-10-26 (8-K accession 0001045810-25-000230, filed 2025-11-19; figures in millions, except per share): diluted EPS GAAP 1.30, non-GAAP 1.36, a spread of 0.06; operating income GAAP 36,010, non-GAAP 37,822; operating margin on revenue of 57,006 GAAP 63.2%, non-GAAP 66.3%, a spread of 3.2 percentage points; stock-based compensation added back 1,652 (gross profit and operating expenses lines), 5.0% of non-GAAP net income of 33,366"],
+    ["C2", "NVDA", "non_gaap.quarter", "non-GAAP reconciliation for the quarter ended 2025-07-27 (8-K accession 0001045810-25-000200, filed 2025-08-27): the release states no GAAP to non-GAAP reconciliation"],
+    ["C3", "NVDA", "non_gaap.add_back", "non-GAAP add-back \"stock-based compensation\": in 1 of the 2 latest quarters on file (2025-10-26); recurring means in 5 or more of the last 8 quarters, which this is not"],
+    ["C4", "NVDA", "non_gaap.add_back", "non-GAAP add-back \"Other\": in 1 of the 2 latest quarters on file (2025-10-26); recurring means in 5 or more of the last 8 quarters, which this is not"],
+    ["C5", "NVDA", "non_gaap.add_back", "non-GAAP add-back \"income tax effects\": in 1 of the 2 latest quarters on file (2025-10-26); recurring means in 5 or more of the last 8 quarters, which this is not"],
+  ]);
+  const [quarter, , category] = analystPacketEntries([result]);
+  assert.equal("source_id" in quarter! && quarter.source_id, RELEASES[0]!.source_id, "a quarter cites its release");
+  assert.deepEqual("sources" in category! && category.sources, [{ source_id: RELEASES[0]!.source_id, company: "NVDA", what: "source" }], "a category cites each release it is in");
+  assert.match(statusNote(result, "NVDA") ?? "", /1 stored earnings release could not be dated to a quarter/);
+  assert.doesNotMatch(analystPacketEntries([result]).map((entry) => entry.text).join("\n"), /\b(?:buy|sell|hold|aggressive|quality|concern)/i, "ADR 0005: counts, never a stance");
+  assert.deepEqual(await runAnalystTool(stackDb(), "get_non_gaap_history", { issuer_ids: [KO], as_of: AS_OF }), { tool: "get_non_gaap_history", status: "no_releases" });
 });
 
 test("each tool says when no stored source exists, as a typed status", async () => {

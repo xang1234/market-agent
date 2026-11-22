@@ -593,6 +593,8 @@ const GATHER_RULES = [
   "get_company_profile reads what a company does and sells; get_claims reads risk factors (predicate risk.factor), competition",
   "(business.competition, and role competitor for other filers that name it) and customers; get_peer_set reads industry peers;",
   "get_analyst_consensus reads attributed analyst consensus, which is what analysts expect: no certified figure stands in for it.",
+  "get_non_gaap_history reads the GAAP to non-GAAP reconciliations of a company's stored earnings releases over its last 8 quarters:",
+  "the diluted EPS and operating margin spreads, each add-back's count of quarters, and stock-based compensation's share of non-GAAP net income.",
   "A question about competitors reads the business.competition claims and the company's industry peers.",
   "Read every company the question is about, in one step when you can.",
 ];
@@ -663,7 +665,8 @@ const ANSWER_FAILED = "The answer could not be written, as the model failed or r
 
 const ANSWER_RULES = [
   "evidence_packet.claims also hold what a company's 10-K states (its business, products, customers, competition and risk factors),",
-  "attributed analyst consensus values, and industry peers: cite each as a management_attribution with its C id, which quotes it as stored.",
+  "attributed analyst consensus values, industry peers, and the GAAP to non-GAAP reconciliations of its earnings releases:",
+  "cite each as a management_attribution with its C id, which quotes it as stored.",
   "Say what a company does or faces only as a claim states it, never from your own knowledge, and never write Buy, Hold, Sell or any recommendation.",
   "A price return or last close is a figure: state it in an observation citing its F id, and set companies' price returns side by side in a comparison.",
 ];
@@ -710,6 +713,7 @@ const TOPIC: Readonly<Record<string, string>> = {
   get_claims: "10-K claims",
   get_peer_set: "Industry peers",
   get_analyst_consensus: "Analyst consensus",
+  get_non_gaap_history: "Non-GAAP reconciliations",
   get_price_performance: "Price returns",
 };
 
@@ -739,6 +743,7 @@ const STEP_LABELS: Readonly<Record<AgentTool, (args: JsonObject, who: string) =>
   },
   get_peer_set: (_args, who) => `Finding ${who}'s industry peers`,
   get_analyst_consensus: (_args, who) => `Reading analyst consensus for ${who}`,
+  get_non_gaap_history: (_args, who) => `Reading ${who}'s non-GAAP reconciliations`,
   get_price_performance: (args, who) =>
     `Reading ${who}'s price ${argIssuers(args).length > 1 ? "returns" : "return"}${isPricePeriod(args.period) ? ` ${PERIOD_WORDS[args.period].step}` : ""}`,
 };
@@ -929,6 +934,20 @@ function readSummary(result: AnalystToolResult): JsonObject {
   if (result.tool === "get_analyst_consensus" && result.status === "ok") {
     return { ...base, company: result.company, captured_on: result.captured_on, values: result.values.map((value) => ({ label: value.label, value: value.raw_value, unit: value.unit, fiscal_period: value.fiscal_period })) };
   }
+  if (result.tool === "get_non_gaap_history" && result.status === "ok") {
+    return {
+      ...base,
+      company: result.company,
+      quarters: result.quarters.map((quarter) => ({
+        quarter_end: quarter.quarter_end,
+        reconciled: quarter.reconciled,
+        eps_spread: quarter.eps?.spread ?? null,
+        operating_margin_spread_pp: quarter.operating_margin?.spread_pp ?? null,
+        sbc_share_of_non_gaap_net_income_pct: quarter.sbc?.share_pct ?? null,
+      })),
+      add_backs: result.categories.map((category) => ({ label: category.label, quarters: category.quarters, of: category.of, recurring: category.recurring })),
+    };
+  }
   return base;
 }
 
@@ -944,10 +963,15 @@ export function statusNote(result: AnalystToolResult, who: string, competitor = 
       return `${who}: no industry peers are on file (${result.reason === "no_industry" ? "no source gives its industry" : "no other company shares its industry"}).`;
     case "no_consensus":
       return `${who}: no analyst consensus captured in the 7 days to the cutoff is on file.`;
+    case "no_releases":
+      return `${who}: no earnings release read for its GAAP to non-GAAP reconciliation is on file.`;
     case "unavailable":
       return `${who}: the stored sources could not be read just now, so this says nothing about what is on file.`;
     case "incomplete_read":
     case "ok":
+      if (result.tool === "get_non_gaap_history") {
+        return result.undated === 0 ? null : `${who}: ${result.undated} stored earnings release${result.undated === 1 ? "" : "s"} could not be dated to a quarter, so ${result.undated === 1 ? "its reconciliation is" : "their reconciliations are"} not shown.`;
+      }
       return "truncated" in result && result.truncated ? `${who}: a read limit left some 10-K filers or claims out.` : null;
     default:
       return null;

@@ -1,5 +1,6 @@
 import { factKnownAtSql } from "../../evidence/src/fact-activity.ts";
 import { issuerLabels, issuerLabelSql, loadLatestFilingClaims, type FilingClaim, type FilingClaimRead } from "../../evidence/src/local-runtime-evidence.ts";
+import { loadNonGaapHistory, type NonGaapHistory } from "../../evidence/src/non-gaap-history.ts";
 import type { RowQueryExecutor } from "../../evidence/src/types.ts";
 import { DEFAULT_PEER_LIMIT } from "../../fundamentals/src/peer-set-resolver.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
@@ -49,9 +50,11 @@ export type AnalystToolResult =
   | { tool: "get_peer_set"; status: "no_peers"; reason: "no_industry" | "no_same_industry_issuer" }
   | { tool: "get_analyst_consensus"; status: "ok"; company: string; captured_on: string; values: ReadonlyArray<ConsensusValue> }
   | { tool: "get_analyst_consensus"; status: "no_consensus" }
+  | ({ tool: "get_non_gaap_history"; status: "ok"; company: string } & NonGaapHistory)
+  | { tool: "get_non_gaap_history"; status: "no_releases" }
   | { tool: AnalystToolName; status: "no_subject" | "invalid_arguments" | "unavailable"; reason: string };
 
-export const ANALYST_TOOL_NAMES = ["get_company_profile", "get_claims", "get_peer_set", "get_analyst_consensus"] as const;
+export const ANALYST_TOOL_NAMES = ["get_company_profile", "get_claims", "get_peer_set", "get_analyst_consensus", "get_non_gaap_history"] as const;
 export type AnalystToolName = (typeof ANALYST_TOOL_NAMES)[number];
 
 type Executor = (db: RowQueryExecutor, input: AnalystToolInput) => Promise<AnalystToolResult>;
@@ -116,6 +119,13 @@ const EXECUTORS: Readonly<Record<AnalystToolName, Executor>> = {
         label: CONSENSUS_FIELDS[value.field_key as keyof typeof CONSENSUS_FIELDS] ?? value.field_key,
       })),
     };
+  },
+  get_non_gaap_history: async (db, input) => {
+    const issuerId = input.issuer_ids[0]!;
+    const history = await loadNonGaapHistory(db, { issuer_id: issuerId, as_of: input.as_of, user_id: input.user_id ?? null });
+    if (history.quarters.length === 0) return { tool: "get_non_gaap_history", status: "no_releases" };
+    const [company] = await issuerLabels(db, [issuerId], input.as_of);
+    return { tool: "get_non_gaap_history", status: "ok", company: company!.label, ...history };
   },
 };
 
@@ -186,6 +196,7 @@ const READ_ARGUMENTS: Readonly<Record<AnalystToolName, ReadonlySet<string>>> = {
   get_claims: new Set(["query", "subject_ref", "subject_refs", "predicates", "role"]),
   get_peer_set: new Set(["query", "subject_ref", "criteria", "n"]),
   get_analyst_consensus: new Set(["query", "subject_ref"]),
+  get_non_gaap_history: new Set(["query", "subject_ref"]),
 };
 
 // The database out of reach: SQLSTATE connection, resource, operator and
