@@ -74,7 +74,14 @@ async function setUp(t: test.TestContext, name: string) {
     const selection = await selectFiscalYear(db, { issuerId: ISSUER_ID, metricKey: "operating_cash_flow", fiscalYear: 2024, fiscalPeriod: "FY" }, "2026-06-01T00:00:00Z", basis);
     return selection.status === "selected" ? selection.input.candidate.inference ?? null : selection.reason_code;
   };
-  return { db, download, lookup, backfill, ocf, shown, relations, picked, pickedScope };
+  const proofs = async () => (await db.query<{ value: string; locator: string; proof: string }>(
+    `select f.value_num::text as value, a.source_locator as locator, a.token_proof_hash as proof
+       from facts f join metrics m on m.metric_id = f.metric_id join current_fact_precision_attestations a on a.fact_id = f.fact_id
+      where f.subject_id = $1 and m.metric_key = 'operating_cash_flow' and f.invalidated_at is null
+      order by f.method, f.created_at`,
+    [ISSUER_ID],
+  )).rows;
+  return { db, download, lookup, backfill, ocf, shown, relations, picked, pickedScope, proofs };
 }
 
 test("operating cash flow filed for continuing operations certifies with its concept recorded", { timeout: 300_000 }, async (t) => {
@@ -254,9 +261,10 @@ test("operating cash flow filed for continuing operations certifies with its con
   });
 
   // ABT's FY2013 10-K repeats FY2012's 8,970,077,000 in thousands as 8,970,000,000 in millions.
+  // The row shows, locates and proves the figure that stands, from the filing that states it.
   await t.test("a total equal only at the coarser rounding restates the year at the figure that stands", async (t) => {
     for (const [continuing, total] of [[[120_077_000, 110_033_000], [120_000_000, 140_000_000]], [[120_000_000, 110_000_000], [120_400_000, 140_300_000]]] as const) {
-      const { download, lookup, relations, picked, pickedScope } = await setUp(t, `fin-ocf-continuing-switch-rounded-${continuing[0]}`);
+      const { download, lookup, relations, picked, pickedScope, proofs } = await setUp(t, `fin-ocf-continuing-switch-rounded-${continuing[0]}`);
       download.text = companyFacts({
         [CONTINUING]: [year(2024, 2024, continuing[0]), year(2024, 2023, continuing[1])],
         [TOTAL]: [year(2025, 2024, total[0]), year(2025, 2025, total[1])],
@@ -267,6 +275,46 @@ test("operating cash flow filed for continuing operations certifies with its con
         [String(continuing[0]), "economic_restatement"],
       ]);
       assert.deepEqual([await picked("as_restated"), await pickedScope("as_restated")], [String(continuing[0]), null]);
+      const [original, restated] = await proofs();
+      assert.deepEqual(restated, original);
+    }
+  });
+
+  await t.test("a total equal only at the coarser rounding to a restated figure cites the filing that restated it", async (t) => {
+    const { download, lookup, relations, proofs } = await setUp(t, "fin-ocf-continuing-restated-switch-rounded");
+    download.text = companyFacts({
+      [CONTINUING]: [year(2024, 2024, 120_000_000), year(2024, 2023, 110_000_000), year(2025, 2024, 118_077_000), year(2025, 2025, 140_033_000)],
+      [TOTAL]: [year(2026, 2024, 118_000_000), year(2026, 2026, 150_000_000)],
+    });
+    await lookup();
+    assert.deepEqual((await relations()).map(({ value, relation }) => [value, relation]), [
+      ["120000000", "original"],
+      ["118077000", "economic_restatement"],
+      ["118077000", "economic_restatement"],
+    ]);
+    const [, restated, rescoped] = await proofs();
+    assert.deepEqual(rescoped, restated);
+  });
+
+  // Devin on #755. A filing that tags both reads as the total (#743), so once
+  // the year stands as the total such a filing keeps it there, and only one
+  // stating it for continuing operations alone restates it back.
+  await t.test("a filing that tags both at the figure keeps the scope the year stands in, before or after the switch", async (t) => {
+    for (const bothFirst of [false, true]) {
+      const { download, lookup, relations, pickedScope } = await setUp(t, `fin-ocf-continuing-switch-both-${bothFirst}`);
+      const tenKA = (of: number, val: number): Value => ({ ...year(2025, of, val), accn: "0000000743-26-000002", form: "10-K/A", filed: "2026-04-01" });
+      const totalOnly = bothFirst ? tenKA : (of: number, val: number) => year(2025, of, val);
+      const both = bothFirst ? (of: number, val: number) => year(2025, of, val) : tenKA;
+      download.text = companyFacts({
+        [CONTINUING]: [year(2024, 2024, 120), both(2024, 120), both(2025, 140)],
+        [TOTAL]: [totalOnly(2024, 120), totalOnly(2025, 140), both(2024, 120), both(2025, 140)],
+      });
+      await lookup();
+      assert.deepEqual((await relations()).map(({ value, flags, relation }) => [value, flags, relation]), [
+        ["120", [SCOPE], "original"],
+        ["120", [], "economic_restatement"],
+      ]);
+      assert.equal(await pickedScope("as_restated"), null);
     }
   });
 
@@ -310,6 +358,39 @@ test("operating cash flow filed for continuing operations certifies with its con
         : { [CONTINUING]: [year(2024, 2024, 120), year(2025, 2024, 120)], [TOTAL]: [tenKA(120), year(2025, 2025, 140)] });
       await lookup();
       assert.deepEqual((await relations()).map(({ relation }) => relation), ["original", "unverified_restatement"]);
+    }
+  });
+
+  // Devin and Codex on #755. The original 10-K is one of that day's filings, so neither is known to be later.
+  await t.test("an original 10-K and a filing the same day stating the year only as an equal total are unverified in either accession order", async (t) => {
+    for (const accn of ["0000000743-25-000000", "0000000743-25-000002"]) {
+      const { download, lookup, relations, picked } = await setUp(t, `fin-ocf-continuing-switch-original-day-${accn}`);
+      const tenKA = (val: number): Value => ({ ...year(2024, 2024, val), accn, form: "10-K/A" });
+      download.text = companyFacts({ [CONTINUING]: [year(2024, 2024, 120), year(2024, 2023, 100)], [TOTAL]: [tenKA(120)] });
+      await lookup();
+      assert.deepEqual((await relations()).map(({ flags, relation }) => [flags, relation]), [[[SCOPE], "original"], [[], "unverified_restatement"]]);
+      assert.equal(await picked("as_restated"), "restatement_unverified");
+    }
+  });
+
+  // Devin on #755. Same-day filings that state the year alike, or one in both
+  // scopes at the figure the other states, leave it the same in either order.
+  await t.test("same-day filings that state the year alike leave it as either order would, in either accession order", async (t) => {
+    for (const amendment of ["000000", "000002"]) {
+      // A 10-K/A filed with the original 10-K, or with the next one.
+      const tenKA = (filing: number) => (of: number, val: number): Value => ({ ...year(filing, of, val), accn: `0000000743-${String(filing + 1).slice(2)}-${amendment}`, form: "10-K/A" });
+      const [withOriginal, later] = [tenKA(2024), tenKA(2025)];
+      const cases = [
+        ["both tags twice", { [CONTINUING]: [year(2024, 2024, 120), year(2025, 2024, 120), later(2024, 120)], [TOTAL]: [year(2025, 2024, 120), later(2024, 120)] }, []],
+        ["both tags with the original", { [CONTINUING]: [year(2024, 2024, 120), year(2024, 2023, 100), withOriginal(2024, 120)], [TOTAL]: [withOriginal(2024, 120)] }, []],
+        ["both tags with the total", { [CONTINUING]: [year(2024, 2024, 120), later(2024, 120)], [TOTAL]: [year(2025, 2024, 120), later(2024, 120)] }, [[[], "economic_restatement"]]],
+      ] as const;
+      for (const [name, facts, rows] of cases) {
+        const { download, lookup, relations } = await setUp(t, `fin-ocf-continuing-same-day-${name.replaceAll(" ", "-")}-${amendment}`);
+        download.text = companyFacts(facts);
+        await lookup();
+        assert.deepEqual((await relations()).map(({ flags, relation }) => [flags, relation]), [[[SCOPE], "original"], ...rows], `${name}, 10-K/A ${amendment}`);
+      }
     }
   });
 
