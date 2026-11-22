@@ -78,6 +78,23 @@ test("backfillIssuer8k ingests only in-window 8-K filings (items from the feed),
   assert.equal(eventCount.rows[0]!.n, 2, "rerun does not duplicate events");
 });
 
+test("backfillIssuer8k's window starts at midnight UTC on its oldest day, whatever the hour", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "form8k-backfill-day-window");
+  const client = await connectedClient(t, databaseUrl);
+  await client.query(`insert into issuers (legal_name, cik) values ('Apple Inc.', '0000320193')`);
+  const deps = { db: client as unknown as QueryExecutor, objectStore: new MemoryObjectStore(), secClient: fakeClient({ n: 0 }) };
+  // IN_WINDOW is filed 2026-04-30: two days back is out of a one-day window...
+  const early = await backfillIssuer8k(deps, { cik: 320193, sinceDays: 1, now: () => new Date("2026-05-02T13:45:00.000Z") });
+  assert.equal(early.ingested, 0);
+  // ...and yesterday is in it, even after 00:00.
+  const late = await backfillIssuer8k(deps, { cik: 320193, sinceDays: 1, now: () => new Date("2026-05-01T13:45:00.000Z") });
+  assert.equal(late.ingested, 1);
+});
+
 test("backfillIssuer8k stores nothing when the issuer's CIK moves to another issuer after it is read (#685)", async (t) => {
   if (!dockerAvailable()) {
     t.skip("docker unavailable");

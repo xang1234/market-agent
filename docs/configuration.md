@@ -108,11 +108,11 @@ The command exits non-zero with a clear message when Postgres is not running. Ev
 ./scripts/dev-shell.sh daily-releases
 ```
 
-Starts Postgres and MinIO if needed, then runs three idempotent steps from `services/evidence`, each picking up where the last run stopped:
+Run it on a checkout whose stack `./scripts/dev-shell.sh up` has set up once (packages installed, migrations applied). It starts Postgres and MinIO if needed, then runs three idempotent steps from `services/evidence`, each picking up where the last run stopped:
 
 1. `backfill:sec-8k -- --tracked --since-days 7`: new 8-Ks of every issuer that already has one stored, one SEC submissions request per issuer. The week of lookback catches up a missed run.
 2. `extract:non-gaap`: the non-GAAP reconciliations of new releases, from the stored bytes, with no SEC request or model call.
-3. `extract:earnings-releases -- --limit 300`: management's explanations and guidance, one model call and one SEC fetch per release. `DAILY_RELEASE_LIMIT` sets the cap, so a backlog drains over several days.
+3. `extract:earnings-releases -- --limit 300`: management's explanations and guidance, one SEC fetch and a model call per prompt for each release (a long exhibit takes several prompts). `DAILY_RELEASE_LIMIT` caps releases, not model calls, so a backlog drains over several days.
 
 A failed step does not stop the later ones, but the command exits non-zero. Each run prints `=== <time> daily releases start` and `exit <status>`. A step that left a filing unread retries it on the next run.
 
