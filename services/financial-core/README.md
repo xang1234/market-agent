@@ -56,7 +56,8 @@ scenario value in the EPS currency per share, not a price target.
   (continuing-operations OCF less PP&E cash capex)", or "less productive-asset
   capex" when its capex is scoped too. Cash conversion over it is an
   `incompatible_definition` gap, since net income includes discontinued
-  operations.
+  operations, and keeps cash conversion's label and column, since its measure
+  carries no scope.
 
 ## Numeric limits (numeric-policy.v1)
 

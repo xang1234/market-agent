@@ -122,7 +122,10 @@ npm test         # contract + AAPL FY2024 income statement verification
   from `NetCashProvidedByUsedInOperatingActivitiesContinuingOperations` for a
   filing that tags only that (#743). That line excludes discontinued
   operations, so its fact carries a `continuing_operations_ocf` inference that
-  is read the same way as the capex one, later filings included. Net income is
+  is read the same way as the capex one, later filings included. A
+  discontinuation changes which businesses that line covers under the same
+  concept, so a quarter derived from another filing's year to date stays
+  uncertified. Net income is
   `NetIncomeLoss`, attributable to the parent. `ProfitLoss`, which adds
   noncontrolling interest, is `net_income_consolidated`, the denominator
   of cash conversion (#342). For a period the filer reports no
