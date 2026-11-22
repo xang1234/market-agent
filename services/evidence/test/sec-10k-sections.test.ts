@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { tenKSections, type TenKSection } from "../src/sec-10k-sections.ts";
+import { verifyStatement } from "../src/sec-earnings-release-extraction.ts";
 
 const fixture = (ticker: string) => readFileSync(new URL(`./fixtures/sec-10k/${ticker}.htm`, import.meta.url), "utf8");
 
@@ -272,7 +273,10 @@ test("a labeled heading may set its label apart from its title, and close with a
 });
 
 test("a contents entry that closes with its page number heads nothing, though a long preface follows it", () => {
-  for (const page of ["(9)", "(page 9)", "(Pages 9-21)", "(p. 9)", "(pp. 9-21)", "9", "9-21", "........ 9", "Page 9"]) {
+  for (const page of [
+    "(9)", "(page 9)", "(Pages 9-21)", "(p. 9)", "(pp. 9-21)", "9", "9-21", "........ 9", "Page 9",
+    "F-1", "F-1 - F-40", "Page F-1", "(F-1)", "II", "IV", "(IV)", "P. 9", "Pp. 9-21", "<span>F</span>-1",
+  ]) {
     const html = [
       `<div>Item 1. Business (3)</div><div>Item 1A. Risk Factors ${page}</div>${paragraphs("preface", 50)}`,
       `<div>Item 1. Business</div>${paragraphs("business", 30)}<div>Item 1A. Risk Factors</div>${paragraphs("risk", 30)}`,
@@ -280,4 +284,82 @@ test("a contents entry that closes with its page number heads nothing, though a 
     ].join("");
     assert.ok((tenKSections(html)["1A"] as TenKSection).text.startsWith("Item 1A. Risk Factors risk paragraph 0"), page);
   }
+});
+
+test("a contents table entry with its page number in another cell of its row heads nothing, though a long preface follows it", () => {
+  for (const row of [
+    "<tr><td>Item 1A.</td><td>Risk Factors</td><td>9</td></tr>",
+    "<tr><td><div>Item 1A.</div></td><td><div>Risk Factors</div></td><td><div>&#160;9</div></td><td></td></tr>",
+    "<tr><td>Item 1A. Risk Factors</td><td>Page 9</td></tr>",
+    "<tr><th>Item 1A.</th><th>Risk Factors</th><th>IV</th></tr>",
+    "<tr><td>Item 1A.</td><td>Risk Factors</td><td>(9)</td></tr>",
+    "<tr><td>Item 1A.</td><td>Risk Factors</td><td>(F-1)</td></tr>",
+    "<tr><td>Item 1A.</td><td>Risk Factors</td><td>(IV)</td></tr>",
+    "<tr><td>Item 1A.</td><td>Risk Factors</td><td><span>F</span>-1</td></tr>",
+    "<tr><td><h3>Item 1A. Risk Factors</h3></td><td><h3>9</h3></td></tr>",
+    "<tr><td><div>Item 1A. Risk Factors</div><td>9</tr>",
+  ]) {
+    const html = [
+      `<table><tr><td>Item 1.</td><td>Business</td><td>3</td></tr>${row}</table>${paragraphs("preface", 50)}`,
+      `<div>Item 1. Business</div>${paragraphs("business", 30)}<div>Item 1A. Risk Factors</div>${paragraphs("risk", 30)}`,
+      "<div>Item 1B. Unresolved Staff Comments</div>",
+    ].join("");
+    assert.ok((tenKSections(html)["1A"] as TenKSection).text.startsWith("Item 1A. Risk Factors risk paragraph 0"), row);
+  }
+});
+
+test("a heading printed above a page footer's number heads its item, the number in a block or table row of its own", () => {
+  for (const heading of [
+    "<div>Item 1A. Risk Factors</div><div>12</div>",
+    "<table><tr><td>Item 1A.</td><td>Risk Factors</td></tr><tr><td></td><td>12</td></tr></table>",
+  ]) {
+    const sections = tenKSections(tenK(heading, "<div>Item 1B. Unresolved Staff Comments</div>"));
+    assert.ok(!(sections["1"] as TenKSection).text.includes("risk paragraph"), heading);
+    assert.ok((sections["1A"] as TenKSection).text.startsWith("Item 1A. Risk Factors 12 risk paragraph 0"), heading);
+  }
+});
+
+test("a contents table whose rows omit </tr> is read row by row", () => {
+  const html = [
+    `<table><tr><td>Item 1. Business</td><td>3</td><tr><td>Item 1A. Risk Factors</td><td>9</td></table>${paragraphs("preface", 50)}`,
+    `<div>Item 1. Business</div>${paragraphs("business", 30)}<div>Item 1A. Risk Factors</div>${paragraphs("risk", 30)}`,
+    "<div>Item 1B. Unresolved Staff Comments</div>",
+  ].join("");
+  const sections = tenKSections(html);
+  assert.ok((sections["1"] as TenKSection).text.startsWith("Item 1. Business business paragraph 0"));
+  assert.ok((sections["1A"] as TenKSection).text.startsWith("Item 1A. Risk Factors risk paragraph 0"));
+});
+
+test("headings in a layout table's cell head their items though the cell holds a table or the row ends in a page number, and so do headings after a table that omits </tr>", () => {
+  const items = `<div>Item 1. Business</div>${paragraphs("business", 30)}<div>Item 1A. Risk Factors</div>${paragraphs("risk", 30)}`;
+  for (const html of [
+    `<table><tr><td>${items}<table><tr><td>Store count</td><td>42</td></tr></table><div>Item 1B. Unresolved Staff Comments</div></td></tr></table>`,
+    `<table><tr><td>Header</td><td>Value</td></table>${items}<table><tr><td>Store count</td><td>12</td></tr></table><div>Item 1B. Unresolved Staff Comments</div>`,
+  ]) {
+    const sections = tenKSections(html);
+    assert.ok((sections["1"] as TenKSection).text.startsWith("Item 1. Business business paragraph 0"), html.slice(0, 40));
+    assert.ok((sections["1A"] as TenKSection).text.startsWith("Item 1A. Risk Factors risk paragraph 0"), html.slice(0, 40));
+  }
+  const page = `<div>Item 1. Business</div>${paragraphs("Business", 30)}<div>Item 1A. Risk Factors</div>${paragraphs("Risk", 30)}`;
+  const sections = tenKSections(`<table><tr><td>${page}<div>Item 1B. Unresolved Staff Comments</div></td><td>12</td></tr></table>`);
+  assert.ok((sections["1"] as TenKSection).text.startsWith("Item 1. Business Business paragraph 0"));
+  assert.ok((sections["1A"] as TenKSection).text.startsWith("Item 1A. Risk Factors Risk paragraph 0"));
+});
+
+test("a quote in a table row that is no contents entry starts and ends at its cell, though the row ends in a number", () => {
+  const quote = "We operate retail stores across North America and Canada.";
+  const row = `<table><tr><td>North America</td><td>${quote}</td><td>125</td></tr></table>`;
+  const item1 = tenKSections(tenK(`${row}<div>Item 1A. Risk Factors</div>`, "<div>Item 1B. Unresolved Staff Comments</div>"))["1"] as TenKSection;
+  assert.equal(verifyStatement({ quote }, [item1])?.quote, quote);
+});
+
+test("6,000 table rows that omit </tr> read about as fast as 6,000 that close it", () => {
+  const fastest = (html: string) => Math.min(...[0, 1, 2].map(() => {
+    const started = performance.now();
+    tenKSections(html);
+    return performance.now() - started;
+  }));
+  const closed = fastest(`<table>${"<tr><td>Region</td><td>12</td></tr>".repeat(6_000)}</table>`);
+  const unclosed = fastest(`<table>${"<tr><td>Region</td><td>12</td>".repeat(6_000)}</table>`);
+  assert.ok(unclosed < 4 * closed, `unclosed ${Math.round(unclosed)} ms, closed ${Math.round(closed)} ms`);
 });

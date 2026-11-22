@@ -133,6 +133,16 @@ const RETIRED_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = Object.freeze([
   }),
 ]);
 
+/**
+ * A v1 investment memo's final verdict block (its rating, conviction and investor profile).
+ * ADR 0005 keeps any stance to an owner-requested Call, so a stored one is never shown or shared.
+ */
+export function isRetiredVerdictBlock(block: unknown): boolean {
+  if (typeof block !== "object" || block === null) return false;
+  const { title, data_ref: dataRef } = block as { title?: unknown; data_ref?: { params?: { playbook_section_id?: unknown } } };
+  return dataRef?.params?.playbook_section_id === "final_verdict" || (typeof title === "string" && title.trim().toLowerCase() === "final verdict");
+}
+
 /** The playbook as the given version defined it, current or retired. */
 export function playbookAt(playbookId: string | null, version: number | null): AnalyzePlaybook | undefined {
   return [...ANALYZE_PLAYBOOKS, ...RETIRED_PLAYBOOKS].find((playbook) => playbook.playbook_id === playbookId && playbook.version === version);

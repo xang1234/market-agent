@@ -2,26 +2,17 @@
 // standalone WatchlistSlot aside). Keeps the default-manual membership list
 // (fra-6al.6.1) and the inline add-symbol search. WatchlistSaveHandler, mounted
 // by the shell, completes save-to-watchlist actions (fra-6al.6.3).
-import { useState } from 'react'
 import { useAuth } from './useAuth'
-import { SegmentedToggle } from '../symbol/SegmentedToggle'
 import { SymbolSearch } from '../symbol/SymbolSearch'
 import { ManualWatchlist } from '../watchlists/ManualWatchlist'
 import { useWatchlist } from '../watchlists/watchlistContext'
 import { useWatchlistSparklines } from '../watchlists/useWatchlistSparklines'
-import { WATCHLIST_WINDOWS, type WatchlistWindow } from '../watchlists/watchlistSparklines'
-
-const WINDOW_OPTIONS = WATCHLIST_WINDOWS.map((value) => ({ value, label: value }))
 
 export function WatchlistSection() {
   const { session } = useAuth()
   const userId = session?.userId ?? null
   const watchlist = useWatchlist()
-  const [sparkWindow, setSparkWindow] = useState<WatchlistWindow>('1M')
-  const sparklines = useWatchlistSparklines(
-    watchlist.members.map((member) => member.subject_ref),
-    sparkWindow,
-  )
+  const sparklines = useWatchlistSparklines(watchlist.members.map((member) => member.subject_ref))
 
   return (
     <section aria-label="Watchlist" className="flex min-h-0 flex-1 flex-col gap-2">
@@ -39,17 +30,6 @@ export function WatchlistSection() {
             : undefined
         }
       />
-      {userId && watchlist.members.length > 0 ? (
-        <div className="px-1.5">
-          <SegmentedToggle
-            options={WINDOW_OPTIONS}
-            value={sparkWindow}
-            onChange={setSparkWindow}
-            ariaLabel="Watchlist sparkline range"
-            testIdPrefix="watchlist-window"
-          />
-        </div>
-      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {userId ? (
           <ManualWatchlist

@@ -442,6 +442,27 @@ test("GET /v1/market/cache-audit reports hits only when the series response cach
   assert.equal(body.dashboard.hits, 1);
 });
 
+test("POST /v1/market/series refetches a range that ends after the clock, since its bars are still arriving", async (t) => {
+  const deps = buildDeps();
+  let getBarsCalls = 0;
+  const adapter = {
+    ...deps.adapter,
+    getBars: async (...args: Parameters<typeof deps.adapter.getBars>) => {
+      getBarsCalls += 1;
+      return deps.adapter.getBars(...args);
+    },
+  };
+  const url = await startServer(t, { ...deps, adapter });
+  const query = validSeriesQuery({
+    interval: "15m",
+    range: { start: "2026-04-15T00:00:00.000Z", end: "2026-04-23T00:00:00.000Z" },
+  });
+
+  assert.equal((await postSeries(url, query)).status, 200);
+  assert.equal((await postSeries(url, query)).status, 200);
+  assert.equal(getBarsCalls, 2);
+});
+
 test("GET /v1/market/cache-audit bounds retained runtime audit events", async (t) => {
   const url = await startServer(t, {
     ...buildDeps(),
