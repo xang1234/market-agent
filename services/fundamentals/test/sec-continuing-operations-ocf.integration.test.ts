@@ -380,17 +380,32 @@ test("operating cash flow filed for continuing operations certifies with its con
       // A 10-K/A filed with the original 10-K, or with the next one.
       const tenKA = (filing: number) => (of: number, val: number): Value => ({ ...year(filing, of, val), accn: `0000000743-${String(filing + 1).slice(2)}-${amendment}`, form: "10-K/A" });
       const [withOriginal, later] = [tenKA(2024), tenKA(2025)];
-      const cases = [
+      const cases: Array<[string, Record<string, Value[]>, unknown[]]> = [
         ["both tags twice", { [CONTINUING]: [year(2024, 2024, 120), year(2025, 2024, 120), later(2024, 120)], [TOTAL]: [year(2025, 2024, 120), later(2024, 120)] }, []],
         ["both tags with the original", { [CONTINUING]: [year(2024, 2024, 120), year(2024, 2023, 100), withOriginal(2024, 120)], [TOTAL]: [withOriginal(2024, 120)] }, []],
         ["both tags with the total", { [CONTINUING]: [year(2024, 2024, 120), later(2024, 120)], [TOTAL]: [year(2025, 2024, 120), later(2024, 120)] }, [[[], "economic_restatement"]]],
-      ] as const;
+      ];
       for (const [name, facts, rows] of cases) {
         const { download, lookup, relations } = await setUp(t, `fin-ocf-continuing-same-day-${name.replaceAll(" ", "-")}-${amendment}`);
         download.text = companyFacts(facts);
         await lookup();
         assert.deepEqual((await relations()).map(({ flags, relation }) => [flags, relation]), [[[SCOPE], "original"], ...rows], `${name}, 10-K/A ${amendment}`);
       }
+    }
+  });
+
+  // Read first, the filing that tags both would leave the year unverified at
+  // 130, and the continuing-operations one would restate it to 130 alone.
+  await t.test("a restated continuing-operations figure and a same-day filing stating it in both scopes are unverified in either accession order", async (t) => {
+    for (const accn of ["0000000743-26-000000", "0000000743-26-000002"]) {
+      const { download, lookup, relations } = await setUp(t, `fin-ocf-continuing-same-day-restated-${accn}`);
+      const tenKA = (val: number): Value => ({ ...year(2025, 2024, val), accn, form: "10-K/A" });
+      download.text = companyFacts({
+        [CONTINUING]: [year(2024, 2024, 120), year(2025, 2024, 130), year(2025, 2025, 140), tenKA(130)],
+        [TOTAL]: [tenKA(130)],
+      });
+      await lookup();
+      assert.deepEqual((await relations()).map(({ relation }) => relation), ["original", "unverified_restatement"]);
     }
   });
 
