@@ -971,7 +971,7 @@ test("a release's next-quarter guides and its quarter's actuals are stored as fi
     `select kind, reason, status, source_id::text as source_id, candidate from fact_review_queue`,
   )).rows;
   assert.equal(queued.length, 1);
-  assert.deepEqual([queued[0]!.kind, queued[0]!.status, queued[0]!.reason], ["release_figure", "queued", "its sentence does not state a GAAP figure"]);
+  assert.deepEqual([queued[0]!.kind, queued[0]!.status, queued[0]!.reason], ["release_figure", "queued", 'its sentence does not state "54%" as a GAAP figure']);
   assert.deepEqual(
     [queued[0]!.candidate.document_id, queued[0]!.candidate.kind, queued[0]!.candidate.metric, queued[0]!.candidate.quote, queued[0]!.candidate.figure],
     [seeded.documentId, "guidance", "gross_margin", AMD_MARGIN_GUIDANCE, { basis: "gaap", value: "54%" }],

@@ -41,41 +41,130 @@ export function figureUnit(metric: ReleaseMetric): FigureUnit {
 export type RawFigure = { metric?: unknown; basis?: unknown; value?: unknown; plus_minus?: unknown; low?: unknown; high?: unknown };
 export type FigureRead = { basis: FigureBasis; low: number; high: number } | { review: string };
 
-const NON_GAAP = /\bnon-?\s?gaap\b|\badjusted\b/i;
-const GAAP = /(?<!non-?\s?)\bgaap\b/i;
-const LOSS = /\bloss(?:es)?\b/i;
-// A loss is stated as a positive amount ("operating loss of $50 million").
-const INCOME_METRICS: ReadonlySet<ReleaseMetric> = new Set(["operating_income", "net_income", "eps"]);
 const UNIT_WORDS: Readonly<Record<FigureUnit, string>> = { usd: "dollars", usd_per_share: "dollars a share", percent: "percent" };
 
-// One amount, an optional dollar sign and a number with an optional percent,
-// basis points or scale word.
-const AMOUNT = /(\$)?\s?(\d[\d,]*(?:\.\d+)?)\s?(%|percent\b|basis points?\b|bps\b|billion\b|million\b|thousand\b)?/gi;
-const SCALES: Readonly<Record<string, number>> = { billion: 1e9, million: 1e6, thousand: 1e3 };
-type Amount = { n: number; dollars: boolean; mark: "%" | "bp" | null; scale: number | null };
+// The words in which a metric that can be negative states a negative figure as a
+// positive amount ("operating loss of $50 million", "cash used in operating
+// activities"). Revenue, costs and capex are never negative, so a negative one
+// is misread.
+const LOSS = /\bloss(?:es)?\b|\bnegative\b/i;
+const OUTFLOW = /\bnegative\b|\bused in\b|\boutflows?\b|\bburn\b/i;
+const NEGATIVE: Readonly<Record<ReleaseMetric, RegExp | "never">> = {
+  revenue: "never",
+  gross_margin: /\bnegative\b|\bgross loss\b/i,
+  operating_expenses: "never",
+  operating_income: LOSS,
+  net_income: LOSS,
+  eps: LOSS,
+  operating_cash_flow: OUTFLOW,
+  free_cash_flow: OUTFLOW,
+  capex: "never",
+  other: "never",
+};
+// EPS is diluted EPS.
+const BASIC = /\bbasic\b/i;
 
-function amountOf(phrase: string): Amount | null {
-  const found = [...phrase.matchAll(AMOUNT)];
-  if (found.length !== 1) return null;
-  const [, dollar, digits, suffix = ""] = found[0]!;
-  const word = suffix.toLowerCase();
-  return {
-    n: Number(digits!.replaceAll(",", "")),
-    dollars: dollar !== undefined,
-    mark: word === "%" || word === "percent" ? "%" : word.startsWith("b") && word !== "billion" ? "bp" : null,
-    scale: SCALES[word] ?? null,
-  };
+// An amount as its sentence states it, with a minus sign or accounting
+// parentheses, a dollar sign, a number, and its percent, basis points or scale. It starts and
+// ends outside any word or number, so no amount is read inside "72.5%" or
+// "$45.0Bn", nor a minus sign in the range "$1.10-$1.20".
+const UNIT = String.raw`%|percent\b|basis points?\b|bps\b|billion\b|million\b|thousand\b|bn\b|mn\b|[BMK]\b`;
+const NUMBER = String.raw`\d+(?:,\d{3})*(?:\.\d+)?(?![.,]?\d)`;
+const AMOUNT = new RegExp(
+  String.raw`(?<![\w.$%)])(?:(\$\s?)?\((\$\s?)?(${NUMBER})(?:\s?(${UNIT}))?\)(?:\s?(${UNIT}))?|(-)?(\$\s?)?(-)?(${NUMBER})(?:\s?(${UNIT}))?)(?![A-Za-z\d])`,
+  "g",
+);
+const SCALES: Readonly<Record<string, number>> = { billion: 1e9, bn: 1e9, B: 1e9, million: 1e6, mn: 1e6, M: 1e6, thousand: 1e3, K: 1e3 };
+type Amount = { start: number; end: number; n: number; dollars: boolean; mark: "%" | "bp" | null; scale: number | null };
+
+function amountsIn(quote: string): Amount[] {
+  return [...quote.matchAll(AMOUNT)].map((found) => {
+    const [whole, outerDollar, innerDollar, parenthesized, innerUnit, outerUnit, minus, dollar, innerMinus, digits, unit] = found;
+    const negative = parenthesized !== undefined || minus !== undefined || innerMinus !== undefined;
+    const word = (parenthesized === undefined ? unit : innerUnit ?? outerUnit) ?? "";
+    const n = Number((parenthesized ?? digits)!.replaceAll(",", ""));
+    return {
+      start: found.index,
+      end: found.index + whole.length,
+      n: negative ? -n : n,
+      dollars: (outerDollar ?? innerDollar ?? dollar) !== undefined,
+      mark: word === "%" || word === "percent" ? "%" : word.startsWith("b") && !(word in SCALES) ? "bp" : null,
+      scale: SCALES[word] ?? null,
+    };
+  });
+}
+
+// The amount a phrase the model copied states, the one amount it holds whole,
+// where its sentence has it once and no other amount runs into it. Or why it is
+// no figure of the sentence.
+function amountOf(quote: string, amounts: ReadonlyArray<Amount>, phrase: string): Amount | string {
+  const start = quote.indexOf(phrase);
+  if (start < 0) return `"${phrase}" is not in its sentence`;
+  if (quote.indexOf(phrase, start + 1) >= 0) return `"${phrase}" is in its sentence more than once`;
+  const end = start + phrase.length;
+  const midWord = (at: number) => /[A-Za-z\d]/.test(quote[at - 1] ?? "") && /[A-Za-z\d]/.test(quote[at] ?? "");
+  const touching = amounts.filter((amount) => amount.start < end && amount.end > start);
+  const held = touching.filter((amount) => amount.start >= start && amount.end <= end);
+  return midWord(start) || midWord(end) || touching.length !== 1 || held.length !== 1 ? `"${phrase}" is not one whole figure of its sentence` : held[0]!;
+}
+
+// Whether an amount is in a metric's unit. A margin is a percent, EPS dollars
+// with no scale, the rest dollars.
+function fits(amount: Amount, unit: FigureUnit): boolean {
+  return unit === "percent"
+    ? amount.mark === "%" && !amount.dollars && amount.scale === null
+    : amount.dollars && amount.mark === null && (unit === "usd" || amount.scale === null);
+}
+
+const LABEL = /\bnon-?\s?gaap\b|\badjusted\b|\bgaap\b/gi;
+// "GAAP and non-GAAP gross margins", a subject both bases share.
+const SHARED = /\b(non-?\s?gaap|gaap) and (non-?\s?gaap|gaap)\b/i;
+const SENTENCE_END = /[.!?]\s+(?=[A-Z])/g;
+const basisOfLabel = (label: string): FigureBasis => (/^gaap$/i.test(label) ? "gaap" : "non_gaap");
+
+// The sentence of the quote an offset is in, and where it starts.
+function sentenceAt(quote: string, at: number): { start: number; text: string } {
+  const ends = [...quote.matchAll(SENTENCE_END)].map((found) => found.index + found[0].length);
+  const start = ends.filter((end) => end <= at).at(-1) ?? 0;
+  return { start, text: quote.slice(start, ends.find((end) => end > at) ?? quote.length) };
+}
+
+// The bases the sentence of the amount `at` states it on, given the amounts the
+// figure reads. A sentence naming no basis, or GAAP alone, states GAAP figures.
+// One naming non-GAAP alone states non-GAAP figures after its label ("On a
+// non-GAAP basis, gross margin was 43%") and none before it, which may be GAAP or
+// a trailing label's. One naming both settles a basis only for a subject they
+// share, in order with "respectively", else as one figure for both when the
+// figure reads every amount after the subject ("were both 75.0%"). Any other mix
+// settles none.
+function basesOf(quote: string, amounts: ReadonlyArray<Amount>, at: Amount, read: ReadonlyArray<Amount>): ReadonlyArray<FigureBasis> {
+  const sentence = sentenceAt(quote, at.start);
+  const labels = [...sentence.text.matchAll(LABEL)].map((label) => ({ at: sentence.start + label.index, basis: basisOfLabel(label[0]) }));
+  const named = new Set(labels.map((label) => label.basis));
+  if (!named.has("non_gaap")) return ["gaap"];
+  if (!named.has("gaap")) return at.start > labels[0]!.at ? ["non_gaap"] : [];
+  const shared = SHARED.exec(sentence.text);
+  if (shared === null || basisOfLabel(shared[1]!) === basisOfLabel(shared[2]!)) return [];
+  const from = sentence.start + shared.index + shared[0].length;
+  const after = amounts.filter((amount) => amount.start >= from && amount.end <= sentence.start + sentence.text.length);
+  const respectively = sentence.text.slice(from - sentence.start).search(/\brespectively\b/i);
+  if (respectively < 0) return after.every((amount) => read.includes(amount)) ? ["gaap", "non_gaap"] : [];
+  const listed = after.filter((amount) => amount.end <= from + respectively);
+  const index = listed.indexOf(at);
+  return listed.length === 2 && index >= 0 ? [basisOfLabel(shared[index + 1]!)] : [];
 }
 
 // Twelve significant digits, so arithmetic on a parsed figure ("$45.0 billion"
 // less 2%) lands on the figure as written.
 const exact = (n: number) => Number(n.toPrecision(12));
 
-// The figure the sentence states, or why it goes to review. That is a basis the
-// sentence does not state, a phrase not in it or not one amount, an amount not
-// in the metric's unit, a loss, a percent plus or minus on a margin (points or a
-// share of it?), or a low above its high. A result is one value; a guide is a
-// value, with or without plus_minus, or a low and a high.
+// The figure the sentence states, or why it goes to review. That is a negative
+// figure stated in words, basic EPS, a phrase not in the sentence or not one
+// whole amount of it, an amount not in the metric's unit, a negative revenue,
+// cost or capex, a basis the sentence does not state for that amount, a percent
+// plus or minus on a margin (points or a share of it?), or a low above its high.
+// A result is one value; a guide is a value, with or without plus_minus, or a
+// low and a high.
 export function readFigure(
   statement: { kind: "guidance" | "result"; metric: ReleaseMetric; quote: string },
   raw: RawFigure,
@@ -83,56 +172,59 @@ export function readFigure(
   const { kind, metric, quote } = statement;
   const basis = raw.basis;
   if (!(FIGURE_BASES as ReadonlyArray<unknown>).includes(basis)) return { review: `basis ${JSON.stringify(basis ?? null)} is neither gaap nor non_gaap` };
-  if (basis === "non_gaap" ? !NON_GAAP.test(quote) : NON_GAAP.test(quote) && !GAAP.test(quote)) {
-    return { review: `its sentence does not state a ${basis === "gaap" ? "GAAP" : "non-GAAP"} figure` };
-  }
-  if (INCOME_METRICS.has(metric) && LOSS.test(quote)) return { review: "its sentence states a loss, which would read as a positive figure" };
+  const negative = NEGATIVE[metric];
+  if (negative !== "never" && negative.test(quote)) return { review: "its sentence states a negative figure in words, which would read as a positive one" };
+  if (metric === "eps" && BASIC.test(quote)) return { review: "EPS is read as diluted, and its sentence names basic EPS" };
   const phrase = (value: unknown) => (typeof value === "string" && value.trim() !== "" ? value.replace(/\s+/g, " ").trim() : null);
   const [value, plusMinus, low, high] = [raw.value, raw.plus_minus, raw.low, raw.high].map(phrase);
   const shaped = kind === "result"
     ? value !== null && plusMinus === null && low === null && high === null
     : value !== null ? low === null && high === null : plusMinus === null && low !== null && high !== null;
   if (!shaped) return { review: kind === "result" ? "a result is one value" : "a guide is a value, with or without plus_minus, or a low and a high" };
-  const amounts = new Map<string, Amount>();
+  const amounts = amountsIn(quote);
+  const found = new Map<string, Amount>();
   for (const given of [value, plusMinus, low, high]) {
     if (given === null) continue;
-    if (!quote.includes(given)) return { review: `"${given}" is not in its sentence` };
-    const amount = amountOf(given);
-    if (amount === null) return { review: `"${given}" is not one figure` };
-    amounts.set(given, amount);
+    const amount = amountOf(quote, amounts, given);
+    if (typeof amount === "string") return { review: amount };
+    found.set(given, amount);
   }
   const unit = figureUnit(metric);
-  const fits = (amount: Amount) => unit === "percent"
-    ? amount.mark === "%" && !amount.dollars && amount.scale === null
-    : amount.dollars && amount.mark === null && (unit === "usd" || amount.scale === null);
-  const unfit = [value, low, high].find((given) => given !== null && !fits(amounts.get(given)!));
+  const levels = [value, low, high].filter((given): given is string => given !== null);
+  const unfit = levels.find((given) => !fits(found.get(given)!, unit));
   if (unfit !== undefined) return { review: `"${unfit}" is not a figure in ${UNIT_WORDS[unit]}` };
+  if (negative === "never" && levels.some((given) => found.get(given)!.n < 0)) return { review: `a negative ${metric.replaceAll("_", " ")} is misread` };
+  const misread = levels.find((given) => !basesOf(quote, amounts, found.get(given)!, [...found.values()]).includes(basis as FigureBasis));
+  if (misread !== undefined) return { review: `its sentence does not state "${misread}" as a ${basis === "gaap" ? "GAAP" : "non-GAAP"} figure` };
   const level = (given: string, scale: number | null = null) => {
-    const amount = amounts.get(given)!;
+    const amount = found.get(given)!;
     return amount.n * (amount.scale ?? scale ?? 1);
   };
   let from: number;
   let to: number;
   if (value !== null) {
     const center = level(value);
-    const spread = plusMinus === null ? 0 : tolerance(amounts.get(plusMinus)!, unit, center);
+    const spread = plusMinus === null ? 0 : tolerance(found.get(plusMinus)!, unit, found.get(value)!, center);
     if (typeof spread === "string") return { review: spread };
     [from, to] = [center - spread, center + spread];
   } else {
     // A low with no scale of its own takes its high's ("$4.0 to $4.1 billion").
-    [from, to] = [level(low!, amounts.get(high!)!.scale), level(high!)];
+    [from, to] = [level(low!, found.get(high!)!.scale), level(high!)];
   }
   if (from > to) return { review: "its low is above its high" };
   return { basis: basis as FigureBasis, low: exact(from), high: exact(to) };
 }
 
-// How far either side of `center` a plus_minus reaches, or why it is unread.
-function tolerance(amount: Amount, unit: FigureUnit, center: number): number | string {
+// How far either side of `center` (the amount `of`) a plus_minus reaches, or
+// why it is unread.
+function tolerance(amount: Amount, unit: FigureUnit, of: Amount, center: number): number | string {
+  if (amount.n < 0) return "a plus or minus is never negative";
+  if (amount.dollars && amount.scale === null && of.scale !== null) return "the plus or minus has no scale, though its figure has one";
   if (unit === "percent") {
     return amount.mark === "bp" ? amount.n / 100 : "a plus or minus on a margin is read only in basis points, as a percent could be points or a share of it";
   }
-  if (amount.mark === "%") return (center * amount.n) / 100;
-  if (amount.dollars && amount.mark === null) return amount.n * (amount.scale ?? 1);
+  if (amount.mark === "%") return (Math.abs(center) * amount.n) / 100;
+  if (fits(amount, unit)) return amount.n * (amount.scale ?? 1);
   return `the plus or minus is not a figure in ${UNIT_WORDS[unit]} or a percent of one`;
 }
 
