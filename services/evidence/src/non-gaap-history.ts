@@ -159,7 +159,9 @@ function sbcOf(release: StoredRelease, net: StoredReconciliation | undefined): N
     const scales = new Set(used.map((reconciliation) => reconciliation.scale));
     if (scales.size !== 1) continue;
     const [scale] = scales;
-    const value = used.flatMap(sbcLines).reduce((sum, line) => sum + Math.abs(line.value_num), 0);
+    // Each reconciliation's lines net with their signs, so a reversal offsets its charge; an expense
+    // reconciliation states add-backs as negatives, so each nets to its size before they add.
+    const value = used.reduce((sum, reconciliation) => sum + Math.abs(sbcLines(reconciliation).reduce((net, line) => net + line.value_num, 0)), 0);
     const comparable = net && net.non_gaap.value_num > 0 && net.scale === scale;
     return {
       value: round(value, 4),

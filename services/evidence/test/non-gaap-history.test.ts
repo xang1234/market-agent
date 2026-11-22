@@ -135,6 +135,16 @@ test("an add-back's category comes from its label, else the label is its own", (
   assert.equal(addBackCategory("Provision for income taxes").key, "income_tax_effect");
 });
 
+test("an SBC reversal nets against its charge, in either sign convention", () => {
+  // Net income 100 to 108: SBC 10 less a 2 reversal is 8, 4% of non-GAAP net income 200.
+  const charge = release("2025-04-30", 1, [["Stock-based compensation", 10], ["Reversal of stock-based compensation", -2]]);
+  assert.equal(nonGaapHistory([charge]).quarters[0]!.sbc!.value, 8);
+  // An operating expenses reconciliation states its add-backs as negatives: (10) and a 2 reversal is 8 too.
+  const expense = { ...charge.reconciliations[0]!, measure_key: "operating_expenses", adjustments: [{ label: "Stock-based compensation", value_num: -10 }, { label: "Reversal of stock-based compensation", value_num: 2 }] };
+  const split = { ...charge, reconciliations: [{ ...charge.reconciliations[0]!, measure_key: "gross_profit", adjustments: [] }, expense, charge.reconciliations[1]!] };
+  assert.deepEqual(nonGaapHistory([split]).quarters[0]!.sbc, { value: 8, basis: "gross_profit_and_operating_expenses", scale: "millions", non_gaap_net_income: 200, share_pct: 4 });
+});
+
 test("each reconciled figure keeps the scale of its own table", () => {
   const quarter = release("2025-04-30", 1, [["Stock-based compensation", 40]]);
   const thousands = { ...quarter.reconciliations[0]!, gaap: { label: "GAAP operating income", value_num: 200_000 }, non_gaap: { label: "Non-GAAP operating income", value_num: 250_000 }, adjustments: [], scale: "thousands" as const };
