@@ -38,6 +38,7 @@ import { createClaimEvidence } from "./claim-evidence-repo.ts";
 import { createClaim, type ClaimPeriod } from "./claim-repo.ts";
 import type { SecFilingFetcher } from "./sec-edgar.ts";
 import { withTransaction } from "./transaction.ts";
+import { canonicalText, endMarkBefore, SENTENCE_START } from "./canonical-text.ts";
 import { readFigure, RELEASE_METRICS, storeReleaseFigures, type RawFigure, type ReleaseMetric } from "./release-figures.ts";
 import type { QueryExecutor } from "./types.ts";
 import { isIsoDate } from "./validators.ts";
@@ -214,41 +215,6 @@ function plainTextBlocks(body: string): string[] {
   });
 }
 
-// Exhibit HTML (or text) as comparable text: tags dropped, entities decoded,
-// typographic quotes and dashes made plain, whitespace collapsed. Quotes are
-// matched in this form, and stored from it.
-export function canonicalText(markup: string): string {
-  return plainPunctuation(decodeEntities(
-    markup
-      .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " "),
-  )).replace(/\s+/g, " ").trim();
-}
-
-const NAMED_ENTITIES: Readonly<Record<string, string>> = {
-  nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
-  rsquo: "'", lsquo: "'", rdquo: '"', ldquo: '"', mdash: "-", ndash: "-", hellip: "...",
-};
-
-function decodeEntities(text: string): string {
-  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, name: string) => {
-    if (name[0] === "#") {
-      const code = name[1] === "x" || name[1] === "X" ? Number.parseInt(name.slice(2), 16) : Number(name.slice(1));
-      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
-    }
-    return NAMED_ENTITIES[name.toLowerCase()] ?? entity;
-  });
-}
-
-function plainPunctuation(text: string): string {
-  return text
-    .replace(/[‘’‚′]/g, "'")
-    .replace(/[“”„″]/g, '"')
-    .replace(/[–—−]/g, "-")
-    .replace(/ /g, " ");
-}
-
 // The model's reply, or null when it is not the expected shape. A malformed
 // statement makes the whole reply unparseable, so the filing is read again
 // rather than marked done without it. A quarter_end that is no date, or an
@@ -364,12 +330,6 @@ export function verifyStatement<S extends { quote: string }>(
   return null;
 }
 
-// What a sentence starts with: a capital, a figure, a quote, a bracket or a
-// bullet. A full stop before anything else ("the U.S. due to") is an
-// abbreviation's. ponytail: a sentence opening lower-case ("iPhone revenue")
-// counts only at a block edge.
-const SENTENCE_START = /^["'($•[0-9A-Z]/;
-
 // A block ending in a colon, semicolon, comma or dash, or in a word that joins
 // it to more ("but", "and", "of"), runs on into the next ("This is not company
 // guidance -", "due to stronger demand,", "This is not company guidance but"):
@@ -382,22 +342,6 @@ const CONTINUES = /(?:[:;,-]|\b(?:and|but|or|nor|yet|so|while|whereas|although|t
 function blockBreak(text: string, before: number, after: number): boolean {
   return !CONTINUES.test(text.slice(Math.max(0, before - 16), before)) &&
     (after >= text.length || SENTENCE_START.test(text.slice(after)));
-}
-
-// An abbreviation's full stop, which ends no sentence even before a capital
-// ("the U.S. Data Center market"): initials ("U.S.", "e.g.", "J.") or a word
-// shortened by convention ("Inc.", "approx.", "Dec."). ponytail: a sentence that ends
-// in one ("...sales in the U.S.") counts only at a block edge.
-const INITIALS = /(?:^|[\s("'])(?:(?:[A-Za-z]\.){2,}|[A-Z]\.)$/;
-const SHORTENED = /(?:^|[\s("'])(?:inc|corp|co|ltd|no|nos|approx|vs|mr|ms|dr|jr|sr|st|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\.$/i;
-
-// Whether the text before `at` ends a sentence with one of `marks` (and a
-// closing quote or bracket), not with an abbreviation's full stop.
-function endMarkBefore(text: string, at: number, marks: RegExp): boolean {
-  const head = text.slice(Math.max(0, at - 16), at);
-  if (!marks.test(head)) return false;
-  const stop = head.replace(/["')]$/, "");
-  return !(stop.endsWith(".") && (INITIALS.test(stop) || SHORTENED.test(stop)));
 }
 
 // A sentence starts where a block starts, or after a sentence's end (a full

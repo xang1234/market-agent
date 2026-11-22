@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto";
 
 import type { IsoDate } from "../../financial-core/src/contracts.ts";
+import { plainText, sentenceStarts } from "./canonical-text.ts";
 import type { QueryExecutor } from "./types.ts";
 
 // The metric a statement concerns. "other" keeps a real explanation whose
@@ -43,52 +44,59 @@ export type FigureRead = { basis: FigureBasis; low: number; high: number } | { r
 
 const UNIT_WORDS: Readonly<Record<FigureUnit, string>> = { usd: "dollars", usd_per_share: "dollars a share", percent: "percent" };
 
-// The words in which a metric that can be negative states a negative figure as a
-// positive amount ("operating loss of $50 million", "cash used in operating
-// activities"). Revenue, costs and capex are never negative, so a negative one
-// is misread.
-const LOSS = /\bloss(?:es)?\b|\bnegative\b/i;
-const OUTFLOW = /\bnegative\b|\bused in\b|\boutflows?\b|\bburn\b/i;
-const NEGATIVE: Readonly<Record<ReleaseMetric, RegExp | "never">> = {
-  revenue: "never",
-  gross_margin: /\bnegative\b|\bgross loss\b/i,
-  operating_expenses: "never",
-  operating_income: LOSS,
-  net_income: LOSS,
-  eps: LOSS,
-  operating_cash_flow: OUTFLOW,
-  free_cash_flow: OUTFLOW,
-  capex: "never",
-  other: "never",
+// The words in which a sentence states a negative figure as a positive amount
+// ("negative $1.2 billion", "operating loss of $50 million", "cash used in
+// operating activities"), per metric. A metric that may be negative takes any
+// of them anywhere in its sentence. Revenue, costs and capex are never
+// negative, so a negative one is misread, by its sign or by a negative word
+// on its amount ("negative $50 million", not "a negative currency impact").
+const SIGN_WORD = String.raw`\bnegative\b|(?<!\bplus\W+(?:or\W+)?)\bminus\b`;
+const LOSS = String.raw`\bloss(?:es)?\b`;
+const OUTFLOW = String.raw`\bused in\b|\boutflows?\b|\bburn\b`;
+const negativeIn = (...words: string[]) => new RegExp([SIGN_WORD, ...words].join("|"), "i");
+const NEGATIVE_AMOUNT = new RegExp(String.raw`(?:${SIGN_WORD}) \(?\$?\d`, "i");
+const NEGATIVE: Readonly<Record<ReleaseMetric, RegExp>> = {
+  revenue: NEGATIVE_AMOUNT,
+  gross_margin: negativeIn(String.raw`\bgross loss\b`),
+  operating_expenses: NEGATIVE_AMOUNT,
+  operating_income: negativeIn(LOSS),
+  net_income: negativeIn(LOSS),
+  eps: negativeIn(LOSS),
+  operating_cash_flow: negativeIn(OUTFLOW),
+  free_cash_flow: negativeIn(OUTFLOW),
+  capex: NEGATIVE_AMOUNT,
+  other: NEGATIVE_AMOUNT,
 };
+const NEVER_NEGATIVE: ReadonlySet<ReleaseMetric> = new Set(["revenue", "operating_expenses", "capex", "other"]);
 // EPS is diluted EPS.
 const BASIC = /\bbasic\b/i;
 
-// An amount as its sentence states it, with a minus sign or accounting
-// parentheses, a dollar sign, a number, and its percent, basis points or scale. It starts and
-// ends outside any word or number, so no amount is read inside "72.5%" or
-// "$45.0Bn", nor a minus sign in the range "$1.10-$1.20".
-const UNIT = String.raw`%|percent\b|basis points?\b|bps\b|billion\b|million\b|thousand\b|bn\b|mn\b|[BMK]\b`;
+// An amount as its plain text states it, with a minus sign or accounting
+// parentheses, a dollar sign, a number, and its percent, basis points or scale
+// in any case ("Billion", "BN"). It starts and ends outside any word or number,
+// so no amount is read inside "72.5%" or "$45.0Bn", nor a minus sign in the
+// range "$1.10-$1.20".
+const UNIT = String.raw`%|percent\b|basis points?\b|bps\b|trillion\b|billion\b|million\b|thousand\b|tn\b|bn\b|mn\b|[bmk]\b`;
 const NUMBER = String.raw`\d+(?:,\d{3})*(?:\.\d+)?(?![.,]?\d)`;
 const AMOUNT = new RegExp(
   String.raw`(?<![\w.$%)])(?:(\$\s?)?\((\$\s?)?(${NUMBER})(?:\s?(${UNIT}))?\)(?:\s?(${UNIT}))?|(-)?(\$\s?)?(-)?(${NUMBER})(?:\s?(${UNIT}))?)(?![A-Za-z\d])`,
-  "g",
+  "gi",
 );
-const SCALES: Readonly<Record<string, number>> = { billion: 1e9, bn: 1e9, B: 1e9, million: 1e6, mn: 1e6, M: 1e6, thousand: 1e3, K: 1e3 };
+const SCALES: Readonly<Record<string, number>> = { trillion: 1e12, tn: 1e12, billion: 1e9, bn: 1e9, b: 1e9, million: 1e6, mn: 1e6, m: 1e6, thousand: 1e3, k: 1e3 };
 type Amount = { start: number; end: number; n: number; dollars: boolean; mark: "%" | "bp" | null; scale: number | null };
 
 function amountsIn(quote: string): Amount[] {
   return [...quote.matchAll(AMOUNT)].map((found) => {
     const [whole, outerDollar, innerDollar, parenthesized, innerUnit, outerUnit, minus, dollar, innerMinus, digits, unit] = found;
     const negative = parenthesized !== undefined || minus !== undefined || innerMinus !== undefined;
-    const word = (parenthesized === undefined ? unit : innerUnit ?? outerUnit) ?? "";
+    const word = ((parenthesized === undefined ? unit : innerUnit ?? outerUnit) ?? "").toLowerCase();
     const n = Number((parenthesized ?? digits)!.replaceAll(",", ""));
     return {
       start: found.index,
       end: found.index + whole.length,
       n: negative ? -n : n,
       dollars: (outerDollar ?? innerDollar ?? dollar) !== undefined,
-      mark: word === "%" || word === "percent" ? "%" : word.startsWith("b") && !(word in SCALES) ? "bp" : null,
+      mark: word === "%" || word === "percent" ? "%" : word.startsWith("basis") || word === "bps" ? "bp" : null,
       scale: SCALES[word] ?? null,
     };
   });
@@ -116,37 +124,61 @@ function fits(amount: Amount, unit: FigureUnit): boolean {
     : amount.dollars && amount.mark === null && (unit === "usd" || amount.scale === null);
 }
 
-const LABEL = /\bnon-?\s?gaap\b|\badjusted\b|\bgaap\b/gi;
+const LABEL = /\bnon-? ?gaap\b|\badjusted\b|\bgaap\b/gi;
 // "GAAP and non-GAAP gross margins", a subject both bases share.
-const SHARED = /\b(non-?\s?gaap|gaap) and (non-?\s?gaap|gaap)\b/i;
-const SENTENCE_END = /[.!?]\s+(?=[A-Z])/g;
+const SHARED = /\b(non-? ?gaap|gaap) and (non-? ?gaap|gaap)\b/i;
+// "On a non-GAAP (*) basis," the basis of every amount after it in its sentence.
+const CLAUSE_BASIS = /\bon an? (?:non-? ?gaap|adjusted)\b[^,.;]*?\bbasis\b/i;
+// What joins the amounts one noun phrase states: "were $3.9 billion and $3.5
+// billion", "$1.10-$1.20", "$3.5 billion, or $2.09 per diluted share".
+const LISTED = /^,? ?(?:and|or|to|-)? ?$/i;
 const basisOfLabel = (label: string): FigureBasis => (/^gaap$/i.test(label) ? "gaap" : "non_gaap");
 
 // The sentence of the quote an offset is in, and where it starts.
 function sentenceAt(quote: string, at: number): { start: number; text: string } {
-  const ends = [...quote.matchAll(SENTENCE_END)].map((found) => found.index + found[0].length);
-  const start = ends.filter((end) => end <= at).at(-1) ?? 0;
-  return { start, text: quote.slice(start, ends.find((end) => end > at) ?? quote.length) };
+  const starts = sentenceStarts(quote);
+  const start = starts.filter((begin) => begin <= at).at(-1) ?? 0;
+  return { start, text: quote.slice(start, starts.find((begin) => begin > at) ?? quote.length) };
+}
+
+// An amount that is a figure, not a bare number such as a year or a date.
+const isFigure = (amount: Amount) => amount.dollars || amount.mark !== null || amount.scale !== null;
+
+// Whether a non-GAAP label at `labelAt` states the amount `at`: the first
+// figure of its own noun phrase, with no comma or semicolon before it, or one
+// listed with that figure ("Non-GAAP operating income and net income were $3.9
+// billion and $3.5 billion"). "Non-GAAP gross margin was 43%, and revenue was
+// $7.7 billion" states no non-GAAP revenue.
+function labelStates(quote: string, amounts: ReadonlyArray<Amount>, labelAt: number, at: Amount): boolean {
+  const figures = amounts.filter((amount) => amount.start > labelAt && isFigure(amount));
+  if (figures.length === 0 || /[,;]/.test(quote.slice(labelAt, figures[0]!.start))) return false;
+  for (let n = 0; figures[n] !== at; n += 1) {
+    if (figures[n + 1] === undefined || !LISTED.test(quote.slice(figures[n]!.end, figures[n + 1]!.start))) return false;
+  }
+  return true;
 }
 
 // The bases the sentence of the amount `at` states it on, given the amounts the
 // figure reads. A sentence naming no basis, or GAAP alone, states GAAP figures.
-// One naming non-GAAP alone states non-GAAP figures after its label ("On a
-// non-GAAP basis, gross margin was 43%") and none before it, which may be GAAP or
-// a trailing label's. One naming both settles a basis only for a subject they
-// share, in order with "respectively", else as one figure for both when the
-// figure reads every amount after the subject ("were both 75.0%"). Any other mix
-// settles none.
+// One naming non-GAAP alone states non-GAAP figures in a label's noun phrase,
+// or after "On a non-GAAP basis," anywhere in its sentence. One naming both
+// settles a basis only for a subject they share, in order with "respectively",
+// else as one figure for both when the figure reads every amount after the
+// subject ("were both 75.0%"). Any other amount settles none.
 function basesOf(quote: string, amounts: ReadonlyArray<Amount>, at: Amount, read: ReadonlyArray<Amount>): ReadonlyArray<FigureBasis> {
   const sentence = sentenceAt(quote, at.start);
   const labels = [...sentence.text.matchAll(LABEL)].map((label) => ({ at: sentence.start + label.index, basis: basisOfLabel(label[0]) }));
   const named = new Set(labels.map((label) => label.basis));
   if (!named.has("non_gaap")) return ["gaap"];
-  if (!named.has("gaap")) return at.start > labels[0]!.at ? ["non_gaap"] : [];
+  if (!named.has("gaap")) {
+    const clause = CLAUSE_BASIS.exec(sentence.text);
+    const stated = clause !== null ? at.start > sentence.start + clause.index : labels.some((label) => labelStates(quote, amounts, label.at, at));
+    return stated ? ["non_gaap"] : [];
+  }
   const shared = SHARED.exec(sentence.text);
   if (shared === null || basisOfLabel(shared[1]!) === basisOfLabel(shared[2]!)) return [];
   const from = sentence.start + shared.index + shared[0].length;
-  const after = amounts.filter((amount) => amount.start >= from && amount.end <= sentence.start + sentence.text.length);
+  const after = amounts.filter((amount) => amount.start >= from && amount.end <= sentence.start + sentence.text.length && isFigure(amount));
   const respectively = sentence.text.slice(from - sentence.start).search(/\brespectively\b/i);
   if (respectively < 0) return after.includes(at) && after.every((amount) => read.includes(amount)) ? ["gaap", "non_gaap"] : [];
   const listed = after.filter((amount) => amount.end <= from + respectively);
@@ -169,13 +201,14 @@ export function readFigure(
   statement: { kind: "guidance" | "result"; metric: ReleaseMetric; quote: string },
   raw: RawFigure,
 ): FigureRead {
-  const { kind, metric, quote } = statement;
+  const { kind, metric } = statement;
+  const quote = plainText(statement.quote);
   const basis = raw.basis;
   if (!(FIGURE_BASES as ReadonlyArray<unknown>).includes(basis)) return { review: `basis ${JSON.stringify(basis ?? null)} is neither gaap nor non_gaap` };
   const negative = NEGATIVE[metric];
-  if (negative !== "never" && negative.test(quote)) return { review: "its sentence states a negative figure in words, which would read as a positive one" };
+  if (negative.test(quote)) return { review: "its sentence states a negative figure in words, which would read as a positive one" };
   if (metric === "eps" && BASIC.test(quote)) return { review: "EPS is read as diluted, and its sentence names basic EPS" };
-  const phrase = (value: unknown) => (typeof value === "string" && value.trim() !== "" ? value.replace(/\s+/g, " ").trim() : null);
+  const phrase = (value: unknown) => (typeof value === "string" && plainText(value) !== "" ? plainText(value) : null);
   const [value, plusMinus, low, high] = [raw.value, raw.plus_minus, raw.low, raw.high].map(phrase);
   const shaped = kind === "result"
     ? value !== null && plusMinus === null && low === null && high === null
@@ -193,7 +226,7 @@ export function readFigure(
   const levels = [value, low, high].filter((given): given is string => given !== null);
   const unfit = levels.find((given) => !fits(found.get(given)!, unit));
   if (unfit !== undefined) return { review: `"${unfit}" is not a figure in ${UNIT_WORDS[unit]}` };
-  if (negative === "never" && levels.some((given) => found.get(given)!.n < 0)) return { review: `a negative ${metric.replaceAll("_", " ")} is misread` };
+  if (NEVER_NEGATIVE.has(metric) && levels.some((given) => found.get(given)!.n < 0)) return { review: `a negative ${metric.replaceAll("_", " ")} is misread` };
   const misread = levels.find((given) => !basesOf(quote, amounts, found.get(given)!, [...found.values()]).includes(basis as FigureBasis));
   if (misread !== undefined) return { review: `its sentence does not state "${misread}" as a ${basis === "gaap" ? "GAAP" : "non-GAAP"} figure` };
   const level = (given: string, scale: number | null = null) => {
@@ -208,11 +241,21 @@ export function readFigure(
     if (typeof spread === "string") return { review: spread };
     [from, to] = [center - spread, center + spread];
   } else {
+    if (!statedAsRange(quote, found.get(low!)!, found.get(high!)!)) return { review: `its sentence does not state "${low}" and "${high}" as a range` };
     // A low with no scale of its own takes its high's ("$4.0 to $4.1 billion").
     [from, to] = [level(low!, found.get(high!)!.scale), level(high!)];
   }
   if (from > to) return { review: "its low is above its high" };
   return { basis: basis as FigureBasis, low: exact(from), high: exact(to) };
+}
+
+// Whether a low and a high are one range: "$4.0 to $4.1 billion",
+// "$1.10-$1.20", "between 71.0% and 72.0%". Two amounts joined by "and" alone
+// ("are expected to be 71.0% and 72.0%") may be two figures.
+function statedAsRange(quote: string, low: Amount, high: Amount): boolean {
+  const between = quote.slice(low.end, high.start);
+  return low.end <= high.start &&
+    (/^ ?(?:to|-) ?$/i.test(between) || (/^ and $/i.test(between) && /\bbetween (?:\w+ )?$/i.test(quote.slice(0, low.start))));
 }
 
 // How far either side of `center` (the amount `of`) a plus_minus reaches, or

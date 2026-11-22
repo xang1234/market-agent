@@ -10,8 +10,8 @@ import { createClaim } from "./claim-repo.ts";
 import { ingestDocumentInTransaction } from "./ingest.ts";
 import { createMention } from "./mention-repo.ts";
 import { contentHashFromBytes, type ObjectStore } from "./object-store.ts";
+import { canonicalText } from "./canonical-text.ts";
 import {
-  canonicalText,
   completeLogged,
   MAX_QUOTE_CHARS,
   MIN_QUOTE_CHARS,

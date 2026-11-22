@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { canonicalText } from "../src/canonical-text.ts";
 import { readFigure } from "../src/release-figures.ts";
 
 const NVDA_REVENUE = "Revenue is expected to be $45.0 billion, plus or minus 2%.";
@@ -142,4 +143,91 @@ test("EPS is diluted EPS, so a sentence naming basic EPS goes to review", () => 
   assert.deepEqual(read("result", "eps", "GAAP diluted EPS was $0.49.", { basis: "gaap", value: "$0.49" }), { basis: "gaap", low: 0.49, high: 0.49 });
   assert.ok(reviewed(read("result", "eps", "Basic and diluted EPS were $0.50 and $0.49, respectively.", { basis: "gaap", value: "$0.50" })));
   assert.ok(reviewed(read("result", "eps", "GAAP basic earnings per share was $0.50.", { basis: "gaap", value: "$0.50" })));
+});
+
+// Each figure kind as a sentence, with slots for how a filing may spell its
+// minus sign or range dash ({-}), the hyphen of "non-GAAP" ({h}), its scale
+// word ({B}, {M}) and words between a label and its amount ({at}). Every
+// spelling below must read back the plain sentence's figure.
+const KINDS: ReadonlyArray<{ kind: "guidance" | "result"; metric: Parameters<typeof readFigure>[0]["metric"]; text: string; raw: Parameters<typeof readFigure>[1]; want: ReturnType<typeof readFigure> }> = [
+  { kind: "result", metric: "revenue", text: "Revenue{at} was $45.0{B}.", raw: { basis: "gaap", value: "$45.0{B}" }, want: { basis: "gaap", low: 45e9, high: 45e9 } },
+  { kind: "guidance", metric: "revenue", text: "Revenue{at} is expected to be $45.0{B}, plus or minus $300{M}.", raw: { basis: "gaap", value: "$45.0{B}", plus_minus: "$300{M}" }, want: { basis: "gaap", low: 44.7e9, high: 45.3e9 } },
+  { kind: "guidance", metric: "operating_expenses", text: "Non{h}GAAP operating expenses{at} are expected to be $1.0{B} to $1.1{B}.", raw: { basis: "non_gaap", low: "$1.0{B}", high: "$1.1{B}" }, want: { basis: "non_gaap", low: 1e9, high: 1.1e9 } },
+  { kind: "guidance", metric: "eps", text: "Non{h}GAAP diluted EPS{at} is expected to be $1.10{-}$1.20.", raw: { basis: "non_gaap", low: "$1.10", high: "$1.20" }, want: { basis: "non_gaap", low: 1.1, high: 1.2 } },
+  { kind: "result", metric: "free_cash_flow", text: "Free cash flow{at} was {-}$1.2{B}.", raw: { basis: "gaap", value: "{-}$1.2{B}" }, want: { basis: "gaap", low: -1.2e9, high: -1.2e9 } },
+  { kind: "result", metric: "eps", text: "Non{h}GAAP diluted EPS{at} was $0.96.", raw: { basis: "non_gaap", value: "$0.96" }, want: { basis: "non_gaap", low: 0.96, high: 0.96 } },
+  { kind: "guidance", metric: "gross_margin", text: "Non{h}GAAP gross margin{at} is expected to be 72.0%, plus or minus 50 basis points.", raw: { basis: "non_gaap", value: "72.0%", plus_minus: "50 basis points" }, want: { basis: "non_gaap", low: 71.5, high: 72.5 } },
+];
+
+const PLAIN = { "{-}": "-", "{h}": "-", "{B}": " billion", "{M}": " million", "{at}": "" };
+const SPELLINGS: ReadonlyArray<Partial<typeof PLAIN>> = [
+  ...[" Billion", " BILLION", " Bn", "BN", "bn", "B", "&nbsp;billion", "\u202fbillion", "&thinsp;billion"].map((word) => ({ "{B}": word })),
+  ...[" Million", " MILLION", " Mn", "mn", "M", "&nbsp;million"].map((word) => ({ "{M}": word })),
+  ...["&minus;", "&#8722;", "&#x2212;", "−", "&ndash;", "–", "—", "‒", "﹣", "－"].map((dash) => ({ "{-}": dash })),
+  ...["‐", "‑", "&#8209;", "&hyphen;", " ", "­-", "-​"].map((hyphen) => ({ "{h}": hyphen })),
+  ...[" in the U.S. Data Center market", " vs. Q3 last year", " of Acme Inc. Holdings", " for the Dec. Quarter"].map((at) => ({ "{at}": at })),
+  { "{B}": "&nbsp;Billion", "{-}": "&minus;", "{h}": "&#8209;", "{at}": " in the U.S. Data Center market" },
+];
+const spell = (text: string, spelling: Partial<typeof PLAIN>) =>
+  text.replace(/\{[-hBM]\}|\{at\}/g, (slot) => (spelling as Record<string, string>)[slot] ?? PLAIN[slot as keyof typeof PLAIN]);
+
+test("a figure reads the same however its filing spells case, entities, minus signs, dashes, hyphens and abbreviations", () => {
+  for (const { kind, metric, text, raw, want } of KINDS) {
+    for (const spelling of [{}, ...SPELLINGS]) {
+      const quote = canonicalText(spell(text, spelling));
+      const given = Object.fromEntries(Object.entries(raw).map(([key, phrase]) => [key, key === "basis" ? phrase : canonicalText(spell(phrase as string, spelling))]));
+      assert.deepEqual(readFigure({ kind, metric, quote }, given), want, `${JSON.stringify(spelling)}: ${quote}`);
+      // The model may copy a phrase in the filing's own characters.
+      const rawGiven = Object.fromEntries(Object.entries(raw).map(([key, phrase]) => [key, key === "basis" ? phrase : spell(phrase as string, spelling)]));
+      if (!Object.values(rawGiven).some((phrase) => String(phrase).includes("&"))) {
+        assert.deepEqual(readFigure({ kind, metric, quote }, rawGiven), want, `raw ${JSON.stringify(spelling)}: ${quote}`);
+      }
+    }
+  }
+});
+
+test("a phrase that leaves the scale word behind is no figure, in any case", () => {
+  for (const word of ["Billion", "BILLION", "Bn", "trillion"]) {
+    assert.ok(reviewed(read("result", "revenue", `Revenue was $45.0 ${word}.`, { basis: "gaap", value: "$45.0" })), word);
+  }
+  assert.deepEqual(read("result", "revenue", "Revenue was $1.2 Trillion.", { basis: "gaap", value: "$1.2 Trillion" }), { basis: "gaap", low: 1.2e12, high: 1.2e12 });
+});
+
+test("a non-GAAP label covers its own noun phrase, or the whole clause when it is the clause's basis", () => {
+  const amd = "On a non-GAAP (*) basis, gross margin was 56%, operating income was $3.9 billion, net income was $3.5 billion and diluted earnings per share was $2.09.";
+  assert.deepEqual(read("result", "operating_income", amd, { basis: "non_gaap", value: "$3.9 billion" }), { basis: "non_gaap", low: 3.9e9, high: 3.9e9 });
+  assert.deepEqual(read("result", "eps", amd, { basis: "non_gaap", value: "$2.09" }), { basis: "non_gaap", low: 2.09, high: 2.09 });
+  const listed = "Non-GAAP operating income and net income were $3.9 billion and $3.5 billion, respectively.";
+  assert.deepEqual(read("result", "net_income", listed, { basis: "non_gaap", value: "$3.5 billion" }), { basis: "non_gaap", low: 3.5e9, high: 3.5e9 });
+  const perShare = "Non-GAAP net income for fiscal 2025 was $3.5 billion, or $2.09 per diluted share.";
+  assert.deepEqual(read("result", "eps", perShare, { basis: "non_gaap", value: "$2.09" }), { basis: "non_gaap", low: 2.09, high: 2.09 });
+  for (const figure of [
+    read("result", "revenue", "Non-GAAP gross margin was 43%, and revenue was $7.7 billion.", { basis: "non_gaap", value: "$7.7 billion" }),
+    read("result", "revenue", "Non-GAAP gross margin was 43%, and revenue was $7.7 billion.", { basis: "gaap", value: "$7.7 billion" }),
+    read("result", "operating_income", "Non-GAAP gross margin was 56%, operating income was $3.9 billion.", { basis: "non_gaap", value: "$3.9 billion" }),
+    read("result", "revenue", "Non-GAAP results improved, and revenue was $7.7 billion.", { basis: "non_gaap", value: "$7.7 billion" }),
+  ]) assert.ok(reviewed(figure), JSON.stringify(figure));
+});
+
+test("a negative word on a figure that is never negative, or two amounts not stated as a range, go to review", () => {
+  for (const figure of [
+    read("result", "operating_expenses", "Operating expenses were negative $50 million.", { basis: "gaap", value: "$50 million" }),
+    read("result", "revenue", "Revenue was minus $50 million.", { basis: "gaap", value: "$50 million" }),
+    read("guidance", "gross_margin", "GAAP and non-GAAP gross margins are expected to be 71.0% and 72.0%.", { basis: "gaap", low: "71.0%", high: "72.0%" }),
+    read("guidance", "gross_margin", "GAAP and non-GAAP gross margins are expected to be 71.0% and 72.0%.", { basis: "non_gaap", low: "71.0%", high: "72.0%" }),
+    read("guidance", "revenue", "Revenue is expected to be $4 billion and capex $5 billion.", { basis: "gaap", low: "$4 billion", high: "$5 billion" }),
+  ]) assert.ok(reviewed(figure), JSON.stringify(figure));
+  // "Plus or minus" is no negative word, and "between" makes "and" a range.
+  assert.deepEqual(
+    read("guidance", "operating_expenses", "Operating expenses are expected to be $1.2 billion, plus or minus $50 million.", { basis: "gaap", value: "$1.2 billion", plus_minus: "$50 million" }),
+    { basis: "gaap", low: 1.15e9, high: 1.25e9 },
+  );
+  for (const quote of ["Revenue was $7.7 billion, despite a negative currency impact.", "Revenue is expected to be $7.7 billion, plus/minus 2%."]) {
+    assert.ok(!reviewed(read(quote.includes("expected") ? "guidance" : "result", "revenue", quote, { basis: "gaap", value: "$7.7 billion" })), quote);
+  }
+  // A year is no amount of the shared subject.
+  const fiscal = "GAAP and non-GAAP gross margins for fiscal 2026 were 74.9% and 75.0%, respectively.";
+  assert.deepEqual(read("result", "gross_margin", fiscal, { basis: "non_gaap", value: "75.0%" }), { basis: "non_gaap", low: 75, high: 75 });
+  const between = "GAAP and non-GAAP gross margins are expected to be between 71.0% and 72.0%.";
+  assert.deepEqual(read("guidance", "gross_margin", between, { basis: "non_gaap", low: "71.0%", high: "72.0%" }), { basis: "non_gaap", low: 71, high: 72 });
 });

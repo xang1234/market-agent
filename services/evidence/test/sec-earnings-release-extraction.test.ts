@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { canonicalText } from "../src/canonical-text.ts";
 import {
-  canonicalText,
   extractReleaseStatements,
   findReleaseCandidates,
   parseRebindReply,
