@@ -9,6 +9,7 @@ import {
   ANSWER_DEADLINES,
   answerContext,
   COUNTERPOINT_LEFT_OUT,
+  NO_CONCLUSION,
   NO_COUNTERPOINT,
   composeAnalystBlocksWithLlm as composeAnswer,
   TITLE_DEADLINES,
@@ -1621,8 +1622,30 @@ test("an answer that must argue against its takeaway labels its case against, an
   assert.ok(of(answer([], true), [[1, "shown"]]).text.endsWith(NO_COUNTERPOINT));
   assert.deepEqual(notes(answer([against], true), [[1, "shown"]]), [COUNTERPOINT_LEFT_OUT], "one the judge hid is said to be left out, not absent");
   assert.deepEqual(notes(answer([against], true), [[1, "shown"], [3, "pending"]]), [], "one still being checked is no gap yet");
-  assert.deepEqual(notes(answer([against], true), []), [], "with no takeaway shown there is nothing to argue against");
+  assert.deepEqual(notes(answer([against], true), []), [NO_CONCLUSION], "every inference hidden: the answer says no conclusion passed, never bare figures");
   assert.deepEqual(notes(answer([]), [[1, "shown"]]), [], "an answer not asked for one says nothing of it");
+  assert.deepEqual(notes(answer([against]), []), [], "nor of a hidden conclusion");
+
+  const orphan = of(answer([against], true), [[3, "shown"]]);
+  assert.ok(!orphan.text.includes("Case against") && !orphan.text.includes("Buyback:"), "a case against never shows without the takeaway it argues against");
+  assert.deepEqual(orphan.commentary.filter((part) => part.kind === "inference" || part.kind === "unverified"), []);
+  assert.deepEqual(orphan.commentary.filter((part) => part.kind === "figures"), of(answer([against], true), []).commentary.filter((part) => part.kind === "figures"),
+    "the quotes it cited stay, as nothing shown cites them");
+  assert.deepEqual(notes(answer([against], true), [[3, "shown"]]), [NO_CONCLUSION]);
+  assert.deepEqual(notes(answer([against], true), [[1, "pending"], [3, "shown"]]), [], "a takeaway still being checked may yet show");
+});
+
+test("an answer that must argue against its takeaway and has every inference rejected by the checks says no conclusion passed them (#735)", () => {
+  const [block] = renderedAnswer(
+    { blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [SEALED_TOOL_CALL], factBlocks: A_BLOCKS, counterpoint: true },
+    SEALED_PACKET,
+    checkAssertions([
+      { kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] },
+      { kind: "analyst_inference", role: "takeaway", text: "Outlook: it expects 9% growth.", supports: [0] },
+      { kind: "analyst_inference", role: "counterpoint", text: "Outlook: it guided 2% lower.", supports: [0] },
+    ], SEALED_PACKET, { roles: true }),
+  ).blocks(new Map());
+  assert.ok(plain(block!).endsWith(NO_CONCLUSION));
 });
 
 test("only an inference that says it argues against the takeaway is shown as the case against, and one written and dropped at any check is said to be left out (#735)", () => {
@@ -1648,7 +1671,8 @@ test("only an inference that says it argues against the takeaway is shown as the
 
   const untyped = shown(argued([inference({})]));
   assert.ok(!untyped.text.includes("Case against") && !untyped.text.includes("Margins:"), "one that never said what it argues is not shown, nor guessed at");
-  assert.deepEqual(untyped.notes, [COUNTERPOINT_LEFT_OUT], "it may have been the case against, so none is said to be absent");
+  assert.deepEqual(untyped.notes, [NO_COUNTERPOINT], "only a declared case against is said to be left out");
+  assert.deepEqual(shown(argued([inference({ role: "theme" })])).notes, [NO_COUNTERPOINT], "nor is one that names a role an answer has none of");
 
   assert.deepEqual(shown(argued([inference({ role: "counterpoint", text: "Margins: it expects margins of 70%." })])).notes, [COUNTERPOINT_LEFT_OUT], "rejected by the checks");
   const sealed = shown(argued([inference({ role: "counterpoint" })]), { withdrawn: [SEALED_CLAIM(3)], unchecked: [] });

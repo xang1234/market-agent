@@ -88,8 +88,9 @@ const ROLES: ReadonlySet<unknown> = new Set(["takeaway", "counterpoint"]);
 export type RejectionCheck =
   | "binding" | "comparative" | "reference" | "kind" | "support" | "limit" | "format" | "rendering" | "judge";
 // part: the metric it failed on, of a comparison over several (comparisons.ts).
-// role: what a rejected inference argued, or unstated where its answer asks each to say,
-// so an answer whose case against was rejected says one was left out, never that none was found.
+// role: what a rejected inference argued, so a declared case against that was rejected is said to be
+// left out, never that none was found; or unstated where its answer asks each to say and it did not,
+// so an answer whose every inference was rejected says no conclusion passed.
 export type Rejection = { index: number; text?: string; check: RejectionCheck; reason: string; part?: ClaimFailure; role?: InferenceRole | "unstated" };
 
 // The list closes the answer in a fenced block, closed or not (a reply cut

@@ -795,7 +795,7 @@ test("judge_prompt_changed reports a judge prompt edit from either round's recor
 });
 
 
-test("in an answer that must argue against its takeaway, an inference that names no role is sent to repair: one that comes back as the case against shows as it, and one that does not is said to be left out (#735)", async (t) => {
+test("in an answer that must argue against its takeaway, an inference that names no role is sent to repair: one that comes back as the case against shows as it, one rejected as the case against is said to be left out, and one that never says what it argues is no case against (#735)", async (t) => {
   t.mock.method(console, "info", () => {});
   const CUSHION = "Counterpoint: only one quarter of segment data is shown, so the data cannot show whether this concentration is rising or falling.";
   const typed = SEGMENTS.exchange!.text.replace(`{"kind":"analyst_inference","subject":"NVDA","text":"Its revenue`, `{"kind":"analyst_inference","subject":"NVDA","role":"takeaway","text":"Its revenue`);
@@ -813,8 +813,8 @@ test("in an answer that must argue against its takeaway, an inference that names
   assert.ok(answered.text.includes(`> **Case against** (from NVDA's revenue ranking by segment): ${CUSHION}`), answered.text);
   assert.ok(!answered.text.includes(COUNTERPOINT_LEFT_OUT) && !answered.text.includes(NO_COUNTERPOINT));
 
-  for (const failed of [fenced([inference(4, "Counterpoint: only 1 quarter is shown.", { role: "counterpoint" })]), fenced([])]) {
-    const left = await run(failed);
-    assert.ok(!left.text.includes("Case against") && left.text.endsWith(COUNTERPOINT_LEFT_OUT), left.text);
-  }
+  const left = await run(fenced([inference(4, "Counterpoint: only 1 quarter is shown.", { role: "counterpoint" })]));
+  assert.ok(!left.text.includes("Case against") && left.text.endsWith(COUNTERPOINT_LEFT_OUT), left.text);
+  const unstated = await run(fenced([]));
+  assert.ok(!unstated.text.includes("Case against") && unstated.text.endsWith(NO_COUNTERPOINT), unstated.text);
 });

@@ -695,7 +695,7 @@ const THEME_SHAPE = [
   "that bear on the theme, when one does; then one analyst_inference of one or two sentences that opens with the theme's name and a colon, sums up the theme,",
   "and weighs it in its claims' own terms: what the filing says is at stake and, when a figure bears on it, what that figure shows, set beside the claims",
   "without saying they caused it, since the filing does not say why its figures moved",
-  "({\"kind\":\"analyst_inference\",\"text\":\"Pricing: the filing warns that price swings may hurt its business and gross margins, and its gross margin moved widely between the two years shown.\",\"supports\":[0,1]}).",
+  "({\"kind\":\"analyst_inference\",\"role\":\"takeaway\",\"text\":\"Pricing: the filing warns that price swings may hurt its business and gross margins, and its gross margin moved widely between the two years shown.\",\"supports\":[0,1]}).",
   "Its supports are the indexes of that management_attribution and those observations, and it says nothing they do not state or clearly imply.",
   "It names the rivals, peers, customers or markets its claims name, and calls a filing \"the filing\", never by its form, since an inference writes no digit.",
   "Industry peers on file share its industry and nothing more is known of them: a theme of peers names them and says only that.",

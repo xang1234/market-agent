@@ -24,6 +24,8 @@ const NO_ANSWER_FALLBACK_TEXT = "No written answer is available for this questio
 // An answer that must argue against its takeaway (#735), when no case against shows.
 export const NO_COUNTERPOINT = "Nothing in the sources read was found to cut against this conclusion.";
 export const COUNTERPOINT_LEFT_OUT = "The case against this conclusion is left out, as it did not pass the answer's checks.";
+// One with no takeaway left to argue against, once it wrote an inference.
+export const NO_CONCLUSION = "No conclusion drawn from these sources is shown, as none passed the answer's checks.";
 
 // What the reader sees as the answer (#208): the accepted assertions in their
 // templates, with the notes they cannot say themselves, or a fixed sentence no
@@ -37,8 +39,9 @@ type Paragraph = Pick<RenderedAssertion, "index" | "segments" | "fact_bindings" 
 // commentaryNotes: the notes its commentary parts keep, without one the page
 // already says (the periods a table beside it names).
 type Answer =
-  // against: null when no case against is asked for; else whether the answer wrote one, shown or not.
-  | { kind: "rendered"; paragraphs: ReadonlyArray<Paragraph>; notes: ReadonlyArray<string>; commentaryNotes: ReadonlyArray<string>; restating: AssertionReport["restating"]; against: { written: boolean } | null }
+  // against: null when no case against is asked for; else whether the answer declared one (written)
+  // and wrote any inference at all (drew), shown or not.
+  | { kind: "rendered"; paragraphs: ReadonlyArray<Paragraph>; notes: ReadonlyArray<string>; commentaryNotes: ReadonlyArray<string>; restating: AssertionReport["restating"]; against: { written: boolean; drew: boolean } | null }
   | { kind: "fallback"; text: string };
 
 // Analyst commentary as its parts, beside its segments (the same answer as
@@ -496,8 +499,11 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
       notes: [...(periods.note === undefined ? [] : [periods.note]), ...others],
       commentaryNotes: [...(periods.note === undefined || packet.periods_shown ? [] : [periods.note]), ...others],
       restating,
-      // One that never said what it argued may have been the case against, so none is said to be absent.
-      against: input.counterpoint ? { written: [...report.accepted, ...report.rejected].some((entry) => entry.role === "counterpoint" || entry.role === "unstated") } : null,
+      // Only a declared case against is said to be left out; a rejected inference of any role, or none, was drawn.
+      against: input.counterpoint ? {
+        written: [...report.accepted, ...report.rejected].some((entry) => entry.role === "counterpoint"),
+        drew: report.accepted.some((entry) => entry.kind === "analyst_inference") || report.rejected.some((entry) => entry.role !== undefined),
+      } : null,
     };
     return { answer, report: { ...report, rendered: true, ...(repeated.length > 0 ? { repeated } : {}), ...(restating.length > 0 ? { restating } : {}) } };
   };
@@ -631,16 +637,18 @@ function statements(segments: ReadonlyArray<Segment>): CommentaryPart[] {
   return parts.filter((part) => part.length > 0).map((part) => ({ kind: "figures", segments: part }));
 }
 
-// Why an answer asked to argue against its takeaway shows no case against,
-// once a takeaway shows and every case against it is settled hidden or none was written.
-function againstNote(answer: Extract<Answer, { kind: "rendered" }>, inferences: Inferences): string[] {
-  if (answer.against === null) return [];
-  const shown = (against: boolean) => answer.paragraphs.some(({ inference }) => inference?.against === against && inferences.has(inference.index));
-  if (!shown(false) || shown(true)) return [];
-  return [answer.against.written ? COUNTERPOINT_LEFT_OUT : NO_COUNTERPOINT];
+// An answer asked to argue against its takeaway: the inferences it shows, a
+// case against only beside a takeaway that shows (or is still being checked),
+// and why no case against or no conclusion shows.
+function argued(answer: Extract<Answer, { kind: "rendered" }>, inferences: Inferences): { inferences: Inferences; notes: string[] } {
+  if (answer.against === null) return { inferences, notes: [] };
+  const against = new Set(answer.paragraphs.flatMap(({ inference }) => inference?.against ? [inference.index] : []));
+  const shown = (side: boolean) => answer.paragraphs.some(({ inference }) => inference !== undefined && inference.against === side && inferences.has(inference.index));
+  if (!shown(false)) return { inferences: new Map([...inferences].filter(([index]) => !against.has(index))), notes: answer.against.drew ? [NO_CONCLUSION] : [] };
+  return { inferences, notes: shown(true) ? [] : [answer.against.written ? COUNTERPOINT_LEFT_OUT : NO_COUNTERPOINT] };
 }
 
-function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answer, inferences: Inferences): ReadonlyArray<Record<string, unknown>> {
+function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answer, judged: Inferences): ReadonlyArray<Record<string, unknown>> {
   let rewritten = false;
   return Object.freeze(blocks.map((block) => {
     if (rewritten || block.kind !== "rich_text") return block;
@@ -648,8 +656,9 @@ function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answ
     if (answer.kind === "fallback") {
       return Object.freeze({ ...block, segments: Object.freeze([Object.freeze({ type: "text", text: answer.text })]) });
     }
-    const argued = againstNote(answer, inferences);
-    const notes = [...answer.notes, ...argued];
+    const argument = argued(answer, judged);
+    const { inferences } = argument;
+    const notes = [...answer.notes, ...argument.notes];
     const left = restated(answer.restating, inferences, answer.paragraphs.flatMap((entry) => entry.inference ? [entry.inference.index] : []));
     // Each paragraph shown, as its segments and its commentary part.
     const paragraphs = answer.paragraphs.filter((entry) => !left.includes(entry.index)).flatMap((entry): Array<Omit<Paragraph, "index"> & { part: CommentaryPart }> => {
@@ -676,7 +685,7 @@ function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answ
     };
     const commentary = block.analyst_commentary !== true ? [] : [
       ...paragraphs.filter((entry) => !citedByShown(entry)).flatMap(({ part }) => (part.kind === "figures" ? statements(part.segments) : [part])),
-      ...[...answer.commentaryNotes, ...argued].map((text): CommentaryPart => ({ kind: "note", text })),
+      ...[...answer.commentaryNotes, ...argument.notes].map((text): CommentaryPart => ({ kind: "note", text })),
     ];
     const factBindings = [...new Map(paragraphs.flatMap((entry) => entry.fact_bindings).map((binding) => [binding.fact_id, binding])).values()];
     const dataRef = (block.data_ref ?? {}) as Record<string, unknown>;
