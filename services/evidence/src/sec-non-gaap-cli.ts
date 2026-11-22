@@ -2,16 +2,21 @@
 // (sec-non-gaap-reconciliations.ts) from their stored bytes: no SEC request
 // and no model call.
 //
-//   DATABASE_URL=... S3_* =... npm run extract:non-gaap
+//   DATABASE_URL=... S3_* =... npm run extract:non-gaap [-- --reread]
 //
 // Idempotent: each release read keeps its row, so a rerun reads only new ones.
-// Exits non-zero when any release failed, so it is read again next run.
+// --reread first deletes every row, which the stored bytes rebuild, so a
+// reader fix reaches releases read before it. Exits non-zero when any release
+// failed, so it is read again next run.
+import { parseArgs } from "node:util";
 import { createEvidenceCliRuntime } from "./evidence-cli-runtime.ts";
 import { runReconciliationDrain } from "./sec-non-gaap-reconciliations.ts";
 
 async function main(): Promise<void> {
+  const { values: flags } = parseArgs({ options: { reread: { type: "boolean" } } });
   const { db, objectStore } = createEvidenceCliRuntime();
   try {
+    if (flags.reread) console.log(`reread: ${(await db.query("delete from non_gaap_reconciliations")).rowCount ?? 0} releases to read again`);
     const result = await runReconciliationDrain({ db, objectStore }, {
       onRelease: (candidate, outcome) => {
         const name = candidate.accession ?? candidate.documentId;
