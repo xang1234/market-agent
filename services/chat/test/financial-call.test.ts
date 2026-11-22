@@ -273,7 +273,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
       call.facts[0]!.basis,
       "free_cash_flow.v1: operating cash flow less capex, as reported in the latest 10-K. Capex is filed as PaymentsToAcquireProductiveAssets, which may include purchased intangibles as well as PP&E.",
     );
-    assert.deepEqual(call.requires.map((row) => row.figure.text), ["7.3% a year", "8.18%"]);
+    assert.deepEqual(call.requires.map((row) => row.figure.text), ["7.3% a year", "Not computed: the exit multiple is not anchored.", "8.18%"]);
     assert.equal(call.stance.rule, 1);
     assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the scoped basis");
   });
