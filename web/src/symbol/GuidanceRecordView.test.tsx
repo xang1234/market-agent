@@ -50,7 +50,7 @@ test('each guide shows beside the actual on its basis, both quoted with their fi
   try {
     assert.deepEqual(
       [...doc.querySelectorAll('[data-testid="guidance-hit-rates"] li')].map((li) => li.textContent),
-      ['Revenue (GAAP) 1 of 1 quarter in line or better', 'Operating expenses (non-GAAP) 1 of 1 quarter in line or better'],
+      ['Revenue (GAAP) 1 of 1 quarter in line or beat', 'Operating expenses (non-GAAP) 1 of 1 quarter in line or beat'],
     )
     const beat = doc.querySelector('[data-testid="guidance-row-2025-07-27-revenue-gaap"]')!
     assert.equal(beat.getAttribute('data-outcome'), 'beat')

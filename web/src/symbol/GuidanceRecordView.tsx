@@ -58,7 +58,7 @@ export function GuidanceRecordBody({ envelope }: { envelope: GuidanceRecordEnvel
           {rates.map((rate) => (
             <li key={`${rate.metric}-${rate.basis}`} className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-xs text-fg-soft">
               <span className="font-medium text-fg">{label(rate)}</span>{' '}
-              <span className="num">{rate.hits} of {rate.compared}</span> {pluralize(rate.compared, 'quarter')} in line or better
+              <span className="num">{rate.hits} of {rate.compared}</span> {pluralize(rate.compared, 'quarter')} in line or beat
             </li>
           ))}
         </ul>
