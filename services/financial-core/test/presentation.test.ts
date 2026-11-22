@@ -393,7 +393,7 @@ test("free cash flow names each scope it is taken in, in every pairing, and a se
   const content = engineAnswer(plan, facts, { a: "Caterpillar Inc." });
   assert.deepEqual(years.map((year) => labelTexts(content, `o_fcf${year}`)[1]), ["Free cash flow (OCF less PP&E cash capex)", CONTINUING_FCF, PRODUCTIVE_ASSETS_FCF, BOTH_SCOPES_FCF]);
   assert.deepEqual(years.map((year) => labelTexts(content, `o_ocf${year}`)[1]), ["Operating cash flow", CONTINUING_OCF, "Operating cash flow", CONTINUING_OCF]);
-  assert.deepEqual(years.map((year) => resultText(content, `o_fcf${year}`)), years.map(() => "$400"));
+  assert.deepEqual(years.map((year) => resultText(content, `o_fcf${year}`)), years.map(() => "USD 400.00"));
   assert.equal(content.presentation_version, "financial-presentation.v4");
   for (const presentation of content.presentations) {
     if (presentation.kind !== "series") continue;

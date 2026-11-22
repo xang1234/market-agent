@@ -440,7 +440,17 @@
     },
     "FactInferenceV1": {
       "description": "Why a filed value stands for a metric its concept does not name.",
-      "oneOf": [{ "$ref": "#/$defs/NoncontrollingInterestInferenceV1" }, { "$ref": "#/$defs/ProductiveAssetsCapexV1" }]
+      "oneOf": [{ "$ref": "#/$defs/NoncontrollingInterestInferenceV1" }, { "$ref": "#/$defs/ProductiveAssetsCapexV1" }, { "$ref": "#/$defs/ContinuingOperationsOcfV1" }]
+    },
+    "ContinuingOperationsOcfV1": {
+      "description": "Operating cash flow the filer tags as NetCashProvidedByUsedInOperatingActivitiesContinuingOperations instead of NetCashProvidedByUsedInOperatingActivities. It excludes discontinued operations, so the figure may be narrower than total operating cash flow.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "concept"],
+      "properties": {
+        "kind": { "const": "continuing_operations_ocf" },
+        "concept": { "const": "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations" }
+      }
     },
     "ProductiveAssetsCapexV1": {
       "description": "Capex the filer tags as PaymentsToAcquireProductiveAssets instead of PaymentsToAcquirePropertyPlantAndEquipment. Productive assets can include purchased intangibles, so the figure may be broader than PP&E cash payments.",

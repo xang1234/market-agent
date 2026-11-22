@@ -49,9 +49,9 @@ export const FINANCIAL_PRESENTATION_V1 = "financial-presentation.v1";
 /** Content with a `scenarios` presentation (#201). All other content stays v2, so no v1 plan's presentation hash moves. */
 export const FINANCIAL_PRESENTATION_V3 = "financial-presentation.v3";
 /**
- * Content that reads a figure in a concept scope (#731), such as capex filed as PaymentsToAcquireProductiveAssets,
- * which with free cash flow taken from it is a measure of its own. It is otherwise v3. Content that reads none keeps
- * v2 or v3, and its hash.
+ * Content that reads a figure in a concept scope (#731, #743), such as capex filed as PaymentsToAcquireProductiveAssets
+ * or OCF filed for continuing operations, which with free cash flow taken from it is a measure of its own. It is
+ * otherwise v3. Content that reads none keeps v2 or v3, and its hash.
  */
 export const FINANCIAL_PRESENTATION_V4 = "financial-presentation.v4";
 

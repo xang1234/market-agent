@@ -369,7 +369,7 @@ export const SUPPORTED_FINANCIAL_PRESENTATION_VERSION = 'financial-presentation.
 export const FINANCIAL_PRESENTATION_V1 = 'financial-presentation.v1'
 /** Content with P/E scenarios (#201); all other content stays v2. */
 export const FINANCIAL_PRESENTATION_V3 = 'financial-presentation.v3'
-/** Content that reads capex filed as productive assets, labelled as its own measure (#731); otherwise as v3. */
+/** Content that reads a figure in a concept scope, such as capex filed as productive assets (#731) or OCF filed for continuing operations (#743), labelled as its own measure; otherwise as v3. */
 export const FINANCIAL_PRESENTATION_V4 = 'financial-presentation.v4'
 
 export type FinancialUnit =

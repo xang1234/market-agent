@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import {
   createRuntimeAuthority,
   DEFAULT_EXECUTION_LIMITS,
+  namesConceptScope,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
 } from "../../financial-core/src/index.ts";
@@ -289,9 +290,12 @@ const persistGridCell: PersistParentArtifact = async (tx, publication) => {
 function certifiedCell(block: FinancialAnswerBlock): CellWrite {
   const [result] = block.financial.results;
   const verified = result?.disposition === "verified";
+  // A figure in a concept scope (#743) sits under its column's reviewed-concept heading, so the cell names its measure.
+  const measure = result === undefined ? null : block.financial.labels[result.measure_label_id]?.text ?? null;
+  const scoped = measure !== null && namesConceptScope(measure) ? ` · ${measure}` : "";
   return {
     status: verified ? "ok" : "missing_data",
-    display: { value: verified ? result!.presented.text : EMPTY_DISPLAY.value, tone: null },
+    display: { value: verified ? `${result!.presented.text}${scoped}` : EMPTY_DISPLAY.value, tone: null },
     snapshotId: block.snapshot_id,
     primaryRef: null,
     coverageFlag: verified ? null : result?.presented.kind === "gap" ? result.presented.reason_code : "no_result",

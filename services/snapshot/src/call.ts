@@ -134,6 +134,7 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
   };
   const observed = bound.get("market_cap_px")?.bound_payload?.observed_at;
   const capexInference = bound.get("capex")?.bound_payload?.inference;
+  const ocfInference = bound.get("operating_cash_flow")?.bound_payload?.inference;
 
   const callDate = localDate(plan.time.knowledge_cutoff);
   const bindingsHashed = bindings.map((row) => ({ slot: row.input_slot, status: row.binding_status, payload_hash: row.payload_hash, gap_reason: row.gap_reason }));
@@ -150,6 +151,9 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     price_date: typeof observed === "string" ? localDate(observed) : null,
     capex_scope: isRecord(capexInference) && capexInference.kind === "productive_assets_capex"
       ? { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" }
+      : null,
+    ocf_scope: isRecord(ocfInference) && ocfInference.kind === "continuing_operations_ocf"
+      ? { kind: "continuing_operations_ocf", concept: "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations" }
       : null,
     consensus: await consensusCaptures(db, issuer, callDate, plan.time.knowledge_cutoff),
   };

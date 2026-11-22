@@ -197,4 +197,19 @@ test("grid financial columns", { timeout: 300_000 }, async (t) => {
     await db.query(`delete from grid_runs where grid_run_id = $1`, [kept.runId]);
     assert.equal((await db.query(`select count(*)::int as n from financial_runs where parent_id = $1`, [kept.runId])).rows[0].n, 0);
   });
+
+  // The second company files its FY2023 operating cash flow for continuing operations only (#743).
+  await t.test("a cell whose OCF is filed for continuing operations names that scope under the column, and cash conversion over it is a gap", async () => {
+    const ocf = await seedReportedFact(db, { metric_key: "operating_cash_flow", value: "90", fiscal_year: 2023, subject: IDS.issuerB });
+    await db.query(`update facts set quality_flags = $2::jsonb where fact_id = $1`, [ocf, JSON.stringify([{ kind: "continuing_operations_ocf", concept: "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations" }])]);
+    await seedReportedFact(db, { metric_key: "net_income_consolidated", value: "100", fiscal_year: 2023, subject: IDS.issuerB });
+    const { runId } = await startRun(pool, { columns: [{ column_key: "latest_operating_cash_flow" }, { column_key: "latest_cash_conversion" }] });
+    const cells = cellsByPosition(await waitForRun(pool, runId, settled));
+    assert.deepEqual(["0:c0", "1:c0", "0:c1", "1:c1"].map((key) => [cells[key]!.status, cells[key]!.display?.value, cells[key]!.coverage_flag]), [
+      ["ok", "USD 120.00", null],
+      ["ok", "USD 90.00 · Operating cash flow (continuing operations, excludes discontinued operations)", null],
+      ["ok", "1.20x", null],
+      ["missing_data", "—", "incompatible_definition"],
+    ]);
+  });
 });

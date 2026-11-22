@@ -523,27 +523,43 @@ export type ProductiveAssetsCapexV1 = {
   concept: "PaymentsToAcquireProductiveAssets";
 };
 
+/**
+ * Operating cash flow a filer tags as
+ * NetCashProvidedByUsedInOperatingActivitiesContinuingOperations instead of
+ * the total NetCashProvidedByUsedInOperatingActivities (operator, 2026-11-21,
+ * #743). It excludes discontinued operations. A filing that tags both is read
+ * as the total.
+ */
+export type ContinuingOperationsOcfV1 = {
+  kind: "continuing_operations_ocf";
+  concept: "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations";
+};
+
 /** Why a filed value stands for a metric its concept does not name. */
-export type FactInferenceV1 = NoncontrollingInterestInferenceV1 | ProductiveAssetsCapexV1;
+export type FactInferenceV1 = NoncontrollingInterestInferenceV1 | ProductiveAssetsCapexV1 | ContinuingOperationsOcfV1;
 
 /**
  * A figure filed under a concept that measures more or less than its metric's
  * reviewed one, so it is a measure of its own, never compared with that
- * concept's (#731). A second scope (OCF from continuing operations, #743) joins
- * this union and conceptScope.
+ * concept's (#731, #743).
  */
-export type ConceptScopeV1 = ProductiveAssetsCapexV1;
+export type ConceptScopeV1 = ProductiveAssetsCapexV1 | ContinuingOperationsOcfV1;
 
 /** A bound figure's concept scope; null for its metric's reviewed concept, and for an inference that equals it. */
 export function conceptScope(inference: FactInferenceV1 | null | undefined): ConceptScopeV1 | null {
-  return inference?.kind === "productive_assets_capex" ? inference : null;
+  return inference?.kind === "productive_assets_capex" || inference?.kind === "continuing_operations_ocf" ? inference : null;
 }
 
 /** What every inspector shows beside such a figure. */
 export function inferenceNote(inference: Pick<FactInferenceV1, "kind" | "concept">): { label: string; text: string } {
-  return inference.kind === "no_noncontrolling_interest"
-    ? { label: "Inferred", text: `Equal to ${inference.concept}: the filer reports no noncontrolling interest for this period.` }
-    : { label: "Scope", text: `Capex is filed as ${inference.concept}, which may include purchased intangibles as well as PP&E.` };
+  switch (inference.kind) {
+    case "no_noncontrolling_interest":
+      return { label: "Inferred", text: `Equal to ${inference.concept}: the filer reports no noncontrolling interest for this period.` };
+    case "productive_assets_capex":
+      return { label: "Scope", text: `Capex is filed as ${inference.concept}, which may include purchased intangibles as well as PP&E.` };
+    case "continuing_operations_ocf":
+      return { label: "Scope", text: `Operating cash flow is filed as ${inference.concept}, which excludes discontinued operations.` };
+  }
 }
 
 /** An immutable bound input: a fact, or a share price from a stored price observation. */

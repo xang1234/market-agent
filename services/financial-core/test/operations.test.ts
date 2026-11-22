@@ -409,7 +409,7 @@ test("OCF filed for continuing operations never compares with total OCF as one m
   assert.deepEqual(pairs.map(([ocf, capex]) => freeCash(ocf, capex).measure.concept_scopes), [[], ["continuing_operations_ocf"], ["productive_assets_capex"], ["continuing_operations_ocf", "productive_assets_capex"]]);
   for (const [i, current] of pairs.entries()) {
     for (const [j, prior] of pairs.entries()) {
-      const outcome = absoluteChange(change("absolute_change"), freeCash(...current), freeCash(...prior, FY2022));
+      const outcome = absoluteChange(change("absolute_change"), freeCash(current[0], current[1]), freeCash(prior[0], prior[1], FY2022));
       if (i === j) assert.equal(value(outcome), "0", `${i} over ${j}`);
       else assert.deepEqual(gap(outcome), ["incompatible", "incompatible_definition"], `${i} over ${j}`);
     }

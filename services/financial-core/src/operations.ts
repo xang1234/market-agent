@@ -416,6 +416,10 @@ export function ratio(node: RatioNode, numerator: FinancialOperand, denominator:
   if ((numerator.period.kind === "instant") !== (definition.timing === "same_instant")) {
     return operationGap("incompatible_period", "The ratio requires a different period timing.");
   }
+  // ponytail: worded for cash conversion, the one approved ratio a scoped figure reaches (#743); word it per ratio once another does.
+  if (numerator.measure.concept_scopes.length > 0 || denominator.measure.concept_scopes.length > 0) {
+    return operationGap("incompatible_definition", "Cash conversion divides operating cash flow including discontinued operations by net income, which includes them, and this operating cash flow is filed for continuing operations only.");
+  }
   return quotient(node.node_id, { metric_key: definition.ratio_key, definition_version: definition.definition_version, derivations: [], concept_scopes: [] }, numerator, denominator);
 }
 
@@ -617,6 +621,7 @@ export function measureMismatch(left: FinancialOperand, right: FinancialOperand)
 
 const SCOPE_MISMATCH: Readonly<Record<ConceptScopeV1["kind"], string>> = {
   productive_assets_capex: "One figure's capex is filed as PaymentsToAcquireProductiveAssets, which may include purchased intangibles, and the other's as PP&E only, so they do not measure the same spending.",
+  continuing_operations_ocf: "One figure's operating cash flow is filed as NetCashProvidedByUsedInOperatingActivitiesContinuingOperations, which excludes discontinued operations, and the other's as the total, so they do not measure the same cash flow.",
 };
 
 const MEASUREMENT_EXPLANATIONS: Readonly<Record<MeasurementReason, string>> = {
