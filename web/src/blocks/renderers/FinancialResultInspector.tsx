@@ -13,7 +13,7 @@ import {
   type FinancialResultInspection,
   type FinancialResultShown,
 } from '../financialInspection.ts'
-import { noncontrollingInterestInferenceText } from '../../../../services/financial-core/src/contracts.ts'
+import { inferenceNote } from '../../../../services/financial-core/src/contracts.ts'
 import { CopyButton } from '../CopyButton.tsx'
 import { VerificationLabel } from '../VerificationLabel.tsx'
 import { Skeleton } from '../../ui/Skeleton.tsx'
@@ -163,17 +163,18 @@ function InputRows({ input, company, terms }: { input: FinancialInspectedInput; 
       </>
     )
   }
+  const note = input.inference && inferenceNote(input.inference)
   return (
     <>
-      <Cells label={named(company, metricLabel(input.metric.metric_key))} middle={fiscalPeriodText(input.period)} value={money(input.value, input.unit)} />
+      <Cells label={named(company, metricLabel(input.metric.metric_key, input.inference))} middle={fiscalPeriodText(input.period)} value={money(input.value, input.unit)} />
       {input.derivation && !terms ? (
         <tr><td colSpan={3} className="pb-1.5 pl-3 text-muted">Derived: {derivationFormula(input.period, input.derivation)}</td></tr>
       ) : null}
       {terms && input.derivation?.terms.map((term, index) => (
         <Cells key={index} indent label={derivationTermLabel(term, index)} middle={filingName(term)} value={money(term.raw_token, input.unit)} />
       ))}
-      {input.inference ? (
-        <tr><td colSpan={3} className="pb-1.5 pl-3 text-muted">Inferred: {noncontrollingInterestInferenceText(input.inference)}</td></tr>
+      {note ? (
+        <tr><td colSpan={3} className="pb-1.5 pl-3 text-muted">{note.label}: {note.text}</td></tr>
       ) : null}
     </>
   )
@@ -197,7 +198,7 @@ function sourceEntries(details: Inspected): SourceEntry[] {
       add(input.source.source_id, named(company(input), 'Price data'), `Share price, ${readableDate(input.observation.observed_at, observedDay(input.observation))}`)
       continue
     }
-    const metric = metricLabel(input.metric.metric_key)
+    const metric = metricLabel(input.metric.metric_key, input.inference)
     // A stated value's source records when it was filed, not which form.
     const filed = input.source.filed === null ? 'Filing' : `Filed ${readableDate(input.source.filed, { storedDate: true })}`
     if (!input.derivation) add(input.source.source_id, named(company(input), filed), `${metric} ${fiscalPeriodText({ ...input.period, end: null })}`, true)
@@ -260,7 +261,7 @@ function Assumptions({ details }: { details: Inspected }): ReactElement | null {
 }
 
 function inputTitle(input: FactInput | PriceInput): string {
-  return 'observation_id' in input ? 'Share price' : `${metricLabel(input.metric.metric_key)} ${fiscalPeriodText({ ...input.period, end: null })}`
+  return 'observation_id' in input ? 'Share price' : `${metricLabel(input.metric.metric_key, input.inference)} ${fiscalPeriodText({ ...input.period, end: null })}`
 }
 
 function AuditDetails({ details }: { details: Inspected }): ReactElement {

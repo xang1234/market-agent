@@ -12,7 +12,7 @@ import type { AnalystToolResult } from "../src/analyst-tools.ts";
 import { answerTurn } from "../src/answer-trace.ts";
 import type { AssertionReport } from "../src/assertions.ts";
 import { createChatCoordinator, resolveTurnSubjects, type ChatAssistantMessagePersistence, type ChatTurnInput } from "../src/coordinator.ts";
-import { figureCompanies, mergePackets, type EvidencePacket, type PacketClaim } from "../src/evidence-packet.ts";
+import { figureCompanies, mergePackets, type EvidencePacket, type PacketClaim, type PacketFigure } from "../src/evidence-packet.ts";
 import { chatAuthority, chatGapText, createChatFinancialRuntime, requestedSubjects } from "../src/financial-runtime.ts";
 import { ANSWER_DEADLINES, composeAnalystBlocksWithLlm } from "../src/llm-runtime.ts";
 import { proposedMetric, resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
@@ -20,7 +20,9 @@ import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS } from "../src/scope-
 import { loadPriorSubjects } from "../src/thread-context.ts";
 import type { TurnHydrator } from "../src/turn-hydration.ts";
 import { loadToolRegistry } from "../../tools/src/registry.ts";
-import { chatDatabase, comparing, FY2023_REVENUE, GONE_LISTING, LISTING_A, NO_ASKS, readingOf, resolveMention, resolveNamedListing, revenueModel, seedListingA } from "./financial-fixtures.ts";
+import { createSecBackedStatementRepository } from "../../fundamentals/src/sec-facts-repository.ts";
+import { secCompanyFetcher } from "../../fundamentals/test/fakes.ts";
+import { chatDatabase, comparing, FY2023_REVENUE, GONE_LISTING, LISTING_A, NO_ASKS, readingOf, resolveMention, resolveNamedListing, revenueModel, SEC_ISSUER, SEC_ISSUER_B, SEC_ISSUER_E, seedListingA } from "./financial-fixtures.ts";
 
 const LLM_ENV = {
   LLM_CHANNELS: "openai",
@@ -678,6 +680,91 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(blocks.map((block) => [block.kind, block.analyst_commentary ?? null]), [["financial_answer", null], ["rich_text", null]]);
     assert.deepEqual((blocks[1]!.segments as Array<{ text: string }>).map((segment) => segment.text), ["Commentary is unavailable for this answer."]);
     assert.ok(!JSON.stringify(blocks).includes("roughly double"));
+  });
+
+  // OPM tags its capex as PP&E, as AAPL does, and PAX as productive assets, as NVIDIA does. SWX switched from
+  // productive assets to PP&E with its FY2020 10-K, as CAT did.
+  await t.test("free cash flow over productive-assets capex is never ranked against PP&E's, nor capex trended across a change of tag (#731)", async () => {
+    for (const metricKey of ["operating_cash_flow", "capex"]) {
+      await db.query(
+        `insert into metrics (metric_id, metric_key, display_name, unit_class, aggregation, interpretation, canonical_source_class)
+         values ($1, $2, $2, 'currency', 'sum', 'neutral', 'gaap') on conflict do nothing`,
+        [randomUUID(), metricKey],
+      );
+    }
+    const filers = [
+      [SEC_ISSUER, 320190, { Revenues: [[2023, "383285000000"]], NetCashProvidedByUsedInOperatingActivities: [[2023, "110543000000"]], PaymentsToAcquirePropertyPlantAndEquipment: [[2023, "10959000000"]] }],
+      [SEC_ISSUER_B, 320191, { Revenues: [[2023, "60922000000"]], NetCashProvidedByUsedInOperatingActivities: [[2023, "28090000000"]], PaymentsToAcquireProductiveAssets: [[2023, "1069000000"]] }],
+      [SEC_ISSUER_E, 320194, { Revenues: [[2019, "53800000000"], [2020, "41748000000"]], PaymentsToAcquireProductiveAssets: [[2019, "1056000000"]], PaymentsToAcquirePropertyPlantAndEquipment: [[2020, "978000000"]] }],
+    ] as const;
+    for (const [issuer, cik, concepts] of filers) {
+      await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, $2, $3)`, [issuer, `Filer ${cik}`, String(cik)]);
+      const annual = ([fy, val]: readonly [number, string]) => ({
+        start: `${fy}-01-01`, end: `${fy}-12-31`, val: Number(val), val_token: val, accn: `0000${cik}-${fy + 1 - 2000}-000010`, fy, fp: "FY", form: "10-K", filed: `${fy + 1}-01-10`,
+      });
+      const usGaap = Object.fromEntries(Object.entries(concepts).map(([concept, values]) => [concept, { label: "", description: "", units: { USD: values.map(annual) } }]));
+      const statements = createSecBackedStatementRepository(pool, {
+        fetcher: secCompanyFetcher(() => ({ cik, entityName: `Filer ${cik}`, facts: { "us-gaap": usGaap } }), { completed_at: "2024-02-01T15:05:00.000Z" }),
+        sourceId: randomUUID(),
+        logger: { warn: () => {} },
+      });
+      for (const [fy] of concepts.Revenues) assert.ok(await statements.find({ issuer_id: issuer, family: "income", basis: "as_reported", fiscal_year: fy, fiscal_period: "FY" }));
+    }
+    const ids = (figures: ReadonlyArray<PacketFigure>, metric: string) => figures.filter((figure) => figure.metric.startsWith(metric)).map((figure) => figure.id);
+    // The agent asks for the figures, then writes the claims its packet's figures give.
+    const ask = async (calls: Array<Record<string, unknown>>, question: string, claims: (figures: ReadonlyArray<PacketFigure>) => unknown[]) => {
+      const router = scripted([{ toolCalls: calls.map((args) => call("certified_financials", args)) }, { text: "DONE" }]);
+      let figures: ReadonlyArray<PacketFigure> = [];
+      const agent = analystAgentRunner({
+        financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
+        router: async (beforeModelCall) => metered(router, beforeModelCall),
+        read: noRead,
+        compose: (input, turn, onAnswered) => answerTurn(input, turn, {
+          env: LLM_ENV,
+          createClient: () => async () => {
+            figures = input.packet!.figures;
+            return { text: `\`\`\`assertions\n${JSON.stringify(claims(figures))}\n\`\`\`` };
+          },
+          onAnswered,
+        }),
+        asOf: () => new Date().toISOString(),
+        logToolCalls: persist.logToolCalls,
+      });
+      const done = completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: question }));
+      return { report: done.assertion_report as AssertionReport, shown: savedText(done), figures };
+    };
+    const refused = (texts: string[]) => texts.map((text) => ["comparative", text, "comparison: a comparison is of one metric"]);
+    const rejected = (report: AssertionReport) => report.rejected.map((entry) => [entry.check, entry.text, entry.reason]);
+
+    const ranked = await ask(
+      [{ subject_refs: [{ kind: "issuer", id: SEC_ISSUER }, { kind: "issuer", id: SEC_ISSUER_B }], metrics: ["free_cash_flow"], period: { kind: "fiscal_year", fiscal_year: 2023 }, question: "OPM and PAX free cash flow in fiscal 2023" }],
+      "Which had the higher free cash flow in fiscal 2023, OPM or PAX?",
+      (figures) => {
+        const [opm, pax] = ids(figures, "Free cash flow");
+        return [
+          { kind: "comparison", text: "OPM had the highest free cash flow.", evidence: [opm, pax], op: "highest", result: opm },
+          { kind: "comparison", text: "OPM then PAX.", evidence: [opm, pax], op: "order", result: [opm, pax] },
+        ];
+      },
+    );
+    assert.doesNotMatch(ranked.shown, /highest/);
+    assert.deepEqual([rejected(ranked.report), ranked.report.accepted.length], [refused(["OPM had the highest free cash flow.", "OPM then PAX."]), 0]);
+    assert.deepEqual(ranked.figures.filter((figure) => figure.metric.startsWith("Free cash flow")).map((figure) => [figure.company, figure.metric]), [
+      ["OPM", "Free cash flow (OCF less PP&E cash capex)"],
+      ["PAX", "Free cash flow (OCF less productive-asset capex)"],
+    ]);
+
+    const capex = (fiscal_year: number) => ({ subject_refs: [{ kind: "issuer", id: SEC_ISSUER_E }], metrics: ["capex"], period: { kind: "fiscal_year", fiscal_year }, question: `SWX capex in fiscal ${fiscal_year}` });
+    const trend = await ask([capex(2019), capex(2020)], "How did SWX's capex move from fiscal 2019 to 2020?", (figures) => [
+      { kind: "comparison", text: "SWX's capex fell.", evidence: ids(figures, "Capital expenditures"), op: "trend", result: "fell" },
+    ]);
+    assert.doesNotMatch(trend.shown, /fell/);
+    assert.deepEqual([rejected(trend.report), trend.report.accepted.length], [refused(["SWX's capex fell."]), 0]);
+    // The two certified calls run at once, so their figures reach the packet in either order.
+    assert.deepEqual(trend.figures.map((figure) => [figure.metric, figure.value]).sort(), [
+      ["Capital expenditures (PP&E cash payments)", "$978.0M"],
+      ["Capital expenditures (productive-asset cash payments, may include intangibles)", "$1.1B"],
+    ]);
   });
 
   await t.test("an assertion citing a figure outside the packet is rejected", async () => {

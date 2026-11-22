@@ -266,7 +266,9 @@ export const US_GAAP_TO_METRIC_KEY: Readonly<Record<string, string>> = {
   NetCashProvidedByUsedInOperatingActivities: "operating_cash_flow",
   NetCashProvidedByUsedInOperatingActivitiesContinuingOperations: "operating_cash_flow",
   // A payment, reported as a positive outflow. Some filers (NVDA) tag only the
-  // broader productive-assets line, which adds purchased intangibles.
+  // broader productive-assets line, which may add purchased intangibles. It
+  // certifies with that scope recorded (#731); a filing that tags both is read
+  // as PP&E, since this order picks the first concept with a value.
   PaymentsToAcquirePropertyPlantAndEquipment: "capex",
   PaymentsToAcquireProductiveAssets: "capex",
   ShareBasedCompensation: "stock_based_compensation",

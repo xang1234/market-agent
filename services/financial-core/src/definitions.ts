@@ -1,7 +1,7 @@
 // Approved financial definitions, catalog v1. Models may propose metric keys;
 // only these reviewed definitions resolve. No executable user rules.
 
-import type { FinancialUnit, MetricKey, VersionTag } from "./contracts.ts";
+import type { ConceptScopeV1, FactInferenceV1, FinancialUnit, MetricKey, VersionTag } from "./contracts.ts";
 import type { ShareBasis } from "./evidence-vocabulary.ts";
 
 export const FINANCIAL_CATALOG_VERSION = "catalog.v1";
@@ -57,8 +57,10 @@ export const METRIC_CATALOG_V1: ReadonlyMap<MetricKey, MetricDefinition> = new M
     // Including discontinued operations, like capex (SEC ingestion certifies
     // only NetCashProvidedByUsedInOperatingActivities).
     metric("operating_cash_flow", "Operating cash flow", "flow", "currency"),
-    // Cash paid for PP&E, reported as a nonnegative outflow (SEC ingestion
-    // certifies only PaymentsToAcquirePropertyPlantAndEquipment).
+    // Cash paid for PP&E, reported as a nonnegative outflow. SEC ingestion
+    // certifies PaymentsToAcquirePropertyPlantAndEquipment, or
+    // PaymentsToAcquireProductiveAssets for a filer that tags that instead, with
+    // its scope recorded (ProductiveAssetsCapexV1, #731).
     metric("capex", "Capital expenditures (PP&E cash payments)", "flow", "currency"),
     // A Call's inputs (ADR 0005), each one reported us-gaap concept (#594),
     // never a sum of tags: net cash and total debt sum them (BALANCE_COMPONENTS).
@@ -195,4 +197,27 @@ export function resolveMetricDefinition(metricKey: MetricKey): MetricDefinition 
 
 export function resolveRatioDefinition(ratioKey: MetricKey): RatioDefinition | null {
   return RATIO_CATALOG_V1.get(ratioKey) ?? null;
+}
+
+// How a figure in each concept scope (#731) reads: its own label, and its part of a free cash flow, where the
+// reviewed concepts read "OCF" and "PP&E cash capex". A second scope (OCF from continuing operations, #743) is one entry.
+const SCOPE_LABELS: Readonly<Record<ConceptScopeV1["kind"], Readonly<{ metric_key: MetricKey; label: string; in_free_cash_flow: string }>>> = {
+  productive_assets_capex: { metric_key: "capex", label: "Capital expenditures (productive-asset cash payments, may include intangibles)", in_free_cash_flow: "productive-asset capex" },
+};
+
+/**
+ * The label of a figure, so that one filed in a concept scope never reads as its metric's reviewed concept (#731).
+ * The scope is an engine measure's concept_scopes or a bound input's inference; free cash flow names each part's.
+ * Null for a key the catalog does not know.
+ */
+export function figureLabel(metricKey: MetricKey, scope: ReadonlyArray<string> | Pick<FactInferenceV1, "kind"> | undefined): string | null {
+  const kinds = scope === undefined ? [] : "kind" in scope ? [scope.kind] : scope;
+  const part = (metric: MetricKey) => kinds.flatMap((kind) => (Object.hasOwn(SCOPE_LABELS, kind) ? [SCOPE_LABELS[kind as ConceptScopeV1["kind"]]] : [])).find((entry) => entry.metric_key === metric);
+  if (metricKey === "free_cash_flow") return `Free cash flow (${part("operating_cash_flow")?.in_free_cash_flow ?? "OCF"} less ${part("capex")?.in_free_cash_flow ?? "PP&E cash capex"})`;
+  return part(metricKey)?.label ?? resolveMetricDefinition(metricKey)?.label ?? null;
+}
+
+/** Whether a label figureLabel wrote, or one built on it, names a concept scope, which no shorter form of it may drop. */
+export function namesConceptScope(label: string): boolean {
+  return Object.values(SCOPE_LABELS).some((entry) => label.includes(entry.label) || label.includes(entry.in_free_cash_flow));
 }

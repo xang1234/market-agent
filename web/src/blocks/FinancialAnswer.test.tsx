@@ -413,6 +413,26 @@ test('a column heading drops the formula and abbreviates a quarter or year chang
     ['Net margin (net income / revenue)', 'Net margin (net income / sales)', 'Net margin (net income / revenue) (GAAP)'],
     'a heading that reads as another column\'s kept heading is kept whole too',
   )
+  const scopes = ['Free cash flow (OCF less PP&E cash capex)', 'Free cash flow (OCF less productive-asset capex)']
+  assert.deepEqual(columnNames(scopes), scopes, 'free cash flow over either capex scope keeps its scope (#731)')
+})
+
+// Alpha's capex has no filing; Beta and Gamma file theirs as productive assets (#731).
+test('a v4 answer keeps its scoped measure whole in every heading and in the inspector a value opens, with a missing company in its column', () => {
+  const block = JSON.parse(readFileSync(new URL('./financialAnswer.productiveAssets.fixture.json', import.meta.url), 'utf8')) as Editable
+  assert.ok(validateBlock(block).valid)
+  assert.equal(block.financial.presentation_version, 'financial-presentation.v4')
+  const FCF = 'Free cash flow (OCF less productive-asset capex)'
+  assert.deepEqual(statement(render(block, true)), {
+    heads: [[], ['Alpha'], ['Beta'], ['Gamma']],
+    rows: [[`${FCF}, FY2023`, '—', '$800.0M', '$500.0M']],
+    caption: null,
+    footnotes: [`— ${UNAVAILABLE}`],
+  })
+  const beta = block.financial.results.find((result) => result.output_id === 'out_b_fcf')!
+  assert.deepEqual(resultShown(block.financial, beta), { subject: 'Beta Inc.', measure: FCF, period: 'FY2023', value: '$800.0M' })
+  assert.deepEqual(columnNames([FCF, 'Revenue']), [FCF, 'Revenue'])
+  assert.deepEqual(columnNames(['Free cash flow (OCF less PP&E cash capex)', 'Capital expenditures (PP&E cash payments)']), ['Free cash flow', 'Capital expenditures'], 'PP&E headings shorten as before')
 })
 
 test('a company reads without its legal suffix, unless two companies would then read alike', () => {
