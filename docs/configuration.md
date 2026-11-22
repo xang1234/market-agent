@@ -102,6 +102,35 @@ Last, it merges each issuer that holds a company's listing apart from the issuer
 
 The command exits non-zero with a clear message when Postgres is not running. Every run that reaches the bundle records a row in `artifact_ingestion_ledger`, keyed by the bundle's sha256, with status `succeeded`, `partial`, or `failed`. A download or connection failure shows only in the log and the exit code.
 
+## Daily earnings releases
+
+```bash
+./scripts/dev-shell.sh daily-releases
+```
+
+Starts Postgres and MinIO if needed, then runs three idempotent steps from `services/evidence`, each picking up where the last run stopped:
+
+1. `backfill:sec-8k -- --tracked --since-days 7`: new 8-Ks of every issuer that already has one stored, one SEC submissions request per issuer. The week of lookback catches up a missed run.
+2. `extract:non-gaap`: the non-GAAP reconciliations of new releases, from the stored bytes, with no SEC request or model call.
+3. `extract:earnings-releases -- --limit 300`: management's explanations and guidance, one model call and one SEC fetch per release. `DAILY_RELEASE_LIMIT` sets the cap, so a backlog drains over several days.
+
+A failed step does not stop the later ones, but the command exits non-zero. Each run prints `=== <time> daily releases start` and `exit <status>`. A step that left a filing unread retries it on the next run.
+
+To run it daily, use launchd rather than cron, because launchd runs a job missed while the Mac slept once it wakes. Save this as `~/Library/LaunchAgents/com.market-agent.daily-releases.plist`, then run `launchctl load` on it. Use a checkout outside `~/Documents`, which macOS blocks launchd jobs from reading.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.market-agent.daily-releases</string>
+  <key>ProgramArguments</key><array><string>/path/to/market-agent/scripts/dev-shell.sh</string><string>daily-releases</string></array>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/path/to/node/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string></dict>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>45</integer></dict>
+  <key>StandardOutPath</key><string>/path/to/market-agent/.dev/logs/daily-releases.log</string>
+  <key>StandardErrorPath</key><string>/path/to/market-agent/.dev/logs/daily-releases.log</string>
+</dict></plist>
+```
+
 ## Free fallback data sources
 
 These sources fill gaps when the paid providers miss. They are off by default. Free public endpoints have tight quotas, so turn on only the ones you need.

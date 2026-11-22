@@ -875,6 +875,23 @@ reference_import() {
     npm run --silent repair:issuer-splits -- --file "$ROOT/.dev/company_tickers.json")
 }
 
+# The daily earnings-release run against this stack's database (launchd runs it;
+# docs/development.md). Each step is idempotent and resumes where the last run
+# stopped, so a missed day is caught up by the next: new 8-Ks of the issuers
+# that already have one (a week back), their non-GAAP reconciliations from the
+# stored bytes, then at most DAILY_RELEASE_LIMIT releases through the model. A
+# failed step does not stop the later ones, but the run exits non-zero.
+daily_releases() {
+  compose up -d postgres minio && wait_for_postgres && ensure_s3_bucket || return 1
+  local failed=0
+  echo "=== $(date -u +%FT%TZ) daily releases start"
+  (cd "$ROOT/services/evidence" && npm run --silent backfill:sec-8k -- --tracked --since-days 7) || failed=1
+  (cd "$ROOT/services/evidence" && npm run --silent extract:non-gaap) || failed=1
+  (cd "$ROOT/services/evidence" && npm run --silent extract:earnings-releases -- --limit "${DAILY_RELEASE_LIMIT:-300}") || failed=1
+  echo "=== $(date -u +%FT%TZ) daily releases exit $failed"
+  return "$failed"
+}
+
 GOLDEN_REPLAY_FILE="$ROOT/services/app/fixtures/golden-conversation.replay.json"
 
 # This checkout's dev stack is the Compose project COMPOSE_PROJECT_NAME, else the
@@ -1040,8 +1057,9 @@ case "${1:-}" in
   # Re-records services/app/fixtures/golden-conversation.replay.json (docs/development.md).
   recapture) recapture ;;
   reference-import) shift; reference_import "$@" ;;
+  daily-releases) daily_releases ;;
   *)
-    echo "Usage: [DEV_PROFILE=chat|full] ./scripts/dev-shell.sh <up|down|status|install|recapture|reference-import [--force|--status]>" >&2
+    echo "Usage: [DEV_PROFILE=chat|full] ./scripts/dev-shell.sh <up|down|status|install|recapture|reference-import [--force|--status]|daily-releases>" >&2
     exit 1
     ;;
 esac

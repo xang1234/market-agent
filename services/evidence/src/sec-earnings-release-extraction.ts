@@ -663,15 +663,18 @@ export type ExtractReleaseDrainResult = Record<ExtractReleaseOutcome | "failed",
 // filing never blocks the rest; a failed claim stays a candidate for next time.
 export async function runReleaseExtractionDrain(
   deps: ExtractReleaseDeps,
-  opts: { pageSize?: number; onClaim?: (candidate: ReleaseCandidate, result: ExtractReleaseOutcome | { error: unknown }) => void } = {},
+  opts: { limit?: number; pageSize?: number; onClaim?: (candidate: ReleaseCandidate, result: ExtractReleaseOutcome | { error: unknown }) => void } = {},
 ): Promise<ExtractReleaseDrainResult> {
   const result: ExtractReleaseDrainResult = { extracted: 0, empty: 0, unparseable: 0, no_exhibits: 0, noop: 0, failed: 0 };
   let cursor = ZERO_UUID;
-  for (;;) {
-    const page = await findReleaseCandidates(deps.db, { afterClaimId: cursor, limit: opts.pageSize ?? 100 });
+  // ponytail: a release left unread is read again first each run, so it spends
+  // that run's limit; skip such releases by age if they ever crowd the limit out.
+  for (let left = opts.limit ?? Infinity; left > 0;) {
+    const page = await findReleaseCandidates(deps.db, { afterClaimId: cursor, limit: Math.min(opts.pageSize ?? 100, left) });
     if (page.length === 0) break;
     for (const candidate of page) {
       cursor = candidate.claimId;
+      left -= 1;
       try {
         const outcome = await extractReleaseStatements(deps, candidate);
         result[outcome] += 1;
