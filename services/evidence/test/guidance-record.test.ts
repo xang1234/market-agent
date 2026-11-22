@@ -10,8 +10,8 @@ import { bootstrapDatabase, connectedClient, connectedPool, dockerAvailable } fr
 const Q1 = release("q1", "2025-04-27", "2025-05-28");
 const Q2 = release("q2", "2025-07-27", "2025-08-27");
 
-function release(document_id: string, quarter_end: string, filed_on: string): StoredRelease {
-  return { document_id, quarter_end, filed_on, url: `https://www.sec.gov/${document_id}` };
+function release(document_id: string, quarter_end: string, filed_on: string, form = "8-K"): StoredRelease {
+  return { document_id, quarter_end, filed_on, form, url: `https://www.sec.gov/${document_id}` };
 }
 
 function guide(of: StoredRelease, metric: StoredFigure["metric"], basis: StoredFigure["basis"], low: number, high: number): StoredFigure {
@@ -111,6 +111,29 @@ test("the same guide repeated in two exhibits is one guide; different ranges or 
   assert.deepEqual(conflicting.rows.map((entry) => [entry.metric, entry.outcome, entry.reason]), [
     ["revenue", "not_comparable", "conflicting_guidance"],
     ["gross_margin", "not_comparable", "conflicting_actuals"],
+  ]);
+});
+
+test("a quarter's latest 8-K/A restating a guide or an actual replaces the earlier figure; two originals still conflict", () => {
+  const Q1A = release("q1a", "2025-04-27", "2025-06-10", "8-K/A");
+  const Q2A = release("q2a", "2025-07-27", "2025-09-10", "8-K/A");
+  const Q2B = release("q2b", "2025-07-27", "2025-09-20", "8-K/A");
+  const Q2Late = release("q2late", "2025-07-27", "2025-10-01");
+  const record = guidanceRecord([Q1, Q1A, Q2, Q2A, Q2B, Q2Late], [
+    guide(Q1, "revenue", "gaap", 44.1e9, 45.9e9),
+    guide(Q1A, "revenue", "gaap", 46.1e9, 47.9e9),
+    result(Q2, "revenue", "gaap", 46.7e9),
+    result(Q2A, "revenue", "gaap", 48.5e9),
+    result(Q2B, "revenue", "gaap", 47.5e9),
+    // An original filed after the amendments changes nothing.
+    result(Q2Late, "revenue", "gaap", 40e9),
+    // An amendment with no figure for a metric leaves that metric's originals.
+    guide(Q1, "gross_margin", "gaap", 71, 72),
+    result(Q2, "gross_margin", "gaap", 71.5),
+  ], NO_SPLITS);
+  assert.deepEqual(record.rows.map((entry) => [entry.metric, entry.outcome, entry.reason, entry.guided.source.document_id, entry.actual?.source.document_id]), [
+    ["revenue", "in_line", undefined, "q1a", "q2b"],
+    ["gross_margin", "in_line", undefined, "q1", "q2"],
   ]);
 });
 

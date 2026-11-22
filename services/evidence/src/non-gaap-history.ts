@@ -91,11 +91,18 @@ export function addBackCategory(label: string): { key: string; label: string } {
 const round = (value: number, places: number) => Number(value.toFixed(places));
 
 export function nonGaapHistory(releases: ReadonlyArray<StoredRelease>): NonGaapHistory {
-  // Each quarter's latest 8-K/A (#752), else the release that first reported it.
+  // Each quarter's latest 8-K/A with a reconciliation (#752), else the release
+  // that first reported it. Filings of one day order original first, then by accession.
   const picked = new Map<string, StoredRelease>();
-  const filed = [...releases].sort((a, b) => a.filed_on.localeCompare(b.filed_on) || a.document_id.localeCompare(b.document_id));
+  const amends = (release: StoredRelease) => (release.form === "8-K/A" ? 1 : 0);
+  const filed = [...releases].sort((a, b) =>
+    a.filed_on.localeCompare(b.filed_on) || amends(a) - amends(b) || (a.accession ?? "").localeCompare(b.accession ?? "") || a.document_id.localeCompare(b.document_id));
   for (const release of filed) {
-    if (release.quarter_end !== null && (!picked.has(release.quarter_end) || release.form === "8-K/A")) picked.set(release.quarter_end, release);
+    if (release.quarter_end === null) continue;
+    const current = picked.get(release.quarter_end);
+    if (current === undefined || (amends(release) === 1 && (release.reconciliations.length > 0 || current.reconciliations.length === 0))) {
+      picked.set(release.quarter_end, release);
+    }
   }
   const supersededBy = (release: StoredRelease): ReleaseRef[] =>
     filed

@@ -2002,6 +2002,13 @@
                     "null"
                   ]
                 },
+                "form": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The filing form: 8-K, or 8-K/A for an amendment."
+                },
                 "filed_on": {
                   "type": "string",
                   "format": "date"
@@ -2009,6 +2016,35 @@
                 "quarter_end": {
                   "type": "string",
                   "format": "date"
+                },
+                "superseded": {
+                  "type": "array",
+                  "description": "The quarter's earlier releases this one replaces, as an 8-K/A replaces its original.",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "document_id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "accession": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "filed_on": {
+                        "type": "string",
+                        "format": "date"
+                      }
+                    },
+                    "required": [
+                      "document_id",
+                      "accession",
+                      "filed_on"
+                    ],
+                    "additionalProperties": false
+                  }
                 },
                 "eps": {
                   "type": [
@@ -2148,8 +2184,10 @@
                 "document_id",
                 "source_id",
                 "accession",
+                "form",
                 "filed_on",
                 "quarter_end",
+                "superseded",
                 "eps",
                 "operating_income",
                 "operating_margin",

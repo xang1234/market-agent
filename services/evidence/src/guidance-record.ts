@@ -14,7 +14,8 @@ import { ACCESSION_PATTERN, filingIndexUrl } from "./sec-edgar.ts";
 import type { QueryExecutor } from "./types.ts";
 
 // An earnings release, by the quarter it reports.
-export type StoredRelease = { document_id: string; quarter_end: IsoDate; filed_on: IsoDate; url: string | null };
+// form is "8-K", or "8-K/A" for an amendment.
+export type StoredRelease = { document_id: string; quarter_end: IsoDate; filed_on: IsoDate; form: string | null; url: string | null };
 // A guide (claim_id names the guidance claim it binds) or a reported actual (low
 // and high both the value), in dollars or percent.
 export type StoredFigure = {
@@ -65,9 +66,9 @@ const LOWER_IS_BETTER: ReadonlySet<ReleaseMetric> = new Set(["operating_expenses
 // another reads as the one kept). A guide whose claim is no longer current
 // (superseded, rejected) guides nothing.
 export async function loadGuidanceRecord(db: QueryExecutor, issuerId: string): Promise<GuidanceRecord> {
-  const { rows: releases } = await db.query<{ document_id: string; quarter_end: IsoDate; filed_on: IsoDate; accession: string | null; cik: string | null }>(
+  const { rows: releases } = await db.query<{ document_id: string; quarter_end: IsoDate; filed_on: IsoDate; form: string | null; accession: string | null; cik: string | null }>(
     `select q.document_id::text as document_id, q.quarter_end::text as quarter_end, q.filed_on::text as filed_on,
-            d.provider_doc_id as accession, i.cik
+            d.title as form, d.provider_doc_id as accession, i.cik
        from earnings_release_quarters q
        join documents d on d.document_id = q.document_id and d.deleted_at is null
        join issuers i on i.issuer_id = q.issuer_id
@@ -142,7 +143,7 @@ function compare(
   reported: ReadonlyArray<StoredFigure & { release: StoredRelease }>,
   splits: SplitHistory,
 ): GuidanceComparison {
-  const [guide, ...others] = latestFirst(picks);
+  const [guide, ...others] = amended(latestFirst(picks));
   const quarterEnd = JSON.parse(key)[0] as IsoDate | null;
   const base = {
     quarter_end: quarterEnd,
@@ -151,7 +152,7 @@ function compare(
     unit: figureUnit(guide!.metric),
     guided: { low: guide!.low, high: guide!.high, source: sourceOf(guide!) },
   };
-  const [actual, ...restated] = latestFirst(reported);
+  const [actual, ...restated] = amended(latestFirst(reported));
   const shown = actual === undefined ? null : { value: actual.low, source: sourceOf(actual) };
   if (others.some((other) => other.low !== guide!.low || other.high !== guide!.high)) {
     return { ...base, actual: shown, outcome: "not_comparable", reason: "conflicting_guidance" };
@@ -201,6 +202,12 @@ function push<T>(map: Map<string, T[]>, key: string, value: T): void {
 
 const latestFirst = <T extends { release: StoredRelease; document_id: string }>(picks: ReadonlyArray<T>): T[] =>
   [...picks].sort((a, b) => b.release.filed_on.localeCompare(a.release.filed_on) || a.document_id.localeCompare(b.document_id));
+
+// The latest 8-K/A's figure replaces the others (#752), as nonGaapHistory reads a quarter; originals alone may conflict.
+const amended = <T extends { release: StoredRelease }>(latest: T[]): T[] => {
+  const amendment = latest.find((pick) => pick.release.form === "8-K/A");
+  return amendment ? [amendment] : latest;
+};
 
 const sourceOf = (figure: StoredFigure & { release: StoredRelease }): FigureSource => ({
   document_id: figure.document_id,

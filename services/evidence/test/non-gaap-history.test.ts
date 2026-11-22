@@ -233,6 +233,31 @@ test("a quarter reads its latest 8-K/A, which supersedes its earlier releases, a
   assert.deepEqual(nonGaapHistory([original]).quarters[0]!.superseded, []);
 });
 
+test("an 8-K/A with no reconciliation, as one amending only commentary, leaves a reconciled quarter as it was", () => {
+  const original = release("2025-04-30", 1, [["Stock-based compensation", 40]], "2025-05-20");
+  const commentary = { ...release("2025-04-30", 2, [], "2025-06-01"), form: "8-K/A", reconciliations: [] };
+  const [quarter] = nonGaapHistory([original, commentary]).quarters;
+  assert.equal(quarter!.document_id, original.document_id);
+  assert.equal(quarter!.reconciled, true);
+  assert.deepEqual(quarter!.superseded, []);
+  // A quarter with no reconciliation of its own still takes the amendment.
+  const unread = { ...original, reconciliations: [] };
+  assert.equal(nonGaapHistory([unread, commentary]).quarters[0]!.document_id, commentary.document_id);
+});
+
+test("releases filed the same day order by form, then accession, never by document id", () => {
+  // Document ids that sort the other way round.
+  const original = { ...release("2025-04-30", 9, [["Stock-based compensation", 40]], "2025-05-20"), accession: "0000000000-25-000001" };
+  const first = { ...release("2025-04-30", 8, [["Stock-based compensation", 45]], "2025-05-20"), form: "8-K/A", accession: "0000000000-25-000002" };
+  const second = { ...release("2025-04-30", 7, [["Stock-based compensation", 50]], "2025-05-20"), form: "8-K/A", accession: "0000000000-25-000003" };
+  const [quarter] = nonGaapHistory([second, first, original]).quarters;
+  assert.equal(quarter!.document_id, second.document_id);
+  assert.deepEqual(quarter!.superseded.map((ref) => ref.document_id), [original.document_id, first.document_id]);
+  // With no amendment, the first original by accession.
+  const later = { ...original, document_id: first.document_id, accession: "0000000000-25-000004" };
+  assert.equal(nonGaapHistory([later, original]).quarters[0]!.document_id, original.document_id);
+});
+
 // --- Against Postgres -------------------------------------------------------
 
 async function seedRelease(

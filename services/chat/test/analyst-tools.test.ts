@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { isUnavailableRead, runAnalystTool, runRegisteredAnalystTool } from "../src/analyst-tools.ts";
 import { parseCliArgs, entryLine } from "../src/analyst-tools-cli.ts";
@@ -204,6 +205,27 @@ test("non-GAAP history is each quarter's reconciled figures and each add-back's 
   const undated = await runAnalystTool(stackDb(), "get_non_gaap_history", { issuer_ids: [INTC], as_of: AS_OF });
   assert.equal(undated.status, "ok");
   assert.equal(statusNote(undated, "INTC"), "INTC: 1 stored earnings release could not be dated to a quarter, so its reconciliation is not shown.");
+});
+
+// Each key the value has that its registry schema closes out, or lacks that it requires.
+type Schema = { properties?: Record<string, Schema>; required?: string[]; additionalProperties?: boolean; items?: Schema };
+function schemaGaps(value: unknown, schema: Schema, path = "$"): string[] {
+  if (Array.isArray(value)) return schema.items ? value.flatMap((item, n) => schemaGaps(item, schema.items!, `${path}[${n}]`)) : [];
+  if (value === null || typeof value !== "object" || !schema.properties) return [];
+  const record = value as Record<string, unknown>;
+  return [
+    ...(schema.required ?? []).filter((key) => !(key in record)).map((key) => `${path}.${key} missing`),
+    ...Object.keys(record).flatMap((key) => schema.properties![key]
+      ? schemaGaps(record[key], schema.properties![key]!, `${path}.${key}`)
+      : schema.additionalProperties === false ? [`${path}.${key} not in schema`] : []),
+  ];
+}
+
+test("non-GAAP history's result has exactly the fields its registry output schema names", async () => {
+  const registry = JSON.parse(readFileSync(new URL("../../../spec/finance_research_tool_registry.json", import.meta.url), "utf8")) as { tools: Array<{ name: string; output_json_schema: Schema }> };
+  const schema = registry.tools.find((tool) => tool.name === "get_non_gaap_history")!.output_json_schema;
+  const result = await runAnalystTool(stackDb(), "get_non_gaap_history", { issuer_ids: [NVDA], as_of: AS_OF });
+  assert.deepEqual(schemaGaps(result, schema), []);
 });
 
 test("each tool says when no stored source exists, as a typed status", async () => {
