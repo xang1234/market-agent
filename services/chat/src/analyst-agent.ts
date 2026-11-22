@@ -701,7 +701,15 @@ const WRITING = {
     ? { instructions: [...ANSWER_RULES, ...ANALYSIS_RULES], counterpoint: "last" as const }
     : { instructions: ANSWER_RULES, answerShape: DESCRIPTION_SHAPE, inferences: false as const }),
   themes: () => ({ instructions: ANSWER_RULES, answerShape: THEME_SHAPE }),
-  thesis: () => ({ instructions: ANSWER_RULES, answerShape: [...THEME_SHAPE, ...counterpointRule("the investment case its themes make")], counterpoint: true as const }),
+  thesis: () => ({
+    instructions: ANSWER_RULES,
+    answerShape: [
+      ...THEME_SHAPE,
+      ...counterpointRule("the investment case its themes make"),
+      "Like a theme, it weighs its claims in their own terms, what the filing says is at stake and what a figure shows, never what they could do to later results or margins.",
+    ],
+    counterpoint: true as const,
+  }),
 };
 
 const ANALYSIS_LEFT_OUT = "Some of the analysis was left out, as the turn reached its limit of model calls.";

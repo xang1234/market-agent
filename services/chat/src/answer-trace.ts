@@ -126,7 +126,7 @@ function withVerdicts(answer: ComposedAnswer, judged: ReadonlyArray<InferenceVer
         // One a check rejected after its verdict (a failed repair) keeps that rejection.
         ...hidden.flatMap((verdict) => {
           const entry = report.accepted.find((accepted) => accepted.index === verdict.index);
-          return entry ? [{ index: verdict.index, text: entry.text, check: "judge" as const, reason: verdictText(verdict) }] : [];
+          return entry ? [{ index: verdict.index, text: entry.text, check: "judge" as const, reason: verdictText(verdict), ...(entry.role ? { role: entry.role } : {}) }] : [];
         }),
       ].sort((a, b) => a.index - b.index),
       judged,

@@ -359,3 +359,15 @@ test("an inference with no judge record of its own stays hidden; the answer is s
   assert.equal(text(judged.blocks), [FIGURES, CONCENTRATED].join("\n\n"));
   assert.deepEqual(judgeRejections(judged.assertions), [[4, "error: no judge record for this inference"]]);
 });
+
+test("a case against the judge hides keeps its role in the saved report, so an answer rendered again from it says one was left out (#735)", async () => {
+  const typed = SEGMENTS.exchange!.text.replace(`"subject":"NVDA","text":"Counterpoint:`, `"subject":"NVDA","role":"counterpoint","text":"Counterpoint:`);
+  assert.notEqual(typed, SEGMENTS.exchange!.text);
+  const recorded = { ...SEGMENTS, exchange: { ...SEGMENTS.exchange!, text: typed } };
+  const { createClient } = models(recorded, async () => ({ text: ENTAILED(3) }));
+  const composed = await composeTraced(recorded.input, { env: ENV, createClient });
+  const { cases } = inferenceCases(recorded.input, composed.assertions);
+  const record = (text: string): JudgeRecord => ({ outcome: "replied", exchange: { messages: [], text, truncated: false, deployment: "anthropic/claude-haiku-5-5", latency_ms: 1 } });
+  const judged = judgedAnswer(composed, cases, [record(ENTAILED(3)), record('{"verdicts":[{"id":4,"verdict":"contradicted","worded_amount":false,"reason":"x."}]}')]);
+  assert.deepEqual(judged.assertions!.rejected.filter((entry) => entry.check === "judge").map((entry) => [entry.index, entry.role]), [[4, "counterpoint"]]);
+});
