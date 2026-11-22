@@ -415,6 +415,8 @@ test('a column heading drops the formula and abbreviates a quarter or year chang
   )
   const scopes = ['Free cash flow (OCF less PP&E cash capex)', 'Free cash flow (OCF less productive-asset capex)']
   assert.deepEqual(columnNames(scopes), scopes, 'free cash flow over either capex scope keeps its scope (#731)')
+  const continuing = ['Operating cash flow (continuing operations, excludes discontinued operations)', 'Free cash flow (continuing-operations OCF less PP&E cash capex)', 'Free cash flow (continuing-operations OCF less productive-asset capex)']
+  assert.deepEqual(columnNames(continuing), continuing, 'OCF filed for continuing operations, and free cash flow over it, keeps its scope (#743)')
 })
 
 // Alpha's capex has no filing; Beta and Gamma file theirs as productive assets (#731).

@@ -309,8 +309,14 @@ test("negative engine amounts compare by their sign", () => {
   assert.deepEqual(report.rejected, []);
 });
 
-// Results the generator presents from a plan over companies a and b, every reported node bound, the named capex nodes to productive assets.
-function presented(names: Record<string, string>, operations: OperationNode[], values: Record<string, string>, productiveAssets: string[]): FinancialAnswerContent {
+const SCOPES = {
+  capex: { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" },
+  operating_cash_flow: { kind: "continuing_operations_ocf", concept: "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations" },
+} as const;
+
+// Results the generator presents from a plan over companies a and b, every reported node bound, the named capex nodes to
+// productive assets and the named OCF nodes to continuing operations.
+function presented(names: Record<string, string>, operations: OperationNode[], values: Record<string, string>, scoped: string[]): FinancialAnswerContent {
   const plan = mutable(planFixture()) as FinancialPlanV1;
   const members = plan.subjects.members.filter((member) => member.slot_id in names);
   plan.subjects = { ...plan.subjects, requested_count: members.length, resolved_count: members.length, members };
@@ -319,7 +325,7 @@ function presented(names: Record<string, string>, operations: OperationNode[], v
   plan.thresholds = [];
   return presentFinancialUnit({
     plan, run_id: "run", unit_id: "section", subject_names: names, periods: new Map(), concept_scopes: new Map(operations.flatMap((node) => node.operation === "reported_metric"
-      ? [[node.node_id, productiveAssets.includes(node.node_id) ? { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const : null] as const]
+      ? [[node.node_id, scoped.includes(node.node_id) ? SCOPES[node.metric_key as keyof typeof SCOPES] : null] as const]
       : [])),
     results: Object.entries(values).map(([node_id, value], index) => ({
       result_id: RESULT(80 + index), output_id: `out_${node_id}`, node_id, disposition: "computed",
@@ -359,6 +365,40 @@ test("free cash flow over productive-assets capex is never ranked against PP&E's
   const trend = [{ kind: "comparison", text: "z", evidence: ["F1", "F2"], op: "trend", result: "fell" }];
   assert.deepEqual(checkAssertions(trend, capex(["capex2019"])).rejected, refused(["z"]));
   assert.deepEqual(checkAssertions(trend, capex([])).rejected, [], "two PP&E years trend");
+});
+
+// COST filed OCF for continuing operations only through FY2018 and the total from FY2020; Walmart files the total.
+test("free cash flow over continuing-operations OCF is never ranked against total OCF's, nor OCF trended across a change of tag (#743)", () => {
+  const fy = (fiscal_year: number) => ({ kind: "fiscal_period" as const, fiscal_year, fiscal_period: "FY" as const });
+  const freeCashFlow = (scoped: string[]) => enginePacket(presented(
+    { a: "Walmart Inc.", b: "Costco Wholesale Corp" },
+    ["a", "b"].flatMap((slot) => [
+      reportedAt(`${slot}_ocf`, slot, "operating_cash_flow", fy(2018)),
+      reportedAt(`${slot}_capex`, slot, "capex", fy(2018)),
+      { node_id: `${slot}_fcf`, operation: "free_cash_flow", operation_version: "free_cash_flow.v1", operating_cash_flow: `${slot}_ocf`, capex: `${slot}_capex` } as const,
+    ]),
+    { a_fcf: "18000000000", b_fcf: "2805000000" },
+    scoped,
+  ), new Map([["a", "WMT"], ["b", "COST"]]), null);
+  const ranked = [
+    { kind: "comparison", text: "x", evidence: ["F1", "F2"], op: "highest", result: "F1" },
+    { kind: "comparison", text: "y", evidence: ["F1", "F2"], op: "order", result: ["F1", "F2"] },
+  ];
+  const refused = (texts: string[]) => texts.map((text, index) => ({ index, text, check: "comparative", reason: "comparison: a comparison is of one metric" }));
+  assert.deepEqual(freeCashFlow(["b_ocf"]).figures.map((figure) => figure.metric), ["Free cash flow (OCF less PP&E cash capex)", "Free cash flow (continuing-operations OCF less PP&E cash capex)"]);
+  assert.deepEqual(checkAssertions(ranked, freeCashFlow(["b_ocf"])).rejected, refused(["x", "y"]));
+  assert.deepEqual(checkAssertions(ranked, freeCashFlow(["b_ocf", "b_capex"])).rejected, refused(["x", "y"]), "nor against one over both scopes");
+  assert.deepEqual(checkAssertions(ranked, freeCashFlow(["a_ocf", "b_ocf"])).rejected, [], "two continuing-operations figures rank");
+
+  const ocf = (scoped: string[]) => enginePacket(presented(
+    { a: "Costco Wholesale Corp" },
+    [reportedAt("ocf2018", "a", "operating_cash_flow", fy(2018)), reportedAt("ocf2020", "a", "operating_cash_flow", fy(2020))],
+    { ocf2018: "5774000000", ocf2020: "8861000000" },
+    scoped,
+  ), new Map([["a", "COST"]]), null);
+  const trend = [{ kind: "comparison", text: "z", evidence: ["F1", "F2"], op: "trend", result: "rose" }];
+  assert.deepEqual(checkAssertions(trend, ocf(["ocf2018"])).rejected, refused(["z"]));
+  assert.deepEqual(checkAssertions(trend, ocf([])).rejected, [], "two total years trend");
 });
 
 test("amounts that read alike at their scale still compare by their exact values, and show as they read", () => {

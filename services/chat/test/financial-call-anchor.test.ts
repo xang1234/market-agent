@@ -2,7 +2,9 @@
 // trimmed from a real companyfacts download, and yfinance's split-adjusted
 // closes give an anchored exit multiple, sealed with the Call. The Call still
 // declines under rule 1, now for the bear case alone. A year whose capex is
-// filed as productive assets still anchors (#731); a year with no capex, or
+// filed as productive assets (#731), or whose operating cash flow is filed for
+// continuing operations (#743), still anchors, so a ten-year window across a
+// change of scope is anchored (operator, 2026-11-21); a year with no capex, or
 // no captured closes, leaves it unanchored.
 
 import assert from "node:assert/strict";
@@ -39,7 +41,9 @@ const NOCL = issuer("NOCL", 3, 900103);
 const SPLT = issuer("SPLT", 4, 900104);
 // AAPL's history with no FY2019 capex filed at all.
 const NOCX = issuer("NOCX", 5, 900105);
-const ISSUERS = [AAPL, GAPY, NOCL, SPLT, NOCX];
+// AAPL's history with FY2019's operating cash flow tagged only for continuing operations, as CAT and COST tagged theirs through FY2018.
+const OCFY = issuer("OCFY", 6, 900106);
+const ISSUERS = [AAPL, GAPY, NOCL, SPLT, NOCX, OCFY];
 
 // yfinance's split-adjusted closes on the last session of each AAPL fiscal year and the session after it, as the
 // dev capture of 2026-11-21 returned them, captured here a day before the Call.
@@ -82,6 +86,16 @@ function productiveAssetsIn2019(): unknown {
   const ppe = gaap.PaymentsToAcquirePropertyPlantAndEquipment!;
   gaap.PaymentsToAcquireProductiveAssets = { ...ppe, units: { USD: ppe.units.USD.filter((entry) => entry.end === "2019-09-28") } };
   gaap.PaymentsToAcquirePropertyPlantAndEquipment = { ...ppe, units: { USD: ppe.units.USD.filter((entry) => entry.end !== "2019-09-28") } };
+  return facts;
+}
+
+// AAPL's history with every FY2019 total OCF entry, FY2019's 10-K and its two later comparatives, moved to the continuing-operations tag.
+function continuingOperationsIn2019(): unknown {
+  const facts = asFiler(OCFY) as { facts: { "us-gaap": Record<string, { units: { USD: Array<{ end: string }> } }> } };
+  const gaap = facts.facts["us-gaap"];
+  const total = gaap.NetCashProvidedByUsedInOperatingActivities!;
+  gaap.NetCashProvidedByUsedInOperatingActivitiesContinuingOperations = { ...total, units: { USD: total.units.USD.filter((entry) => entry.end === "2019-09-28") } };
+  gaap.NetCashProvidedByUsedInOperatingActivities = { ...total, units: { USD: total.units.USD.filter((entry) => entry.end !== "2019-09-28") } };
   return facts;
 }
 
@@ -128,6 +142,7 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
   await seedIssuer(db, pool, AAPL, aaplHistoryCompanyFacts(), true);
   await seedIssuer(db, pool, GAPY, productiveAssetsIn2019(), true);
   await seedIssuer(db, pool, NOCX, noCapexIn2019(), true);
+  await seedIssuer(db, pool, OCFY, continuingOperationsIn2019(), true);
   await seedIssuer(db, pool, NOCL, asFiler(NOCL), false);
   await seedIssuer(db, pool, SPLT, asFiler(SPLT), false);
   await db.query(`insert into listing_splits (listing_id, execution_date, split_from, split_to, source_id) values ($1, '2026-11-09', 1, 2, $2)`, [SPLT.listing, POLYGON_MARKET_SOURCE_ID]);
@@ -230,6 +245,12 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
 
   await t.test("a year whose capex is filed as productive assets still anchors the exit multiple (#731)", async () => {
     const { call } = (await ask("Make a Call on GAPY")).block;
+    assert.deepEqual(row(call, "anchored_exit_multiple").figure, { kind: "value", text: "17.33x" });
+    assert.ok(row(call, "anchored_exit_multiple").citations.some((citation) => citation.text.startsWith("FY2019: 15.61x, ")));
+  });
+
+  await t.test("a year whose operating cash flow is filed for continuing operations still anchors the exit multiple (#743)", async () => {
+    const { call } = (await ask("Make a Call on OCFY")).block;
     assert.deepEqual(row(call, "anchored_exit_multiple").figure, { kind: "value", text: "17.33x" });
     assert.ok(row(call, "anchored_exit_multiple").citations.some((citation) => citation.text.startsWith("FY2019: 15.61x, ")));
   });

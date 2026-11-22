@@ -49,6 +49,11 @@ function companyFacts(cik: number, fourthQuarterLine: boolean) {
         value(4, "10-K", "2025-02-03", "FY", "2024-01-01", "2024-12-31", "125000000"),
         value(8, "10-K/A", "2025-02-20", "FY", "2024-01-01", "2024-12-31", "130000000"),
       ] } } } : {}),
+      // PAX files its operating cash flow for continuing operations only, and the same 10-K/A restates FY2024's (#743).
+      ...(cik === CIK_B ? { NetCashProvidedByUsedInOperatingActivitiesContinuingOperations: { label: "", description: "", units: { USD: [
+        value(4, "10-K", "2025-02-03", "FY", "2024-01-01", "2024-12-31", "900000000"),
+        value(8, "10-K/A", "2025-02-20", "FY", "2024-01-01", "2024-12-31", "940000000"),
+      ] } } } : {}),
       // GE's FY2023 diluted EPS: the same 8.36 across a spin-off Polygon lists as a split.
       EarningsPerShareDiluted: { label: "", description: "", units: { "USD/shares": [
         value(7, "10-K", "2024-02-02", "FY", "2023-01-01", "2023-12-31", "8.36", 2023),
@@ -100,8 +105,8 @@ test("the note on a figure later filings moved", { timeout: 300_000 }, async (t)
     }
     assert.ok(await statements.find({ issuer_id: issuerId, family: "income", basis: "as_reported", fiscal_year: 2023, fiscal_period: "FY" }));
   }
-  const answer = async (fiscalPeriod: "FY" | "Q1" | "Q4", mention = "OPM", metricKey: "revenue" | "net_income" | "eps_diluted" | "capex" = "revenue", fiscalYear = 2024) => {
-    const reading = metricKey === "eps_diluted" || metricKey === "capex" ? { ...METRIC_READING, metrics: [proposedMetric(metricKey, null, null)!] } : { ...METRIC_READING, income_items: [metricKey] };
+  const answer = async (fiscalPeriod: "FY" | "Q1" | "Q4", mention = "OPM", metricKey: "revenue" | "net_income" | "eps_diluted" | "capex" | "operating_cash_flow" = "revenue", fiscalYear = 2024) => {
+    const reading = metricKey === "eps_diluted" || metricKey === "capex" || metricKey === "operating_cash_flow" ? { ...METRIC_READING, metrics: [proposedMetric(metricKey, null, null)!] } : { ...METRIC_READING, income_items: [metricKey] };
     const threadId = randomUUID();
     await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [threadId, IDS.owner]);
     const done = completed((await chatHarness(pool, {
@@ -133,6 +138,12 @@ test("the note on a figure later filings moved", { timeout: 300_000 }, async (t)
     assert.ok(blocks.includes("USD 130000000"), blocks);
     assert.ok(blocks.includes("Restated by a later filing, so not as first reported: PAX's capital expenditures (productive-asset cash payments, may include intangibles) in FY2024 (ended 2024-12-31)."), blocks);
     assert.ok(!blocks.includes("PP&E"), blocks);
+  });
+
+  await t.test("restated OCF filed for continuing operations is named in its own scope, never as the total (#743)", async () => {
+    const blocks = await answer("FY", "PAX", "operating_cash_flow");
+    assert.ok(blocks.includes("USD 940000000"), blocks);
+    assert.ok(blocks.includes("Restated by a later filing, so not as first reported: PAX's operating cash flow (continuing operations, excludes discontinued operations) in FY2024 (ended 2024-12-31)."), blocks);
   });
 
   await t.test("a figure a later filing repeats across a listed split is as first reported, so no note says otherwise", async () => {

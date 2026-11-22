@@ -14,7 +14,9 @@ const exact = (text: string): ExactRational => {
 
 const PRODUCTIVE_ASSETS = { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const;
 
-function inputs(asOf: string, periodEnd: string, fcf: string, shares: string, capexScope: AsOfInputs["capex_scope"] = null): AsOfInputs {
+const CONTINUING_OPERATIONS = { kind: "continuing_operations_ocf", concept: "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations" } as const;
+
+function inputs(asOf: string, periodEnd: string, fcf: string, shares: string, capexScope: AsOfInputs["capex_scope"] = null, ocfScope: AsOfInputs["ocf_scope"] = null): AsOfInputs {
   const figure = (text: string): Figure => ({ kind: "value", value: Number(text), text });
   const values = { free_cash_flow: fcf, net_cash: "200000000", stock_based_compensation: "50000000", shares_outstanding: shares };
   return {
@@ -24,6 +26,7 @@ function inputs(asOf: string, periodEnd: string, fcf: string, shares: string, ca
     currency: "USD",
     fiscal_year_end: periodEnd,
     capex_scope: capexScope,
+    ocf_scope: ocfScope,
     bound: [
       { slot: "operating_cash_flow", fiscal_year: Number(periodEnd.slice(0, 4)), period_end: periodEnd, public_by: `${asOf}T04:59:59.999Z`, locator: null },
       { slot: "market_cap_shares", fiscal_year: Number(asOf.slice(0, 4)), period_end: asOf, public_by: `${asOf}T04:59:59.999Z`, locator: null },
@@ -189,6 +192,27 @@ test("realized growth from free cash flow over productive-assets capex to one ov
   const realized = (figure: Figure) => (figure.kind === "outcome" ? figure.outcome : figure.text);
   assert.deepEqual([row(PRODUCTIVE_ASSETS, null), row(null, PRODUCTIVE_ASSETS), row(PRODUCTIVE_ASSETS, PRODUCTIVE_ASSETS), row(null, null)].map((one) => [realized(one.realized.fcf), realized(one.realized.per_share)]),
     [["incompatible_definition", "incompatible_definition"], ["incompatible_definition", "incompatible_definition"], ["7.78%", "23.81%"], ["7.78%", "23.81%"]]);
+});
+
+// CAT and COST filed OCF for continuing operations only through FY2018 and the total from FY2019 and FY2020.
+test("realized growth across a change of OCF scope is a named outcome, never a rate, in every pairing with capex's (#743)", () => {
+  type Scopes = readonly [ocf: AsOfInputs["ocf_scope"], capex: AsOfInputs["capex_scope"]];
+  const row = (base: Scopes, later: Scopes) => backtestRow({
+    ticker: "SWCH", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
+    base: inputs("2018-02-16", "2017-12-31", "1100000000", "100000000", base[1], base[0]),
+    later: inputs("2023-02-16", "2022-12-31", "1600000000", "100000000", later[1], later[0]),
+    earlier: noEarlier, closes, splits: split,
+  });
+  const realized = (figure: Figure) => (figure.kind === "outcome" ? `${figure.outcome}: ${figure.text}` : figure.text);
+  const pairs: Scopes[] = [[null, null], [CONTINUING_OPERATIONS, null], [null, PRODUCTIVE_ASSETS], [CONTINUING_OPERATIONS, PRODUCTIVE_ASSETS]];
+  for (const [i, base] of pairs.entries()) {
+    for (const [j, later] of pairs.entries()) {
+      const { fcf, per_share } = row(base, later).realized;
+      if (i === j) assert.deepEqual([realized(fcf), realized(per_share)], ["7.78%", "23.81%"], `${i} to ${j}`);
+      else for (const figure of [fcf, per_share]) assert.match(realized(figure), /^incompatible_definition: /u, `${i} to ${j}`);
+    }
+  }
+  assert.match(realized(row(pairs[1]!, pairs[0]!).realized.fcf), /continuing operations at one end and as the total at the other/u);
 });
 
 test("a missing later 10-K is named once, as FY+5's, for both realized figures", () => {
