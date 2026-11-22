@@ -128,7 +128,7 @@ export type ClaimSource = { source_id: string; company?: string; what: "source" 
 export type AnalystPacketEntry =
   | (PacketClaim & { kind: "claim"; filing: string })
   | { kind: "consensus"; id: string; text: string; predicate: string; company: string; captured_on: string; capture_id: string; source_id: string }
-  | { kind: "non_gaap"; id: string; text: string; predicate: "non_gaap.quarter" | "non_gaap.add_back"; company: string; key: string; filed_on?: string; source_id: string; sources?: ReadonlyArray<ClaimSource> }
+  | { kind: "non_gaap"; id: string; text: string; predicate: "non_gaap.quarter" | "non_gaap.add_back"; company: string; key: string; source_id: string; sources?: ReadonlyArray<ClaimSource> }
   | { kind: "peer"; id: string; text: string; predicate: "peer_set.industry"; company: string; peer_issuer_id: string; sources: ReadonlyArray<ClaimSource> }
   // The chosen filing's item state, and the newer 10-K that left the item unread.
   | {
@@ -188,7 +188,6 @@ function resultEntries(result: AnalystToolResult): Array<readonly [string, Unnum
         predicate: "non_gaap.quarter",
         company: result.company,
         key: `non_gaap:${quarter.document_id}`,
-        filed_on: quarter.filed_on,
         source_id: quarter.source_id,
       }] as const);
       const sourceOf = new Map(result.quarters.map((quarter) => [quarter.quarter_end, quarter.source_id]));
@@ -290,8 +289,9 @@ function packetClaim(entry: AnalystPacketEntry): Omit<PacketClaim, "id">[] {
       return [{ text: entry.text, predicate: entry.predicate, stance: "neutral", company: entry.company, published_at: entry.captured_on, claim_id: `consensus:${entry.capture_id}`, source_id: entry.source_id }];
     case "peer":
       return [{ text: `Industry peer: ${entry.text}`, predicate: entry.predicate, stance: "neutral", company: entry.company, claim_id: `peer:${entry.company}:${entry.peer_issuer_id}`, source_id: entry.sources[0]!.source_id, sources: entry.sources }];
+    // Undated, so a ref opens the release: the text says when it was filed.
     case "non_gaap":
-      return [{ text: entry.text, predicate: entry.predicate, stance: "neutral", company: entry.company, ...(entry.filed_on ? { published_at: entry.filed_on } : {}), claim_id: entry.key, source_id: entry.source_id, ...(entry.sources ? { sources: entry.sources } : {}) }];
+      return [{ text: entry.text, predicate: entry.predicate, stance: "neutral", company: entry.company, claim_id: entry.key, source_id: entry.source_id, ...(entry.sources ? { sources: entry.sources } : {}) }];
     case "filing_read":
     case "no_filing":
       return [];
@@ -310,7 +310,8 @@ const amount = (value: number) => value.toLocaleString("en-US", { maximumFractio
 function nonGaapQuarterText(quarter: NonGaapQuarter): string {
   const release = `8-K accession ${quarter.accession ?? "unknown"}, filed ${quarter.filed_on}${quarter.scale ? `; figures in ${quarter.scale}, except per share` : ""}`;
   const head = `non-GAAP reconciliation for the quarter ended ${quarter.quarter_end} (${release})`;
-  if (!quarter.reconciled) return `${head}: the release states no GAAP to non-GAAP reconciliation`;
+  // The reader's rules found none, which says nothing of what the release discloses.
+  if (!quarter.reconciled) return `${head}: no GAAP to non-GAAP reconciliation could be read from the release`;
   const { eps, operating_income: income, operating_margin: margin, sbc } = quarter;
   const parts = [
     eps && `diluted EPS GAAP ${eps.gaap.toFixed(2)}, non-GAAP ${eps.non_gaap.toFixed(2)}, a spread of ${eps.spread.toFixed(2)}`,

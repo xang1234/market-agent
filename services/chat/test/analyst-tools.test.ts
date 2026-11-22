@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { isUnavailableRead, runAnalystTool, runRegisteredAnalystTool } from "../src/analyst-tools.ts";
 import { parseCliArgs, entryLine } from "../src/analyst-tools-cli.ts";
 import { statusNote } from "../src/analyst-agent.ts";
-import { analystPacketEntries } from "../src/evidence-packet.ts";
+import { analystPacketEntries, mergePackets } from "../src/evidence-packet.ts";
+import { citable } from "../src/render-assertions.ts";
 import { fakeQuery } from "./fake-query.ts";
 
 const NVDA = "11111111-1111-4111-8111-111111111111";
@@ -106,7 +107,7 @@ function stackDb(seen: Array<{ text: string; values?: unknown[] }> = []) {
         return { rows: values?.[0] === MU ? [peer(MU, null), peer(WDC, "cap-WDC")] : [] };
       }
       if (text.includes("from consensus_captures cc")) return { rows: values?.[0] === AAPL ? CONSENSUS : [] };
-      if (text.includes("from non_gaap_reconciliations r")) return { rows: values?.[0] === NVDA ? RELEASES : [] };
+      if (text.includes("from non_gaap_reconciliations r")) return { rows: values?.[0] === NVDA ? RELEASES : values?.[0] === INTC ? [RELEASES[2]] : [] };
       if (text.includes("jsonb_array_elements")) {
         const refs = JSON.parse(String(values?.[0])) as Array<{ kind: string; id: string }>;
         return { rows: refs.map((ref, i) => ({ ord: i + 1, issuer_id: ref.id === AAPL_LISTING ? AAPL : ref.kind === "issuer" && LABELS[ref.id] ? ref.id : null })) };
@@ -186,7 +187,7 @@ test("non-GAAP history is each quarter's reconciled figures and each add-back's 
   assert.equal(result.status, "ok");
   assert.deepEqual(analystPacketEntries([result]).map((entry) => [entry.id, entry.company, entry.predicate, entry.text]), [
     ["C1", "NVDA", "non_gaap.quarter", "non-GAAP reconciliation for the quarter ended 2025-10-26 (8-K accession 0001045810-25-000230, filed 2025-11-19; figures in millions, except per share): diluted EPS GAAP 1.30, non-GAAP 1.36, a spread of 0.06; operating income GAAP 36,010, non-GAAP 37,822; operating margin on revenue of 57,006 GAAP 63.2%, non-GAAP 66.3%, a spread of 3.2 percentage points; stock-based compensation added back 1,652 (gross profit and operating expenses lines), 5.0% of non-GAAP net income of 33,366"],
-    ["C2", "NVDA", "non_gaap.quarter", "non-GAAP reconciliation for the quarter ended 2025-07-27 (8-K accession 0001045810-25-000200, filed 2025-08-27): the release states no GAAP to non-GAAP reconciliation"],
+    ["C2", "NVDA", "non_gaap.quarter", "non-GAAP reconciliation for the quarter ended 2025-07-27 (8-K accession 0001045810-25-000200, filed 2025-08-27): no GAAP to non-GAAP reconciliation could be read from the release"],
     ["C3", "NVDA", "non_gaap.add_back", "non-GAAP add-back \"stock-based compensation\": in 1 of the 2 latest quarters on file (2025-10-26); recurring means in 5 or more of the last 8 quarters, which this is not"],
     ["C4", "NVDA", "non_gaap.add_back", "non-GAAP add-back \"Other\": in 1 of the 2 latest quarters on file (2025-10-26); recurring means in 5 or more of the last 8 quarters, which this is not"],
     ["C5", "NVDA", "non_gaap.add_back", "non-GAAP add-back \"income tax effects\": in 1 of the 2 latest quarters on file (2025-10-26); recurring means in 5 or more of the last 8 quarters, which this is not"],
@@ -195,8 +196,14 @@ test("non-GAAP history is each quarter's reconciled figures and each add-back's 
   assert.equal("source_id" in quarter! && quarter.source_id, RELEASES[0]!.source_id, "a quarter cites its release");
   assert.deepEqual("sources" in category! && category.sources, [{ source_id: RELEASES[0]!.source_id, company: "NVDA", what: "source" }], "a category cites each release it is in");
   assert.match(statusNote(result, "NVDA") ?? "", /1 stored earnings release could not be dated to a quarter/);
+  const packet = mergePackets({ engine: [], analyst: [result], figuresAskedFor: [], notes: [], labels: new Map(), cutoff: AS_OF });
+  assert.deepEqual(packet.claims.filter((claim) => !citable(claim)).map((claim) => claim.id), [], "every quarter and add-back opens its release");
   assert.doesNotMatch(analystPacketEntries([result]).map((entry) => entry.text).join("\n"), /\b(?:buy|sell|hold|aggressive|quality|concern)/i, "ADR 0005: counts, never a stance");
   assert.deepEqual(await runAnalystTool(stackDb(), "get_non_gaap_history", { issuer_ids: [KO], as_of: AS_OF }), { tool: "get_non_gaap_history", status: "no_releases" });
+  // Releases read but none dated: said as such, never as no release on file.
+  const undated = await runAnalystTool(stackDb(), "get_non_gaap_history", { issuer_ids: [INTC], as_of: AS_OF });
+  assert.equal(undated.status, "ok");
+  assert.equal(statusNote(undated, "INTC"), "INTC: 1 stored earnings release could not be dated to a quarter, so its reconciliation is not shown.");
 });
 
 test("each tool says when no stored source exists, as a typed status", async () => {

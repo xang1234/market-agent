@@ -123,7 +123,8 @@ const EXECUTORS: Readonly<Record<AnalystToolName, Executor>> = {
   get_non_gaap_history: async (db, input) => {
     const issuerId = input.issuer_ids[0]!;
     const history = await loadNonGaapHistory(db, { issuer_id: issuerId, as_of: input.as_of, user_id: input.user_id ?? null });
-    if (history.quarters.length === 0) return { tool: "get_non_gaap_history", status: "no_releases" };
+    // Releases read that none could date are on file, which statusNote says.
+    if (history.quarters.length === 0 && history.undated === 0) return { tool: "get_non_gaap_history", status: "no_releases" };
     const [company] = await issuerLabels(db, [issuerId], input.as_of);
     return { tool: "get_non_gaap_history", status: "ok", company: company!.label, ...history };
   },
