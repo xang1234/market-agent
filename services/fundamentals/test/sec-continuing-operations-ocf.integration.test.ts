@@ -300,6 +300,19 @@ test("operating cash flow filed for continuing operations certifies with its con
     }
   });
 
+  // One filing on that day states it for continuing operations and another as the total: neither is known to be later.
+  await t.test("two filings the same day stating one figure in opposite scopes are unverified in either accession order", async (t) => {
+    for (const totalFirst of [true, false]) {
+      const { download, lookup, relations } = await setUp(t, `fin-ocf-continuing-switch-opposite-${totalFirst}`);
+      const tenKA = (val: number): Value => ({ ...year(2025, 2024, val), accn: "0000000743-25-000002", form: "10-K/A" });
+      download.text = companyFacts(totalFirst
+        ? { [CONTINUING]: [year(2024, 2024, 120), tenKA(120)], [TOTAL]: [year(2025, 2024, 120), year(2025, 2025, 140)] }
+        : { [CONTINUING]: [year(2024, 2024, 120), year(2025, 2024, 120)], [TOTAL]: [tenKA(120), year(2025, 2025, 140)] });
+      await lookup();
+      assert.deepEqual((await relations()).map(({ relation }) => relation), ["original", "unverified_restatement"]);
+    }
+  });
+
   await t.test("a later 10-K that switches to the total at another figure is an unverified restatement", async (t) => {
     const { download, lookup, relations, picked } = await setUp(t, "fin-ocf-continuing-switch-changed");
     download.text = companyFacts({

@@ -1554,6 +1554,12 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
       [...statements.map(rounded), ...linesOf(null)],
       ...(derivation?.terms ?? []).map((term, index) => [...termStatements(values, term).map(rounded), ...linesOf(index)]),
     ]);
+    // A filing stating it for continuing operations and another, that day, only as the total: neither is known to be later.
+    if (secConceptScope(original.metric_key, concept!)?.kind === "continuing_operations_ocf") {
+      for (const line of linesOf(null)) {
+        if (statements.some((statement) => statement.filed === line.filed && statement.accession !== line.accession && isLater(statement))) unordered.add(line.filed);
+      }
+    }
     let standing: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on, rounding: roundings.get(originalAccession!) ?? null };
     const inputs: RoundedFigure[] = derivation?.terms.map((term) => ({ value: term.raw_token, rounding: roundings.get(term.source.accession) ?? null })) ?? [];
     // A derived figure stands on its unmoved inputs, whose rounding a line may fall within.
