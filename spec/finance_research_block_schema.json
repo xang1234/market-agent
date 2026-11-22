@@ -253,6 +253,10 @@
               "items": {
                 "$ref": "#/$defs/RefSegment"
               }
+            },
+            "against": {
+              "description": "The answer's case against its takeaway.",
+              "const": true
             }
           },
           "additionalProperties": false
@@ -278,6 +282,10 @@
             "text": {
               "type": "string",
               "minLength": 1
+            },
+            "against": {
+              "description": "The answer's case against its takeaway.",
+              "const": true
             }
           },
           "additionalProperties": false

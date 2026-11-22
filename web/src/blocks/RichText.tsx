@@ -123,6 +123,7 @@ function TakeawayItem({ index, block, part, numbers }: { index: number; block: R
     <li data-commentary-part={part.kind}>
       <p className="text-fg">
         <span title={badge.title} className={`${PILL_CLASS} mr-2 align-[1px] ${badge.className}`}>{badge.text}</span>
+        {part.kind !== 'pending' && part.against ? <span className="mr-1.5 font-semibold">Case against</span> : null}
         {part.kind !== 'pending' && part.subject ? <span className="mr-1.5 font-semibold">{part.subject}</span> : null}
         {part.kind === 'pending' ? <span className="text-muted">An analyst inference is being checked against the figures it rests on.</span> : part.text}
         {part.kind === 'inference' ? (part.cites ?? []).map((cite, n) => (

@@ -134,7 +134,7 @@ function templateSegments(
     case "analyst_inference": {
       // Words only: the check rejected any figure or reference in it.
       const { subject, basis, text: words } = inferenceWords(assertion, packet, accepted);
-      text(`> **Analyst inference${onSubject(subject)}${basis ? `** (from ${basis}):` : ":**"} ${literal(words)}`);
+      text(`> **${assertion.role === "counterpoint" ? "Case against" : "Analyst inference"}${onSubject(subject)}${basis ? `** (from ${basis}):` : ":**"} ${literal(words)}`);
       break;
     }
   }
@@ -211,7 +211,7 @@ function sharedSourceLabel(id: string, packet: EvidencePacket): string {
 // in words (verdicts.ts shownAs), with no checked results to lend it weight.
 export function unverifiedInference(assertion: Assertion, packet: EvidencePacket): Segment[] {
   const { subject, text } = inferenceWords(assertion, packet);
-  return [{ type: "text", text: `> **Unverified analyst view${onSubject(subject)}** (not backed by the figures shown): ${literal(text)}` }];
+  return [{ type: "text", text: `> **Unverified ${assertion.role === "counterpoint" ? "case against" : "analyst view"}${onSubject(subject)}** (not backed by the figures shown): ${literal(text)}` }];
 }
 
 // What an inference's label names and its words, apart: the company it is on

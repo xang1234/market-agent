@@ -8,6 +8,8 @@ import { LlmProviderError, LlmRouterError } from "../../llm/src/index.ts";
 import {
   ANSWER_DEADLINES,
   answerContext,
+  COUNTERPOINT_LEFT_OUT,
+  NO_COUNTERPOINT,
   composeAnalystBlocksWithLlm as composeAnswer,
   TITLE_DEADLINES,
   createLlmThreadTitleModel,
@@ -1584,4 +1586,41 @@ test("an industry peer cites every source its line rests on, and a source cited 
     source(S(44), line("INTC", "NVDA"), "INTC industry source"),
   ] }]);
   assert.deepEqual([...(block!.source_refs as string[])].sort(), [S(11), S(22), S(33), S(44)], "every source a peer line rests on is sealed");
+});
+
+test("an answer that must argue against its takeaway labels its case against, and says so when none is shown (#735)", () => {
+  const takeaway = { kind: "analyst_inference", text: "Outlook: it expects a better year.", supports: [0] };
+  const against = { kind: "analyst_inference", role: "counterpoint", text: "Buyback: it is returning less cash to holders.", supports: [2] };
+  const answer = (list: unknown[], counterpoint?: true) => renderedAnswer(
+    { blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [SEALED_TOOL_CALL], factBlocks: A_BLOCKS, ...(counterpoint ? { counterpoint } : {}) },
+    SEALED_PACKET,
+    checkAssertions([
+      { kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] },
+      takeaway,
+      { kind: "management_attribution", text: "Management cut its buyback.", evidence: ["C3"] },
+      ...list,
+    ], SEALED_PACKET),
+  ).blocks;
+  const of = (blocks: ReturnType<typeof answer>, states: Array<[number, "shown" | "unverified" | "pending"]>) => {
+    const [block] = blocks(new Map(states));
+    return { text: plain(block!), commentary: block!.commentary as Array<Record<string, unknown>> };
+  };
+  const both = of(answer([against], true), [[1, "shown"], [3, "shown"]]);
+  assert.match(both.text, /> \*\*Case against:\*\* Buyback: it is returning less cash to holders\.$/);
+  assert.deepEqual(both.commentary.filter((part) => part.kind === "inference").map((part) => [part.text, part.against]), [
+    ["Outlook: it expects a better year.", undefined],
+    ["Buyback: it is returning less cash to holders.", true],
+  ]);
+  assert.deepEqual(of(answer([against], true), [[1, "shown"], [3, "unverified"]]).commentary.filter((part) => part.kind === "unverified"),
+    [{ kind: "unverified", subject: null, text: "Buyback: it is returning less cash to holders.", against: true }]);
+  assert.match(of(answer([against], true), [[1, "shown"], [3, "unverified"]]).text, /> \*\*Unverified case against\*\* \(not backed by the figures shown\): Buyback/);
+
+  const notes = (blocks: ReturnType<typeof answer>, states: Array<[number, "shown" | "unverified" | "pending"]>) =>
+    of(blocks, states).commentary.filter((part) => part.kind === "note").map((part) => part.text);
+  assert.deepEqual(notes(answer([], true), [[1, "shown"]]), [NO_COUNTERPOINT], "none written: the answer says the sources hold none");
+  assert.ok(of(answer([], true), [[1, "shown"]]).text.endsWith(NO_COUNTERPOINT));
+  assert.deepEqual(notes(answer([against], true), [[1, "shown"]]), [COUNTERPOINT_LEFT_OUT], "one the judge hid is said to be left out, not absent");
+  assert.deepEqual(notes(answer([against], true), [[1, "shown"], [3, "pending"]]), [], "one still being checked is no gap yet");
+  assert.deepEqual(notes(answer([against], true), []), [], "with no takeaway shown there is nothing to argue against");
+  assert.deepEqual(notes(answer([]), [[1, "shown"]]), [], "an answer not asked for one says nothing of it");
 });

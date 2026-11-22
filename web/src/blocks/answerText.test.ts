@@ -124,14 +124,14 @@ test('commentary copies as its card shows it: shown themes with their citations,
   const hidden = '> **Analyst inference:** A hidden theme the judge did not entail.'
   const block = commentaryBlock([
     { kind: 'inference', subject: null, basis: null, text: 'Rivals: AMD competes and shares its industry.', cites: [competition, peers] },
-    { kind: 'unverified', subject: null, text: 'Margins may narrow.' },
+    { kind: 'unverified', subject: null, text: 'Margins may narrow.', against: true },
     { kind: 'figures', segments: [debt] },
     { kind: 'note', text: 'Periods: NVDA FY2026.' },
   ], [competition, { type: 'text', text: `\n\n${hidden}\n\n` }, peers])
   const copied = answerText([block])
   assert.equal(copied, [
     'Analysis',
-    '- Inference: Rivals: AMD competes and shares its industry. [1] [2]\n- Unverified: Margins may narrow.',
+    '- Inference: Rivals: AMD competes and shares its industry. [1] [2]\n- Unverified: Case against: Margins may narrow.',
     'Quoted sources\n\n- “Our debt could limit us.” [3]',
     'Periods: NVDA FY2026.',
     'Sources',

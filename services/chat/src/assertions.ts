@@ -31,6 +31,9 @@ export type Assertion = {
   // The company an inference is about, one its evidence covers: across
   // companies its text names none, so the label names it (#308).
   subject?: string;
+  // counterpoint: the answer's case against its takeaway (#735), judged like
+  // any other inference and labelled as such when shown.
+  role?: "counterpoint";
   // A comparison's operation and claimed result (comparisons.ts): the high or
   // low's id, the ids highest first, or a trend's result.
   op?: ComparisonOp;
@@ -81,7 +84,8 @@ export const MAX_ASSERTIONS = 12;
 export type RejectionCheck =
   | "binding" | "comparative" | "reference" | "kind" | "support" | "limit" | "format" | "rendering" | "judge";
 // part: the metric it failed on, of a comparison over several (comparisons.ts).
-export type Rejection = { index: number; text?: string; check: RejectionCheck; reason: string; part?: ClaimFailure };
+// role: a rejected case against, so the answer says one was left out, not that none was found.
+export type Rejection = { index: number; text?: string; check: RejectionCheck; reason: string; part?: ClaimFailure; role?: "counterpoint" };
 
 // The list closes the answer in a fenced block, closed or not (a reply cut
 // off inside it). The first block is the one read, so a second (a corrected
@@ -110,7 +114,10 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
   const accepted: Array<Assertion & { index: number }> = [];
   const rejected: Rejection[] = [];
   const reject = (index: number, item: unknown, check: RejectionCheck, reason: string, part?: ClaimFailure) =>
-    rejected.push({ index, ...(isRecord(item) && typeof item.text === "string" ? { text: item.text } : {}), check, reason, ...(part ? { part } : {}) });
+    rejected.push({
+      index, ...(isRecord(item) && typeof item.text === "string" ? { text: item.text } : {}), check, reason, ...(part ? { part } : {}),
+      ...(isRecord(item) && item.kind === "analyst_inference" && item.role === "counterpoint" ? { role: "counterpoint" as const } : {}),
+    });
 
   // Inferences last, so the observations they rest on are already checked.
   const order = list.map((item, index) => ({ item, index }))
@@ -142,6 +149,14 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
     }
     if (item.subject !== undefined && kind !== "analyst_inference") {
       reject(index, item, "format", "only an analyst inference has a subject");
+      continue;
+    }
+    if (item.role !== undefined && kind !== "analyst_inference") {
+      reject(index, item, "format", "only an analyst inference has a role");
+      continue;
+    }
+    if (item.role !== undefined && item.role !== "counterpoint") {
+      reject(index, item, "format", "an inference's role is counterpoint, or it has none");
       continue;
     }
     if ((item.op !== undefined || item.result !== undefined) && kind !== "comparison") {
@@ -221,7 +236,7 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
       kind,
       text: item.text,
       evidence: comparison?.standing?.evidence ?? evidence,
-      ...(kind === "analyst_inference" ? { supports, ...(item.subject !== undefined ? { subject: item.subject as string } : {}) } : {}),
+      ...(kind === "analyst_inference" ? { supports, ...(item.subject !== undefined ? { subject: item.subject as string } : {}), ...(item.role === "counterpoint" ? { role: item.role } : {}) } : {}),
       ...(comparison?.standing ? { op: item.op as ComparisonOp, result: comparison.standing.result as string | string[] } : {}),
     });
   }

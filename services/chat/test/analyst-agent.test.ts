@@ -14,7 +14,7 @@ import type { AssertionReport } from "../src/assertions.ts";
 import { createChatCoordinator, resolveTurnSubjects, type ChatAssistantMessagePersistence, type ChatTurnInput } from "../src/coordinator.ts";
 import { figureCompanies, mergePackets, type EvidencePacket, type PacketClaim } from "../src/evidence-packet.ts";
 import { chatAuthority, chatGapText, createChatFinancialRuntime, requestedSubjects } from "../src/financial-runtime.ts";
-import { ANSWER_DEADLINES, composeAnalystBlocksWithLlm } from "../src/llm-runtime.ts";
+import { ANSWER_DEADLINES, composeAnalystBlocksWithLlm, NO_COUNTERPOINT } from "../src/llm-runtime.ts";
 import { proposedMetric, resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS } from "../src/scope-figures.ts";
 import { loadPriorSubjects } from "../src/thread-context.ts";
@@ -575,7 +575,9 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     const events = await run(judged, { ...base, turnId: randomUUID(), userIntent: "AAA revenue" });
     const done = completed(events);
     const card = (done.message as { blocks: Array<Record<string, unknown>> }).blocks.find((block) => block.analyst_commentary === true);
-    assert.deepEqual((card?.commentary as Array<{ kind: string }>).map((part) => part.kind), ["figures", "inference"]);
+    assert.deepEqual((card?.commentary as Array<{ kind: string; text?: string }>).map((part) => [part.kind, part.kind === "note" ? part.text : undefined]), [
+      ["figures", undefined], ["inference", undefined], ["note", NO_COUNTERPOINT],
+    ], "a takeaway with no case against says none was found");
     assert.deepEqual(events.filter((event) => event.type === "tool.completed").map((event) => [event.tool_name, event.label, event.status]), [
       ["certified_financials", "Certifying income statement for AAA in fiscal year 2023", "ok"],
       ["write_answer", "Writing the answer", "ok"],
@@ -1258,12 +1260,14 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
 
   await t.test("an ask for no figures is answered as its sources describe it, and one for figures keeps its counterpoint", async () => {
     const rules: string[][] = [];
+    const against: boolean[] = [];
     const recording = (router: ControlledRouter, read: AnalystAgentDeps["read"]) => analystAgentRunner({
       financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
       router: async () => router,
       read,
       compose: (input, turn, onAnswered) => {
         rules.push([...(input.instructions ?? []), ...(input.answerShape ?? [])]);
+        against.push(input.counterpoint === true);
         return answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: '```assertions\n[{"kind":"management_attribution","text":"It sells widgets.","evidence":["C1"]}]\n```' }), onAnswered });
       },
       asOf: () => new Date().toISOString(),
@@ -1273,6 +1277,8 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     completed(await run(recording(scripted([{ toolCalls: [call("get_company_profile", PROFILE), call("certified_financials", INCOME_2023)] }, { text: "DONE" }]), profileOf("We sell widgets.")), { ...base, turnId: randomUUID(), userIntent: "AAA revenue, and what it sells" }));
     completed(await run(recording(scripted([{ toolCalls: [call("get_company_profile", PROFILE), call("certified_financials", REVENUE)] }, { text: "DONE" }]), profileOf("We sell widgets.")), { ...base, turnId: randomUUID(), userIntent: "AAA revenue, and what it sells" }));
     assert.deepEqual(rules.map((given) => [given.some((rule) => rule.includes("write no analyst_inference")), given.some((rule) => rule.includes("the takeaway and the counterpoint"))]), [[true, false], [false, true], [true, false]], "an ask whose figures were not computed is described");
+    assert.deepEqual(against, [false, true, false], "only an answer with a takeaway must argue against it");
+    assert.ok(['"role":"counterpoint"', "never invent one"].every((words) => rules[1]!.join(" ").includes(words)), "the case against is typed, and none is said rather than made up");
     assert.ok(!savedText(describe).includes("No figures are shown"), "a company no certified call asked about lacks none");
   });
 

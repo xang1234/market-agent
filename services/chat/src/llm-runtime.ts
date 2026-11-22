@@ -21,19 +21,24 @@ import { isRecord } from "../../shared/src/http.ts";
 // Shown when no assertion renders.
 const NO_ANSWER_FALLBACK_TEXT = "No written answer is available for this question; try asking again.";
 
+// An answer that must argue against its takeaway (#735), when no case against shows.
+export const NO_COUNTERPOINT = "Nothing in the sources read was found to cut against this takeaway.";
+export const COUNTERPOINT_LEFT_OUT = "The case against this takeaway is left out, as it did not pass the answer's checks.";
+
 // What the reader sees as the answer (#208): the accepted assertions in their
 // templates, with the notes they cannot say themselves, or a fixed sentence no
 // model wrote. The model's prose is never shown. An analyst inference's
 // paragraph names its assertion and carries its unverified form: which one
 // shows, if any, is the judge's verdict.
 type Paragraph = Pick<RenderedAssertion, "index" | "segments" | "fact_bindings" | "source_refs"> & {
-  inference?: { index: number; unverified: ReadonlyArray<Segment>; words: InferenceWords; cites: ReadonlyArray<Segment> };
+  inference?: { index: number; unverified: ReadonlyArray<Segment>; words: InferenceWords; cites: ReadonlyArray<Segment>; against: boolean };
   quotedBy?: ReadonlyArray<number>;
 };
 // commentaryNotes: the notes its commentary parts keep, without one the page
 // already says (the periods a table beside it names).
 type Answer =
-  | { kind: "rendered"; paragraphs: ReadonlyArray<Paragraph>; notes: ReadonlyArray<string>; commentaryNotes: ReadonlyArray<string>; restating: AssertionReport["restating"] }
+  // against: null when no case against is asked for; else whether the answer wrote one, shown or not.
+  | { kind: "rendered"; paragraphs: ReadonlyArray<Paragraph>; notes: ReadonlyArray<string>; commentaryNotes: ReadonlyArray<string>; restating: AssertionReport["restating"]; against: { written: boolean } | null }
   | { kind: "fallback"; text: string };
 
 // Analyst commentary as its parts, beside its segments (the same answer as
@@ -43,8 +48,8 @@ type Answer =
 // or a note.
 export type CommentaryPart =
   | { kind: "figures"; segments: ReadonlyArray<Segment> }
-  | { kind: "inference"; subject: string | null; basis: string | null; text: string; cites?: ReadonlyArray<Segment> }
-  | { kind: "unverified"; subject: string | null; text: string }
+  | { kind: "inference"; subject: string | null; basis: string | null; text: string; cites?: ReadonlyArray<Segment>; against?: true }
+  | { kind: "unverified"; subject: string | null; text: string; against?: true }
   | { kind: "pending" }
   | { kind: "note"; text: string };
 
@@ -163,6 +168,8 @@ export async function composeAnalystBlocksWithLlm(input: {
   answerShape?: ReadonlyArray<string>;
   // Set false to reject every analyst_inference the answer lists, with no repair asked for one.
   inferences?: false;
+  // Set when the answer must argue against its takeaway (#735): with a takeaway shown and no case against, it says why none shows.
+  counterpoint?: true;
   // Set when a model failed before the turn read anything, so an answer with nothing to write from says so (#695).
   modelFailed?: true;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
@@ -319,7 +326,7 @@ function withoutInferences(report: AssertionReport, list: ReadonlyArray<unknown>
   };
 }
 
-export type AnswerInput = Pick<Parameters<typeof composeAnalystBlocksWithLlm>[0], "blocks" | "toolCalls" | "factBlocks" | "scope" | "modelFailed">;
+export type AnswerInput = Pick<Parameters<typeof composeAnalystBlocksWithLlm>[0], "blocks" | "toolCalls" | "factBlocks" | "scope" | "modelFailed" | "counterpoint">;
 
 // The answer the accepted assertions render, or the fallback sentence, and
 // the report with what rendering left out (#208). An answer repaired after
@@ -420,7 +427,7 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
       if (assertion.kind === "management_attribution") return { ...entry, quotedBy: assertion.evidence.some((id) => disputed.has(id) || uncited.has(id)) ? [] : restingOn(assertion.index) };
       if (assertion.kind !== "analyst_inference") return entry;
       const words = inferenceWords(assertion, packet, report.accepted);
-      return { ...entry, inference: { index: assertion.index, unverified: unverifiedInference(assertion, packet), words, cites: quoted(assertion.supports ?? []) } };
+      return { ...entry, inference: { index: assertion.index, unverified: unverifiedInference(assertion, packet), words, cites: quoted(assertion.supports ?? []), against: assertion.role === "counterpoint" } };
     });
     // The figures the kept assertions state, and their companies: a comparison
     // rendered for only some of the companies it shows figures for would read
@@ -485,6 +492,7 @@ function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionR
       notes: [...(periods.note === undefined ? [] : [periods.note]), ...others],
       commentaryNotes: [...(periods.note === undefined || packet.periods_shown ? [] : [periods.note]), ...others],
       restating,
+      against: input.counterpoint ? { written: [...report.accepted, ...report.rejected].some((entry) => entry.role === "counterpoint") } : null,
     };
     return { answer, report: { ...report, rendered: true, ...(repeated.length > 0 ? { repeated } : {}), ...(restating.length > 0 ? { restating } : {}) } };
   };
@@ -618,6 +626,15 @@ function statements(segments: ReadonlyArray<Segment>): CommentaryPart[] {
   return parts.filter((part) => part.length > 0).map((part) => ({ kind: "figures", segments: part }));
 }
 
+// Why an answer asked to argue against its takeaway shows no case against,
+// once a takeaway shows and every case against it is settled hidden or none was written.
+function againstNote(answer: Extract<Answer, { kind: "rendered" }>, inferences: Inferences): string[] {
+  if (answer.against === null) return [];
+  const shown = (against: boolean) => answer.paragraphs.some(({ inference }) => inference?.against === against && inferences.has(inference.index));
+  if (!shown(false) || shown(true)) return [];
+  return [answer.against.written ? COUNTERPOINT_LEFT_OUT : NO_COUNTERPOINT];
+}
+
 function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answer, inferences: Inferences): ReadonlyArray<Record<string, unknown>> {
   let rewritten = false;
   return Object.freeze(blocks.map((block) => {
@@ -626,7 +643,8 @@ function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answ
     if (answer.kind === "fallback") {
       return Object.freeze({ ...block, segments: Object.freeze([Object.freeze({ type: "text", text: answer.text })]) });
     }
-    const { notes } = answer;
+    const argued = againstNote(answer, inferences);
+    const notes = [...answer.notes, ...argued];
     const left = restated(answer.restating, inferences, answer.paragraphs.flatMap((entry) => entry.inference ? [entry.inference.index] : []));
     // Each paragraph shown, as its segments and its commentary part.
     const paragraphs = answer.paragraphs.filter((entry) => !left.includes(entry.index)).flatMap((entry): Array<Omit<Paragraph, "index"> & { part: CommentaryPart }> => {
@@ -634,9 +652,10 @@ function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answ
       const state = inferences.get(entry.inference.index);
       const { subject, basis, text } = entry.inference.words;
       const { cites } = entry.inference;
+      const against = entry.inference.against ? { against: true as const } : {};
       const as = {
-        shown: { ...entry, part: { kind: "inference" as const, subject, basis, text, ...(cites.length > 0 ? { cites } : {}) } },
-        unverified: { ...entry, segments: entry.inference.unverified, part: { kind: "unverified" as const, subject, text } },
+        shown: { ...entry, part: { kind: "inference" as const, subject, basis, text, ...(cites.length > 0 ? { cites } : {}), ...against } },
+        unverified: { ...entry, segments: entry.inference.unverified, part: { kind: "unverified" as const, subject, text, ...against } },
         pending: { ...PENDING_INFERENCE, part: { kind: "pending" as const } },
       };
       return state === undefined ? [] : [as[state]];
@@ -652,7 +671,7 @@ function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answ
     };
     const commentary = block.analyst_commentary !== true ? [] : [
       ...paragraphs.filter((entry) => !citedByShown(entry)).flatMap(({ part }) => (part.kind === "figures" ? statements(part.segments) : [part])),
-      ...answer.commentaryNotes.map((text): CommentaryPart => ({ kind: "note", text })),
+      ...[...answer.commentaryNotes, ...argued].map((text): CommentaryPart => ({ kind: "note", text })),
     ];
     const factBindings = [...new Map(paragraphs.flatMap((entry) => entry.fact_bindings).map((binding) => [binding.fact_id, binding])).values()];
     const dataRef = (block.data_ref ?? {}) as Record<string, unknown>;

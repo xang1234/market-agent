@@ -13,10 +13,11 @@ import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import type { DevApiAnalyzeWorkflowInput, DevApiAnalyzeWorkflowResult } from "./analyze-adapter.ts";
 import { DevApiHttpError } from "./dev-api-shared.ts";
 
-const GOALS: Readonly<Record<string, Readonly<{ ask: (company: string) => string; claimsRequired?: true }>>> = {
+const GOALS: Readonly<Record<string, Readonly<{ ask: (company: string) => string; claimsRequired?: true; argued?: true }>>> = {
   investment_thesis: {
     ask: (company) =>
       `What is the investment case for ${company} as its stored sources state it: what the business does and sells, and its latest fiscal year's revenue, gross margin and operating margin?`,
+    argued: true,
   },
   growth_drivers: {
     ask: (company) =>
@@ -79,6 +80,7 @@ export function analyzeAgentWorkflow(deps: AnalyzeAgentDeps): (input: DevApiAnal
       subject: company,
       goal: GOALS[entry.section_id]!.ask(company.label),
       ...(GOALS[entry.section_id]!.claimsRequired ? { claimsRequired: true } : {}),
+      ...(GOALS[entry.section_id]!.argued ? { argued: true } : {}),
       sectionId: entry.section_id,
       userId: input.userId,
       runId: input.runId,

@@ -503,7 +503,7 @@ const partsBlock: RichTextBlock = {
     { kind: 'figures', segments: [MU_TEXT[0]!, MU_TEXT[1]!, { type: 'text', text: '.' }] },
     { kind: 'inference', subject: 'MU', basis: 'the revenue ranking', text: 'It leads on *revenue*.' },
     { kind: 'unverified', subject: 'WDC', text: 'Its margin comes from below the operating line.' },
-    { kind: 'inference', subject: null, basis: null, text: 'Scale wins.' },
+    { kind: 'inference', subject: null, basis: null, text: 'Scale wins.', against: true },
     { kind: 'pending' },
     { kind: 'note', text: 'More sources matched than are shown here.' },
   ],
@@ -538,7 +538,7 @@ test('commentary with parts reads as one card: badged takeaways first, plain wor
     }), [
       ['inference', 'Inference', 'Checked against the figures shown', 'InferenceMUIt leads on *revenue*.Based on the revenue ranking.'],
       ['unverified', 'Unverified', 'Not backed by the figures shown', 'UnverifiedWDCIts margin comes from below the operating line.'],
-      ['inference', 'Inference', 'Checked against the figures shown', 'InferenceScale wins.'],
+      ['inference', 'Inference', 'Checked against the figures shown', 'InferenceCase againstScale wins.'],
       ['pending', 'Checking', 'Being checked against the figures shown', 'CheckingAn analyst inference is being checked against the figures it rests on.'],
     ])
     assert.equal(card.querySelector('[data-commentary-part] .font-semibold')!.textContent, 'MU')

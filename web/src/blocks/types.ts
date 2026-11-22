@@ -99,11 +99,12 @@ export type CitationRef = Extract<RefSegment, { ref_kind: Exclude<RefSegmentKind
 
 // One part of analyst commentary: a statement of figures, an inference the
 // judge found entailed, one it found unsupported, one it is still checking,
-// or a note. An inference's words are plain text, never Markdown.
+// or a note. An inference's words are plain text, never Markdown. against:
+// the answer's case against its takeaway.
 export type CommentaryPart =
   | { kind: 'figures'; segments: ReadonlyArray<RichTextSegment> }
-  | { kind: 'inference'; subject: string | null; basis: string | null; text: string; cites?: ReadonlyArray<CitationRef> }
-  | { kind: 'unverified'; subject: string | null; text: string }
+  | { kind: 'inference'; subject: string | null; basis: string | null; text: string; cites?: ReadonlyArray<CitationRef>; against?: true }
+  | { kind: 'unverified'; subject: string | null; text: string; against?: true }
   | { kind: 'pending' }
   | { kind: 'note'; text: string }
 

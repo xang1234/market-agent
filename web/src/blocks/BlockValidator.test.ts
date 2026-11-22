@@ -22,6 +22,19 @@ test('validateBlock accepts analyst commentary citing an engine result, and no o
   assert.equal(validateBlock({ ...commentary, segments: [{ ...commentary.segments[0], ref_kind: 'calculation' }] }).valid, false)
 })
 
+test('validateBlock accepts a case against in commentary, marked only as true (#735)', () => {
+  const parts = (against: unknown) => ({
+    ...richTextFixture,
+    analyst_commentary: true,
+    commentary: [
+      { kind: 'inference', subject: null, basis: null, text: 'Its margin may not hold.', against },
+      { kind: 'unverified', subject: null, text: 'Its margin may not hold.', against },
+    ],
+  })
+  assert.equal(validateBlock(parts(true)).valid, true)
+  assert.equal(validateBlock(parts(false)).valid, false)
+})
+
 test('validateBlock rejects a block missing the kind discriminator', () => {
   const block: Record<string, unknown> = { ...richTextFixture }
   delete block.kind

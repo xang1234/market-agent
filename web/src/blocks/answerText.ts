@@ -107,7 +107,7 @@ function commentaryText(parts: ReadonlyArray<CommentaryPart>): string {
   const { takeaways, figures, quotes, notes, numbers } = commentaryCard(parts)
   const takeaway = takeaways.map((part) => {
     if (part.kind === 'pending') return `- ${TAKEAWAY_BADGES.pending}: An analyst inference is being checked against the figures it rests on.`
-    const words = `- ${TAKEAWAY_BADGES[part.kind]}: ${part.subject ? `${literal(part.subject)} ` : ''}${literal(part.text)}`
+    const words = `- ${TAKEAWAY_BADGES[part.kind]}: ${part.against ? 'Case against: ' : ''}${part.subject ? `${literal(part.subject)} ` : ''}${literal(part.text)}`
     if (part.kind === 'unverified') return words
     return `${words}${(part.cites ?? []).map((cite) => ` [${numbers.get(cite.ref_id)}]`).join('')}${part.basis ? `\n  Based on ${literal(part.basis)}.` : ''}`
   })

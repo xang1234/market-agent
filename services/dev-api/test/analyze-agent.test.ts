@@ -5,6 +5,7 @@ import test from "node:test";
 import { dockerAvailable, registerLifoCleanup } from "../../../db/test/docker-pg.ts";
 import { createMemoRun, memoDatabase, playbook } from "../../analyze/test/financial-fixtures.ts";
 import { meteredModels, statesStance } from "../../chat/src/analyst-agent.ts";
+import { NO_COUNTERPOINT } from "../../chat/src/llm-runtime.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { LlmClientError, type LlmChatClient, type LlmChatRequest, type LlmToolCall } from "../../llm/src/router.ts";
 import { analyzeAgentWorkflow } from "../src/analyze-agent.ts";
@@ -34,6 +35,8 @@ type Script = Readonly<{
   risksWithoutClaims?: boolean;
   verdict?: "entailed" | "unsupported";
   onCall?: (kind: "read" | "answer" | "judge", certified: boolean) => void;
+  // Each answer call's question and system prompt.
+  answered?: Array<{ question: string; system: string }>;
 }>;
 
 // What the scripted model reads for each section's goal, and what it answers with: every id the packet offers.
@@ -72,7 +75,8 @@ function scriptedModel(calls: string[], script: Script = {}): () => LlmChatClien
     }
     calls.push("answer");
     const answer = request.messages.find((message) => message.role === "user" && message.content.startsWith("{"))!.content;
-    const { evidence_packet: packet } = JSON.parse(answer) as { evidence_packet: { figures: Array<{ id: string; gap?: string }>; claims: Array<{ id: string }> } };
+    const { evidence_packet: packet, question } = JSON.parse(answer) as { question: string; evidence_packet: { figures: Array<{ id: string; gap?: string }>; claims: Array<{ id: string }> } };
+    script.answered?.push({ question, system: String(request.messages[0]!.content) });
     const figures = packet.figures.filter((figure) => figure.gap === undefined).map((figure) => figure.id);
     script.onCall?.("answer", figures.length > 0);
     const observed = figures.length > 0 ? [{ kind: "observation", text: "Revenue was reported.", evidence: figures }] : [];
@@ -131,6 +135,7 @@ test("an inference states a stance in an always-stance word, a price target acti
     "This is a buy.", "It is a strong sell.", "The shares carry a buy rating.", "Analysts rated hold the stock.", "The stock is rated by its brokers as a hold.",
     "We recommend buying the shares.", "The recommendation of sell stands.", "Our view is overweight.", "It should outperform.", "High conviction.",
     "An upgrade is due.", "A downgrade is due.", "Analysts raised their price target.", "A price target cut followed.",
+    "The upside looks limited.", "It has upside from here.",
   ];
   const fact = [
     "Customers buy in bulk.", "Customers buy the devices in bulk.", "Wholesale partners sell through to retailers.", "Institutional investors hold most of the shares.",
@@ -318,6 +323,18 @@ test("the analyst agent writes an investment memo's sections from stored sources
     };
     assert.deepEqual(await shownWhen("entailed"), [[NEUTRAL], [NEUTRAL], [NEUTRAL], [NEUTRAL]], "each section's stance inference is left out");
     assert.deepEqual(await shownWhen("unsupported"), [[], [], [], []]);
+  });
+
+  await t.test("the thesis is asked for its case against, and says none was found when its answer lists none (#735)", async () => {
+    const answered: Array<{ question: string; system: string }> = [];
+    const judged = adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps({ ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" }, scriptedModel([], { inferences: ["Customers buy the devices in bulk."], answered }))));
+    const run = await judged.analyze.createRun({ userId: IDS.owner, body: memoBody });
+    const saved = (await db.query(`select blocks from analyze_template_runs where run_id = $1`, [run.run_id])).rows[0].blocks;
+    const sections = sectionsOf(saved).map((section) => [section.data_ref.params?.playbook_section_id, JSON.stringify(section.children).includes(NO_COUNTERPOINT)]);
+    assert.deepEqual(sections, [["investment_thesis", true], ["growth_drivers", false], ["competitive_position", false], ["downside_risks", false]]);
+    const askedAgainst = answered.map((entry) => [entry.question.includes("investment case"), entry.system.includes('"role":"counterpoint"')]);
+    assert.deepEqual(askedAgainst.filter(([thesis]) => thesis), [[true, true]]);
+    assert.ok(askedAgainst.every(([thesis, against]) => thesis === against), "only the thesis is asked for one");
   });
 
   await t.test("a theme cites the claims it rests on, sealed with the memo, and its quotes come back when the judge does not entail it", async () => {

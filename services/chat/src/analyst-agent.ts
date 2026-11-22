@@ -230,6 +230,8 @@ export type AnalystSectionInput = Readonly<{
   subject: Readonly<{ issuer_id: string; label: string }>;
   goal: string;
   claimsRequired?: boolean;
+  // The memo's conclusion, so its section closes with the case against it (#735).
+  argued?: true;
   sectionId: string;
   userId: string;
   // The memo run the section's certified figures belong to, under its authority.
@@ -267,7 +269,7 @@ export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystS
       snapshotId: input.snapshotId,
       scopedKey: (name) => `${input.sectionId}:${name}`,
       noFilingAsOfCutoff: true,
-      writing: "themes",
+      writing: input.argued ? "thesis" : "themes",
       trace: { thread_id: input.runId, run_id: input.runId, turn_id: input.sectionId },
       ...(deps.logToolCalls ? { logToolCalls: deps.logToolCalls } : {}),
     };
@@ -602,7 +604,7 @@ const QUIET = (() => undefined) as unknown as ChatTurnRunContext["emit"];
 // ADR 0005. Buy, sell and hold are stance only as a rating, so "customers buy in bulk" is not one.
 const RATING = String.raw`(?:strong\s+)?(?:buy|sell|hold)\b(?!-)`;
 const STANCE = new RegExp([
-  String.raw`\b(?:overweight|underweight|outperform|underperform|conviction|upgrade|downgrade)\b`,
+  String.raw`\b(?:overweight|underweight|outperform|underperform|conviction|upgrade|downgrade|upside)\b`,
   String.raw`\b(?:raise[sd]?|raising|lift(?:s|ed)?|lower(?:s|ed|ing)?|cut(?:s|ting)?|set(?:s|ting)?|reiterate[sd]?|maintain(?:s|ed)?|boost(?:s|ed)?|trim(?:s|med)?|increase[sd]?|reduce[sd]?)\b(?:\s+\S+){0,3}?\s+price targets?\b`,
   String.raw`\bprice targets?\s+(?:raise|cut|increase|hike|reduction)s?\b`,
   String.raw`\b(?:a|an|the|our|my)\s+${RATING}`,
@@ -622,7 +624,7 @@ function withoutStance(input: AnswerInput & Pick<AnswerTraceInput, "context">, p
   const rendering = renderedAnswer(input, packet, {
     ...report,
     accepted: report.accepted.filter((entry) => !stance.includes(entry)),
-    rejected: [...report.rejected, ...stance.map((entry) => ({ index: entry.index, text: entry.text, check: "limit" as const, reason: "states a stance" }))].sort((a, b) => a.index - b.index),
+    rejected: [...report.rejected, ...stance.map((entry) => ({ index: entry.index, text: entry.text, check: "limit" as const, reason: "states a stance", ...(entry.role ? { role: entry.role } : {}) }))].sort((a, b) => a.index - b.index),
   });
   const shown = new Map((report.judged ?? []).flatMap((verdict) => {
     const as = shownAs(verdict, answerPath({ ...input, packet }));
@@ -667,7 +669,14 @@ const ANSWER_RULES = [
   "Say what a company does or faces only as a claim states it, never from your own knowledge, and never write Buy, Hold, Sell or any recommendation.",
   "A price return or last close is a figure: state it in an observation citing its F id, and set companies' price returns side by side in a comparison.",
 ];
-const ANALYSIS_RULE = "Write at most two analyst_inference entries: the takeaway and the counterpoint.";
+// The bear section (#735): a case against the conclusion from sourced facts, never a stance (ADR 0005).
+const counterpointRule = (conclusion: string) => [
+  `The counterpoint is the strongest case the evidence makes against ${conclusion}: one analyst_inference with "role":"counterpoint", listed last,`,
+  "whose supports are observations, comparisons or management_attributions other than the ones the case for it rests on, where the evidence holds them",
+  "(a figure that fell or trails, a period that breaks the trend, a risk or cost a claim states). It argues from those facts and is no rating, stance or price target.",
+  "If nothing in the evidence cuts against it, write no counterpoint, and the answer says none was found: never invent one.",
+];
+const ANALYSIS_RULES = ["Write at most two analyst_inference entries: the takeaway and the counterpoint.", ...counterpointRule("the takeaway")];
 const DESCRIPTION_SHAPE = [
   "Answer with what the stored sources say: list management_attribution entries alone, each citing a claim that answers the question as asked,",
   "and write no analyst_inference, neither a takeaway nor a counterpoint.",
@@ -689,9 +698,10 @@ const THEME_SHAPE = [
 
 const WRITING = {
   chat: (askedFigures: boolean) => (askedFigures
-    ? { instructions: [...ANSWER_RULES, ANALYSIS_RULE] }
+    ? { instructions: [...ANSWER_RULES, ...ANALYSIS_RULES], counterpoint: true as const }
     : { instructions: ANSWER_RULES, answerShape: DESCRIPTION_SHAPE, inferences: false as const }),
   themes: () => ({ instructions: ANSWER_RULES, answerShape: THEME_SHAPE }),
+  thesis: () => ({ instructions: ANSWER_RULES, answerShape: [...THEME_SHAPE, ...counterpointRule("the investment case its themes make")], counterpoint: true as const }),
 };
 
 const ANALYSIS_LEFT_OUT = "Some of the analysis was left out, as the turn reached its limit of model calls.";
