@@ -149,9 +149,11 @@ test("extractNonGaapReconciliations reads an EDGAR-built table: spanned headers,
       { measure: "operating_expenses", gaap: 5_839, non_gaap: 4_325, scale: "millions", adjustments: [
         ["Stock-based compensation expense (B)", -1_474], ["Acquisition-related and other costs (A)", -40],
       ] },
-      // A total of the adjustments is no adjustment itself.
-      { measure: "operating_income", gaap: 36_010, non_gaap: 37_822, scale: "millions", adjustments: [] },
-      { measure: "net_income", gaap: 31_910, non_gaap: 33_366, scale: "millions", adjustments: [["Income tax impact of non-GAAP adjustments (D)", -356]] },
+      // A total with no lines above it is the add-back the release states.
+      { measure: "operating_income", gaap: 36_010, non_gaap: 37_822, scale: "millions", adjustments: [["Total impact of non-GAAP adjustments to operating income", 1_812]] },
+      { measure: "net_income", gaap: 31_910, non_gaap: 33_366, scale: "millions", adjustments: [
+        ["Total pre-tax impact of non-GAAP adjustments", 1_812], ["Income tax impact of non-GAAP adjustments (D)", -356],
+      ] },
       // "GAAP" alone takes its measure from the section header above it.
       { measure: "eps_diluted", gaap: 1.3, non_gaap: 1.36, scale: "millions", adjustments: [] },
     ],
@@ -322,4 +324,79 @@ test("extractNonGaapReconciliations heads a figure with the header over its empt
     <tr><td>Non-GAAP operating income</td><td></td><td></td><td>110</td><td></td></tr>
   </table>`;
   assert.deepEqual(lines(html), [["operating_income", "Three Months Ended October 26, 2025", 100, 110, [["Stock-based compensation", 10]]]]);
+});
+
+test("extractNonGaapReconciliations keeps a gross margin reconciled in dollars as gross profit, and skips one in percent", () => {
+  const html = `<table>
+    <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th></tr>
+    <tr><td>GAAP gross margin</td><td>$100</td></tr>
+    <tr><td>Stock-based compensation</td><td>10</td></tr>
+    <tr><td>Non-GAAP gross margin</td><td>$110</td></tr>
+    <tr><td>GAAP gross margin</td><td>73.4%</td></tr>
+    <tr><td>Stock-based compensation</td><td>0.3</td></tr>
+    <tr><td>Non-GAAP gross margin</td><td>73.7%</td></tr>
+  </table>`;
+  assert.deepEqual(lines(html), [["gross_profit", "Q3 2025", 100, 110, [["Stock-based compensation", 10]]]]);
+});
+
+test("extractNonGaapReconciliations keeps a total with no lines above it as the add-back, and skips one that sums lines above", () => {
+  const html = `<table>
+    <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th></tr>
+    <tr><td>GAAP net income</td><td>$100</td></tr>
+    <tr><td>Total stock-based compensation</td><td>10</td></tr>
+    <tr><td>Non-GAAP net income</td><td>$110</td></tr>
+    <tr><td>GAAP operating income</td><td>$120</td></tr>
+    <tr><td>Stock-based compensation: cost of revenue</td><td>4</td></tr>
+    <tr><td>Stock-based compensation: research and development</td><td>6</td></tr>
+    <tr><td>Total stock-based compensation</td><td>10</td></tr>
+    <tr><td>Non-GAAP operating income</td><td>$130</td></tr>
+  </table>`;
+  assert.deepEqual(lines(html), [
+    ["net_income", "Q3 2025", 100, 110, [["Total stock-based compensation", 10]]],
+    ["operating_income", "Q3 2025", 120, 130, [["Stock-based compensation: cost of revenue", 4], ["Stock-based compensation: research and development", 6]]],
+  ]);
+});
+
+test("extractNonGaapReconciliations keeps an open reconciliation past a row of dashes and a subheading", () => {
+  const html = `<table>
+    <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th><th>Q3 2024</th></tr>
+    <tr><td>Diluted net income per share</td><td></td><td></td></tr>
+    <tr><td>GAAP</td><td>$1.30</td><td>$0.78</td></tr>
+    <tr><td>Non-GAAP adjustments:</td><td></td><td></td></tr>
+    <tr><td>Stock-based compensation</td><td>0.06</td><td>0.03</td></tr>
+    <tr><td>Restructuring charges</td><td>—</td><td>&#8212;</td></tr>
+    <tr><td>Non-GAAP</td><td>$1.36</td><td>$0.81</td></tr>
+  </table>`;
+  assert.deepEqual(lines(html), [
+    ["eps_diluted", "Q3 2025", 1.3, 1.36, [["Stock-based compensation", 0.06]]],
+    ["eps_diluted", "Q3 2024", 0.78, 0.81, [["Stock-based compensation", 0.03]]],
+  ]);
+});
+
+test("extractNonGaapReconciliations never puts two figures of one row in one slot, past a year cell spanning both columns", () => {
+  const html = `<table>
+    <tr><td></td><td colspan="2">Three Months Ended</td></tr>
+    <tr><td></td><td>September 27, 2025</td><td>September 28, 2024</td></tr>
+    <tr><td>GAAP operating income</td><td>$1,270</td><td>$724</td></tr>
+    <tr><td></td><td colspan="2">2025</td></tr>
+    <tr><td>Stock-based compensation</td><td>419</td><td>353</td></tr>
+    <tr><td>Non-GAAP operating income</td><td>$1,689</td><td>$1,077</td></tr>
+  </table>`;
+  assert.deepEqual(lines(html), [
+    ["operating_income", "Three Months Ended September 27, 2025", 1_270, 1_689, [["Stock-based compensation", 419]]],
+    ["operating_income", "Three Months Ended September 28, 2024", 724, 1_077, [["Stock-based compensation", 353]]],
+  ]);
+});
+
+test("extractNonGaapReconciliations reads a negative percent split across cells as a percent, and a Unicode minus as a sign", () => {
+  const html = `<table>
+    <tr><th>GAAP to non-GAAP reconciliation</th><th colspan="3">Q3 2025</th></tr>
+    <tr><td>GAAP net income</td><td>$</td><td>100</td><td></td></tr>
+    <tr><td>Change in effective tax rate</td><td></td><td>(2.5</td><td>)</td><td>%</td></tr>
+    <tr><td>Change in operating margin</td><td></td><td>(1.5</td><td>)%</td></tr>
+    <tr><td>Gain on investments</td><td></td><td>&minus;5</td><td></td></tr>
+    <tr><td>Stock-based compensation</td><td></td><td>10</td><td></td></tr>
+    <tr><td>Non-GAAP net income</td><td>$</td><td>105</td><td></td></tr>
+  </table>`;
+  assert.deepEqual(lines(html), [["net_income", "Q3 2025", 100, 105, [["Gain on investments", -5], ["Stock-based compensation", 10]]]]);
 });

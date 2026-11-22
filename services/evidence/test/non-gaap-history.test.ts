@@ -58,19 +58,50 @@ test("a release's revenue is the first revenue row with a figure in its quarter,
   assert.deepEqual(read.revenue, { exhibit: "EX-99.1", label: "Total revenue", value_num: 150, scale: "millions" });
 });
 
-test("a column is a quarter only when the last duration its header names is three months", () => {
-  assert.equal(quarterEndOf("Three Months Ended October 26, 2025"), "2025-10-26");
-  assert.equal(quarterEndOf("Fourth Quarter and Fiscal Year Ended Three Months Ended December 31, 2025"), "2025-12-31");
-  assert.equal(quarterEndOf("Fourth Quarter and Fiscal Year Ended Fiscal Year Ended December 31, 2025"), null);
-  assert.equal(quarterEndOf("Third Quarter Year-to-Date Ended September 30, 2025"), null);
-  assert.equal(quarterEndOf("Nine Months Ended October 26, 2025"), null);
+test("a column is a quarter only when the lowest header cell naming a duration names three months and nothing longer", () => {
+  assert.equal(quarterEndOf(["Three Months Ended October 26, 2025"]), "2025-10-26");
+  assert.equal(quarterEndOf(["Fourth Quarter and Fiscal Year Ended", "Three Months Ended", "December 31, 2025"]), "2025-12-31");
+  assert.equal(quarterEndOf(["Fourth Quarter and Fiscal Year Ended", "Fiscal Year Ended", "December 31, 2025"]), null);
+  assert.equal(quarterEndOf(["Third Quarter Year-to-Date Ended September 30, 2025"]), null);
+  assert.equal(quarterEndOf(["Nine Months Ended October 26, 2025"]), null);
+  // A banner over quarter and year columns alike dates neither, whatever its word order.
+  assert.equal(quarterEndOf(["Fourth Quarter and Full Year", "December 31, 2025"]), null);
+  assert.equal(quarterEndOf(["Fourth Quarter and Fiscal Year Ended December 31", "FY 2026"]), null);
+  assert.equal(quarterEndOf(["Fiscal Year and Fourth Quarter Ended", "December 31, 2025"]), null);
+  assert.equal(quarterEndOf(["Annual", "December 31, 2025"]), null);
+  assert.equal(quarterEndOf(["Fourth Quarter FY26 Ended December 31, 2025"]), null);
+});
+
+test("a release's quarter comes from a column's own header cell under a banner naming quarter and year", () => {
+  const read = releaseReconciliations(submissionOf(`<table>
+    <tr><td></td><td colspan="2">Fourth Quarter and Fiscal Year Ended</td></tr>
+    <tr><td></td><td>Three Months Ended</td><td>Twelve Months Ended</td></tr>
+    <tr><td></td><td>December 31, 2025</td><td>December 31, 2025</td></tr>
+    <tr><td>GAAP operating income</td><td>$30</td><td>$120</td></tr>
+    <tr><td>Stock-based compensation</td><td>6</td><td>24</td></tr>
+    <tr><td>Non-GAAP operating income</td><td>$36</td><td>$144</td></tr>
+  </table>`), "2026-01-28");
+  assert.equal(read.quarter_end, "2025-12-31");
+  assert.deepEqual(read.reconciliations.map((line) => [line.measure_key, line.gaap.value_num, line.non_gaap.value_num]), [["operating_income", 30, 36]]);
+});
+
+test("a table's scale is the first its nearest note names, never an exception's: AAPL's real 10-K is in millions", () => {
+  const html = readFileSync(new URL("./fixtures/sec-10k/aapl.htm", import.meta.url), "utf8");
+  const tables = readTables(html);
+  const tableWith = (label: string) => tables.find((table) => table.rows.some((row) => row.label === label))!;
+  // "(In millions, except number of shares, which are reflected in thousands, and per-share amounts)"
+  assert.equal(tableWith("Total net sales").scale, "millions");
+  // "(In millions, except number of shares, which are reflected in thousands, and par value)"
+  assert.equal(tableWith("Total assets").scale, "millions");
+  // "(net income in millions and shares in thousands)"
+  assert.equal(tableWith("Numerator:").scale, "millions");
 });
 
 test("the reader lays out NVIDIA's real 10-K income statement: its scale above the table, a $ cell and its figure one column", () => {
   const html = readFileSync(new URL("./fixtures/sec-10k/nvda.htm", import.meta.url), "utf8");
   const statement = readTables(html).find((table) => table.rows.some((row) => row.label === "Net income per share:"))!;
   assert.equal(statement.scale, "millions");
-  const row = (label: string) => statement.rows.find((candidate) => candidate.label === label)!.values.map(([slot, value]) => [statement.periods[slot], value.value_num]);
+  const row = (label: string) => statement.rows.find((candidate) => candidate.label === label)!.values.map(([slot, value]) => [statement.periods[slot]!.join(" "), value.value_num]);
   assert.deepEqual(row("Revenue"), [["Year Ended Jan 25, 2026", 215_938], ["Year Ended Jan 26, 2025", 130_497], ["Year Ended Jan 28, 2024", 60_922]]);
   assert.deepEqual(row("Cost of revenue"), [["Year Ended Jan 25, 2026", 62_475], ["Year Ended Jan 26, 2025", 32_639], ["Year Ended Jan 28, 2024", 16_621]]);
   assert.deepEqual(row("Interest expense"), [["Year Ended Jan 25, 2026", -259], ["Year Ended Jan 26, 2025", -247], ["Year Ended Jan 28, 2024", -257]]);

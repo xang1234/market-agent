@@ -9,7 +9,7 @@
 import type { IsoDate } from "../../financial-core/src/contracts.ts";
 import type { ReleaseRevenue, StoredReconciliation } from "./non-gaap-history.ts";
 import { isEphemeralRawBlobId, type ObjectStore } from "./object-store.ts";
-import { extractNonGaapReconciliations, readTables } from "./reader/non-gaap-reconciliation-extractor.ts";
+import { extractNonGaapReconciliations, readTables, type Period } from "./reader/non-gaap-reconciliation-extractor.ts";
 import type { QueryExecutor } from "./types.ts";
 
 export type ReleaseReconciliations = {
@@ -33,17 +33,19 @@ const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const DATE = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})\b/i;
 const QUARTER = /\b(?:three|3)[\s-]+months?\b|\bquarter\b|\b(?:13|thirteen)[\s-]+weeks?\b/i;
-const LONGER = /\byears?[\s-]+(?:ended|to[\s-]+date)\b|\bytd\b|\b(?:six|nine|twelve|6|9|12)[\s-]+months?\b|\b(?:26|39|52|53)[\s-]+weeks?\b/i;
-const DURATION = new RegExp(`${QUARTER.source}|${LONGER.source}`, "gi");
+const LONGER = /\byears?[\s-]+(?:ended|to[\s-]+date)\b|\b(?:full|fiscal)[\s-]+years?\b|\bannual\b|\bFY\s*'?\d{2,4}\b|\bytd\b|\b(?:six|nine|twelve|6|9|12)[\s-]+months?\b|\b(?:26|39|52|53)[\s-]+weeks?\b/i;
+const DURATION = new RegExp(`${QUARTER.source}|${LONGER.source}`, "i");
 const REVENUE = /^(?:total\s+)?(?:net\s+)?(?:revenues?|sales)$/i;
 
-// The end of the three months a column header names, if it names one. Its
-// own heading is its lowest, so the last duration it names is the column's,
-// as under a "Fourth Quarter and Fiscal Year Ended" banner.
-export function quarterEndOf(label: string | null | undefined): IsoDate | null {
-  const duration = label ? [...label.matchAll(DURATION)].at(-1)?.[0] : undefined;
-  if (duration === undefined || LONGER.test(duration)) return null;
-  const match = DATE.exec(label!);
+// The end of the three months a column header names, if it names one. A
+// column's own heading is its lowest cell, so the lowest cell naming a
+// duration decides, as "Three Months Ended" under a "Fourth Quarter and
+// Fiscal Year Ended" banner. A cell naming a longer one is no quarter in any
+// word order, so a banner over quarter and year columns alike dates neither.
+export function quarterEndOf(header: Period | undefined): IsoDate | null {
+  const own = header?.filter((cell) => DURATION.test(cell)).at(-1);
+  if (own === undefined || LONGER.test(own)) return null;
+  const match = DATE.exec(header!.join(" "));
   if (!match) return null;
   const [, month, day, year] = match;
   const date = new Date(Date.UTC(Number(year), MONTHS.indexOf(month!.toLowerCase()), Number(day)));
@@ -83,9 +85,11 @@ export function releaseReconciliations(submission: string, filedOn: IsoDate | nu
         if (value) revenue = { exhibit: exhibit.type, label: row.label, value_num: value[1].value_num, scale: table.scale ?? null };
       }
     }
+    // An item names its column by the header's text, joined as the extractor joins it.
+    const quarterColumns = new Set(exhibit.tables.flatMap((table) => table.periods.filter((period) => quarterEndOf(period) === quarter_end).map((period) => period.join(" "))));
     const { items } = extractNonGaapReconciliations({ html: exhibit.html, source_id: "", as_of: "" });
     for (const item of items) {
-      if (quarterEndOf(item.period_label) !== quarter_end) continue;
+      if (!quarterColumns.has(item.period_label ?? "")) continue;
       if (reconciliations.some((line) => line.measure_key === item.measure_key)) continue;
       reconciliations.push({
         exhibit: exhibit.type,
