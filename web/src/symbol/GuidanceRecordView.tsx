@@ -73,6 +73,9 @@ export function GuidanceRecordBody({ envelope }: { envelope: GuidanceRecordEnvel
       {rows.some((row) => COSTS.has(row.metric)) ? (
         <p className="text-xs text-muted">For operating expenses and capex, an actual below the guided range counts as a beat.</p>
       ) : null}
+      {rows.some((row) => row.guided.low === row.guided.high) ? (
+        <p className="text-xs text-muted">Against a single guided figure, an actual within 1% of it counts as in line.</p>
+      ) : null}
     </div>
   )
 }
