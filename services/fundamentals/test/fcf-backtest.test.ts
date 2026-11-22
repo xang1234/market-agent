@@ -12,7 +12,9 @@ const exact = (text: string): ExactRational => {
   return rationalFromDecimal(parsed.value)!;
 };
 
-function inputs(asOf: string, periodEnd: string, fcf: string, shares: string): AsOfInputs {
+const PRODUCTIVE_ASSETS = { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const;
+
+function inputs(asOf: string, periodEnd: string, fcf: string, shares: string, capexScope: AsOfInputs["capex_scope"] = null): AsOfInputs {
   const figure = (text: string): Figure => ({ kind: "value", value: Number(text), text });
   const values = { free_cash_flow: fcf, net_cash: "200000000", stock_based_compensation: "50000000", shares_outstanding: shares };
   return {
@@ -21,6 +23,7 @@ function inputs(asOf: string, periodEnd: string, fcf: string, shares: string): A
     exact: Object.fromEntries(Object.entries(values).map(([id, text]) => [id, exact(text)])),
     currency: "USD",
     fiscal_year_end: periodEnd,
+    capex_scope: capexScope,
     bound: [
       { slot: "operating_cash_flow", fiscal_year: Number(periodEnd.slice(0, 4)), period_end: periodEnd, public_by: `${asOf}T04:59:59.999Z`, locator: null },
       { slot: "market_cap_shares", fiscal_year: Number(asOf.slice(0, 4)), period_end: asOf, public_by: `${asOf}T04:59:59.999Z`, locator: null },
@@ -173,6 +176,19 @@ test("an earlier 10-K that is missing, mislabeled or has no positive free cash f
   assert.deepEqual(missing.trailing[3].per_share, { ...noFiling, input: "FY-3" });
   const text = renderBacktest({ rows: [missing], issuers: [] }, { ranOn: "2026-11-21", command: "c", notes: "" });
   assert.match(text, /FY-3: \*\*no_fy_facts\*\* \(No SEC facts labeled for that FY on file\.\); FY-5: \*\*no_fy_facts\*\*/u);
+});
+
+// CAT filed capex as productive assets through FY2019 and as PP&E from FY2020.
+test("realized growth from free cash flow over productive-assets capex to one over PP&E capex is a named outcome, never a rate (#731)", () => {
+  const row = (base: AsOfInputs["capex_scope"], later: AsOfInputs["capex_scope"]) => backtestRow({
+    ticker: "SWCH", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
+    base: inputs("2018-02-16", "2017-12-31", "1100000000", "100000000", base),
+    later: inputs("2023-02-16", "2022-12-31", "1600000000", "100000000", later),
+    earlier: noEarlier, closes, splits: split,
+  });
+  const realized = (figure: Figure) => (figure.kind === "outcome" ? figure.outcome : figure.text);
+  assert.deepEqual([row(PRODUCTIVE_ASSETS, null), row(null, PRODUCTIVE_ASSETS), row(PRODUCTIVE_ASSETS, PRODUCTIVE_ASSETS), row(null, null)].map((one) => [realized(one.realized.fcf), realized(one.realized.per_share)]),
+    [["incompatible_definition", "incompatible_definition"], ["incompatible_definition", "incompatible_definition"], ["7.78%", "23.81%"], ["7.78%", "23.81%"]]);
 });
 
 test("a missing later 10-K is named once, as FY+5's, for both realized figures", () => {

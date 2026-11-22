@@ -63,6 +63,7 @@ import { Pool } from "pg";
 import {
   callModelOperations,
   canonicalDecimalString,
+  conceptScope,
   createRuntimeAuthority,
   DEFAULT_CALL_SETTINGS,
   divideRationals,
@@ -80,6 +81,7 @@ import {
   type FinancialPlan,
   type FinancialRuntimeAuthority,
   type IsoDate,
+  type ConceptScopeV1,
   type ValuationInputs,
   type ValuationOutcomeResult,
 } from "../../financial-core/src/index.ts";
@@ -124,6 +126,8 @@ export type AsOfInputs = Readonly<{
   exact: Readonly<Partial<Record<InputId, ExactRational>>>;
   currency: string | null;
   fiscal_year_end: IsoDate | null;
+  /** Present when the bound capex is filed as productive assets (#731). */
+  capex_scope: ConceptScopeV1 | null;
   bound: ReadonlyArray<BoundInput>;
 }>;
 
@@ -289,7 +293,9 @@ export async function inputsAsOf(client: SqlExecutor, issuerId: string, asOf: Is
     }]
     : []);
   const operating = bound.find((input) => input.slot === "operating_cash_flow");
-  return { as_of: asOf, figures, exact, currency, fiscal_year_end: operating?.period_end ?? null, bound };
+  const capex = bindings.get("capex");
+  const capexScope = capex?.status === "bound" && "fact_id" in capex.input ? conceptScope(capex.input.inference) : null;
+  return { as_of: asOf, figures, exact, currency, fiscal_year_end: operating?.period_end ?? null, capex_scope: capexScope, bound };
 }
 
 /**
@@ -406,6 +412,9 @@ function growth(from: Read | Absent, to: Read | Absent, years: number, splits: S
     : rationalSign(exact(start, "shares_outstanding")) <= 0 || rationalSign(exact(end, "shares_outstanding")) <= 0
     ? outcome("non_positive_shares", "A share count at one end is zero or negative, so it has no growth rate.")
     : divideRationals(exact(end, "shares_outstanding"), multiplyRationals(exact(start, "shares_outstanding"), splitFactor(splits, start.inputs.as_of, end.inputs.as_of))!)!;
+  // Free cash flow over capex in two scopes is no growth of one measure (#731).
+  const rescoped = (): Figure | null => (start.inputs.capex_scope === null) === (end.inputs.capex_scope === null) ? null
+    : outcome("incompatible_definition", "Capex is filed as PaymentsToAcquireProductiveAssets at one end and as PP&E at the other, so the two free cash flows do not measure the same spending.");
   const shares = (): Figure => {
     const ratio = shareRatio();
     return "kind" in ratio ? ratio : annual(ratio);
@@ -416,8 +425,8 @@ function growth(from: Read | Absent, to: Read | Absent, years: number, splits: S
     return nonPositive() ? noGrowth : annual(divideRationals(divideRationals(exact(end, "free_cash_flow"), exact(start, "free_cash_flow"))!, ratio)!);
   };
   return {
-    fcf: missing("free_cash_flow") ?? fcf(),
-    per_share: missing("free_cash_flow", "shares_outstanding") ?? perShare(),
+    fcf: missing("free_cash_flow") ?? rescoped() ?? fcf(),
+    per_share: missing("free_cash_flow", "shares_outstanding") ?? rescoped() ?? perShare(),
     shares: missing("shares_outstanding") ?? shares(),
   };
 }

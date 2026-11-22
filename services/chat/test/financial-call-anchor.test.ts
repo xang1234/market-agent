@@ -1,8 +1,9 @@
 // The exit multiple's anchor in chat (#605): AAPL's FY2017 to FY2026 10-Ks,
 // trimmed from a real companyfacts download, and yfinance's split-adjusted
 // closes give an anchored exit multiple, sealed with the Call. The Call still
-// declines under rule 1, now for the bear case alone. A year whose capex tag
-// blocks its free cash flow, or no captured closes, leaves it unanchored.
+// declines under rule 1, now for the bear case alone. A year whose capex is
+// filed as productive assets still anchors (#731); a year with no capex, or
+// no captured closes, leaves it unanchored.
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -36,7 +37,9 @@ const GAPY = issuer("GAPY", 2, 900102);
 const NOCL = issuer("NOCL", 3, 900103);
 // AAPL's history with a 2-for-1 split on the Call date, its closes captured at 20:00 the evening before in New York.
 const SPLT = issuer("SPLT", 4, 900104);
-const ISSUERS = [AAPL, GAPY, NOCL, SPLT];
+// AAPL's history with no FY2019 capex filed at all.
+const NOCX = issuer("NOCX", 5, 900105);
+const ISSUERS = [AAPL, GAPY, NOCL, SPLT, NOCX];
 
 // yfinance's split-adjusted closes on the last session of each AAPL fiscal year and the session after it, as the
 // dev capture of 2026-11-21 returned them, captured here a day before the Call.
@@ -82,6 +85,14 @@ function productiveAssetsIn2019(): unknown {
   return facts;
 }
 
+// AAPL's history with every FY2019 PP&E capex entry removed.
+function noCapexIn2019(): unknown {
+  const facts = asFiler(NOCX) as { facts: { "us-gaap": Record<string, { units: { USD: Array<{ end: string }> } }> } };
+  const ppe = facts.facts["us-gaap"].PaymentsToAcquirePropertyPlantAndEquipment!;
+  ppe.units.USD = ppe.units.USD.filter((entry) => entry.end !== "2019-09-28");
+  return facts;
+}
+
 async function seedIssuer(db: Client, pool: FinancialPool, company: Issuer, facts: unknown, closes: boolean): Promise<void> {
   await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, $2, $3)`, [company.issuer, `${company.ticker} Inc.`, String(company.cik)]);
   await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $1, 'common_stock')`, [company.issuer]);
@@ -116,6 +127,7 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
   await db.query(`insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at) values ($1, 'polygon_market', 'market_data', 'primary', 'licensed', now()) on conflict (source_id) do nothing`, [POLYGON_MARKET_SOURCE_ID]);
   await seedIssuer(db, pool, AAPL, aaplHistoryCompanyFacts(), true);
   await seedIssuer(db, pool, GAPY, productiveAssetsIn2019(), true);
+  await seedIssuer(db, pool, NOCX, noCapexIn2019(), true);
   await seedIssuer(db, pool, NOCL, asFiler(NOCL), false);
   await seedIssuer(db, pool, SPLT, asFiler(SPLT), false);
   await db.query(`insert into listing_splits (listing_id, execution_date, split_from, split_to, source_id) values ($1, '2026-11-09', 1, 2, $2)`, [SPLT.listing, POLYGON_MARKET_SOURCE_ID]);
@@ -216,8 +228,14 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
     assert.equal(row(split, "anchored_exit_multiple").citations.at(-1)!.text, "yfinance split-adjusted daily closes, captured 2026-11-08; dev only, never certified");
   });
 
-  await t.test("a year whose capex tag blocks its free cash flow leaves the exit multiple unanchored, and rule 1 names both anchors", async () => {
+  await t.test("a year whose capex is filed as productive assets still anchors the exit multiple (#731)", async () => {
     const { call } = (await ask("Make a Call on GAPY")).block;
+    assert.deepEqual(row(call, "anchored_exit_multiple").figure, { kind: "value", text: "17.33x" });
+    assert.ok(row(call, "anchored_exit_multiple").citations.some((citation) => citation.text.startsWith("FY2019: 15.61x, ")));
+  });
+
+  await t.test("a year with no capex leaves the exit multiple unanchored, and rule 1 names both anchors", async () => {
+    const { call } = (await ask("Make a Call on NOCX")).block;
     assert.deepEqual(row(call, "anchored_exit_multiple").figure, {
       kind: "outcome",
       outcome: "unanchored",

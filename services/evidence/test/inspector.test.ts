@@ -430,6 +430,16 @@ test("a fact standing in for another metric says what it equals and why (#342)",
   assert.ok((await fact([])).rows.every((row) => row.label !== "Inferred"));
 });
 
+test("capex filed as productive assets names its concept and that it may include intangibles (#731)", async () => {
+  const fact = (quality_flags: unknown[]) => inspectFactRow(factRow({
+    value: "30000000", unit: "currency", currency: "USD", metric_name: "Capital Expenditures",
+    period_kind: "fiscal_y", fiscal_year: 2023, fiscal_period: "FY", quality_flags,
+  }));
+  const scoped = await fact([{ kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" }]);
+  assert.deepEqual(scoped.rows.at(-1), { label: "Scope", value: "Capex is filed as PaymentsToAcquireProductiveAssets, which may include purchased intangibles as well as PP&E." });
+  assert.ok((await fact([])).rows.every((row) => row.label !== "Scope"));
+});
+
 test("a derived fact lists the facts it was computed from, as their own inspections word them, before its source", async () => {
   const Q3_REVENUE = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
   const Q2_REVENUE = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";

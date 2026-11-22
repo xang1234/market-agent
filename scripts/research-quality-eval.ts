@@ -211,7 +211,7 @@ export type EngineContent = {
   presentations: EnginePresentation[];
 };
 
-const ENGINE_VERSIONS = new Set(["financial-presentation.v1", "financial-presentation.v2", "financial-presentation.v3"]);
+const ENGINE_VERSIONS = new Set(["financial-presentation.v1", "financial-presentation.v2", "financial-presentation.v3", "financial-presentation.v4"]);
 
 function renderEngineAnswer(content: EngineContent): string {
   if (!ENGINE_VERSIONS.has(content.presentation_version)) {

@@ -15,6 +15,7 @@ import { assumptionHash, hashCanonical } from "./canonical.ts";
 import type {
   BoundFactInputV1,
   ChangeNode,
+  ConceptScopeV1,
   Comparison,
   CoverageState,
   DecimalString,
@@ -28,6 +29,7 @@ import type {
   PlanAssumption,
   RankingPayload,
   ReasonCode,
+  ReportedMetricNode,
   Scenario,
   ScenarioEpsMultipleNode,
   Sha256Hex,
@@ -35,7 +37,7 @@ import type {
 } from "./contracts.ts";
 import { FISCAL_PERIODS, operationDependencies, scenarioAssumption, SCENARIOS } from "./contracts.ts";
 import { coverageState } from "./coverage.ts";
-import { resolveMetricDefinition, resolveRatioDefinition } from "./definitions.ts";
+import { figureLabel, resolveMetricDefinition, resolveRatioDefinition } from "./definitions.ts";
 import { compareExactDecimals, parseDerivedDecimalText, type ExactDecimal } from "./exact-decimal.ts";
 import { dependencyClosure } from "./graph.ts";
 import { formatValue, readsAsMultiple } from "./value-text.ts";
@@ -46,6 +48,12 @@ export const FINANCIAL_PRESENTATION_VERSION = "financial-presentation.v2";
 export const FINANCIAL_PRESENTATION_V1 = "financial-presentation.v1";
 /** Content with a `scenarios` presentation (#201). All other content stays v2, so no v1 plan's presentation hash moves. */
 export const FINANCIAL_PRESENTATION_V3 = "financial-presentation.v3";
+/**
+ * Content that reads a figure in a concept scope (#731), such as capex filed as PaymentsToAcquireProductiveAssets,
+ * which with free cash flow taken from it is a measure of its own. It is otherwise v3. Content that reads none keeps
+ * v2 or v3, and its hash.
+ */
+export const FINANCIAL_PRESENTATION_V4 = "financial-presentation.v4";
 
 export const SCENARIO_DISCLOSURE = "A mechanical scenario: reported diluted EPS × a P/E you supplied. Not a price target, forecast, or recommendation.";
 
@@ -147,8 +155,12 @@ export function presentFinancialUnit(input: {
   subject_names: Readonly<Record<LocalId, string>>;
   /** Each bound fact's period, by its reported node. */
   periods: ReadonlyMap<LocalId, BoundPeriod>;
+  /** Each bound input's concept scope (#731) by its reported node, null in its metric's reviewed concept. A node not here is unbound. */
+  concept_scopes: BoundScopes;
 }): FinancialAnswerContent {
   const { plan } = input;
+  const read = dependencyClosure(plan, plan.outputs.filter((output) => output.unit_id === input.unit_id).map((output) => output.node_id));
+  const scoped = scopeReader(plan, input.concept_scopes, read);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const readsOf = periodReader(plan, nodes, input.periods);
   const byOutput = new Map(input.results.map((result) => [result.output_id, result]));
@@ -170,9 +182,9 @@ export function presentFinancialUnit(input: {
       output_id: output.output_id,
       disposition: result.disposition === "computed" ? "verified" : result.disposition,
       subject_label_id: slot === null ? null : subjectLabelId(slot),
-      measure_label_id: labels.intern("measure", measureKey(plan, node), measureText(plan, node)),
+      measure_label_id: labels.intern("measure", measureKey(plan, node, scoped), labelText(plan, node, scoped(node))),
       period_label_id: labels.intern("period", periodKey(plan, node, readsOf), periodText(plan, node, names, readsOf)),
-      presented: presentPayload(plan, node, result.payload, labels, readsOf),
+      presented: presentPayload(plan, node, result.payload, labels, readsOf, scoped),
       result_hash: result.result_hash,
     };
   });
@@ -180,7 +192,8 @@ export function presentFinancialUnit(input: {
   const verified = results.filter((result) => result.disposition === "verified").length;
   const presentations = layout(plan, nodes, results, labels.entries);
   return {
-    presentation_version: presentations.some((presentation) => presentation.kind === "scenarios") ? FINANCIAL_PRESENTATION_V3 : FINANCIAL_PRESENTATION_VERSION,
+    presentation_version: [...read].some((id) => input.concept_scopes.get(id)) ? FINANCIAL_PRESENTATION_V4
+      : presentations.some((presentation) => presentation.kind === "scenarios") ? FINANCIAL_PRESENTATION_V3 : FINANCIAL_PRESENTATION_VERSION,
     template_version: plan.presentation_template_version,
     run_id: input.run_id,
     unit_id: input.unit_id,
@@ -367,7 +380,7 @@ function columnKeyByResult(results: ReadonlyArray<PresentedResult>, lines: Reado
 // ---------------------------------------------------------------------------
 // Payload text.
 
-function presentPayload(plan: FinancialPlan, node: OperationNode, payload: unknown, table: LabelTable, readsOf: ReadsOf): PresentedPayload {
+function presentPayload(plan: FinancialPlan, node: OperationNode, payload: unknown, table: LabelTable, readsOf: ReadsOf, scoped: ScopesOf): PresentedPayload {
   const record = payload as { kind: string } & Record<string, unknown>;
   const labels = table.entries;
   switch (record.kind) {
@@ -387,11 +400,11 @@ function presentPayload(plan: FinancialPlan, node: OperationNode, payload: unkno
       return {
         kind: "predicate",
         outcome,
-        text: `${who}${measureText(plan, subjectNode)}, ${periodText(plan, subjectNode, subjectNames(labels), readsOf)}, ${COMPARISON_TEXT[record.comparison as Comparison]} ${bound}: ${outcome ? "yes" : "no"}`,
+        text: `${who}${labelText(plan, subjectNode, scoped(subjectNode))}, ${periodText(plan, subjectNode, subjectNames(labels), readsOf)}, ${COMPARISON_TEXT[record.comparison as Comparison]} ${bound}: ${outcome ? "yes" : "no"}`,
       };
     }
     case "ranking": {
-      if (node.operation === "period_rank") return periodRanking(plan, node, record as unknown as RankingPayload, table, readsOf);
+      if (node.operation === "period_rank") return periodRanking(plan, node, record as unknown as RankingPayload, table, readsOf, scoped);
       const slotOf = (memberNode: LocalId) => subjectSlot(plan, plan.operations.find((entry) => entry.node_id === memberNode)!);
       const order = (record.ranks as Array<{ node_id: LocalId; rank: number }>).map((entry) => ({ subject_label_id: subjectLabelId(slotOf(entry.node_id)!), rank: entry.rank }));
       const extreme = record.extreme as LocalId[] | null;
@@ -406,13 +419,13 @@ function presentPayload(plan: FinancialPlan, node: OperationNode, payload: unkno
     }
     default: {
       const gap = record as unknown as { reason_code: ReasonCode; explanation: string };
-      const apart = gap.reason_code === "incompatible_period" ? operandPeriods(plan, node, readsOf, subjectNames(labels)) : "";
+      const apart = gap.reason_code === "incompatible_period" ? operandPeriods(plan, node, readsOf, subjectNames(labels), scoped) : "";
       return { kind: "gap", text: `${gap.explanation}${apart}`, reason_code: gap.reason_code };
     }
   }
 }
 
-function periodRanking(plan: FinancialPlan, node: PeriodRankNode, ranking: RankingPayload, labels: LabelTable, readsOf: ReadsOf): PresentedPayload {
+function periodRanking(plan: FinancialPlan, node: PeriodRankNode, ranking: RankingPayload, labels: LabelTable, readsOf: ReadsOf, scoped: ScopesOf): PresentedPayload {
   const names = subjectNames(labels.entries);
   const nodeOf = (id: LocalId) => plan.operations.find((entry) => entry.node_id === id)!;
   const periodOf = (id: LocalId) => labels.intern("period", periodKey(plan, nodeOf(id), readsOf), periodText(plan, nodeOf(id), names, readsOf));
@@ -420,7 +433,7 @@ function periodRanking(plan: FinancialPlan, node: PeriodRankNode, ranking: Ranki
   const { requested, evaluated } = ranking.population;
   const [step, ...others] = new Set(node.members.map((id) => periodAnchor(periodSelectors(plan, nodeOf(id))[0]!).step));
   const periods = others.length === 0 && step !== "cutoff" ? { quarter: "quarters", year: "fiscal years" }[step!] : "periods";
-  const measure = `${ranking.direction} ${lowercaseUnlessAcronym(measureText(plan, nodeOf(node.members[0]!)))}`;
+  const measure = `${ranking.direction} ${lowercaseUnlessAcronym(labelText(plan, nodeOf(node.members[0]!), scoped(node)))}`;
   const leading = leaders.length > 1 ? `tie for the ${measure}` : `has the ${measure}`;
   return {
     kind: "ranking",
@@ -460,12 +473,43 @@ function subjectSlot(plan: FinancialPlan, node: OperationNode): LocalId | null {
   return slots.size === 1 ? [...slots][0]! : null;
 }
 
-/** What a node measures, as the answer labels its measure ("Revenue"). */
-export function measureText(plan: FinancialPlan, node: OperationNode): string {
-  const of = (id: LocalId) => measureText(plan, plan.operations.find((entry) => entry.node_id === id)!);
+/** Each bound input's concept scope (#731) by its reported node: null in its metric's reviewed concept. A node not here is unbound. */
+export type BoundScopes = ReadonlyMap<LocalId, ConceptScopeV1 | null>;
+
+type ScopesOf = (node: OperationNode) => ReadonlyArray<ConceptScopeV1["kind"]>;
+
+// A node's concept scopes are those of the bound inputs it reads (#731), so a label never turns on which member of a
+// ranking or which side of a change comes first. An unbound input reads as the bound inputs of its metric beside it
+// when they share one scope, so a missing member never opens a column or series of the reviewed concept beside
+// scoped figures. Inputs of one metric in two scopes leave it its metric's reviewed concept.
+function scopeReader(plan: FinancialPlan, bound: BoundScopes, read: ReadonlySet<LocalId>): ScopesOf {
+  const reported = plan.operations.filter((node): node is ReportedMetricNode => node.operation === "reported_metric" && read.has(node.node_id));
+  const shared = new Map([...new Set(reported.map((node) => node.metric_key))].map((key) => {
+    const kinds = new Set(reported.filter((node) => node.metric_key === key && bound.has(node.node_id)).map((node) => bound.get(node.node_id)?.kind ?? null));
+    return [key, kinds.size === 1 ? [...kinds][0] ?? null : null] as const;
+  }));
+  const scopeOf = (node: ReportedMetricNode) => (bound.has(node.node_id) ? bound.get(node.node_id)?.kind : shared.get(node.metric_key)) ?? null;
+  return (node) => {
+    const kinds = [...dependencyClosure(plan, [node.node_id])].flatMap((id) => {
+      const entry = plan.operations.find((candidate) => candidate.node_id === id)!;
+      const kind = entry.operation === "reported_metric" ? scopeOf(entry) : null;
+      return kind ? [kind] : [];
+    });
+    return [...new Set(kinds)].sort();
+  };
+}
+
+/** What a node measures, as the answer labels its measure ("Revenue"), given each bound input's concept scope. */
+export function measureText(plan: FinancialPlan, node: OperationNode, bound: BoundScopes): string {
+  return labelText(plan, node, scopeReader(plan, bound, dependencyClosure(plan, [node.node_id]))(node));
+}
+
+/** A node's label in the given concept scopes, which its parts read in too. */
+function labelText(plan: FinancialPlan, node: OperationNode, scopes: ReadonlyArray<ConceptScopeV1["kind"]>): string {
+  const of = (id: LocalId) => labelText(plan, plan.operations.find((entry) => entry.node_id === id)!, scopes);
   switch (node.operation) {
     case "reported_metric":
-      return resolveMetricDefinition(node.metric_key)?.label ?? node.metric_key;
+      return figureLabel(node.metric_key, scopes) ?? node.metric_key;
     case "gross_margin":
       return "Gross margin (gross profit / revenue)";
     case "operating_margin":
@@ -473,7 +517,7 @@ export function measureText(plan: FinancialPlan, node: OperationNode): string {
     case "net_margin":
       return "Net margin (net income / revenue)";
     case "free_cash_flow":
-      return "Free cash flow (OCF less PP&E cash capex)";
+      return figureLabel(node.operation, scopes) ?? node.operation;
     case "net_cash":
       return "Net cash (cash and securities less debt)";
     case "total_debt":
@@ -504,9 +548,13 @@ export function measureText(plan: FinancialPlan, node: OperationNode): string {
   }
 }
 
-/** The structural identity of a measure: equal keys always render the same text. */
-function measureKey(plan: FinancialPlan, node: OperationNode): string {
-  const of = (id: LocalId) => measureKey(plan, plan.operations.find((entry) => entry.node_id === id)!);
+/** The identity of a measure: its structure in its concept scopes. Equal keys always render the same text. */
+function measureKey(plan: FinancialPlan, node: OperationNode, scoped: ScopesOf): string {
+  return `${structureKey(plan, node)}@${scoped(node).join(",")}`;
+}
+
+function structureKey(plan: FinancialPlan, node: OperationNode): string {
+  const of = (id: LocalId) => structureKey(plan, plan.operations.find((entry) => entry.node_id === id)!);
   switch (node.operation) {
     case "reported_metric":
       return `metric:${node.metric_key}`;
@@ -618,9 +666,9 @@ function periodReader(plan: FinancialPlan, nodes: ReadonlyMap<LocalId, Operation
 // named with theirs. One company's measure at several periods keeps the engine's words, which already say which
 // side of a change is current and why a trailing sum's quarters do not sum. A trailing sum operand reads four
 // quarters, and naming one as its period would mislead.
-function operandPeriods(plan: FinancialPlan, node: OperationNode, readsOf: ReadsOf, names: (slot: LocalId) => string): string {
+function operandPeriods(plan: FinancialPlan, node: OperationNode, readsOf: ReadsOf, names: (slot: LocalId) => string, scoped: ScopesOf): string {
   const operands = operationDependencies(node).map((id) => plan.operations.find((entry) => entry.node_id === id)!);
-  if (new Set(operands.map((operand) => `${subjectSlot(plan, operand)} ${measureKey(plan, operand)}`)).size === 1) return "";
+  if (new Set(operands.map((operand) => `${subjectSlot(plan, operand)} ${measureKey(plan, operand, scoped)}`)).size === 1) return "";
   if (operands.some((operand) => readsOf(operand).length !== 1)) return "";
   const bound = operands.flatMap((operand) => {
     const period = readsOf(operand)[0]!.bound;
@@ -631,7 +679,7 @@ function operandPeriods(plan: FinancialPlan, node: OperationNode, readsOf: Reads
   const owner = (operand: OperationNode, index: number) => {
     const slot = across ? subjectSlot(plan, operand) : null;
     if (slot !== null) return names(slot);
-    return index === 0 ? measureText(plan, operand) : lowercaseUnlessAcronym(measureText(plan, operand));
+    return index === 0 ? labelText(plan, operand, scoped(operand)) : lowercaseUnlessAcronym(labelText(plan, operand, scoped(operand)));
   };
   const possessive = (name: string) => (name.endsWith("s") ? `${name}'` : `${name}'s`);
   const named = bound.map(({ operand, period }, index) =>

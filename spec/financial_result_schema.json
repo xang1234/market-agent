@@ -422,7 +422,7 @@
         "observed_at": { "$ref": "financial_plan_schema.json#/$defs/IsoDateTime" },
         "precision_status": { "enum": ["source_token_preserved", "revalidated_against_source", "derived_from_source_tokens"] },
         "derivation": { "$ref": "#/$defs/DerivationProofV1" },
-        "inference": { "$ref": "#/$defs/NoncontrollingInterestInferenceV1" },
+        "inference": { "$ref": "#/$defs/FactInferenceV1" },
         "eligibility": {
           "type": "object",
           "additionalProperties": false,
@@ -437,6 +437,20 @@
       "if": { "properties": { "precision_status": { "const": "derived_from_source_tokens" } } },
       "then": { "properties": { "derivation": true }, "required": ["derivation"] },
       "else": { "properties": { "derivation": false } }
+    },
+    "FactInferenceV1": {
+      "description": "Why a filed value stands for a metric its concept does not name.",
+      "oneOf": [{ "$ref": "#/$defs/NoncontrollingInterestInferenceV1" }, { "$ref": "#/$defs/ProductiveAssetsCapexV1" }]
+    },
+    "ProductiveAssetsCapexV1": {
+      "description": "Capex the filer tags as PaymentsToAcquireProductiveAssets instead of PaymentsToAcquirePropertyPlantAndEquipment. Productive assets can include purchased intangibles, so the figure may be broader than PP&E cash payments.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "concept"],
+      "properties": {
+        "kind": { "const": "productive_assets_capex" },
+        "concept": { "const": "PaymentsToAcquireProductiveAssets" }
+      }
     },
     "NoncontrollingInterestInferenceV1": {
       "description": "Why a filed value stands for a metric its concept does not name: the filer reports no noncontrolling interest for the period, so income attributable to the parent and consolidated income are one figure. concept is the one filed; checked lists the concepts that would have shown a noncontrolling interest.",

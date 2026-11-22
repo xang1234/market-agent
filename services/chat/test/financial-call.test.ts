@@ -38,17 +38,19 @@ const issuer = (ticker: string, index: number, cik: number, accession: string): 
   ticker, cik, accession, issuer: `5c000000-0000-4000-8000-0000000000${index}1`, listing: `5c000000-0000-4000-8000-0000000000${index}e`,
 });
 const AAPL = issuer("AAPL", 1, 320193, "0000320193-26-000026");
-// AAPL's inputs under other filers: one with no consensus capture, one with no cover count, and one whose capex is tagged only as productive assets, as NVIDIA's is.
+// AAPL's inputs under other filers: one with no consensus capture, one with no cover count, one whose capex is tagged only as productive assets, as NVIDIA's is,
+// and one whose operating cash flow is tagged only for continuing operations.
 const NOCN = issuer("NOCN", 2, 900002, "0000900002-26-000026");
 const NOSH = issuer("NOSH", 3, 900003, "0000900003-26-000026");
 const NVDA = issuer("NVDA", 4, 1045810, "0001045810-26-000026");
+const CONT = issuer("CONT", 8, 900008, "0000900008-26-000026");
 // AAPL's inputs, its splits checked a week later, so a Call then binds its shares and finds Friday's close a week old.
 const STAL = issuer("STAL", 5, 900005, "0000900005-26-000026");
 // AAPL's inputs, its last close Wednesday 2026-11-25, the day before Thanksgiving, and its splits checked on Friday.
 const HOLI = issuer("HOLI", 6, 900006, "0000900006-26-000026");
 // AAPL's inputs, its 10-K downloaded at 20:00 New York on 2026-11-09, already 2026-11-10 in UTC.
 const EVEN = issuer("EVEN", 7, 900007, "0000900007-26-000026");
-const ISSUERS = [AAPL, NOCN, NOSH, NVDA, STAL, HOLI, EVEN];
+const ISSUERS = [AAPL, NOCN, NOSH, NVDA, CONT, STAL, HOLI, EVEN];
 
 const resolve = (mention: string): Promise<ChatSubjectPreResolution> => {
   const company = ISSUERS.find((entry) => entry.ticker === mention);
@@ -67,14 +69,15 @@ function withAccession(value: unknown, accession: string): unknown {
   return value;
 }
 
-// AAPL's companyfacts as another filer's: its accession, and without the cover count or with capex under another tag when asked.
-function filerFacts(company: Issuer, change: { shares?: false; capexTag?: string } = {}): unknown {
+// AAPL's companyfacts as another filer's: its accession, and without the cover count or with a figure under another tag when asked.
+function filerFacts(company: Issuer, change: { shares?: false; retag?: readonly [from: string, to: string] } = {}): unknown {
   const facts = withAccession(aaplCallInputs(), company.accession) as { cik: unknown; facts: { "us-gaap": Record<string, unknown>; dei: Record<string, unknown> } };
   facts.cik = company.cik;
   if (change.shares === false) delete facts.facts.dei.EntityCommonStockSharesOutstanding;
-  if (change.capexTag) {
-    facts.facts["us-gaap"][change.capexTag] = facts.facts["us-gaap"].PaymentsToAcquirePropertyPlantAndEquipment;
-    delete facts.facts["us-gaap"].PaymentsToAcquirePropertyPlantAndEquipment;
+  if (change.retag) {
+    const [from, to] = change.retag;
+    facts.facts["us-gaap"][to] = facts.facts["us-gaap"][from];
+    delete facts.facts["us-gaap"][from];
   }
   return facts;
 }
@@ -135,7 +138,8 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
   await seedIssuer(db, pool, AAPL, aaplCallInputs(), true);
   await seedIssuer(db, pool, NOCN, filerFacts(NOCN), false);
   await seedIssuer(db, pool, NOSH, filerFacts(NOSH, { shares: false }), true);
-  await seedIssuer(db, pool, NVDA, filerFacts(NVDA, { capexTag: "PaymentsToAcquireProductiveAssets" }), true);
+  await seedIssuer(db, pool, NVDA, filerFacts(NVDA, { retag: ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"] }), true);
+  await seedIssuer(db, pool, CONT, filerFacts(CONT, { retag: ["NetCashProvidedByUsedInOperatingActivities", "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"] }), true);
   await seedIssuer(db, pool, STAL, filerFacts(STAL), true, "2026-11-16T12:00:00Z");
   await seedIssuer(db, pool, HOLI, filerFacts(HOLI), true, "2026-11-27T12:00:00Z", "2026-11-25T21:00:00Z");
   await seedIssuer(db, pool, EVEN, filerFacts(EVEN), true, undefined, "2026-11-09T21:00:00Z", "2026-11-10T01:00:00.000Z");
@@ -261,8 +265,21 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     assert.equal(await count(), before);
   });
 
-  await t.test("NVDA-style capex declines under rule 0: free cash flow is blocked_dependency, and row 3 names it", async () => {
-    const { call } = (await ask("Make a Call on NVDA")).block;
+  await t.test("NVDA-style capex certifies: the Call is AAPL's, and free cash flow's basis names the productive-assets concept (#731)", async () => {
+    const { threadId, block } = await ask("Make a Call on NVDA");
+    const { call } = block;
+    assert.deepEqual(call.facts[0]!.figure, { kind: "value", text: "USD 136,056,000,000" });
+    assert.equal(
+      call.facts[0]!.basis,
+      "free_cash_flow.v1: operating cash flow less capex, as reported in the latest 10-K. Capex is filed as PaymentsToAcquireProductiveAssets, which may include purchased intangibles as well as PP&E.",
+    );
+    assert.deepEqual(call.requires.map((row) => row.figure.text), ["7.3% a year", "Not computed: the exit multiple is not anchored.", "8.18%"]);
+    assert.equal(call.stance.rule, 1);
+    assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the scoped basis");
+  });
+
+  await t.test("continuing-operations OCF declines under rule 0: free cash flow is blocked_dependency, and row 3 names it", async () => {
+    const { call } = (await ask("Make a Call on CONT")).block;
     assert.deepEqual(call.facts[0]!.figure, { kind: "outcome", outcome: "blocked_dependency", reason_code: "blocked_by_dependency", text: "Not certified: blocked_dependency (blocked_by_dependency)" });
     assert.deepEqual([call.stance.rule, call.stance.reasons.map((reason) => reason.cites)], [0, ["free_cash_flow"]]);
     assert.equal(call.requires[0]!.figure.text, "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)");

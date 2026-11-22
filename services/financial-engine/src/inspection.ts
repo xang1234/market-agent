@@ -10,13 +10,14 @@
 import {
   assumptionHash,
   BOUND_PRICE_INPUT_SCHEMA_VERSION,
+  conceptScope,
   dependencyClosure,
   measureText,
   readsAsMultiple,
   type BoundFinancialInputV1,
   type DerivationProofV1,
   type LocalId,
-  type NoncontrollingInterestInferenceV1,
+  type FactInferenceV1,
   type PlanAssumption,
   scenarioAssumption,
   type PriceObservationKind,
@@ -48,7 +49,7 @@ export type InspectedInput = Readonly<
       period: Readonly<{ kind: string; start: string | null; end: string; fiscal_year: number; fiscal_period: string }>;
       precision_status: string;
       derivation: DerivationProofV1 | null;
-      inference?: NoncontrollingInterestInferenceV1;
+      inference?: FactInferenceV1;
       publication: Readonly<{ attestation_id: string; available_no_later_than: string; precision: string; source_timezone: string }>;
     }
   | {
@@ -146,7 +147,11 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
       numeric_policy_version: record.computation.numeric_policy_version,
       reads_as_multiple: readsAsMultiple(plan, node),
     },
-    measure: measureText(plan, node),
+    measure: measureText(plan, node, new Map(inputs.flatMap((input) => {
+      if (input.binding_status !== "bound") return [];
+      const bound = input.bound_payload as BoundFinancialInputV1;
+      return [[input.input_slot, "inference" in bound ? conceptScope(bound.inference) : null] as const];
+    }))),
     definitions: plan.metric_definitions.filter((definition) => metricKeys.has(definition.metric_key)),
     inputs: inputs.map((input): InspectedInput => {
       if (input.binding_status === "gap") return { input_slot: input.input_slot, status: "gap", reason_code: input.gap_reason };

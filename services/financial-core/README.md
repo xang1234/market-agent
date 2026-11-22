@@ -43,6 +43,12 @@ scenario value in the EPS currency per share, not a price target.
   attribution. Every other node reads no assumption, so v1 hashes are unchanged.
 - Content with a `scenarios` presentation is `financial-presentation.v3`. All
   other content stays v2.
+- Content that reads a figure in a concept scope (`ConceptScopeV1`, #731) is
+  `financial-presentation.v4`, otherwise shaped as v3. Capex filed as
+  `PaymentsToAcquireProductiveAssets` is labelled "Capital expenditures
+  (productive-asset cash payments, may include intangibles)", and free cash
+  flow from it "Free cash flow (OCF less productive-asset capex)", so a table,
+  a series or a chat comparison never sets either beside PP&E's.
 
 ## Numeric limits (numeric-policy.v1)
 

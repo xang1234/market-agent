@@ -11,6 +11,22 @@ import { AAPL, AAPL_HISTORY, filing, PRICE_SOURCE } from "./call-fixtures.ts";
 
 const figures = (rows: CallContent["facts"]) => rows.map((row) => [row.id, row.kind, row.figure.text]);
 
+test("free cash flow from capex filed as productive assets names that concept in its basis (#731)", () => {
+  const ppe = assembleCall(AAPL).facts[0]!;
+  assert.equal(ppe.basis, "free_cash_flow.v1: operating cash flow less PP&E capex, as reported in the latest 10-K");
+  const scoped = assembleCall({ ...AAPL, capex_scope: { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } }).facts[0]!;
+  assert.equal(
+    scoped.basis,
+    "free_cash_flow.v1: operating cash flow less capex, as reported in the latest 10-K. Capex is filed as PaymentsToAcquireProductiveAssets, which may include purchased intangibles as well as PP&E.",
+  );
+  assert.deepEqual({ ...scoped, basis: ppe.basis }, ppe, "only the basis moves");
+});
+
+test("evidence from a caller that predates the capex scope assembles as PP&E capex (#731)", () => {
+  const { capex_scope: _, ...unscoped } = AAPL;
+  assert.deepEqual(assembleCall(unscoped as CallEvidence), assembleCall(AAPL));
+});
+
 test("AAPL: today's multiple is 36.15x, the anchored exit multiple 17.33x, and the stance declines under rule 1 for the bear case", () => {
   const call = assembleCall(AAPL);
   assert.deepEqual(figures(call.facts), [

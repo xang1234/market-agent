@@ -27,6 +27,7 @@ import {
   type ExtractStatementInput,
   type SecCompanyFacts,
   type SecCompanyFactsFetch,
+  type SecConcept,
   type SecConceptValue,
   type SecEdgarFetcher,
   type SecDerivation,
@@ -35,7 +36,7 @@ import {
   type SecSourceToken,
   type SecValueLocation,
 } from "./sec-edgar.ts";
-import type { DerivationProofV1, NoncontrollingInterestInferenceV1 } from "../../financial-core/src/contracts.ts";
+import type { DerivationProofV1, NoncontrollingInterestInferenceV1, ProductiveAssetsCapexV1 } from "../../financial-core/src/contracts.ts";
 import { resolveMetricDefinition, type MetricValueKind } from "../../financial-core/src/definitions.ts";
 import { derivationValue } from "../../financial-core/src/derivation.ts";
 import type { ShareBasis } from "../../financial-core/src/evidence-vocabulary.ts";
@@ -1325,12 +1326,11 @@ async function invalidateWithDependents(db: FundamentalsQueryExecutor, issuerId:
 const SEC_CONTEXT_VERSION = "sec_companyfacts_context.v1";
 
 // A metric mapped from several concepts is certified only from the reviewed
-// one: capex v1 is cash paid for PP&E, and PaymentsToAcquireProductiveAssets
-// (which some filers tag instead) adds purchased intangibles. OCF is the total,
-// matching capex's scope; the continuing-operations line leaves out
-// discontinued operations. Facts from the other concepts stay readable in
-// statements but get no context. A Call's inputs (#594) are each one reviewed
-// concept, so an alias mapped beside one later is never certified unreviewed.
+// one, or a scoped one (secConceptScope). OCF is the total, matching capex's
+// scope; the continuing-operations line leaves out discontinued operations.
+// Facts from the other concepts stay readable in statements but get no
+// context. A Call's inputs (#594) are each one reviewed concept, so an alias
+// mapped beside one later is never certified unreviewed.
 const SEC_CERTIFIED_CONCEPTS: Readonly<Record<string, string>> = {
   capex: "PaymentsToAcquirePropertyPlantAndEquipment",
   operating_cash_flow: "NetCashProvidedByUsedInOperatingActivities",
@@ -1350,6 +1350,14 @@ const SEC_CERTIFIED_CONCEPTS: Readonly<Record<string, string>> = {
   remaining_performance_obligations: "RevenueRemainingPerformanceObligation",
 };
 
+// Capex a filer tags as PaymentsToAcquireProductiveAssets instead of PP&E
+// certifies too (operator, 2026-11-21, #731), with the concept recorded in its
+// quality_flags, since productive assets may include purchased intangibles.
+// Extraction reads a filing that tags both as PP&E (US_GAAP_TO_METRIC_KEY's order).
+function secConceptScope(metricKey: string, concept: string): ProductiveAssetsCapexV1 | null {
+  return metricKey === "capex" && concept === "PaymentsToAcquireProductiveAssets" ? { kind: "productive_assets_capex", concept } : null;
+}
+
 // Selection takes every token from the filing whose own period it is, never
 // from a later filing's comparative, so the stored fact is that filing's
 // original disclosure. Companyfacts carries only undimensioned values, which
@@ -1366,7 +1374,15 @@ async function recordSecOriginalContext(
   // count keeps its filing's own fiscal period.
   if (token.start === null && token.form !== "10-K" && token.concept !== SEC_COVER_COUNT_CONCEPT) return;
   const certifiedConcept = SEC_CERTIFIED_CONCEPTS[line.metric_key];
-  if (certifiedConcept !== undefined && token.concept !== certifiedConcept) return;
+  const scope = secConceptScope(line.metric_key, token.concept);
+  if (certifiedConcept !== undefined && token.concept !== certifiedConcept && scope === null) return;
+  // A fact stored before its concept certified gains the scope with its context.
+  if (scope !== null) {
+    await db.query(
+      `update facts set quality_flags = quality_flags || $2::jsonb, updated_at = now() where fact_id = $1 and not quality_flags @> $2::jsonb`,
+      [tokenFactId, JSON.stringify([scope])],
+    );
+  }
   const existing = await db.query(`select 1 from fact_financial_contexts where fact_id = $1`, [tokenFactId]);
   if (existing.rows.length > 0) return;
   await recordFactFinancialContext(db, {
@@ -1501,8 +1517,12 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     const values = usGaap[concept!]?.units?.[unit!] ?? [];
     const originalFiled = values.find((value) => value.accn === originalAccession)?.filed;
     if (originalFiled === undefined) continue;
-    const roundings = roundingsByValues.get(values) ?? filingRoundings(values, resolveMetricDefinition(original.metric_key)?.value_kind ?? "per_share");
-    roundingsByValues.set(values, roundings);
+    const roundingsFor = (list: ReadonlyArray<SecConceptValue>) => {
+      const known = roundingsByValues.get(list) ?? filingRoundings(list, resolveMetricDefinition(original.metric_key)?.value_kind ?? "per_share");
+      roundingsByValues.set(list, known);
+      return known;
+    };
+    const roundings = roundingsFor(values);
     const { derivation } = original;
     const record = async (later: LaterStatement, relation: LaterRelation | null) => {
       const current = storedLater.get(`${original.fact_id}|${sourceIdForAccession(later.accession)}`);
@@ -1514,11 +1534,22 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     const statements = periodStatements(values, original.period_start, original.period_end, original.fiscal_period === "FY");
     const isLater = ({ accession, filed }: PeriodStatement) => filed >= originalFiled && (derivation !== null || accession !== originalAccession);
     const unordered = unorderedDates([statements, ...(derivation?.terms ?? []).map((term) => termStatements(values, term))], roundings);
+    const rescoped = reviewedLines(usGaap, original, concept!, unit!, roundingsFor).filter((line) => line.input !== undefined || isLater(line));
     let standing: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on, rounding: roundings.get(originalAccession!) ?? null };
     const inputs: RoundedFigure[] = derivation?.terms.map((term) => ({ value: term.raw_token, rounding: roundings.get(term.source.accession) ?? null })) ?? [];
     // A derived figure stands on its unmoved inputs, whose rounding a line may fall within.
     let asDerived = derivation !== null;
-    for (const filing of filingsInOrder(statements, derivation, values)) {
+    for (const filing of filingsInOrder(statements, derivation, values, rescoped)) {
+      // A line in another scope only ever repeats the figure that stands, or leaves it unverified (#731).
+      const changed = filing.rescoped.find((line) => sameRoundedFigure(line.term === null ? standing : inputs[line.term]!, { value: line.token, rounding: line.rounding }) !== true);
+      if (changed !== undefined) {
+        await record(changed, "unverified_restatement");
+        break;
+      }
+      if (filing.statement === null && filing.inputs.length === 0) {
+        await record(filing.rescoped[0]!, null);
+        continue;
+      }
       let moved: FiledInput | null = null;
       for (const input of filing.inputs) {
         const figure: RoundedFigure = { value: input.statement.token, rounding: roundings.get(input.statement.accession) ?? null };
@@ -1573,6 +1604,36 @@ function periodStatements(values: ReadonlyArray<SecConceptValue>, start: string 
   }).sort((left, right) => left.filed.localeCompare(right.filed) || left.accession.localeCompare(right.accession));
 }
 
+/** A filing's line in the metric's reviewed concept, at that filing's rounding, for the period (term null) or one of a derived quarter's inputs. */
+type RescopedLine = LaterStatement & Readonly<{ rounding: number | null; term: number | null }>;
+
+/**
+ * A filing's capex is its PP&E line when it states one, as extraction reads it
+ * (US_GAAP_TO_METRIC_KEY's order). So for an original in a scoped concept
+ * (secConceptScope), each filing's line in the metric's reviewed concept states
+ * the period, or a derived quarter's input, in another scope. An input's own
+ * filing is left out: its derivation already read that filing in this concept.
+ */
+function reviewedLines(
+  usGaap: Readonly<Record<string, SecConcept>>,
+  original: SecOriginal,
+  concept: string,
+  unit: string,
+  roundingsOf: (values: ReadonlyArray<SecConceptValue>) => FilingRoundings,
+): RescopedLine[] {
+  const reviewed = SEC_CERTIFIED_CONCEPTS[original.metric_key];
+  if (reviewed === undefined || secConceptScope(original.metric_key, concept) === null) return [];
+  const values = usGaap[reviewed]?.units?.[unit] ?? [];
+  const roundings = roundingsOf(values);
+  const line = (term: number | null, input?: DerivationTerm) => (statement: PeriodStatement): RescopedLine =>
+    ({ ...statement, concept: reviewed, unit, rounding: roundings.get(statement.accession) ?? null, term, ...(input ? { input } : {}) });
+  return [
+    ...periodStatements(values, original.period_start, original.period_end, original.fiscal_period === "FY").map(line(null)),
+    ...(original.derivation?.terms ?? []).flatMap((input, term) =>
+      termStatements(values, input).filter(({ accession }) => accession !== input.source.accession).map(line(term, input))),
+  ];
+}
+
 type DerivationTerm = DerivationProofV1["terms"][number];
 
 function termStatements(values: ReadonlyArray<SecConceptValue>, term: DerivationTerm): PeriodStatement[] {
@@ -1590,13 +1651,18 @@ function unorderedDates(statementLists: ReadonlyArray<ReadonlyArray<PeriodStatem
 /** A later filing's statement of one of a derived quarter's inputs, by its place among the terms. */
 type FiledInput = Readonly<{ term: number; statement: PeriodStatement }>;
 
-type WalkedFiling = { filed: string; accession: string; statement: PeriodStatement | null; inputs: FiledInput[] };
+type WalkedFiling = { filed: string; accession: string; statement: PeriodStatement | null; inputs: FiledInput[]; rescoped: RescopedLine[] };
 
-/** What each filing states of a period and of a derived quarter's inputs, in filing order. */
-function filingsInOrder(statements: ReadonlyArray<PeriodStatement>, derivation: DerivationProofV1 | null, values: ReadonlyArray<SecConceptValue>): WalkedFiling[] {
+/** What each filing states of a period and of a derived quarter's inputs, in either scope, in filing order. */
+function filingsInOrder(
+  statements: ReadonlyArray<PeriodStatement>,
+  derivation: DerivationProofV1 | null,
+  values: ReadonlyArray<SecConceptValue>,
+  rescoped: ReadonlyArray<RescopedLine>,
+): WalkedFiling[] {
   const filings = new Map<string, WalkedFiling>();
   const filingOf = ({ accession, filed }: PeriodStatement) => {
-    const filing = filings.get(accession) ?? { filed, accession, statement: null, inputs: [] };
+    const filing = filings.get(accession) ?? { filed, accession, statement: null, inputs: [], rescoped: [] };
     filings.set(accession, filing);
     return filing;
   };
@@ -1604,6 +1670,7 @@ function filingsInOrder(statements: ReadonlyArray<PeriodStatement>, derivation: 
   for (const [term, derived] of (derivation?.terms ?? []).entries()) {
     for (const statement of termStatements(values, derived)) filingOf(statement).inputs.push({ term, statement });
   }
+  for (const line of rescoped) filingOf(line).rescoped.push(line);
   return [...filings.values()].sort((left, right) => left.filed.localeCompare(right.filed) || left.accession.localeCompare(right.accession));
 }
 
@@ -1741,7 +1808,7 @@ async function storeLaterStatement(
       input.issuerId, original.metric_id, original.period_kind, original.period_start, original.period_end, original.fiscal_year,
       token.token, original.unit, original.currency, original.scale, asOf, input.clock().toISOString(), sourceId, original.fact_id,
       later.filed,
-      JSON.stringify(original.inference ? [original.inference] : []),
+      JSON.stringify([original.inference, secConceptScope(original.metric_key, later.concept)].filter((flag) => flag !== null)),
       original.fiscal_period,
     ],
   );

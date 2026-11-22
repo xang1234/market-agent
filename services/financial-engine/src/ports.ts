@@ -14,7 +14,7 @@ import type {
   FiscalPeriod,
   IsoDateTime,
   MetricKey,
-  NoncontrollingInterestInferenceV1,
+  FactInferenceV1,
   PeriodType,
   PrecisionClass,
   PriceObservationKind,
@@ -78,8 +78,8 @@ export type InputCandidate = Readonly<{
     /** A derived value's proof; its raw_token is the derivation's exact sum. */
     derivation: DerivationProofV1 | null;
   }> | null;
-  /** Why the value stands for a metric its concept does not name (#342). */
-  inference?: NoncontrollingInterestInferenceV1 | null;
+  /** Why the value stands for a metric its concept does not name (#342, #731). */
+  inference?: FactInferenceV1 | null;
   publication: ReadonlyArray<Readonly<{ attestation_id: string; timing: PublicationTiming }>>;
 }>;
 
