@@ -176,7 +176,12 @@ export function createMarketServer(deps: MarketServerDeps): Server {
             ),
           );
           const response: GetSeriesResponse = { query, results };
-          if (!seriesResponseHasRetryableUnavailable(response)) {
+          // A range that ends after now still gains bars, so its response is
+          // not final; the adapter's bar cache bounds how often it refetches.
+          if (
+            !seriesResponseHasRetryableUnavailable(response) &&
+            Date.parse(query.range.end) <= Date.parse(observedAt)
+          ) {
             rememberSeriesResponse(seriesResponseCache, seriesCacheMaxEntries, cacheKey, response);
           }
           respondJson(res, 200, response);
