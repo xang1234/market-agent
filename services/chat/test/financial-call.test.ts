@@ -278,11 +278,17 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the scoped basis");
   });
 
-  await t.test("continuing-operations OCF declines under rule 0: free cash flow is blocked_dependency, and row 3 names it", async () => {
-    const { call } = (await ask("Make a Call on CONT")).block;
-    assert.deepEqual(call.facts[0]!.figure, { kind: "outcome", outcome: "blocked_dependency", reason_code: "blocked_by_dependency", text: "Not certified: blocked_dependency (blocked_by_dependency)" });
-    assert.deepEqual([call.stance.rule, call.stance.reasons.map((reason) => reason.cites)], [0, ["free_cash_flow"]]);
-    assert.equal(call.requires[0]!.figure.text, "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)");
+  await t.test("continuing-operations OCF certifies: the Call is AAPL's, and free cash flow's basis names the continuing-operations concept (#743)", async () => {
+    const { threadId, block } = await ask("Make a Call on CONT");
+    const { call } = block;
+    assert.deepEqual(call.facts[0]!.figure, { kind: "value", text: "USD 136,056,000,000" });
+    assert.equal(
+      call.facts[0]!.basis,
+      "free_cash_flow.v1: operating cash flow less PP&E capex, as reported in the latest 10-K. Operating cash flow is filed as NetCashProvidedByUsedInOperatingActivitiesContinuingOperations, which excludes discontinued operations.",
+    );
+    assert.deepEqual(call.requires.map((row) => row.figure.text), ["7.3% a year", "Not computed: the exit multiple is not anchored.", "8.18%"]);
+    assert.equal(call.stance.rule, 1);
+    assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the scoped basis");
   });
 
   await t.test("missing shares decline under rule 0", async () => {

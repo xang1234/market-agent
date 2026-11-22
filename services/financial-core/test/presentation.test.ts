@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { conceptScope, type BoundFactInputV1, type BoundFinancialInputV1, type FinancialPlanV1, type PeriodSelector, type ValuePayload } from "../src/contracts.ts";
+import { conceptScope, type BoundFactInputV1, type BoundFinancialInputV1, type FactInferenceV1, type FinancialPlanV1, type PeriodSelector, type ValuePayload } from "../src/contracts.ts";
 import { evaluatePlan } from "../src/coverage.ts";
 import { parseDerivedDecimalText } from "../src/exact-decimal.ts";
 import { operandFromBoundInput, operationGap } from "../src/operations.ts";
@@ -287,7 +287,7 @@ test("one company's capex is a series only within one scope: never across its sw
   assert.deepEqual(["o_capex2019", "o_capex2020"].map((output) => labelTexts(content, output)[1]), [PRODUCTIVE_ASSETS_CAPEX, "Capital expenditures (PP&E cash payments)"]);
 });
 
-const fiscalYearFact = (slot: "a" | "b" | "c", metric: string, fiscal_year: number, value: string, inference?: typeof PRODUCTIVE_ASSETS) =>
+const fiscalYearFact = (slot: "a" | "b" | "c", metric: string, fiscal_year: number, value: string, inference?: FactInferenceV1) =>
   boundInput({ slot, metric, value, start: `${fiscal_year}-01-01`, end: `${fiscal_year}-12-31`, fiscal_year, ...(inference ? { inference } : {}) });
 
 const capexWindow = (members: string[], outputs: string[]) => singleSubjectPlan([
@@ -367,6 +367,88 @@ test("a peer ranking across capex scopes is the engine's named gap under one lab
     assert.equal(labelTexts(content, "o_a_fcf")[1], "Free cash flow (OCF less PP&E cash capex)", "a figure filed as PP&E keeps its own label");
   }
   assert.deepEqual([...labels], [`${PRODUCTIVE_ASSETS_FCF} ranking`]);
+});
+
+const CONTINUING_OPERATIONS = { kind: "continuing_operations_ocf", concept: "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations" } as const;
+const CONTINUING_OCF = "Operating cash flow (continuing operations, excludes discontinued operations)";
+const CONTINUING_FCF = "Free cash flow (continuing-operations OCF less PP&E cash capex)";
+const BOTH_SCOPES_FCF = "Free cash flow (continuing-operations OCF less productive-asset capex)";
+
+// One filer's free cash flow in each pairing of the two scopes: FY2020 neither, FY2021 continuing-operations OCF,
+// FY2022 productive-assets capex, FY2023 both.
+test("free cash flow names each scope it is taken in, in every pairing, and a series never crosses one (#743)", () => {
+  const years = [2020, 2021, 2022, 2023] as const;
+  const scopes: Record<(typeof years)[number], readonly [FactInferenceV1 | undefined, FactInferenceV1 | undefined]> = {
+    2020: [undefined, undefined], 2021: [CONTINUING_OPERATIONS, undefined], 2022: [undefined, PRODUCTIVE_ASSETS], 2023: [CONTINUING_OPERATIONS, PRODUCTIVE_ASSETS],
+  };
+  const plan = singleSubjectPlan(years.flatMap((year) => [
+    balance(`ocf${year}`, "operating_cash_flow", year),
+    balance(`capex${year}`, "capex", year),
+    { node_id: `fcf${year}`, operation: "free_cash_flow" as const, operation_version: "free_cash_flow.v1", operating_cash_flow: `ocf${year}`, capex: `capex${year}` },
+  ]), years.flatMap((year) => [`ocf${year}`, `fcf${year}`]));
+  const facts = Object.fromEntries(years.flatMap((year) => [
+    [`ocf${year}`, fiscalYearFact("a", "operating_cash_flow", year, "500", scopes[year][0])],
+    [`capex${year}`, fiscalYearFact("a", "capex", year, "100", scopes[year][1])],
+  ]));
+  const content = engineAnswer(plan, facts, { a: "Caterpillar Inc." });
+  assert.deepEqual(years.map((year) => labelTexts(content, `o_fcf${year}`)[1]), ["Free cash flow (OCF less PP&E cash capex)", CONTINUING_FCF, PRODUCTIVE_ASSETS_FCF, BOTH_SCOPES_FCF]);
+  assert.deepEqual(years.map((year) => labelTexts(content, `o_ocf${year}`)[1]), ["Operating cash flow", CONTINUING_OCF, "Operating cash flow", CONTINUING_OCF]);
+  assert.deepEqual(years.map((year) => resultText(content, `o_fcf${year}`)), years.map(() => "USD 400.00"));
+  assert.equal(content.presentation_version, "financial-presentation.v4");
+  for (const presentation of content.presentations) {
+    if (presentation.kind !== "series") continue;
+    assert.ok(presentation.points.every((point) => content.results.find((entry) => entry.result_id === point.result_id)!.measure_label_id === presentation.measure_label_id), "a series holds one measure");
+  }
+
+  // The same figures with every input in its reviewed concept: one label, as every answer before #731 has them.
+  const reviewed = engineAnswer(plan, Object.fromEntries(Object.keys(facts).map((node) => [node, fiscalYearFact("a", node.startsWith("ocf") ? "operating_cash_flow" : "capex", Number(node.slice(-4)), node.startsWith("ocf") ? "500" : "100")])), { a: "Caterpillar Inc." });
+  assert.equal(reviewed.presentation_version, "financial-presentation.v2");
+  assert.deepEqual(new Set(years.map((year) => labelTexts(reviewed, `o_fcf${year}`)[1])), new Set(["Free cash flow (OCF less PP&E cash capex)"]));
+});
+
+test("a peer ranking across OCF scopes is the engine's named gap under one label, in every member order (#743)", () => {
+  const facts = { ...FREE_CASH_FLOW_FACTS, a_capex: fiscalYearFact("a", "capex", 2023, "50", PRODUCTIVE_ASSETS), b_ocf: fiscalYearFact("b", "operating_cash_flow", 2023, "900", CONTINUING_OPERATIONS) };
+  const labels = new Set<string>();
+  for (const members of orderings(["a_fcf", "b_fcf", "c_fcf"])) {
+    const content = engineAnswer(freeCashFlowRanking(members), facts, THREE);
+    const { disposition, presented } = result(content, "o_rank");
+    assert.deepEqual([disposition, presented.kind === "gap" && presented.reason_code], ["incompatible", "incompatible_definition"], members.join());
+    assert.match(presented.kind === "gap" ? presented.text : "", /discontinued operations/);
+    labels.add(labelTexts(content, "o_rank")[1]);
+    assert.deepEqual(["o_a_fcf", "o_b_fcf"].map((output) => labelTexts(content, output)[1]), [PRODUCTIVE_ASSETS_FCF, BOTH_SCOPES_FCF], "each figure keeps its own label");
+  }
+  assert.deepEqual([...labels], [`${BOTH_SCOPES_FCF} ranking`]);
+});
+
+// Cash conversion over a continuing-operations OCF is the engine's incompatible_definition gap (operations.ts ratio), so
+// its measure, and with it its label and its key, carries no scope.
+const cashConversion = (slot: string, year: number) => [
+  reportedAt(`${slot}_ocf${year}`, slot, "operating_cash_flow", FY(year)),
+  reportedAt(`${slot}_ni${year}`, slot, "net_income_consolidated", FY(year)),
+  { node_id: `${slot}_cc${year}`, operation: "ratio" as const, operation_version: "ratio.v1", ratio_key: "operating_cash_flow_to_net_income", numerator: `${slot}_ocf${year}`, denominator: `${slot}_ni${year}` },
+];
+const cashConversionFacts = (slot: "a" | "b", year: number, ocf: string, scope?: FactInferenceV1) => ({
+  [`${slot}_ocf${year}`]: fiscalYearFact(slot, "operating_cash_flow", year, ocf, scope),
+  [`${slot}_ni${year}`]: fiscalYearFact(slot, "net_income_consolidated", year, "100"),
+});
+
+test("cash conversion beside a continuing-operations gap is one column, the gap in its own company's row (#743)", () => {
+  const plan = comparisonPlan([...cashConversion("a", 2023), ...cashConversion("b", 2023)], ["a_cc2023", "b_cc2023"]);
+  const content = engineAnswer(plan, { ...cashConversionFacts("a", 2023, "120"), ...cashConversionFacts("b", 2023, "90", CONTINUING_OPERATIONS) }, { a: "Apple Inc.", b: "Caterpillar Inc." });
+  assert.deepEqual([resultText(content, "o_a_cc2023"), result(content, "o_b_cc2023").disposition], ["1.20x", "incompatible"]);
+  assert.equal(result(content, "o_a_cc2023").measure_label_id, result(content, "o_b_cc2023").measure_label_id);
+  const table = content.presentations.find((presentation) => presentation.kind === "table");
+  assert.ok(table?.kind === "table");
+  assert.deepEqual([table.columns.length, table.rows.map((row) => row.cells.length)], [1, [1, 1]]);
+});
+
+test("one company's cash conversion across its switch from continuing-operations OCF to the total is one series (#743)", () => {
+  const years = [2017, 2018, 2019];
+  const plan = singleSubjectPlan(years.flatMap((year) => cashConversion("a", year)), years.map((year) => `a_cc${year}`));
+  const content = engineAnswer(plan, Object.assign({}, ...years.map((year) => cashConversionFacts("a", year, "120", year < 2019 ? CONTINUING_OPERATIONS : undefined))), { a: "Caterpillar Inc." });
+  assert.deepEqual(years.map((year) => result(content, `o_a_cc${year}`).disposition), ["incompatible", "incompatible", "verified"]);
+  assert.equal(new Set(years.map((year) => result(content, `o_a_cc${year}`).measure_label_id)).size, 1);
+  assert.deepEqual(content.presentations.map((presentation) => [presentation.kind, presentation.kind === "series" ? presentation.points.length : 1]), [["series", 3]]);
 });
 
 test("a threshold on an approved ratio reads as a multiple, like the ratio's value", () => {

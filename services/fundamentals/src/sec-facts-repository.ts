@@ -36,7 +36,7 @@ import {
   type SecSourceToken,
   type SecValueLocation,
 } from "./sec-edgar.ts";
-import type { DerivationProofV1, NoncontrollingInterestInferenceV1, ProductiveAssetsCapexV1 } from "../../financial-core/src/contracts.ts";
+import type { ConceptScopeV1, DerivationProofV1, NoncontrollingInterestInferenceV1 } from "../../financial-core/src/contracts.ts";
 import { resolveMetricDefinition, type MetricValueKind } from "../../financial-core/src/definitions.ts";
 import { derivationValue } from "../../financial-core/src/derivation.ts";
 import type { ShareBasis } from "../../financial-core/src/evidence-vocabulary.ts";
@@ -1162,7 +1162,9 @@ async function persistStatementFacts(
         ? { ...attestation, fact_id: storedId, precision_class: "revalidated_against_source" }
         : { ...attestation, fact_id: storedId });
     }
-    if (provenance.certify !== false) await recordSecOriginalContext(db, storedId, line, exact.at, attestation.source_locator);
+    if (provenance.certify !== false && !(derivation && derivedAcrossPerimeters(line.metric_key, derivation))) {
+      await recordSecOriginalContext(db, storedId, line, exact.at, attestation.source_locator);
+    }
   }
   return insertedIds;
 }
@@ -1327,8 +1329,7 @@ const SEC_CONTEXT_VERSION = "sec_companyfacts_context.v1";
 
 // A metric mapped from several concepts is certified only from the reviewed
 // one, or a scoped one (secConceptScope). OCF is the total, matching capex's
-// scope; the continuing-operations line leaves out discontinued operations.
-// Facts from the other concepts stay readable in statements but get no
+// scope. Facts from the other concepts stay readable in statements but get no
 // context. A Call's inputs (#594) are each one reviewed concept, so an alias
 // mapped beside one later is never certified unreviewed.
 const SEC_CERTIFIED_CONCEPTS: Readonly<Record<string, string>> = {
@@ -1351,11 +1352,24 @@ const SEC_CERTIFIED_CONCEPTS: Readonly<Record<string, string>> = {
 };
 
 // Capex a filer tags as PaymentsToAcquireProductiveAssets instead of PP&E
-// certifies too (operator, 2026-11-21, #731), with the concept recorded in its
-// quality_flags, since productive assets may include purchased intangibles.
-// Extraction reads a filing that tags both as PP&E (US_GAAP_TO_METRIC_KEY's order).
-function secConceptScope(metricKey: string, concept: string): ProductiveAssetsCapexV1 | null {
-  return metricKey === "capex" && concept === "PaymentsToAcquireProductiveAssets" ? { kind: "productive_assets_capex", concept } : null;
+// (#731), and OCF a filer tags only for continuing operations (#743), certify
+// too (operator, 2026-11-21), with the concept recorded in quality_flags:
+// productive assets may include purchased intangibles, and the
+// continuing-operations line excludes discontinued operations. Extraction reads
+// a filing that tags both as its reviewed concept (US_GAAP_TO_METRIC_KEY's order).
+function secConceptScope(metricKey: string, concept: string): ConceptScopeV1 | null {
+  if (metricKey === "capex" && concept === "PaymentsToAcquireProductiveAssets") return { kind: "productive_assets_capex", concept };
+  if (metricKey === "operating_cash_flow" && concept === "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations") return { kind: "continuing_operations_ocf", concept };
+  return null;
+}
+
+// A continuing-operations line covers the businesses its own filing reports as
+// continuing, and a discontinuation changes that set under the same concept. A
+// quarter derived from another filing's year to date may subtract a figure
+// covering other businesses, and no filing states which, so it does not certify.
+function derivedAcrossPerimeters(metricKey: string, derivation: SecDerivation): boolean {
+  return secConceptScope(metricKey, derivation.concept)?.kind === "continuing_operations_ocf"
+    && derivation.subtrahends.some((input) => input.accn !== derivation.minuend.accn);
 }
 
 // Selection takes every token from the filing whose own period it is, never

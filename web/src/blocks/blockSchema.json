@@ -2174,7 +2174,7 @@
       ]
     },
     "FinancialAnswerContentV3": {
-      "description": "v2 content whose presentations may include P/E scenarios (#201). Every other content stays v2. v4 is the same shape, for content that reads capex filed as productive assets, whose capex and free cash flow carry measure labels of their own (#731).",
+      "description": "v2 content whose presentations may include P/E scenarios (#201). Every other content stays v2. v4 is the same shape, for content that reads a figure in a concept scope, capex filed as productive assets (#731) or operating cash flow filed for continuing operations (#743), whose figures and the free cash flow taken from them carry measure labels of their own.",
       "type": "object",
       "required": [
         "presentation_version",

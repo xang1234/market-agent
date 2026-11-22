@@ -625,10 +625,11 @@ async function derivationInputs(
   });
 }
 
-// A value standing for a metric its concept does not name (#342, #731) never reads as stated.
+// A value standing for a metric its concept does not name (#342, #731, #743) never reads as stated.
 function inferenceRows(qualityFlags: unknown): ReadonlyArray<{ label: string; value: string }> {
   return (Array.isArray(qualityFlags) ? qualityFlags : []).flatMap((flag) => {
-    if (!isRecord(flag) || (flag.kind !== "no_noncontrolling_interest" && flag.kind !== "productive_assets_capex") || typeof flag.concept !== "string") return [];
+    if (!isRecord(flag) || typeof flag.concept !== "string") return [];
+    if (flag.kind !== "no_noncontrolling_interest" && flag.kind !== "productive_assets_capex" && flag.kind !== "continuing_operations_ocf") return [];
     const { label, text } = inferenceNote({ kind: flag.kind, concept: flag.concept });
     return [{ label, value: text }];
   });

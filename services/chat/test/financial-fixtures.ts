@@ -34,6 +34,7 @@ export const SEC_ISSUER_B = "4f000000-0000-4000-8000-0000000000d2";
 export const SEC_ISSUER_C = "4f000000-0000-4000-8000-0000000000d3";
 export const SEC_ISSUER_D = "4f000000-0000-4000-8000-0000000000d4";
 export const SEC_ISSUER_E = "4f000000-0000-4000-8000-0000000000d5";
+export const SEC_ISSUER_F = "4f000000-0000-4000-8000-0000000000d6";
 
 /**
  * AAA and BBB resolve to the seeded issuers; AMB is ambiguous between them, and AMBL
@@ -55,6 +56,7 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
     COX: resolved(SEC_ISSUER_C, "Continuing Operations Corp"),
     QTR: resolved(SEC_ISSUER_D, "Quarterly Filer Corp"),
     SWX: resolved(SEC_ISSUER_E, "Switched Capex Corp"),
+    BOX: resolved(SEC_ISSUER_F, "Both Scopes Corp"),
     AMB: {
       status: "needs_clarification", input_text: mention, normalized_input: mention, message: "ambiguous",
       candidates: [

@@ -388,6 +388,51 @@ test("capex filed as productive assets never compares with PP&E capex as one mea
   assert.equal(value(absoluteChange(change("absolute_change"), freeCash(scoped("100")), freeCash(scoped("125", FY2022)))), "25");
 });
 
+const CONTINUING_OPERATIONS = { kind: "continuing_operations_ocf", concept: "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations" } as const;
+
+// CAT and COST tagged only continuing-operations OCF through FY2018 and the total later.
+test("OCF filed for continuing operations never compares with total OCF as one measure, nor does the free cash flow taken from it (#743)", () => {
+  const continuing = (value: string, extra: Partial<InputSpec> = {}) => ocfOf(value, { inference: CONTINUING_OPERATIONS, ...extra });
+  const growth = change("percent_change_positive_base");
+  const mixed = percentChangePositiveBase(growth, ocfOf("120"), continuing("100", FY2022));
+  assert.deepEqual(gap(mixed), ["incompatible", "incompatible_definition"]);
+  assert.match(mixed.ok ? "" : mixed.explanation, /NetCashProvidedByUsedInOperatingActivitiesContinuingOperations.*discontinued operations/);
+  assert.equal(value(percentChangePositiveBase(growth, continuing("120"), continuing("100", FY2022))), "0.2");
+
+  // Every pairing of the two scopes gives free cash flow its own identity, and only equal ones compare.
+  const freeCash = (ocf: InputSpec["inference"], capex: InputSpec["inference"], period: Partial<InputSpec> = {}) => {
+    const outcome = freeCashFlow(fcf, ocfOf("200", { ...period, ...(ocf ? { inference: ocf } : {}) }), capexOf("50", { ...period, ...(capex ? { inference: capex } : {}) }));
+    assert.ok(outcome.ok);
+    return outcome.operand;
+  };
+  const pairs = [[undefined, undefined], [CONTINUING_OPERATIONS, undefined], [undefined, PRODUCTIVE_ASSETS], [CONTINUING_OPERATIONS, PRODUCTIVE_ASSETS]] as const;
+  assert.deepEqual(pairs.map(([ocf, capex]) => freeCash(ocf, capex).measure.concept_scopes), [[], ["continuing_operations_ocf"], ["productive_assets_capex"], ["continuing_operations_ocf", "productive_assets_capex"]]);
+  for (const [i, current] of pairs.entries()) {
+    for (const [j, prior] of pairs.entries()) {
+      const outcome = absoluteChange(change("absolute_change"), freeCash(current[0], current[1]), freeCash(prior[0], prior[1], FY2022));
+      if (i === j) assert.equal(value(outcome), "0", `${i} over ${j}`);
+      else assert.deepEqual(gap(outcome), ["incompatible", "incompatible_definition"], `${i} over ${j}`);
+    }
+  }
+  // Each operand in one scope the other lacks names the same one, in either order.
+  const explanation = (current: typeof pairs[number], prior: typeof pairs[number]) => {
+    const outcome = absoluteChange(change("absolute_change"), freeCash(current[0], current[1]), freeCash(prior[0], prior[1], FY2022));
+    return outcome.ok ? "" : outcome.explanation;
+  };
+  assert.equal(explanation(pairs[1], pairs[2]), explanation(pairs[2], pairs[1]));
+  assert.match(explanation(pairs[2], pairs[1]), /^One figure's operating cash flow/u);
+});
+
+// Net income includes discontinued operations, so continuing-operations OCF over it is not the approved ratio.
+test("cash conversion never reads OCF filed for continuing operations (#743)", () => {
+  const node: RatioNode = { node_id: "cc", operation: "ratio", operation_version: "ratio.v1", ratio_key: "operating_cash_flow_to_net_income", numerator: "ocf", denominator: "ni" };
+  const netIncome = operand("ni", { metric: "net_income_consolidated", value: "100", ...FY2023 });
+  assert.equal(value(ratio(node, ocfOf("120"), netIncome)), "1.2");
+  const scoped = ratio(node, ocfOf("120", { inference: CONTINUING_OPERATIONS }), netIncome);
+  assert.deepEqual(gap(scoped), ["incompatible", "incompatible_definition"]);
+  assert.match(scoped.ok ? "" : scoped.explanation, /discontinued operations/);
+});
+
 test("margins are exact when the quotient terminates", () => {
   const rev = operand("rev", { metric: "revenue", value: "200", ...FY2023 });
   const op = operand("op", { metric: "operating_income", value: "50", ...FY2023 });

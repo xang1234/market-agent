@@ -49,9 +49,9 @@ export const FINANCIAL_PRESENTATION_V1 = "financial-presentation.v1";
 /** Content with a `scenarios` presentation (#201). All other content stays v2, so no v1 plan's presentation hash moves. */
 export const FINANCIAL_PRESENTATION_V3 = "financial-presentation.v3";
 /**
- * Content that reads a figure in a concept scope (#731), such as capex filed as PaymentsToAcquireProductiveAssets,
- * which with free cash flow taken from it is a measure of its own. It is otherwise v3. Content that reads none keeps
- * v2 or v3, and its hash.
+ * Content that reads a figure in a concept scope (#731, #743), such as capex filed as PaymentsToAcquireProductiveAssets
+ * or OCF filed for continuing operations, which with free cash flow taken from it is a measure of its own. It is
+ * otherwise v3. Content that reads none keeps v2 or v3, and its hash.
  */
 export const FINANCIAL_PRESENTATION_V4 = "financial-presentation.v4";
 
@@ -481,7 +481,8 @@ type ScopesOf = (node: OperationNode) => ReadonlyArray<ConceptScopeV1["kind"]>;
 // A node's concept scopes are those of the bound inputs it reads (#731), so a label never turns on which member of a
 // ranking or which side of a change comes first. An unbound input reads as the bound inputs of its metric beside it
 // when they share one scope, so a missing member never opens a column or series of the reviewed concept beside
-// scoped figures. Inputs of one metric in two scopes leave it its metric's reviewed concept.
+// scoped figures. Inputs of one metric in two scopes leave it its metric's reviewed concept. A ratio's measure carries
+// no scope (operations.ts ratio), so neither does a node read through one.
 function scopeReader(plan: FinancialPlan, bound: BoundScopes, read: ReadonlySet<LocalId>): ScopesOf {
   const reported = plan.operations.filter((node): node is ReportedMetricNode => node.operation === "reported_metric" && read.has(node.node_id));
   const shared = new Map([...new Set(reported.map((node) => node.metric_key))].map((key) => {
@@ -489,14 +490,15 @@ function scopeReader(plan: FinancialPlan, bound: BoundScopes, read: ReadonlySet<
     return [key, kinds.size === 1 ? [...kinds][0] ?? null : null] as const;
   }));
   const scopeOf = (node: ReportedMetricNode) => (bound.has(node.node_id) ? bound.get(node.node_id)?.kind : shared.get(node.metric_key)) ?? null;
-  return (node) => {
-    const kinds = [...dependencyClosure(plan, [node.node_id])].flatMap((id) => {
-      const entry = plan.operations.find((candidate) => candidate.node_id === id)!;
-      const kind = entry.operation === "reported_metric" ? scopeOf(entry) : null;
-      return kind ? [kind] : [];
-    });
-    return [...new Set(kinds)].sort();
+  const kindsOf = (node: OperationNode): ReadonlyArray<ConceptScopeV1["kind"]> => {
+    if (node.operation === "ratio") return [];
+    if (node.operation === "reported_metric") {
+      const kind = scopeOf(node);
+      return kind === null ? [] : [kind];
+    }
+    return operationDependencies(node).flatMap((id) => kindsOf(plan.operations.find((candidate) => candidate.node_id === id)!));
   };
+  return (node) => [...new Set(kindsOf(node))].sort();
 }
 
 /** What a node measures, as the answer labels its measure ("Revenue"), given each bound input's concept scope. */

@@ -231,6 +231,25 @@ test('each input reads in its own scope: its row, its source and its details, ne
   assert.deepEqual([...document.querySelectorAll('[data-testid="inspector-details"] h4')].map(text).filter((title) => title?.startsWith('Capital')), [`${PRODUCTIVE} FY2025`, `${PPE} FY2024`], 'the Audit Details headings')
 })
 
+// Caterpillar filed FY2018 operating cash flow for continuing operations only, and its capex as productive assets (#743).
+test('operating cash flow filed for continuing operations reads in its scope in every place, beside productive-asset capex', () => {
+  const continuing = { kind: 'continuing_operations_ocf', concept: 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations' } as const
+  const fy = { kind: 'duration', start: '2018-01-01', end: '2018-12-31', fiscal_year: 2018, fiscal_period: 'FY' }
+  const filed = (source_id: string) => ({ source_id, document_id: null, source_version_hash: 'v'.repeat(64), locator: null, filed: '2019-02-14' })
+  const document = render(inspection({
+    measure: 'Free cash flow (continuing-operations OCF less productive-asset capex)',
+    inputs: [
+      fact('operating_cash_flow', '6558000000', null, { input_slot: 'ocf', fact_id: 'f0000000-0000-4000-8000-000000000001', inference: continuing, source: filed('src-ocf'), period: fy }),
+      fact('capex', '1276000000', null, { input_slot: 'capex', fact_id: 'f0000000-0000-4000-8000-000000000002', inference: { kind: 'productive_assets_capex', concept: 'PaymentsToAcquireProductiveAssets' }, source: filed('src-capex'), period: fy }),
+    ],
+  }))
+  const OCF = 'Operating cash flow (continuing operations, excludes discontinued operations)'
+  assert.ok(rows(document).filter((row) => row.length === 3).map((row) => row[0]).some((label) => label?.endsWith(OCF)), 'the Inputs row')
+  assert.ok(rows(document).some((row) => row[0] === 'Scope: Operating cash flow is filed as NetCashProvidedByUsedInOperatingActivitiesContinuingOperations, which excludes discontinued operations.'))
+  assert.ok(sources(document).some((line) => line.includes(`${OCF} FY2018`)), 'its source')
+  assert.ok([...document.querySelectorAll('[data-testid="inspector-details"] h4')].map(text).some((title) => title?.startsWith(OCF)), 'its Audit Details heading')
+})
+
 test('a tiny ratio keeps its exact canonical text and a P/E reads as a multiple', () => {
   const small = render(inspection({ payload: { kind: 'value', value: '0.000000000000000001', unit: { kind: 'ratio' }, exact: true, rounding: null }, formula: { operation: 'gross_margin', operation_version: 'gross_margin.v1', numeric_policy_version: 'numeric.v1', reads_as_multiple: false } }))
   assert.equal(text(small.querySelector('[data-testid="financial-inspector-value"]')), '0.00%')

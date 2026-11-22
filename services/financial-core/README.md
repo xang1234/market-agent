@@ -48,7 +48,16 @@ scenario value in the EPS currency per share, not a price target.
   `PaymentsToAcquireProductiveAssets` is labelled "Capital expenditures
   (productive-asset cash payments, may include intangibles)", and free cash
   flow from it "Free cash flow (OCF less productive-asset capex)", so a table,
-  a series or a chat comparison never sets either beside PP&E's.
+  a series or a chat comparison never sets either beside PP&E's. Operating
+  cash flow filed as
+  `NetCashProvidedByUsedInOperatingActivitiesContinuingOperations` (#743) is
+  "Operating cash flow (continuing operations, excludes discontinued
+  operations)", and free cash flow from it "Free cash flow
+  (continuing-operations OCF less PP&E cash capex)", or "less productive-asset
+  capex" when its capex is scoped too. Cash conversion over it is an
+  `incompatible_definition` gap, since net income includes discontinued
+  operations, and keeps cash conversion's label and column, since its measure
+  carries no scope.
 
 ## Numeric limits (numeric-policy.v1)
 

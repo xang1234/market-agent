@@ -54,8 +54,10 @@ export const METRIC_CATALOG_V1: ReadonlyMap<MetricKey, MetricDefinition> = new M
     // us-gaap ProfitLoss, or NetIncomeLoss for a period with no noncontrolling
     // interest. OCF is consolidated, so cash conversion divides by this.
     metric("net_income_consolidated", "Net income including noncontrolling interest", "flow", "currency"),
-    // Including discontinued operations, like capex (SEC ingestion certifies
-    // only NetCashProvidedByUsedInOperatingActivities).
+    // Including discontinued operations, like capex. SEC ingestion certifies
+    // NetCashProvidedByUsedInOperatingActivities, or the continuing-operations
+    // line for a filer that tags only that, with its scope recorded
+    // (ContinuingOperationsOcfV1, #743).
     metric("operating_cash_flow", "Operating cash flow", "flow", "currency"),
     // Cash paid for PP&E, reported as a nonnegative outflow. SEC ingestion
     // certifies PaymentsToAcquirePropertyPlantAndEquipment, or
@@ -199,10 +201,11 @@ export function resolveRatioDefinition(ratioKey: MetricKey): RatioDefinition | n
   return RATIO_CATALOG_V1.get(ratioKey) ?? null;
 }
 
-// How a figure in each concept scope (#731) reads: its own label, and its part of a free cash flow, where the
-// reviewed concepts read "OCF" and "PP&E cash capex". A second scope (OCF from continuing operations, #743) is one entry.
+// How a figure in each concept scope (#731, #743) reads: its own label, and its part of a free cash flow, where the
+// reviewed concepts read "OCF" and "PP&E cash capex".
 const SCOPE_LABELS: Readonly<Record<ConceptScopeV1["kind"], Readonly<{ metric_key: MetricKey; label: string; in_free_cash_flow: string }>>> = {
   productive_assets_capex: { metric_key: "capex", label: "Capital expenditures (productive-asset cash payments, may include intangibles)", in_free_cash_flow: "productive-asset capex" },
+  continuing_operations_ocf: { metric_key: "operating_cash_flow", label: "Operating cash flow (continuing operations, excludes discontinued operations)", in_free_cash_flow: "continuing-operations OCF" },
 };
 
 /**

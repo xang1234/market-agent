@@ -440,6 +440,16 @@ test("capex filed as productive assets names its concept and that it may include
   assert.ok((await fact([])).rows.every((row) => row.label !== "Scope"));
 });
 
+test("operating cash flow filed for continuing operations names its concept and that it excludes discontinued operations (#743)", async () => {
+  const fact = (quality_flags: unknown[]) => inspectFactRow(factRow({
+    value: "120000000", unit: "currency", currency: "USD", metric_name: "Operating Cash Flow",
+    period_kind: "fiscal_y", fiscal_year: 2017, fiscal_period: "FY", quality_flags,
+  }));
+  const scoped = await fact([{ kind: "continuing_operations_ocf", concept: "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations" }]);
+  assert.deepEqual(scoped.rows.at(-1), { label: "Scope", value: "Operating cash flow is filed as NetCashProvidedByUsedInOperatingActivitiesContinuingOperations, which excludes discontinued operations." });
+  assert.ok((await fact([])).rows.every((row) => row.label !== "Scope"));
+});
+
 test("a derived fact lists the facts it was computed from, as their own inspections word them, before its source", async () => {
   const Q3_REVENUE = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
   const Q2_REVENUE = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";

@@ -22,8 +22,25 @@ test("free cash flow from capex filed as productive assets names that concept in
   assert.deepEqual({ ...scoped, basis: ppe.basis }, ppe, "only the basis moves");
 });
 
-test("evidence from a caller that predates the capex scope assembles as PP&E capex (#731)", () => {
-  const { capex_scope: _, ...unscoped } = AAPL;
+const CONTINUING_OPERATIONS = { kind: "continuing_operations_ocf", concept: "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations" } as const;
+const CONTINUING_NOTE = "Operating cash flow is filed as NetCashProvidedByUsedInOperatingActivitiesContinuingOperations, which excludes discontinued operations.";
+
+test("free cash flow from OCF filed for continuing operations names that concept in its basis, and with productive-assets capex names both (#743)", () => {
+  const ppe = assembleCall(AAPL);
+  const continuing = assembleCall({ ...AAPL, ocf_scope: CONTINUING_OPERATIONS });
+  assert.equal(continuing.facts[0]!.basis, `free_cash_flow.v1: operating cash flow less PP&E capex, as reported in the latest 10-K. ${CONTINUING_NOTE}`);
+  const both = assembleCall({ ...AAPL, ocf_scope: CONTINUING_OPERATIONS, capex_scope: { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } });
+  assert.equal(
+    both.facts[0]!.basis,
+    `free_cash_flow.v1: operating cash flow less capex, as reported in the latest 10-K. ${CONTINUING_NOTE} Capex is filed as PaymentsToAcquireProductiveAssets, which may include purchased intangibles as well as PP&E.`,
+  );
+  for (const call of [continuing, both]) {
+    assert.deepEqual({ ...call, facts: call.facts.map((row) => ({ ...row, basis: ppe.facts.find((entry) => entry.id === row.id)!.basis })) }, ppe, "only the basis moves, the anchored exit multiple included");
+  }
+});
+
+test("evidence from a caller that predates the capex and OCF scopes assembles as PP&E capex and total OCF (#731, #743)", () => {
+  const { capex_scope: _, ocf_scope: __, ...unscoped } = AAPL;
   assert.deepEqual(assembleCall(unscoped as CallEvidence), assembleCall(AAPL));
 });
 
@@ -97,6 +114,13 @@ test("each year cites every filing its free cash flow, net cash and diluted shar
     [filing("2019-09-28").source_id, "FY2019: 15.61x, (close 54.71 on 2019-09-27 × 18,595,652,000 shares − net cash USD 97,851,000,000) ÷ free cash flow USD 58,896,000,000; free cash flow from 10-K 0000320193-26-000026, period ended 2019-09-28, public by 2026-11-03"],
     [later.source_id, "FY2019: free cash flow, net cash and diluted shares from 10-K 0000320193-21-000105, period ended 2019-09-28, public by 2021-10-29"],
   ]);
+});
+
+test("a year whose operating cash flow is filed for continuing operations names that scope in its citation (#743)", () => {
+  const texts = (evidence: CallEvidence) => anchored(evidence).citations.map((citation) => citation.text);
+  const scoped = texts({ ...AAPL, history: year(2019, (entry) => ({ ...entry, ocf_scope: CONTINUING_OPERATIONS })) });
+  assert.deepEqual(scoped, texts(AAPL).map((text) => text.startsWith("FY2019: 15.61x, ") ? `${text}. ${CONTINUING_NOTE}` : text));
+  assert.deepEqual(texts({ ...AAPL, history: year(2019, (entry) => ({ ...entry, ocf_scope: null })) }), texts(AAPL), "a total OCF year reads as before");
 });
 
 test("the basis names the share-count gap between the years' diluted averages and today's cover count, either way", () => {

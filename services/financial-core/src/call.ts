@@ -10,7 +10,7 @@
 // move or a scenario. The Call reads facts by identity and never feeds the
 // fact layer.
 
-import { inferenceNote, type DecimalString, type GapDisposition, type IsoDate, type IsoDateTime, type LocalId, type ProductiveAssetsCapexV1, type ReasonCode, type Sha256Hex, type UUID } from "./contracts.ts";
+import { inferenceNote, type ContinuingOperationsOcfV1, type DecimalString, type GapDisposition, type IsoDate, type IsoDateTime, type LocalId, type ProductiveAssetsCapexV1, type ReasonCode, type Sha256Hex, type UUID } from "./contracts.ts";
 import { balanceComponents } from "./definitions.ts";
 import { canonicalDecimalString, parseFinancialDecimal, type ExactDecimal } from "./exact-decimal.ts";
 import { localDateOf } from "./public-time.ts";
@@ -252,6 +252,8 @@ export type CallEvidence = Readonly<{
   price_date: IsoDate | null;
   /** Present when the bound capex is filed as productive assets (#731). */
   capex_scope: ProductiveAssetsCapexV1 | null;
+  /** Present when the bound operating cash flow is filed for continuing operations (#743). */
+  ocf_scope: ContinuingOperationsOcfV1 | null;
   consensus: ReadonlyArray<ConsensusCapture & Readonly<{ source_id: UUID }>>;
   /** The anchor's fiscal years, latest first: empty when the latest has no bound statement. */
   history: ReadonlyArray<CallHistoryYear>;
@@ -268,6 +270,8 @@ export type CallHistoryYear = Readonly<{
   period_end: IsoDate | null;
   figures: Readonly<{ free_cash_flow: CallEngineFigure; net_cash: CallEngineFigure; shares: CallEngineFigure }>;
   citations: Readonly<{ free_cash_flow: ReadonlyArray<CallSource>; net_cash: ReadonlyArray<CallSource>; shares: ReadonlyArray<CallSource> }>;
+  /** Present when the year's operating cash flow is filed for continuing operations (#743); older callers omit it. */
+  ocf_scope?: ContinuingOperationsOcfV1 | null;
 }>;
 
 /** One set of dev split-adjusted daily closes, as captured (daily_close_captures): never certified. */
@@ -290,6 +294,14 @@ const FACTS: ReadonlyArray<Readonly<{ id: CallFactId; label: string; kind: CallI
   },
   { id: "share_price", label: "Share price", kind: "market_observation", basis: "The latest stored close on or before the Call date", source: (citation) => `Close on ${citation.date}` },
 ];
+
+// A caller written before #731 or #743 passes no scope, and its OCF is the total and its capex PP&E.
+function freeCashFlowBasis({ ocf_scope, capex_scope }: Pick<CallEvidence, "ocf_scope" | "capex_scope">): string | null {
+  const scopes = [ocf_scope, capex_scope].filter((scope) => scope != null);
+  if (scopes.length === 0) return null;
+  const capex = capex_scope == null ? "PP&E capex" : "capex";
+  return `free_cash_flow.v1: operating cash flow less ${capex}, as reported in the latest 10-K. ${scopes.map((scope) => inferenceNote(scope).text).join(" ")}`;
+}
 
 function tenK(citation: CallSource): string {
   return `10-K${citation.accession === null ? "" : ` ${citation.accession}`}, period ended ${citation.period_end}, public by ${citation.date}`;
@@ -318,10 +330,7 @@ export function assembleCall(evidence: CallEvidence): CallContent {
     id: fact.id,
     label: fact.label,
     kind: fact.kind,
-    // A caller written before #731 passes no capex_scope, and its capex is PP&E.
-    basis: fact.id === "free_cash_flow" && evidence.capex_scope != null
-      ? `free_cash_flow.v1: operating cash flow less capex, as reported in the latest 10-K. ${inferenceNote(evidence.capex_scope).text}`
-      : fact.basis,
+    basis: fact.id === "free_cash_flow" ? freeCashFlowBasis(evidence) ?? fact.basis : fact.basis,
     figure: engine[fact.id],
     citations: evidence.citations[fact.id].map((citation) => ({ ...citation, text: fact.source(citation) })),
     from: [],
@@ -611,7 +620,7 @@ function yearMultiple(year: CallHistoryYear, closes: CallCloses, capturedOn: Iso
     multiple,
     citations: [...filings.values()].map(({ source, figures }, index) => ({
       ...source,
-      text: `${index === 0 ? `${computed}; ` : `FY${year.fiscal_year}: `}${LIST.format(figures)} from ${tenK(source)}`,
+      text: `${index === 0 ? `${computed}; ` : `FY${year.fiscal_year}: `}${LIST.format(figures)} from ${tenK(source)}${index === 0 && year.ocf_scope != null ? `. ${inferenceNote(year.ocf_scope).text}` : ""}`,
     })),
   };
 }

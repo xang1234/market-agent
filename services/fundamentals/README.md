@@ -117,9 +117,15 @@ npm test         # contract + AAPL FY2024 income statement verification
   own. A later filing's PP&E line for its period, or for a derived
   quarter's input, is the same figure when equal within rounding, and
   otherwise an unverified restatement. Operating cash
-  flow is certified only from the total
-  `NetCashProvidedByUsedInOperatingActivities`, the scope capex covers;
-  the continuing-operations line gets no context. Net income is
+  flow is certified from the total
+  `NetCashProvidedByUsedInOperatingActivities`, the scope capex covers, or
+  from `NetCashProvidedByUsedInOperatingActivitiesContinuingOperations` for a
+  filing that tags only that (#743). That line excludes discontinued
+  operations, so its fact carries a `continuing_operations_ocf` inference that
+  is read the same way as the capex one, later filings included. A
+  discontinuation changes which businesses that line covers under the same
+  concept, so a quarter derived from another filing's year to date stays
+  uncertified. Net income is
   `NetIncomeLoss`, attributable to the parent. `ProfitLoss`, which adds
   noncontrolling interest, is `net_income_consolidated`, the denominator
   of cash conversion (#342). For a period the filer reports no

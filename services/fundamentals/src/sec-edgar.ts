@@ -262,7 +262,9 @@ export const US_GAAP_TO_METRIC_KEY: Readonly<Record<string, string>> = {
   WeightedAverageNumberOfSharesOutstandingBasic: "weighted_average_basic_shares",
   WeightedAverageNumberOfDilutedSharesOutstanding: "weighted_average_diluted_shares",
 
-  // Cash flow (a 10-Q reports these year to date)
+  // Cash flow (a 10-Q reports these year to date). Some filers (CAT and COST
+  // through FY2018) tag only the continuing-operations OCF, which certifies with
+  // that scope recorded (#743); a filing that tags both is read as the total.
   NetCashProvidedByUsedInOperatingActivities: "operating_cash_flow",
   NetCashProvidedByUsedInOperatingActivitiesContinuingOperations: "operating_cash_flow",
   // A payment, reported as a positive outflow. Some filers (NVDA) tag only the
