@@ -22,8 +22,8 @@ import { isRecord } from "../../shared/src/http.ts";
 const NO_ANSWER_FALLBACK_TEXT = "No written answer is available for this question; try asking again.";
 
 // An answer that must argue against its takeaway (#735), when no case against shows.
-export const NO_COUNTERPOINT = "Nothing in the sources read was found to cut against this takeaway.";
-export const COUNTERPOINT_LEFT_OUT = "The case against this takeaway is left out, as it did not pass the answer's checks.";
+export const NO_COUNTERPOINT = "Nothing in the sources read was found to cut against this conclusion.";
+export const COUNTERPOINT_LEFT_OUT = "The case against this conclusion is left out, as it did not pass the answer's checks.";
 
 // What the reader sees as the answer (#208): the accepted assertions in their
 // templates, with the notes they cannot say themselves, or a fixed sentence no
