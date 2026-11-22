@@ -102,7 +102,7 @@ function GuidanceRow({ row }: { row: GuidanceComparison }) {
 }
 
 function Cited({ heading, value, source }: { heading: string; value: string; source: GuidanceSource }) {
-  const filed = `8-K filed ${source.filed_on}`
+  const filed = `${source.form ?? '8-K'} filed ${source.filed_on}`
   return (
     <figure className="flex flex-col gap-0.5 text-xs">
       <div>

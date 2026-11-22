@@ -29,7 +29,7 @@ export type StoredFigure = {
   quote: string;
 };
 
-export type FigureSource = { document_id: string; claim_id: string | null; filed_on: IsoDate; url: string | null; quote: string };
+export type FigureSource = { document_id: string; claim_id: string | null; filed_on: IsoDate; form: string | null; url: string | null; quote: string };
 export type GuidanceOutcome = "beat" | "in_line" | "miss" | "not_comparable" | "not_yet_reported";
 export type NotComparableReason =
   | "no_same_basis_actual"
@@ -113,6 +113,13 @@ function releaseUrl(cik: string | null, accession: string | null): string | null
 export function guidanceRecord(releases: ReadonlyArray<StoredRelease>, figures: ReadonlyArray<StoredFigure>, splits: SplitHistory): GuidanceRecord {
   const byDocument = new Map(releases.map((release) => [release.document_id, release]));
   const ends = [...new Set(releases.map((release) => release.quarter_end))].sort();
+  // The day each quarter's results were first filed: an 8-K/A guide filed after
+  // that is written once the outcome was known, so it never replaces the guide.
+  const firstReported = new Map<IsoDate, IsoDate>();
+  for (const release of releases) {
+    const first = firstReported.get(release.quarter_end);
+    if (first === undefined || release.filed_on < first) firstReported.set(release.quarter_end, release.filed_on);
+  }
   const recorded = new Set(ends.slice(-RECORD_QUARTERS));
   const guides = new Map<string, Array<StoredFigure & { release: StoredRelease }>>();
   const actuals = new Map<string, Array<StoredFigure & { release: StoredRelease }>>();
@@ -127,6 +134,7 @@ export function guidanceRecord(releases: ReadonlyArray<StoredRelease>, figures: 
     // ponytail: a guide whose next release is not on file, though a later one
     // is, is left out; show it when stored releases have gaps worth naming.
     if (target === null ? release.quarter_end !== ends.at(-1) : !recorded.has(target)) continue;
+    if (target !== null && release.form === "8-K/A" && release.filed_on > firstReported.get(target)!) continue;
     push(guides, seriesKey(target, figure), { ...figure, release });
   }
   const rows = [...guides.entries()].map(([key, picks]) => compare(key, picks, actuals.get(key) ?? [], splits));
@@ -216,6 +224,7 @@ const sourceOf = (figure: StoredFigure & { release: StoredRelease }): FigureSour
   document_id: figure.document_id,
   claim_id: figure.claim_id,
   filed_on: figure.release.filed_on,
+  form: figure.release.form,
   url: figure.release.url,
   quote: figure.quote,
 });

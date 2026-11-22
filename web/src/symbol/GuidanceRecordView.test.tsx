@@ -26,7 +26,7 @@ const ENVELOPE: GuidanceRecordEnvelope = {
       {
         quarter_end: '2025-07-27', metric: 'operating_expenses', basis: 'non_gaap', unit: 'usd',
         guided: { low: 4.0e9, high: 4.0e9, source: source('2025-05-28', 'Non-GAAP operating expenses are expected to be approximately $4.0 billion.') },
-        actual: { value: 3.9e9, source: source('2025-08-27', 'Non-GAAP operating expenses were $3.9 billion.') },
+        actual: { value: 3.9e9, source: { ...source('2025-09-02', 'Non-GAAP operating expenses were $3.9 billion.'), form: '8-K/A' } },
         outcome: 'beat',
       },
     ],
@@ -65,6 +65,7 @@ test('each guide shows beside the actual on its basis, both quoted with their fi
     assert.match(unmatched.textContent!, /No non-GAAP actual for this quarter was read from the next release, and a guide is never compared across bases\./)
     assert.equal(unmatched.querySelectorAll('a').length, 0, 'a filing with no link is named, not linked')
     assert.match(doc.querySelector('[data-testid="guidance-row-next-revenue-gaap"]')!.textContent!, /Next quarterNot yet reported/)
+    assert.match(doc.querySelector('[data-testid="guidance-row-2025-07-27-operating_expenses-non_gaap"]')!.textContent!, /8-K\/A filed 2025-09-02/)
     assert.match(doc.body.textContent!, /For operating expenses and capex, an actual below the guided range counts as a beat\./)
   } finally {
     await done()

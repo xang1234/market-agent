@@ -161,6 +161,19 @@ test("of two 8-K/As filed the same day, the later accession replaces the earlier
   assert.deepEqual(record.rows.map((entry) => [entry.outcome, entry.actual?.source.document_id]), [["beat", "z-late"]]);
 });
 
+test("an 8-K/A guide filed after its quarter's results were first filed does not replace the guide", () => {
+  const before = release("q1a-before", "2025-04-27", "2025-08-01", "8-K/A");
+  const after = release("q1a-after", "2025-04-27", "2025-09-01", "8-K/A");
+  const record = guidanceRecord([Q1, Q2, before, after], [
+    guide(Q1, "revenue", "gaap", 100, 110),
+    guide(before, "revenue", "gaap", 95, 105),
+    // Filed after Q2's results (2025-08-27), knowing them.
+    guide(after, "revenue", "gaap", 85, 95),
+    result(Q2, "revenue", "gaap", 90),
+  ], NO_SPLITS);
+  assert.deepEqual(record.rows.map((entry) => [entry.outcome, entry.guided.source.document_id, entry.guided.source.form]), [["miss", "q1a-before", "8-K/A"]]);
+});
+
 test("the hit rate counts in-line and beaten guides over the last 8 reported quarters, per metric and basis, leaving out ones not comparable", () => {
   // Ten quarters, 91 days apart, each guiding the next.
   const releases = Array.from({ length: 10 }, (_, n) => {
@@ -267,8 +280,8 @@ test("an issuer's record is a public read: each guide beside the next release's 
     metric: "revenue",
     basis: "gaap",
     unit: "usd",
-    guided: { low: 44.1e9, high: 45.9e9, source: { document_id: q1, claim_id: claimId, filed_on: "2025-05-28", url: "https://www.sec.gov/Archives/edgar/data/1045810/000104581025000115/0001045810-25-000115-index.htm", quote: guide } },
-    actual: { value: 46.7e9, source: { document_id: q2, claim_id: null, filed_on: "2025-08-27", url: "https://www.sec.gov/Archives/edgar/data/1045810/000104581025000207/0001045810-25-000207-index.htm", quote: "Revenue was $46.7 billion." } },
+    guided: { low: 44.1e9, high: 45.9e9, source: { document_id: q1, claim_id: claimId, filed_on: "2025-05-28", form: null, url: "https://www.sec.gov/Archives/edgar/data/1045810/000104581025000115/0001045810-25-000115-index.htm", quote: guide } },
+    actual: { value: 46.7e9, source: { document_id: q2, claim_id: null, filed_on: "2025-08-27", form: null, url: "https://www.sec.gov/Archives/edgar/data/1045810/000104581025000207/0001045810-25-000207-index.htm", quote: "Revenue was $46.7 billion." } },
     outcome: "beat",
   }]);
   assert.deepEqual(body.record.rows.slice(1).map((entry) => [entry.metric, entry.outcome, entry.reason]), [["eps", "not_comparable", "split_between_releases"]]);

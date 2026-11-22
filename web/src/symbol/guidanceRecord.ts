@@ -5,7 +5,7 @@ import { defineResource } from '../fetch/resource.ts'
 
 export type GuidanceBasis = 'gaap' | 'non_gaap'
 export type GuidanceOutcome = 'beat' | 'in_line' | 'miss' | 'not_comparable' | 'not_yet_reported'
-export type GuidanceSource = { document_id: string; claim_id: string | null; filed_on: string; url: string | null; quote: string }
+export type GuidanceSource = { document_id: string; claim_id: string | null; filed_on: string; form?: string | null; url: string | null; quote: string }
 
 export type GuidanceComparison = {
   quarter_end: string | null
