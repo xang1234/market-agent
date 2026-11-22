@@ -131,6 +131,8 @@ export type AsOfInputs = Readonly<{
   capex_scope: ConceptScopeV1 | null;
   /** Present when the bound operating cash flow is filed for continuing operations (#743). */
   ocf_scope: ConceptScopeV1 | null;
+  /** When a later filing first restated that continuing-operations figure as the total at its value, if one has (#752). */
+  ocf_total_from: IsoDate | null;
   bound: ReadonlyArray<BoundInput>;
 }>;
 
@@ -300,7 +302,27 @@ export async function inputsAsOf(client: SqlExecutor, issuerId: string, asOf: Is
     const binding = bindings.get(slot);
     return binding?.status === "bound" && "fact_id" in binding.input ? conceptScope(binding.input.inference) : null;
   };
-  return { as_of: asOf, figures, exact, currency, fiscal_year_end: operating?.period_end ?? null, capex_scope: scopeOf("capex"), ocf_scope: scopeOf("operating_cash_flow"), bound };
+  const ocfScope = scopeOf("operating_cash_flow");
+  const ocfBinding = bindings.get("operating_cash_flow");
+  const ocfTotalFrom = ocfScope !== null && ocfBinding?.status === "bound" && "fact_id" in ocfBinding.input ? await restatedAsTotalOn(client, ocfBinding.input.fact_id) : null;
+  return { as_of: asOf, figures, exact, currency, fiscal_year_end: operating?.period_end ?? null, capex_scope: scopeOf("capex"), ocf_scope: ocfScope, ocf_total_from: ocfTotalFrom, bound };
+}
+
+// The filing date of the first later filing that states a continuing-operations
+// OCF fact's period as the total at the same value, which ingest stores as its
+// restatement in that scope (#752). It is after the read's own cutoff, so only
+// a window whose other end is read by then may use it.
+async function restatedAsTotalOn(client: SqlExecutor, factId: string): Promise<IsoDate | null> {
+  const { rows } = await client.query<{ filed: string | null }>(
+    `select (min(r.reported_at) at time zone 'UTC')::date::text as filed
+       from facts b
+       join facts r on r.supersedes = coalesce(b.supersedes, b.fact_id) and r.method = 'restated' and r.invalidated_at is null
+       join fact_financial_contexts c on c.fact_id = r.fact_id and c.disclosure_relation = 'economic_restatement'
+      where b.fact_id = $1::uuid and r.value_num = b.value_num
+        and not r.quality_flags @> '[{"kind": "continuing_operations_ocf"}]'::jsonb`,
+    [factId],
+  );
+  return rows[0]?.filed ?? null;
 }
 
 /**
@@ -417,10 +439,13 @@ function growth(from: Read | Absent, to: Read | Absent, years: number, splits: S
     : rationalSign(exact(start, "shares_outstanding")) <= 0 || rationalSign(exact(end, "shares_outstanding")) <= 0
     ? outcome("non_positive_shares", "A share count at one end is zero or negative, so it has no growth rate.")
     : divideRationals(exact(end, "shares_outstanding"), multiplyRationals(exact(start, "shares_outstanding"), splitFactor(splits, start.inputs.as_of, end.inputs.as_of))!)!;
-  // Free cash flow over capex, or OCF, in two scopes is no growth of one measure (#731, #743).
+  // Free cash flow over capex, or OCF, in two scopes is no growth of one measure (#731, #743), unless a
+  // filing public by the end restated the start's continuing-operations OCF as an equal total (#752).
+  const restatedAsTotal = start.inputs.ocf_scope !== null && end.inputs.ocf_scope === null
+    && start.inputs.ocf_total_from !== null && start.inputs.ocf_total_from <= end.inputs.as_of;
   const rescoped = (): Figure | null => (start.inputs.capex_scope === null) !== (end.inputs.capex_scope === null)
     ? outcome("incompatible_definition", "Capex is filed as PaymentsToAcquireProductiveAssets at one end and as PP&E at the other, so the two free cash flows do not measure the same spending.")
-    : (start.inputs.ocf_scope === null) !== (end.inputs.ocf_scope === null)
+    : (start.inputs.ocf_scope === null) !== (end.inputs.ocf_scope === null) && !restatedAsTotal
     ? outcome("incompatible_definition", "Operating cash flow is filed for continuing operations at one end and as the total at the other, so the two free cash flows do not measure the same cash flow.")
     : null;
   const shares = (): Figure => {
@@ -717,7 +742,7 @@ function tableRow(row: BacktestRow): string {
     return [`${label}: **${figure.outcome}** (${escape(figure.text)})`];
   });
   const outcomes = [...(row.period === null ? [] : [`**${row.period.outcome}** (${escape(row.period.text)})`]), ...named];
-  // Growth reads only within one scope, so a row's scope is its growths' too.
+  // The scopes of the row's own free cash flow.
   const scopes = [row.inputs.ocf_scope, row.inputs.capex_scope].flatMap((scope) => (scope === null ? [] : [scope.kind]));
   const cells = figures.map((figure) => figure.kind === "value" ? escape(figure.text) : "n/a");
   if (scopes.length > 0 && free_cash_flow.kind === "value") cells[0] = `${cells[0]}; ${figureLabel("free_cash_flow", scopes)}`;

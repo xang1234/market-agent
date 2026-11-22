@@ -1553,6 +1553,10 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     const inputs: RoundedFigure[] = derivation?.terms.map((term) => ({ value: term.raw_token, rounding: roundings.get(term.source.accession) ?? null })) ?? [];
     // A derived figure stands on its unmoved inputs, whose rounding a line may fall within.
     let asDerived = derivation !== null;
+    // The first filing that states continuing-operations OCF only as an equal
+    // total restates it in that scope, so growth to a total year reads one
+    // measure (operator 2026-11-22, #752). Capex keeps #731's rule.
+    let toTotal = secConceptScope(original.metric_key, concept!)?.kind === "continuing_operations_ocf";
     for (const filing of filingsInOrder(statements, derivation, values, rescoped)) {
       // A line in another scope only ever repeats the figure that stands, or leaves it unverified (#731).
       const changed = filing.rescoped.find((line) => sameRoundedFigure(line.term === null ? standing : inputs[line.term]!, { value: line.token, rounding: line.rounding }) !== true);
@@ -1561,7 +1565,9 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
         break;
       }
       if (filing.statement === null && filing.inputs.length === 0) {
-        await record(filing.rescoped[0]!, null);
+        const total = toTotal ? filing.rescoped.find((line) => line.term === null) : undefined;
+        await record(total ?? filing.rescoped[0]!, total ? "economic_restatement" : null);
+        if (total) toTotal = false;
         continue;
       }
       let moved: FiledInput | null = null;
