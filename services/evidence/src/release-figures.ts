@@ -37,8 +37,8 @@ export function figureUnit(metric: ReleaseMetric): FigureUnit {
   return metric === "gross_margin" ? "percent" : metric === "eps" ? "usd_per_share" : "usd";
 }
 
-// A figure as the model gave it, its basis and the phrases it copied.
-export type RawFigure = { basis?: unknown; value?: unknown; plus_minus?: unknown; low?: unknown; high?: unknown };
+// A figure as the model gave it, its metric, its basis and the phrases it copied.
+export type RawFigure = { metric?: unknown; basis?: unknown; value?: unknown; plus_minus?: unknown; low?: unknown; high?: unknown };
 export type FigureRead = { basis: FigureBasis; low: number; high: number } | { review: string };
 
 const NON_GAAP = /\bnon-?\s?gaap\b|\badjusted\b/i;

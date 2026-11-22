@@ -480,8 +480,10 @@ function buildMessages(text: string): LlmChatMessage[] {
         "An explanation names a cause (a charge, a product, a mix shift, pricing, a ramp), not just the figure.",
         'A result states the reported quarter\'s figure for a metric ("Revenue for the quarter was $44.1 billion"); its about is "quarter".',
         'target, for guidance: "next_quarter" when it guides the quarter after the one reported, else "other" (a full year, a later period).',
-        'figures, for guidance and results: each figure the sentence states, as {"basis":"gaap"|"non_gaap","value":"<phrase>","plus_minus":"<phrase>"}',
-        'or {"basis":"gaap"|"non_gaap","low":"<phrase>","high":"<phrase>"}, plus_minus left out when the sentence gives none.',
+        'figures, for guidance and results: each figure the sentence states, as {"metric":"<metric>","basis":"gaap"|"non_gaap","value":"<phrase>","plus_minus":"<phrase>"}',
+        'or {"metric":"<metric>","basis":"gaap"|"non_gaap","low":"<phrase>","high":"<phrase>"}, plus_minus left out when the sentence gives none.',
+        "A sentence stating several metrics gives one figure for each, with that figure's own metric.",
+        "Give a result for each metric the release states for the quarter in a sentence, revenue first.",
         'Each phrase is copied EXACTLY from the sentence ("$45.0 billion", "2%", "50 basis points", "approximately 54%"), never computed or rounded.',
         'basis is "non_gaap" for a non-GAAP or adjusted figure, else "gaap". A sentence stating a GAAP and a non-GAAP figure',
         '("71.8% and 72.0%, respectively") gives one figure for each. A figure in no unit of its metric, such as a growth rate, is left out.',
@@ -608,7 +610,7 @@ export async function extractReleaseStatements(
   // it no guide has a quarter to compare with, nor an actual its period.
   const filedOn = candidate.effectiveTime?.slice(0, 10) ?? null;
   const figured = quarterEnd === null || filedOn === null ? [] : found.filter((pick) =>
-    pick.metric !== "other" && (pick.kind === "guidance" ? pick.target === "next_quarter" : pick.kind === "result" && pick.about === "quarter"));
+    pick.kind === "guidance" ? pick.target === "next_quarter" : pick.kind === "result" && pick.about === "quarter");
   const outcome: ExtractReleaseOutcome = exhibits.length === 0
     ? "no_exhibits"
     : verified.size > 0 || figured.length > 0
@@ -674,10 +676,15 @@ export async function extractReleaseStatements(
       claimIds.push(claim.claim_id);
       claimOf.set(key, claim.claim_id);
     }
-    const figures = figured.flatMap((pick) => (pick.figures ?? []).map((raw) => {
+    // A figure names its own metric when its sentence states several ("gross
+    // margin was 55%, operating income was $2.5 billion"); a guide binds its
+    // sentence's claim whatever the figure's metric.
+    const figures = figured.flatMap((pick) => (pick.figures ?? []).flatMap((raw) => {
       const kind = pick.kind as "guidance" | "result";
+      const metric = (RELEASE_METRICS as ReadonlyArray<unknown>).includes(raw.metric) ? raw.metric as ReleaseMetric : pick.metric;
+      if (metric === "other") return [];
       const claimId = kind === "guidance" ? claimOf.get(JSON.stringify([`guidance.${pick.metric}`, pick.quote]))! : null;
-      return { kind, metric: pick.metric, quote: pick.quote, claimId, raw, read: readFigure({ kind, metric: pick.metric, quote: pick.quote }, raw) };
+      return [{ kind, metric, quote: pick.quote, claimId, raw, read: readFigure({ kind, metric, quote: pick.quote }, raw) }];
     }));
     const stored = quarterEnd === null || filedOn === null
       ? { stored: 0, queued: 0 }

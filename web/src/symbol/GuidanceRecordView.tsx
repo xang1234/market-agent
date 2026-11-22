@@ -41,7 +41,7 @@ function figure(value: number, unit: GuidanceComparison['unit']): string {
 function whyNotCompared(row: GuidanceComparison): string {
   if (row.reason === 'conflicting_guidance') return 'The release gives different figures for this guide, so it is not compared.'
   if (row.reason === 'conflicting_actuals') return 'The releases report different actuals for this quarter, so the guide is not compared.'
-  return `No ${BASIS_LABEL[row.basis]} actual was reported for this quarter, and a guide is never compared across bases.`
+  return `No ${BASIS_LABEL[row.basis]} actual for this quarter was read from the next release, and a guide is never compared across bases.`
 }
 
 // Each guide beside the next release's actual on the same basis, both quoted

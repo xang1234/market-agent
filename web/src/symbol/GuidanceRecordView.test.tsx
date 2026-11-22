@@ -62,7 +62,7 @@ test('each guide shows beside the actual on its basis, both quoted with their fi
     assert.match(unmatched.textContent!, /Not comparable/)
     assert.match(unmatched.textContent!, /Guided 71\.5% to 72\.5%/)
     assert.doesNotMatch(unmatched.textContent!, /Reported/)
-    assert.match(unmatched.textContent!, /No non-GAAP actual was reported for this quarter, and a guide is never compared across bases\./)
+    assert.match(unmatched.textContent!, /No non-GAAP actual for this quarter was read from the next release, and a guide is never compared across bases\./)
     assert.equal(unmatched.querySelectorAll('a').length, 0, 'a filing with no link is named, not linked')
     assert.match(doc.querySelector('[data-testid="guidance-row-next-revenue-gaap"]')!.textContent!, /Next quarterNot yet reported/)
     assert.match(doc.body.textContent!, /For operating expenses and capex, an actual below the guided range counts as a beat\./)

@@ -907,7 +907,7 @@ test("a release whose only bound explanation is superseded is rebound for its cu
 
 // #733: the figures of AMD's Q2 2025 release, its sentences cut down.
 const AMD_REVENUE_RESULT = "Second quarter revenue was $7.7 billion.";
-const AMD_MARGIN_RESULT = "Non-GAAP gross margin was 43%.";
+const AMD_MARGIN_RESULT = "On a non-GAAP basis, gross margin was 43%, operating income was $897 million and diluted earnings per share was $0.48.";
 const AMD_MARGIN_GUIDANCE = "Non-GAAP gross margin is expected to be approximately 54%.";
 const AMD_YEAR_GUIDANCE = "For the full year 2025, AMD expects revenue to grow approximately 30%.";
 const AMD_FIGURES_SUBMISSION = amdSubmission([
@@ -921,7 +921,12 @@ const AMD_FIGURES_SUBMISSION = amdSubmission([
 ]);
 const amdFiguresReply = (quarterEnd: string | null) => JSON.stringify({ quarter_end: quarterEnd, statements: [
   { kind: "result", metric: "revenue", about: "quarter", quote: AMD_REVENUE_RESULT, figures: [{ basis: "gaap", value: "$7.7 billion" }] },
-  { kind: "result", metric: "gross_margin", about: "quarter", quote: AMD_MARGIN_RESULT, figures: [{ basis: "non_gaap", value: "43%" }] },
+  // One sentence states three metrics, each figure naming its own.
+  { kind: "result", metric: "gross_margin", about: "quarter", quote: AMD_MARGIN_RESULT, figures: [
+    { basis: "non_gaap", value: "43%" },
+    { metric: "operating_income", basis: "non_gaap", value: "$897 million" },
+    { metric: "eps", basis: "non_gaap", value: "$0.48" },
+  ] },
   { kind: "guidance", metric: "revenue", about: "other", target: "next_quarter", quote: AMD_GUIDANCE, figures: [{ basis: "gaap", value: "approximately $8.7 billion", plus_minus: "$300 million" }] },
   // The sentence says non-GAAP; read as GAAP, it waits for review.
   { kind: "guidance", metric: "gross_margin", about: "other", target: "next_quarter", quote: AMD_MARGIN_GUIDANCE, figures: [{ basis: "non_gaap", value: "54%" }, { basis: "gaap", value: "54%" }] },
@@ -950,7 +955,9 @@ test("a release's next-quarter guides and its quarter's actuals are stored as fi
   assert.deepEqual(await releaseFigures(client), [
     ["guidance", "gross_margin", "non_gaap", 54, 54, AMD_MARGIN_GUIDANCE, "guidance.gross_margin"],
     ["guidance", "revenue", "gaap", 8.4e9, 9.0e9, AMD_GUIDANCE, "guidance.revenue"],
+    ["result", "eps", "non_gaap", 0.48, 0.48, AMD_MARGIN_RESULT, null],
     ["result", "gross_margin", "non_gaap", 43, 43, AMD_MARGIN_RESULT, null],
+    ["result", "operating_income", "non_gaap", 897e6, 897e6, AMD_MARGIN_RESULT, null],
     ["result", "revenue", "gaap", 7.7e9, 7.7e9, AMD_REVENUE_RESULT, null],
   ]);
   // Actuals are figures, never claims, so no reader takes "revenue was $7.7

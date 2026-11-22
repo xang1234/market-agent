@@ -569,8 +569,9 @@ next release reports, on the same basis (`services/evidence/src/guidance-record.
 `GET /v1/evidence/guidance-record?issuer_id=`, public like the issuer news rail).
 
 - **Figures.** The extraction above also asks for each guidance sentence's target (`next_quarter` or other) and, for
-  guides and for the sentences stating the quarter's reported result (kind `result`), its figures, each a basis and
-  phrases copied from the sentence ("$45.0 billion" plus or minus "2%", or a low and a high). `release-figures.ts`
+  guides and for the sentences stating the quarter's reported result (kind `result`), its figures, each a metric (a
+  sentence may state several), a basis and phrases copied from the sentence ("$45.0 billion" plus or minus "2%", or a
+  low and a high). `release-figures.ts`
   reads the low and high from those phrases, never from a number the model wrote. A next-quarter guide and a
   quarter's actual are stored in `earnings_release_figures` (migration 0086) with the guidance claim the guide binds.
   Actuals are never claims, so no reader takes a release's "revenue was $7.7 billion" for a certified figure. Figures
