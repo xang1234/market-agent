@@ -160,10 +160,10 @@ test("operating cash flow filed for continuing operations certifies with its con
 
   // FY2024's quarters derive from year-to-date continuing-operations lines,
   // and the FY2025 filings state FY2024's figures as the total: Q1 28 (was
-  // 30), six months 70 (was 60), the year 125 (was 120). A derived quarter
-  // reads its inputs' later lines in either concept, so none stands on a
-  // figure a later filing moved.
-  await t.test("a derived quarter of continuing-operations OCF is unverified from the filing that states one of its inputs as a different total", async (t) => {
+  // 30), six months 70 (was 60), the year 125 (was 120). Q2 to Q4 each
+  // subtract another filing's year to date, so none certifies, and the stated
+  // Q1 and year are unverified from the filings that state them as a different total.
+  await t.test("continuing-operations OCF derived across filings stays uncertified, and a stated figure is unverified from the filing that states it as a different total", async (t) => {
     const { download, lookup, relations, picked } = await setUp(t, "fin-ocf-continuing-derived-quarters");
     const filed = (accn: string, fy: number, fp: string, form: string, date: string) => (start: string, end: string, val: number): Value => ({ start, end, val, accn, fy, fp, form, filed: date });
     const q1 = filed("0000000743-24-000101", 2024, "Q1", "10-Q", "2024-05-01");
@@ -186,11 +186,30 @@ test("operating cash flow filed for continuing operations certifies with its con
     for (const period of periods) await lookup(period);
     const originals = (await relations()).filter((row) => row.relation === "original");
     // A derived quarter's flags also name the inputs it was derived from.
-    assert.deepEqual(originals.map((row) => [row.value, row.flags.some((flag) => (flag as { kind?: string }).kind === SCOPE.kind)]), ["30", "30", "30", "30", "120"].map((value) => [value, true]));
+    assert.deepEqual(originals.map((row) => [row.value, row.flags.some((flag) => (flag as { kind?: string }).kind === SCOPE.kind)]), ["30", "120"].map((value) => [value, true]));
     const asReported = await Promise.all(periods.map((period) => picked("as_reported", period)));
     const asRestated = await Promise.all(periods.map((period) => picked("as_restated", period)));
-    assert.deepEqual(asReported, ["30", "30", "30", "30", "120"]);
-    assert.deepEqual(asRestated, periods.map(() => "restatement_unverified"));
+    const derived = ["context_unverified", "context_unverified", "context_unverified"];
+    assert.deepEqual(asReported, ["30", ...derived, "120"]);
+    assert.deepEqual(asRestated, ["restatement_unverified", ...derived, "restatement_unverified"]);
+  });
+
+  // Devin on #746. The Q1 10-Q's 100 includes 30 from a business the Q2 10-Q
+  // reports as discontinued, and its 150 six months excludes that business from
+  // both quarters. Q2 is 80, never 150 less 100, and no filing states it.
+  await t.test("a continuing-operations quarter derived across filings stays uncertified, since the perimeter can change between them", async (t) => {
+    const { download, lookup, relations, picked } = await setUp(t, "fin-ocf-continuing-perimeter");
+    const filed = (accn: string, fp: string, date: string) => (start: string, end: string, val: number): Value => ({ start, end, val, accn, fy: 2024, fp, form: "10-Q", filed: date });
+    const q1 = filed("0000000743-24-000101", "Q1", "2024-05-01");
+    const q2 = filed("0000000743-24-000102", "Q2", "2024-08-01");
+    download.text = companyFacts({
+      Revenues: [q1("2024-01-01", "2024-03-31", 100), q2("2024-04-01", "2024-06-30", 100)],
+      [CONTINUING]: [q1("2024-01-01", "2024-03-31", 100), q2("2024-01-01", "2024-06-30", 150)],
+    });
+    await lookup("Q1");
+    await lookup("Q2");
+    assert.deepEqual((await relations()).map((row) => [row.value, row.relation]), [["100", "original"], ["50", null]]);
+    assert.deepEqual([await picked("as_reported", "Q1"), await picked("as_reported", "Q2")], ["100", "context_unverified"]);
   });
 
   // CAT and COST switched to the total this way, CAT in its FY2019 10-K and COST in its FY2020 one.

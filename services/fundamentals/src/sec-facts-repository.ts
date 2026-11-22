@@ -1162,7 +1162,9 @@ async function persistStatementFacts(
         ? { ...attestation, fact_id: storedId, precision_class: "revalidated_against_source" }
         : { ...attestation, fact_id: storedId });
     }
-    if (provenance.certify !== false) await recordSecOriginalContext(db, storedId, line, exact.at, attestation.source_locator);
+    if (provenance.certify !== false && !(derivation && derivedAcrossPerimeters(line.metric_key, derivation))) {
+      await recordSecOriginalContext(db, storedId, line, exact.at, attestation.source_locator);
+    }
   }
   return insertedIds;
 }
@@ -1359,6 +1361,15 @@ function secConceptScope(metricKey: string, concept: string): ConceptScopeV1 | n
   if (metricKey === "capex" && concept === "PaymentsToAcquireProductiveAssets") return { kind: "productive_assets_capex", concept };
   if (metricKey === "operating_cash_flow" && concept === "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations") return { kind: "continuing_operations_ocf", concept };
   return null;
+}
+
+// A continuing-operations line covers the businesses its own filing reports as
+// continuing, and a discontinuation changes that set under the same concept. A
+// quarter derived from another filing's year to date may subtract a figure
+// covering other businesses, and no filing states which, so it does not certify.
+function derivedAcrossPerimeters(metricKey: string, derivation: SecDerivation): boolean {
+  return secConceptScope(metricKey, derivation.concept)?.kind === "continuing_operations_ocf"
+    && derivation.subtrahends.some((input) => input.accn !== derivation.minuend.accn);
 }
 
 // Selection takes every token from the filing whose own period it is, never
