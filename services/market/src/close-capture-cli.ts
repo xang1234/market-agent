@@ -1,4 +1,4 @@
-// Capture ten years of split-adjusted daily closes from yfinance into
+// Capture eleven years of split-adjusted daily closes from yfinance into
 // daily_close_captures (captureCloses). Dev only: it reads yfinance through the
 // dev-providers sidecar.
 //
@@ -8,7 +8,7 @@
 // With no tickers, captures every active US common stock or ADR listing except
 // the frozen golden issuers'. A ticker with more than one active US listing is a
 // failure and is never fetched. One request per listing, in turn, at least
-// YFINANCE_PACE_MS apart, covering the ten calendar years before the request's
+// YFINANCE_PACE_MS apart, covering the eleven calendar years before the request's
 // UTC day, which also dates the set. A rerun the same UTC day inserts nothing.
 // The currency stored is the listing's: the sidecar echoes it back rather than
 // reading it from yfinance, so a non-USD listing's currency is unverified.
@@ -27,7 +27,9 @@ import { YAHOO_FINANCE_DEV_MARKET_SOURCE_ID } from "./provider-sources.ts";
 import { sessionDate } from "./ytd-window.ts";
 
 export const YFINANCE_PACE_MS = 500;
-const HISTORY_YEARS = 10;
+// A Call's oldest fiscal year ends 9 years before its latest (financial-core's ANCHOR_FISCAL_YEARS is 10), which a 10-K
+// keeps current for 15 months, and needs a close in the 5 sessions to it: at most 10 years, 3 months and 5 sessions back.
+const HISTORY_YEARS = 11;
 const ADJUSTMENT_BASIS = "split_adjusted";
 const US_EQUITY_MICS = ["ARCX", "BATS", "IEXG", "XASE", "XNAS", "XNYS"];
 

@@ -41,7 +41,7 @@ export async function memoDatabase(t: TestContext, prefix: string): Promise<{ db
 export async function createMemoRun(
   db: Client,
   pool: Pool,
-  input: { templateId: string; playbookId: string; playbookVersion?: number; peers?: string[]; cutoff?: string; context?: AnalyzeRunFinancialMetadata },
+  input: { templateId: string; playbookId: string; playbookVersion?: number; peers?: string[]; cutoff?: string; context?: AnalyzeRunFinancialMetadata; blocks?: Array<Record<string, unknown>> },
 ) {
   const book = input.playbookVersion === undefined ? playbook(input.playbookId) : playbookAt(input.playbookId, input.playbookVersion)!;
   const context = input.context ?? prepareAnalyzeFinancialContext({
@@ -63,7 +63,7 @@ export async function createMemoRun(
     template_id: input.templateId,
     template_version: 1,
     playbook_id: book.playbook_id,
-    blocks: [{ id: "summary-1", kind: "rich_text", snapshot_id: snapshotId, segments: [{ type: "text", text: "Narrative memo." }] }],
+    blocks: [{ id: "summary-1", kind: "rich_text", snapshot_id: snapshotId, segments: [{ type: "text", text: "Narrative memo." }] }, ...(input.blocks ?? []).map((block) => ({ ...block, snapshot_id: snapshotId }))] as never,
     run_metadata: serializeAnalyzeRunMetadataV1({
       template_id: input.templateId,
       template_version: 1,

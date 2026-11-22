@@ -94,7 +94,8 @@ export function createDevPolygonFetcher(opts: { clock: () => Date }): PolygonFet
       const multiplier = Number(aggsMatch[2]);
       const timespan = aggsMatch[3] as "minute" | "hour" | "day";
       const startMs = Number(aggsMatch[4]);
-      const endMs = Number(aggsMatch[5]);
+      // Like Polygon, no bars after now.
+      const endMs = Math.min(Number(aggsMatch[5]), opts.clock().getTime());
       const snap = snapshotForTicker(ticker);
       return {
         adjusted: true,
@@ -160,6 +161,7 @@ function synthesizeAggBars(opts: {
   let close = opts.prevClose;
   const bars: Array<{ t: number; o: number; h: number; l: number; c: number; v: number }> = [];
   for (let t = opts.startMs; t < opts.endMs; t += stepMs) {
+    if (opts.timespan !== "day" && outsideUsSession(t)) continue;
     seed = (seed * 1664525 + 1013904223) >>> 0;
     const driftPct = ((seed % 4001) - 2000) / 100_000; // ±2.0% drift
     const open = close;
@@ -171,6 +173,14 @@ function synthesizeAggBars(opts: {
     bars.push({ t, o: open, h: high, l: low, c: close, v: volume });
   }
   return bars;
+}
+
+// Polygon's intraday bars run 04:00 to 20:00 New York time on weekdays.
+// ponytail: fixed UTC-5, so the fixture session is an hour late in summer.
+function outsideUsSession(ms: number): boolean {
+  const ny = new Date(ms - 5 * 3_600_000);
+  const hour = ny.getUTCHours();
+  return hour < 4 || hour >= 20 || ny.getUTCDay() === 0 || ny.getUTCDay() === 6;
 }
 
 function periodStepMs(timespan: "minute" | "hour" | "day"): number {

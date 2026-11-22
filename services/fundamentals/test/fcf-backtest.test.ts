@@ -29,7 +29,7 @@ function inputs(asOf: string, periodEnd: string, fcf: string, shares: string): A
 }
 
 // Split-adjusted closes as captured on 2026-11-10, after a 2-for-1 split on 2020-06-01.
-const closes: CloseSeries = { kind: "closes", captured_on: "2026-11-10", currency: "USD", closes: [{ trade_date: "2018-02-16", close_text: "57.7245" }, { trade_date: "2023-02-16", close_text: "101.73" }] };
+const closes: CloseSeries = { kind: "closes", basis_date: "2026-11-10", currency: "USD", closes: [{ trade_date: "2018-02-16", close_text: "57.7245" }, { trade_date: "2023-02-16", close_text: "101.73" }] };
 const noFiling: Absent = { kind: "outcome", outcome: "no_fy_facts", text: "No SEC facts labeled for that FY on file." };
 const noEarlier = { 3: noFiling, 5: noFiling } as const;
 const split = { status: "ok", listing_id: "l", timezone: "America/New_York", checked_at: "2026-11-10T00:00:00Z", splits: [{ execution_date: "2020-06-01", split_from: "1", split_to: "2" }] } as const;

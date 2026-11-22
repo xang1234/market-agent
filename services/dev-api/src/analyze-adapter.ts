@@ -7,6 +7,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   ANALYZE_PLAYBOOKS,
+  isRetiredVerdictBlock,
   playbookAt,
   AnalyzePlaybookError,
   AnalyzeRunMetadataError,
@@ -493,7 +494,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
     async shareRunToChat({ userId, runId, body }) {
       const run = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
       if (run === null) throw new DevApiHttpError(404, "analyze run not found");
-      const blocks = enrichAnalyzeRunBlocks(run.blocks.filter((block) => !isCertifiedBlock(block)), run);
+      const blocks = enrichAnalyzeRunBlocks(run.blocks.filter((block) => !isCertifiedBlock(block) && !isRetiredVerdictBlock(block)), run);
       const shared = acceptedShare(await shareArtifactToChat({
         sources: [
           {
@@ -738,7 +739,7 @@ async function toDevAnalyzeRun(
   return {
     ...summary,
     run_metadata: row.run_metadata,
-    blocks: row.blocks as ReadonlyArray<Record<string, unknown>>,
+    blocks: (row.blocks as ReadonlyArray<Record<string, unknown>>).filter((block) => !isRetiredVerdictBlock(block)),
     ...(financial ? { financial_sections: financial } : {}),
   };
 }

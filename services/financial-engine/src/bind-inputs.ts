@@ -116,14 +116,22 @@ export async function selectPlanInputs(input: {
   const reads: SlotRead[] = [];
   const priceNodes: ReportedMetricNode[] = [];
   let candidateBudget = plan.limits.max_input_candidates;
+  // A metric at several latest offsets asks the same request each time: it is read, and spends the budget, once.
+  const pages = new Map<string, SlotRead>();
   for (const node of plan.operations) {
     if (node.operation !== "reported_metric") continue;
     if (resolveMetricDefinition(node.metric_key)?.value_kind === "price") {
       priceNodes.push(node);
       continue;
     }
-    const read = await readSlot(client, node, { authority, evidence, plan, candidate_budget: candidateBudget });
-    if (read.status === "read") candidateBudget -= read.candidates.length;
+    const period = requestedPeriod(node);
+    const request = JSON.stringify([node.subject_slot, node.metric_key, period?.fiscal_year ?? null, period?.fiscal_period ?? null]);
+    const page = pages.get(request);
+    const read = page === undefined ? await readSlot(client, node, { authority, evidence, plan, candidate_budget: candidateBudget }) : { ...page, node };
+    if (page === undefined) {
+      pages.set(request, read);
+      if (read.status === "read") candidateBudget -= read.candidates.length;
+    }
     reads.push(read);
   }
   const policy: SelectionPolicy = {
@@ -153,8 +161,7 @@ async function readSlot(
 ): Promise<SlotRead> {
   if (context.candidate_budget <= 0) return { node, status: "gap", reason_code: "scope_limit_exceeded" };
   const slot = subjectSlot(context.plan, node);
-  // A share count is current only while it is the latest filing's, so every filing's is read.
-  const period = node.period.kind === "fiscal_period" && !isShareCount(node.metric_key) ? node.period : null;
+  const period = requestedPeriod(node);
   await client.query("savepoint evidence_read");
   const page = await context.evidence.listInputCandidates({
     authority: context.authority,
@@ -170,6 +177,11 @@ async function readSlot(
   }
   await client.query("release savepoint evidence_read");
   return { node, status: "read", candidates: page.candidates, truncated: page.truncated };
+}
+
+// The fiscal period a slot's read asks for, or null for every period. A share count is current only while it is the latest filing's, so every filing's is read.
+function requestedPeriod(node: ReportedMetricNode): Extract<ReportedMetricNode["period"], { kind: "fiscal_period" }> | null {
+  return node.period.kind === "fiscal_period" && !isShareCount(node.metric_key) ? node.period : null;
 }
 
 /**
