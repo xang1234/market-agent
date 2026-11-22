@@ -36,12 +36,12 @@ export type SbcBasis = "net_income" | "operating_income" | "gross_profit_and_ope
 
 export type NonGaapQuarter = Pick<StoredRelease, "document_id" | "source_id" | "accession" | "filed_on"> & {
   quarter_end: string;
-  scale: TableScale | null;
   eps: { gaap: number; non_gaap: number; spread: number } | null;
-  operating_income: { gaap: number; non_gaap: number } | null;
+  // Each amount in the scale of the table that reconciles it.
+  operating_income: { gaap: number; non_gaap: number; scale: TableScale | null } | null;
   // Percent of the release's own revenue, the spread in percentage points.
   operating_margin: { revenue: number; gaap_pct: number; non_gaap_pct: number; spread_pp: number } | null;
-  sbc: { value: number; basis: SbcBasis; non_gaap_net_income: number | null; share_pct: number | null } | null;
+  sbc: { value: number; basis: SbcBasis; scale: TableScale | null; non_gaap_net_income: number | null; share_pct: number | null } | null;
   // The categories of the quarter's add-backs, in any of its reconciliations.
   categories: ReadonlyArray<string>;
   reconciled: boolean;
@@ -71,9 +71,13 @@ const CATEGORIES: ReadonlyArray<readonly [key: string, label: string, pattern: R
   ["investment_gains_losses", "gains and losses on investments", /\binvestments?\b|\bequity securities\b/i],
 ];
 
+// How a line is stated, so "stock-based compensation, net of tax" is that add-back, no tax effect.
+const TAX_BASIS = /\bnet\s+of\s+(?:income\s+)?tax(?:es)?\b|\b(?:after|pre)[\s-]?tax\b/gi;
+
 // A line's category: a known kind, else its own label, footnote marks dropped.
 export function addBackCategory(label: string): { key: string; label: string } {
-  for (const [key, name, pattern] of CATEGORIES) if (pattern.test(label)) return { key, label: name };
+  const named = label.replace(TAX_BASIS, "");
+  for (const [key, name, pattern] of CATEGORIES) if (pattern.test(named)) return { key, label: name };
   const own = label.replace(/\s*\((?:[A-Z]|[a-z]|\d{1,2})\)/g, "").trim();
   return { key: `other:${own.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`, label: own };
 }
@@ -120,9 +124,8 @@ function quarterOf(release: StoredRelease): NonGaapQuarter {
     accession: release.accession,
     filed_on: release.filed_on,
     quarter_end: release.quarter_end!,
-    scale: (operating ?? net)?.scale ?? null,
     eps: eps ? { gaap: eps.gaap.value_num, non_gaap: eps.non_gaap.value_num, spread: round(eps.non_gaap.value_num - eps.gaap.value_num, 4) } : null,
-    operating_income: operating ? { gaap: operating.gaap.value_num, non_gaap: operating.non_gaap.value_num } : null,
+    operating_income: operating ? { gaap: operating.gaap.value_num, non_gaap: operating.non_gaap.value_num, scale: operating.scale } : null,
     operating_margin: sameScale
       ? {
         revenue: revenue.value_num,
@@ -151,14 +154,17 @@ function sbcOf(release: StoredRelease, net: StoredReconciliation | undefined): N
     ["gross_profit_and_operating_expenses", ["gross_profit", "operating_expenses"]],
   ];
   for (const [basis, keys] of bases) {
-    const used = release.reconciliations.filter((reconciliation) => keys.includes(reconciliation.measure_key));
-    const lines = used.flatMap(sbcLines);
-    if (lines.length === 0) continue;
-    const value = lines.reduce((sum, line) => sum + Math.abs(line.value_num), 0);
-    const comparable = net && net.non_gaap.value_num > 0 && used.every((reconciliation) => reconciliation.scale === net.scale);
+    const used = release.reconciliations.filter((reconciliation) => keys.includes(reconciliation.measure_key) && sbcLines(reconciliation).length > 0);
+    // Lines in two scales sum to no amount.
+    const scales = new Set(used.map((reconciliation) => reconciliation.scale));
+    if (scales.size !== 1) continue;
+    const [scale] = scales;
+    const value = used.flatMap(sbcLines).reduce((sum, line) => sum + Math.abs(line.value_num), 0);
+    const comparable = net && net.non_gaap.value_num > 0 && net.scale === scale;
     return {
       value: round(value, 4),
       basis,
+      scale: scale ?? null,
       non_gaap_net_income: comparable ? net.non_gaap.value_num : null,
       share_pct: comparable ? round((value / net.non_gaap.value_num) * 100, 1) : null,
     };

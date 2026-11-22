@@ -16,7 +16,7 @@ import { returnLabel } from "../../market/src/perf-points.ts";
 import { QUARTERS_SHOWN, type ResearchScope, type ScopeQuarter } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
 import type { AnalystToolResult } from "./analyst-tools.ts";
-import { HISTORY_QUARTERS, RECURRING_QUARTERS, type NonGaapQuarter, type SbcBasis } from "../../evidence/src/non-gaap-history.ts";
+import { HISTORY_QUARTERS, RECURRING_QUARTERS, type NonGaapQuarter, type SbcBasis, type TableScale } from "../../evidence/src/non-gaap-history.ts";
 import type { FilingItemRead, TenKFiling } from "../../evidence/src/local-runtime-evidence.ts";
 
 type Block = Record<string, unknown>;
@@ -306,18 +306,20 @@ const SBC_BASIS_TEXT: Readonly<Record<SbcBasis, string>> = {
 
 const amount = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 4 });
 
-// Each figure as the release states it, or a difference or ratio of its figures.
+const inScale = (scale: TableScale | null) => (scale ? ` in ${scale}` : "");
+
+// Each figure as the release states it, in its own table's scale, or a difference or ratio of its figures.
 function nonGaapQuarterText(quarter: NonGaapQuarter): string {
-  const release = `8-K accession ${quarter.accession ?? "unknown"}, filed ${quarter.filed_on}${quarter.scale ? `; figures in ${quarter.scale}, except per share` : ""}`;
-  const head = `non-GAAP reconciliation for the quarter ended ${quarter.quarter_end} (${release})`;
+  const head = `non-GAAP reconciliation for the quarter ended ${quarter.quarter_end} (8-K accession ${quarter.accession ?? "unknown"}, filed ${quarter.filed_on})`;
   // The reader's rules found none, which says nothing of what the release discloses.
   if (!quarter.reconciled) return `${head}: no GAAP to non-GAAP reconciliation could be read from the release`;
   const { eps, operating_income: income, operating_margin: margin, sbc } = quarter;
   const parts = [
     eps && `diluted EPS GAAP ${eps.gaap.toFixed(2)}, non-GAAP ${eps.non_gaap.toFixed(2)}, a spread of ${eps.spread.toFixed(2)}`,
-    income && `operating income GAAP ${amount(income.gaap)}, non-GAAP ${amount(income.non_gaap)}`,
-    margin && `operating margin on revenue of ${amount(margin.revenue)} GAAP ${margin.gaap_pct.toFixed(1)}%, non-GAAP ${margin.non_gaap_pct.toFixed(1)}%, a spread of ${margin.spread_pp.toFixed(1)} percentage points`,
-    sbc && `stock-based compensation added back ${amount(sbc.value)} (${SBC_BASIS_TEXT[sbc.basis]})${sbc.share_pct === null ? "" : `, ${sbc.share_pct.toFixed(1)}% of non-GAAP net income of ${amount(sbc.non_gaap_net_income!)}`}`,
+    income && `operating income GAAP ${amount(income.gaap)}, non-GAAP ${amount(income.non_gaap)}${inScale(income.scale)}`,
+    // A margin is shown only when revenue is in operating income's scale.
+    margin && `operating margin on revenue of ${amount(margin.revenue)}${inScale(income!.scale)}, GAAP ${margin.gaap_pct.toFixed(1)}%, non-GAAP ${margin.non_gaap_pct.toFixed(1)}%, a spread of ${margin.spread_pp.toFixed(1)} percentage points`,
+    sbc && `stock-based compensation added back ${amount(sbc.value)}${inScale(sbc.scale)} (${SBC_BASIS_TEXT[sbc.basis]})${sbc.share_pct === null ? "" : `, ${sbc.share_pct.toFixed(1)}% of non-GAAP net income of ${amount(sbc.non_gaap_net_income!)}`}`,
   ].filter(Boolean);
   return `${head}: ${parts.join("; ") || "the release reconciles none of diluted EPS, operating income and stock-based compensation"}`;
 }

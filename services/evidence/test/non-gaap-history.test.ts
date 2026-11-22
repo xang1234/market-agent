@@ -94,6 +94,25 @@ test("an add-back's category comes from its label, else the label is its own", (
   assert.equal(addBackCategory("Income tax impact of non-GAAP adjustments (D)").key, "income_tax_effect");
   assert.equal(addBackCategory("Restructuring charges").key, "restructuring");
   assert.deepEqual(addBackCategory("Other (C)"), { key: "other:other", label: "Other" });
+  // An add-back stated after its tax is that add-back, and only a tax effect is a tax line.
+  assert.equal(addBackCategory("Stock-based compensation, net of tax").key, "stock_based_compensation");
+  assert.equal(addBackCategory("Amortization of intangibles, net of income taxes").key, "amortization_of_intangibles");
+  assert.equal(addBackCategory("After-tax restructuring charges").key, "restructuring");
+  assert.deepEqual(addBackCategory("(Gains)/Charges, net of tax"), { key: "other:gains_charges_net_of_tax", label: "(Gains)/Charges, net of tax" });
+  assert.equal(addBackCategory("Income tax effect of stock-based compensation").key, "income_tax_effect");
+  assert.equal(addBackCategory("Tax effect of non-GAAP adjustments").key, "income_tax_effect");
+  assert.equal(addBackCategory("Provision for income taxes").key, "income_tax_effect");
+});
+
+test("each reconciled figure keeps the scale of its own table", () => {
+  const quarter = release("2025-04-30", 1, [["Stock-based compensation", 40]]);
+  const thousands = { ...quarter.reconciliations[0]!, gaap: { label: "GAAP operating income", value_num: 200_000 }, non_gaap: { label: "Non-GAAP operating income", value_num: 250_000 }, adjustments: [], scale: "thousands" as const };
+  const netIncome = { ...quarter.reconciliations[1]!, adjustments: [{ label: "Stock-based compensation", value_num: 40 }] };
+  const [read] = nonGaapHistory([{ ...quarter, reconciliations: [thousands, netIncome] }]).quarters;
+  assert.deepEqual(read!.operating_income, { gaap: 200_000, non_gaap: 250_000, scale: "thousands" });
+  assert.deepEqual(read!.sbc, { value: 40, basis: "net_income", scale: "millions", non_gaap_net_income: 200, share_pct: 20 });
+  // Revenue in millions and operating income in thousands make no margin.
+  assert.equal(read!.operating_margin, null);
 });
 
 function release(quarterEnd: string | null, n: number, lines: ReadonlyArray<[string, number]>, filedOn = quarterEnd ?? "2025-01-01"): StoredRelease {
@@ -130,7 +149,7 @@ test("the history reads the last 8 quarters: spreads, each category's quarters, 
   const latest = history.quarters[0]!;
   assert.deepEqual(latest.eps, { gaap: 1.3, non_gaap: 1.45, spread: 0.15 });
   assert.deepEqual(latest.operating_margin, { revenue: 1_000, gaap_pct: 20, non_gaap_pct: 25, spread_pp: 5 });
-  assert.deepEqual(latest.sbc, { value: 40, basis: "operating_income", non_gaap_net_income: 200, share_pct: 20 });
+  assert.deepEqual(latest.sbc, { value: 40, basis: "operating_income", scale: "millions", non_gaap_net_income: 200, share_pct: 20 });
   assert.equal(latest.document_id, rows[8]!.document_id);
   assert.deepEqual(history.categories.map((category) => [category.key, category.quarters, category.of, category.recurring]), [
     ["stock_based_compensation", 8, 8, true],
@@ -218,7 +237,7 @@ test("a stored release is read once from its bytes, and the history reads it at 
   assert.deepEqual(quarter.eps, { gaap: 1.3, non_gaap: 1.36, spread: 0.06 });
   assert.deepEqual(quarter.operating_margin, { revenue: 57_006, gaap_pct: 63.2, non_gaap_pct: 66.3, spread_pp: 3.2 });
   // No SBC line in net or operating income: the gross profit and operating expense lines together.
-  assert.deepEqual(quarter.sbc, { value: 1_652, basis: "gross_profit_and_operating_expenses", non_gaap_net_income: 33_366, share_pct: 5 });
+  assert.deepEqual(quarter.sbc, { value: 1_652, basis: "gross_profit_and_operating_expenses", scale: "millions", non_gaap_net_income: 33_366, share_pct: 5 });
   // Before the release was filed, nothing.
   assert.equal((await loadNonGaapHistory(client, { issuer_id: issuerId, as_of: "2025-11-18T00:00:00Z" })).quarters.length, 0);
 

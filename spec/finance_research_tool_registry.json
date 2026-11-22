@@ -2010,14 +2010,6 @@
                   "type": "string",
                   "format": "date"
                 },
-                "scale": {
-                  "enum": [
-                    "thousands",
-                    "millions",
-                    "billions",
-                    null
-                  ]
-                },
                 "eps": {
                   "type": [
                     "object",
@@ -2052,11 +2044,20 @@
                     },
                     "non_gaap": {
                       "type": "number"
+                    },
+                    "scale": {
+                      "enum": [
+                        "thousands",
+                        "millions",
+                        "billions",
+                        null
+                      ]
                     }
                   },
                   "required": [
                     "gaap",
-                    "non_gaap"
+                    "non_gaap",
+                    "scale"
                   ],
                   "additionalProperties": false
                 },
@@ -2103,6 +2104,14 @@
                         "gross_profit_and_operating_expenses"
                       ]
                     },
+                    "scale": {
+                      "enum": [
+                        "thousands",
+                        "millions",
+                        "billions",
+                        null
+                      ]
+                    },
                     "non_gaap_net_income": {
                       "type": [
                         "number",
@@ -2119,6 +2128,7 @@
                   "required": [
                     "value",
                     "basis",
+                    "scale",
                     "non_gaap_net_income",
                     "share_pct"
                   ],
@@ -2140,7 +2150,6 @@
                 "accession",
                 "filed_on",
                 "quarter_end",
-                "scale",
                 "eps",
                 "operating_income",
                 "operating_margin",
