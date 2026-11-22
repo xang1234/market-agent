@@ -78,7 +78,7 @@ test("an actual within the range is in line, below it a miss; for costs, below t
     guide(Q1, "revenue", "gaap", 44.1e9, 45.9e9),
     result(Q2, "revenue", "gaap", 44.1e9),
     guide(Q1, "eps", "non_gaap", 1.0, 1.0),
-    result(Q2, "eps", "non_gaap", 0.99),
+    result(Q2, "eps", "non_gaap", 0.98),
     guide(Q1, "operating_expenses", "non_gaap", 4.0e9, 4.0e9),
     result(Q2, "operating_expenses", "non_gaap", 3.9e9),
     guide(Q1, "capex", "gaap", 1.0e9, 1.2e9),
@@ -90,6 +90,18 @@ test("an actual within the range is in line, below it a miss; for costs, below t
     ["eps", "miss"],
     ["capex", "miss"],
   ]);
+});
+
+test("an actual within 1% of a point guide is in line, past 1% a beat or a miss; for costs, under the band is the beat; a range has no band", () => {
+  const outcomes = (metric: StoredFigure["metric"], guided: number, actuals: number[], high = guided) =>
+    actuals.map((value) => guidanceRecord([Q1, Q2], [guide(Q1, metric, "gaap", guided, high), result(Q2, metric, "gaap", value)], NO_SPLITS).rows[0]?.outcome);
+  assert.deepEqual(outcomes("revenue", 10.0e9, [10.1e9, 9.9e9, 10.1e9 + 1, 9.9e9 - 1]), ["in_line", "in_line", "beat", "miss"]);
+  assert.deepEqual(outcomes("eps", 0.5, [0.505, 0.495, 0.5051, 0.4949]), ["in_line", "in_line", "beat", "miss"]);
+  assert.deepEqual(outcomes("eps", -0.1, [-0.101, -0.099, -0.1011, -0.0989]), ["in_line", "in_line", "miss", "beat"]);
+  assert.deepEqual(outcomes("gross_margin", 72.0, [72.72, 71.28, 72.73, 71.27]), ["in_line", "in_line", "beat", "miss"]);
+  assert.deepEqual(outcomes("operating_expenses", 4.0e9, [4.04e9, 3.96e9, 3.96e9 - 1, 4.04e9 + 1]), ["in_line", "in_line", "beat", "miss"]);
+  assert.deepEqual(outcomes("capex", 1.0e9, [0.99e9 - 1, 1.01e9 + 1]), ["beat", "miss"]);
+  assert.deepEqual(outcomes("revenue", 44.1e9, [45.9e9 + 1, 44.1e9 - 1], 45.9e9), ["beat", "miss"]);
 });
 
 test("the same guide repeated in two exhibits is one guide; different ranges or different actuals for one quarter are not comparable", () => {

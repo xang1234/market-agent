@@ -60,6 +60,9 @@ export const RECORD_QUARTERS = 8;
 const NEXT_QUARTER_DAYS = { min: 80, max: 100 } as const;
 // Coming in under a cost guide is the beat.
 const LOWER_IS_BETTER: ReadonlySet<ReleaseMetric> = new Set(["operating_expenses", "capex"]);
+// An actual within 1% of a point guide is in line (operator, #752). The slack
+// keeps an actual at exactly 1% inside despite float rounding (0.505 against 0.5).
+const POINT_GUIDE_BAND = 0.01 * (1 + 1e-9);
 
 // An issuer's record, read from its stored releases (an issuer merged into
 // another reads as the one kept). A guide whose claim is no longer current
@@ -166,7 +169,8 @@ function compare(
     if (splits.splits.some((split) => split >= from && split <= to)) return { ...base, actual: shown, outcome: "not_comparable", reason: "split_between_releases" };
     if (splits.checked_through === null || splits.checked_through < to) return { ...base, actual: shown, outcome: "not_comparable", reason: "split_history_missing" };
   }
-  const position = actual.low < guide!.low ? -1 : actual.low > guide!.high ? 1 : 0;
+  const band = guide!.low === guide!.high ? Math.abs(guide!.low) * POINT_GUIDE_BAND : 0;
+  const position = actual.low < guide!.low - band ? -1 : actual.low > guide!.high + band ? 1 : 0;
   const better = LOWER_IS_BETTER.has(guide!.metric) ? -position : position;
   return { ...base, actual: shown, outcome: better > 0 ? "beat" : better < 0 ? "miss" : "in_line" };
 }
