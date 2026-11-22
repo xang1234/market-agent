@@ -8,6 +8,7 @@ import {
   assertUuidV4,
 } from "./validators.ts";
 import { PROMOTION_VERIFICATION_STATUSES, type PromotionVerificationStatus } from "./promotion-rules.ts";
+import { reviewedFigure, storeReviewedFigure } from "./release-figures.ts";
 import { withPoolClient } from "../../shared/src/pool-client.ts";
 
 export const FACT_SUBJECT_KINDS = Object.freeze([
@@ -28,6 +29,8 @@ export const FRESHNESS_CLASSES = Object.freeze(["real_time", "delayed_15m", "eod
 export const COVERAGE_LEVELS = Object.freeze(["full", "partial", "sparse", "unavailable"] as const);
 export const FACT_REVIEW_STATUSES = Object.freeze(["queued", "reviewed", "dismissed"] as const);
 export const FACT_REVIEW_ACTIONS = Object.freeze(["approved", "rejected", "edited"] as const);
+// What a queued candidate is, a fact or an earnings-release figure (#733).
+export const FACT_REVIEW_KINDS = Object.freeze(["fact", "release_figure"] as const);
 export const FACT_ENTITLEMENT_CHANNELS = Object.freeze(["app", "export", "email", "push"] as const);
 
 export type FactSubjectKind = (typeof FACT_SUBJECT_KINDS)[number];
@@ -37,6 +40,9 @@ export type FreshnessClass = (typeof FRESHNESS_CLASSES)[number];
 export type CoverageLevel = (typeof COVERAGE_LEVELS)[number];
 export type FactReviewStatus = (typeof FACT_REVIEW_STATUSES)[number];
 export type FactReviewAction = (typeof FACT_REVIEW_ACTIONS)[number];
+export type FactReviewKind = (typeof FACT_REVIEW_KINDS)[number];
+// A release figure's candidate (release-figures.ts) is its own shape.
+export type FactReviewCandidate = FactInput | Readonly<Record<string, unknown>>;
 export type FactEntitlementChannel = (typeof FACT_ENTITLEMENT_CHANNELS)[number];
 
 export type FactInput = Readonly<{
@@ -99,7 +105,8 @@ export type QueueFactReviewInput = Readonly<{
 
 export type FactReviewQueueRow = Readonly<{
   review_id: string;
-  candidate: FactInput;
+  kind: FactReviewKind;
+  candidate: FactReviewCandidate;
   reason: string;
   source_id: string | null;
   metric_id: string | null;
@@ -111,6 +118,7 @@ export type FactReviewQueueRow = Readonly<{
   reviewed_by: string | null;
   reviewed_at: string | null;
   fact_id: string | null;
+  release_figure_id: string | null;
 }>;
 
 export type FactReviewActionRow = Readonly<{
@@ -119,8 +127,8 @@ export type FactReviewActionRow = Readonly<{
   action: FactReviewAction;
   reviewer_id: string;
   notes: string | null;
-  candidate_before: FactInput;
-  candidate_after: FactInput | null;
+  candidate_before: FactReviewCandidate;
+  candidate_after: FactReviewCandidate | null;
   fact_id: string | null;
   created_at: string;
 }>;
@@ -168,6 +176,16 @@ export type EditFactReviewCandidateInput = Readonly<{
   review_id: string;
   reviewer_id: string;
   candidate: FactInput;
+  notes?: string | null;
+  reviewed_at?: string;
+  throughput_limit?: FactReviewThroughputLimit;
+}>;
+
+export type ResolveReleaseFigureReviewInput = Readonly<{
+  review_id: string;
+  reviewer_id: string;
+  action: FactReviewAction;
+  candidate?: unknown;
   notes?: string | null;
   reviewed_at?: string;
   throughput_limit?: FactReviewThroughputLimit;
@@ -296,7 +314,9 @@ const FACT_REVIEW_QUEUE_COLUMNS = `review_id,
                updated_at,
                reviewed_by,
                reviewed_at,
-               fact_id`;
+               fact_id,
+               kind,
+               release_figure_id`;
 
 const FACT_REVIEW_ACTION_COLUMNS = `action_id,
                review_id,
@@ -592,7 +612,7 @@ export async function approveFactReview(
   try {
     const locked = await lockQueuedFactReview(db, input.review_id);
     await assertReviewerThroughputAvailable(db, input.reviewer_id, input.throughput_limit);
-    const candidateBefore = normalizeReviewCandidate(locked.candidate);
+    const candidateBefore = normalizeReviewCandidate(locked.candidate as FactInput);
     const candidateAfter = input.candidate == null ? candidateBefore : normalizeReviewCandidate(input.candidate);
     const fact = await createFact(db, {
       ...candidateAfter,
@@ -654,7 +674,7 @@ export async function rejectFactReview(
   try {
     const locked = await lockQueuedFactReview(db, input.review_id);
     await assertReviewerThroughputAvailable(db, input.reviewer_id, input.throughput_limit);
-    const candidateBefore = normalizeReviewCandidate(locked.candidate);
+    const candidateBefore = normalizeReviewCandidate(locked.candidate as FactInput);
     const review = await updateFactReviewAsRejected(db, input.review_id, input.reviewer_id, reviewedAt);
     await insertFactReviewAction(db, {
       review_id: input.review_id,
@@ -694,7 +714,7 @@ export async function editFactReviewCandidate(
   try {
     const locked = await lockQueuedFactReview(db, input.review_id);
     await assertReviewerThroughputAvailable(db, input.reviewer_id, input.throughput_limit);
-    const candidateBefore = normalizeReviewCandidate(locked.candidate);
+    const candidateBefore = normalizeReviewCandidate(locked.candidate as FactInput);
     const candidateAfter = normalizeReviewCandidate(input.candidate);
     const review = await updateFactReviewCandidate(db, input.review_id, candidateAfter);
     await insertFactReviewAction(db, {
@@ -719,6 +739,82 @@ export async function editFactReviewCandidateWithPool(
   input: EditFactReviewCandidateInput,
 ): Promise<FactReviewQueueRow> {
   return withFactReviewClient(pool, (client) => editFactReviewCandidate(client, input));
+}
+
+// The kind of a review, so a request is sent to the fact or the release figure
+// path; null when there is no such review.
+export async function factReviewKind(db: QueryExecutor, reviewId: string): Promise<FactReviewKind | null> {
+  const { rows } = await db.query<{ kind: FactReviewKind }>(`select kind from fact_review_queue where review_id = $1`, [reviewId]);
+  return rows[0]?.kind ?? null;
+}
+
+// A release figure the extraction could not read for sure (#733). Approving
+// stores the figure the reviewer set (release-figures.ts) and names it on the
+// review; rejecting dismisses it; editing keeps it queued with the corrected
+// candidate. Each is audited, and counts against the reviewer's throughput, as
+// a fact review does.
+export async function resolveReleaseFigureReview(
+  db: QueryExecutor,
+  input: ResolveReleaseFigureReviewInput,
+): Promise<FactReviewQueueRow> {
+  assertReviewActionInput(input.review_id, input.reviewer_id, input.reviewed_at);
+  assertOneOf(input.action, FACT_REVIEW_ACTIONS, "action");
+  const notes = normalizeOptionalNotes(input.notes);
+  const reviewedAt = input.reviewed_at ?? new Date().toISOString();
+  if (isPoolLike(db)) {
+    throw new Error("resolveReleaseFigureReview requires a pinned transaction client");
+  }
+
+  await db.query("begin");
+  try {
+    const locked = await lockQueuedFactReview(db, input.review_id, "release_figure");
+    await assertReviewerThroughputAvailable(db, input.reviewer_id, input.throughput_limit);
+    const after = input.action === "rejected" ? null : (input.candidate ?? locked.candidate) as FactReviewCandidate;
+    if (input.action === "edited") reviewedFigure(after, locked.candidate);
+    const figureId = input.action === "approved" ? await storeReviewedFigure(db, after, locked.candidate) : null;
+    const decided = input.action !== "edited";
+    const { rows } = await db.query<FactReviewQueueDbRow>(
+      `update fact_review_queue
+          set status = $2,
+              candidate = $3::jsonb,
+              reviewed_by = $4,
+              reviewed_at = $5,
+              release_figure_id = $6,
+              updated_at = now()
+        where review_id = $1
+          and status = 'queued'
+        returning ${FACT_REVIEW_QUEUE_COLUMNS}`,
+      [
+        input.review_id,
+        input.action === "approved" ? "reviewed" : input.action === "rejected" ? "dismissed" : "queued",
+        after ?? locked.candidate,
+        decided ? input.reviewer_id : null,
+        decided ? reviewedAt : null,
+        figureId,
+      ],
+    );
+    await insertFactReviewAction(db, {
+      review_id: input.review_id,
+      action: input.action,
+      reviewer_id: input.reviewer_id,
+      notes,
+      candidate_before: locked.candidate,
+      candidate_after: after,
+      fact_id: null,
+    });
+    await db.query("commit");
+    return factReviewQueueRowFromDb(rows[0]);
+  } catch (error) {
+    await db.query("rollback");
+    throw error;
+  }
+}
+
+export async function resolveReleaseFigureReviewWithPool(
+  pool: FactClientPool,
+  input: ResolveReleaseFigureReviewInput,
+): Promise<FactReviewQueueRow> {
+  return withFactReviewClient(pool, (client) => resolveReleaseFigureReview(client, input));
 }
 
 export async function listFactsForEgress(
@@ -759,14 +855,16 @@ async function withFactReviewClient<T>(
   return withPoolClient(pool, action, isConnectionError);
 }
 
-async function lockQueuedFactReview(db: QueryExecutor, reviewId: string): Promise<FactReviewQueueRow> {
+// A fact review never takes a release figure's row, nor the other way round.
+async function lockQueuedFactReview(db: QueryExecutor, reviewId: string, kind: FactReviewKind = "fact"): Promise<FactReviewQueueRow> {
   const { rows } = await db.query<FactReviewQueueDbRow>(
     `select ${FACT_REVIEW_QUEUE_COLUMNS}
        from fact_review_queue
       where review_id = $1
         and status = 'queued'
+        and kind = $2
       for update`,
-    [reviewId],
+    [reviewId, kind],
   );
   if (rows.length !== 1) {
     throw new Error("fact review queue item was not found or is no longer queued");
@@ -1092,6 +1190,7 @@ function factReviewQueueRowFromDb(row: FactReviewQueueDbRow | undefined): FactRe
   assertOneOf(row.status, FACT_REVIEW_STATUSES, "status");
   return Object.freeze({
     review_id: row.review_id,
+    kind: row.kind,
     candidate: row.candidate,
     reason: row.reason,
     source_id: row.source_id,
@@ -1104,6 +1203,7 @@ function factReviewQueueRowFromDb(row: FactReviewQueueDbRow | undefined): FactRe
     reviewed_by: row.reviewed_by,
     reviewed_at: nullableIsoString(row.reviewed_at),
     fact_id: row.fact_id,
+    release_figure_id: row.release_figure_id,
   });
 }
 

@@ -11,6 +11,8 @@ import {
   type EarningsSurpriseDirection,
 } from '../../symbol/earnings.ts'
 import { beatMissSummary, type BeatMissChip, type BeatMissSummary } from '../../symbol/earningsStrip.ts'
+import { guidanceRecord } from '../../symbol/guidanceRecord.ts'
+import { GuidanceRecordBody } from '../../symbol/GuidanceRecordView.tsx'
 import { formatCurrency2 } from '../../symbol/format.ts'
 import { formatSignedPercent } from '../../symbol/quote.ts'
 import { pluralize } from '../../format/pluralize.ts'
@@ -26,6 +28,7 @@ export function EarningsSection() {
 
   const earnings = useResource(earningsEvents, issuerId)
   const consensus = useResource(analystConsensus, issuerId)
+  const guidance = useResource(guidanceRecord, issuerId)
 
   return (
     <div data-testid="section-earnings" className={SECTION_STACK_CLASS}>
@@ -77,6 +80,19 @@ export function EarningsSection() {
           </FetchStateView>
         </Card>
       </div>
+      <Card
+        testId="earnings-guidance"
+        headingId="earnings-guidance-heading"
+        heading="Guidance vs reported · last 8 quarters"
+      >
+        <FetchStateView
+          state={guidance}
+          noun="guidance record"
+          skeletonClassName="h-40"
+        >
+          {(envelope) => <GuidanceRecordBody envelope={envelope} />}
+        </FetchStateView>
+      </Card>
       {/* Quarter-by-quarter table is the detail layer — kept last so the
           section reads at-a-glance first (beat/miss chips, then consensus). */}
       <Card

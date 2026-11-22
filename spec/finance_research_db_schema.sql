@@ -512,6 +512,10 @@ create table claims (
   -- the unbound ones. Apart from enriched_at, which marks a deterministic 8-K
   -- claim processed.
   period_read_at timestamptz,
+  -- When the extraction read an Item 2.02 claim's release for its figures
+  -- (#733); null until read, so a release read before figures existed is read
+  -- once more.
+  figures_read_at timestamptz,
   constraint claims_period_pair check (num_nulls(period_kind, period_end, period_bound_at) in (0, 3))
 );
 create function prevent_claim_period_rebinding() returns trigger
@@ -687,6 +691,38 @@ create unique index facts_active_restated_identity_idx
     and invalidated_at is null
     and superseded_by is null;
 
+-- The quarter an earnings release reports, and when it was filed (#733). A
+-- release with no such quarter has no row and no figures.
+create table earnings_release_quarters (
+  document_id uuid primary key references documents(document_id) on delete cascade,
+  issuer_id uuid not null references issuers(issuer_id),
+  quarter_end date not null,
+  filed_on date not null,
+  created_at timestamptz not null default now(),
+  check (quarter_end < filed_on)
+);
+create index earnings_release_quarters_issuer_idx on earnings_release_quarters(issuer_id, quarter_end);
+
+-- A guide for the quarter after its release's (claim_id names the guidance claim
+-- it binds), or an actual its release reports for its own quarter (low = high), on
+-- the basis its sentence states (#733).
+create table earnings_release_figures (
+  figure_id uuid primary key default gen_random_uuid(),
+  document_id uuid not null references earnings_release_quarters(document_id) on delete cascade,
+  claim_id uuid references claims(claim_id) on delete cascade,
+  kind text not null check (kind in ('guidance', 'result')),
+  metric text not null,
+  basis text not null check (basis in ('gaap', 'non_gaap')),
+  low numeric not null,
+  high numeric not null,
+  quote text not null,
+  created_at timestamptz not null default now(),
+  check (low <= high),
+  check ((kind = 'guidance') = (claim_id is not null)),
+  check (kind = 'guidance' or low = high),
+  unique (document_id, kind, metric, basis, quote)
+);
+
 create table fact_review_queue (
   review_id uuid primary key default gen_random_uuid(),
   candidate jsonb not null,
@@ -701,24 +737,31 @@ create table fact_review_queue (
   reviewed_by text,
   reviewed_at timestamptz,
   fact_id uuid references facts(fact_id),
+  -- A release figure the extraction could not read for sure (#733); approving
+  -- it stores the figure, whose id is cleared when its release is deleted.
+  kind text not null default 'fact' check (kind in ('fact', 'release_figure')),
+  release_figure_id uuid references earnings_release_figures(figure_id) on delete set null,
   constraint fact_review_queue_review_metadata_chk check (
     (
       status = 'queued'
       and reviewed_by is null
       and reviewed_at is null
       and fact_id is null
+      and release_figure_id is null
     ) or (
       status = 'reviewed'
       and reviewed_by is not null
       and length(btrim(reviewed_by)) > 0
       and reviewed_at is not null
-      and fact_id is not null
+      and (fact_id is not null) = (kind = 'fact')
+      and (kind = 'release_figure' or release_figure_id is null)
     ) or (
       status = 'dismissed'
       and reviewed_by is not null
       and length(btrim(reviewed_by)) > 0
       and reviewed_at is not null
       and fact_id is null
+      and release_figure_id is null
     )
   )
 );

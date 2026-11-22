@@ -904,3 +904,111 @@ test("a release whose only bound explanation is superseded is rebound for its cu
   const mi308 = (await client.query<{ period_end: string }>(`select period_end::text as period_end from claims where text_canonical = $1`, [MI308_EXPLANATION])).rows;
   assert.deepEqual(mi308, [{ period_end: "2025-06-30" }]);
 });
+
+// #733: the figures of AMD's Q2 2025 release, its sentences cut down.
+const AMD_REVENUE_RESULT = "Second quarter revenue was $7.7 billion.";
+const AMD_MARGIN_RESULT = "Non-GAAP gross margin was 43%.";
+const AMD_MARGIN_GUIDANCE = "Non-GAAP gross margin is expected to be approximately 54%.";
+const AMD_YEAR_GUIDANCE = "For the full year 2025, AMD expects revenue to grow approximately 30%.";
+const AMD_FIGURES_SUBMISSION = amdSubmission([
+  "AMD Reports Second Quarter 2025 Financial Results",
+  "Financial results for the three months ended June 28, 2025 are in the tables below.",
+  AMD_REVENUE_RESULT,
+  AMD_MARGIN_RESULT,
+  AMD_GUIDANCE,
+  AMD_MARGIN_GUIDANCE,
+  AMD_YEAR_GUIDANCE,
+]);
+const amdFiguresReply = (quarterEnd: string | null) => JSON.stringify({ quarter_end: quarterEnd, statements: [
+  { kind: "result", metric: "revenue", about: "quarter", quote: AMD_REVENUE_RESULT, figures: [{ basis: "gaap", value: "$7.7 billion" }] },
+  { kind: "result", metric: "gross_margin", about: "quarter", quote: AMD_MARGIN_RESULT, figures: [{ basis: "non_gaap", value: "43%" }] },
+  { kind: "guidance", metric: "revenue", about: "other", target: "next_quarter", quote: AMD_GUIDANCE, figures: [{ basis: "gaap", value: "approximately $8.7 billion", plus_minus: "$300 million" }] },
+  // The sentence says non-GAAP; read as GAAP, it waits for review.
+  { kind: "guidance", metric: "gross_margin", about: "other", target: "next_quarter", quote: AMD_MARGIN_GUIDANCE, figures: [{ basis: "non_gaap", value: "54%" }, { basis: "gaap", value: "54%" }] },
+  // A full year's guide is no next quarter's, so it is a claim with no figure.
+  { kind: "guidance", metric: "revenue", about: "other", target: "other", quote: AMD_YEAR_GUIDANCE, figures: [{ basis: "gaap", value: "30%" }] },
+] });
+
+async function releaseFigures(client: { query: QueryExecutor["query"] }) {
+  return (await client.query<{ kind: string; metric: string; basis: string; low: string; high: string; quote: string; claim_predicate: string | null }>(
+    `select f.kind, f.metric, f.basis, f.low::text as low, f.high::text as high, f.quote, c.predicate as claim_predicate
+       from earnings_release_figures f left join claims c on c.claim_id = f.claim_id
+      order by f.kind, f.metric, f.basis`,
+  )).rows.map((row) => [row.kind, row.metric, row.basis, Number(row.low), Number(row.high), row.quote, row.claim_predicate]);
+}
+
+test("a release's next-quarter guides and its quarter's actuals are stored as figures on their stated basis, and a parse its sentence does not bear out waits for review", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-figures");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  const result = await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdFiguresReply("2025-06-28")).llm, secClient: fakeSec(AMD_FIGURES_SUBMISSION) });
+  assert.equal(result.extracted, 1);
+  assert.deepEqual(
+    (await client.query(`select document_id::text as document_id, issuer_id::text as issuer_id, quarter_end::text as quarter_end, filed_on::text as filed_on from earnings_release_quarters`)).rows,
+    [{ document_id: seeded.documentId, issuer_id: seeded.issuerId, quarter_end: "2025-06-28", filed_on: "2025-08-05" }],
+  );
+  assert.deepEqual(await releaseFigures(client), [
+    ["guidance", "gross_margin", "non_gaap", 54, 54, AMD_MARGIN_GUIDANCE, "guidance.gross_margin"],
+    ["guidance", "revenue", "gaap", 8.4e9, 9.0e9, AMD_GUIDANCE, "guidance.revenue"],
+    ["result", "gross_margin", "non_gaap", 43, 43, AMD_MARGIN_RESULT, null],
+    ["result", "revenue", "gaap", 7.7e9, 7.7e9, AMD_REVENUE_RESULT, null],
+  ]);
+  // Actuals are figures, never claims, so no reader takes "revenue was $7.7
+  // billion" for a certified figure.
+  assert.deepEqual((await releaseClaims(client, seeded.documentId)).map((claim) => [claim.predicate, claim.text_canonical]), [
+    ["guidance.gross_margin", AMD_MARGIN_GUIDANCE],
+    ["guidance.revenue", AMD_YEAR_GUIDANCE],
+    ["guidance.revenue", AMD_GUIDANCE],
+  ]);
+  const queued = (await client.query<{ kind: string; reason: string; status: string; source_id: string; candidate: Record<string, unknown> }>(
+    `select kind, reason, status, source_id::text as source_id, candidate from fact_review_queue`,
+  )).rows;
+  assert.equal(queued.length, 1);
+  assert.deepEqual([queued[0]!.kind, queued[0]!.status, queued[0]!.reason], ["release_figure", "queued", "its sentence does not state a GAAP figure"]);
+  assert.deepEqual(
+    [queued[0]!.candidate.document_id, queued[0]!.candidate.kind, queued[0]!.candidate.metric, queued[0]!.candidate.quote, queued[0]!.candidate.figure],
+    [seeded.documentId, "guidance", "gross_margin", AMD_MARGIN_GUIDANCE, { basis: "gaap", value: "54%" }],
+  );
+  assert.equal(typeof queued[0]!.candidate.claim_id, "string");
+  // Read for its figures, so no longer a candidate.
+  assert.deepEqual(
+    (await client.query(`select enriched_at is not null as enriched, figures_read_at is not null as read from claims where claim_id = $1`, [seeded.claimId])).rows,
+    [{ enriched: true, read: true }],
+  );
+  assert.deepEqual(await findReleaseCandidates(client), []);
+});
+
+test("a release whose quarter end is unknown stores its claims but no figure, and queues none", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-figures-no-quarter");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdFiguresReply(null)).llm, secClient: fakeSec(AMD_FIGURES_SUBMISSION) });
+  assert.equal((await releaseClaims(client, seeded.documentId)).length, 3);
+  assert.deepEqual(await releaseFigures(client), []);
+  assert.equal((await client.query(`select 1 from earnings_release_quarters`)).rowCount, 0);
+  assert.equal((await client.query(`select 1 from fact_review_queue`)).rowCount, 0);
+});
+
+test("a release read before figures existed is read once more for them, keeping its claims and their ids", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-figures-reread");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  // The read before #733: claims only, the Item 2.02 claim marked enriched.
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply("2025-06-28")).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  await client.query(`update claims set figures_read_at = null where claim_id = $1`, [seeded.claimId]);
+  await client.query(`delete from earnings_release_figures`);
+  const before = await releaseClaims(client, seeded.documentId);
+
+  const reread = await runReleaseExtractionDrain({ db: client, llm: fakeLlm(JSON.stringify({ quarter_end: "2025-06-28", statements: [
+    { kind: "explanation", metric: "gross_margin", about: "quarter", quote: MI308_EXPLANATION },
+    { kind: "guidance", metric: "revenue", about: "other", target: "next_quarter", quote: AMD_GUIDANCE, figures: [{ basis: "gaap", value: "approximately $8.7 billion", plus_minus: "$300 million" }] },
+  ] })).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  assert.equal(reread.extracted, 1);
+  assert.deepEqual(await releaseClaims(client, seeded.documentId), before);
+  const guidanceClaim = before.find((claim) => claim.predicate === "guidance.revenue")!;
+  assert.deepEqual(
+    (await client.query(`select claim_id::text as claim_id, low::text as low from earnings_release_figures`)).rows,
+    [{ claim_id: guidanceClaim.claim_id, low: "8400000000" }],
+  );
+  assert.deepEqual(await findReleaseCandidates(client), []);
+});

@@ -559,8 +559,38 @@ an 8-K Item 2.02 files the press release and CFO commentary as EX-99 exhibits
   reader may cite, against the issuer's facts. It flags a near miss, a fact of that kind ending within 7 days but not
   that day (a calendar end read for a 52/53-week quarter's), and a mismatch, a fiscal year that holds facts with none
   of that kind ending that day. It exits 0 clean, 1 on a flag and 2 on an error.
-- **Not yet:** guidance compared with the reported result once it is in, and 10-Q/10-K MD&A. The frozen golden
-  dataset holds one such claim: AMD's Q2 2025 MI308 charge, bound to the quarter (#542).
+- **Not yet:** 10-Q/10-K MD&A. The frozen golden dataset holds one such claim, AMD's Q2 2025 MI308 charge, bound to
+  the quarter (#542).
+
+## Guidance against reported results (#733)
+
+The symbol page's Earnings section compares each guide an earnings release gives for the next quarter with what the
+next release reports, on the same basis (`services/evidence/src/guidance-record.ts`, read at
+`GET /v1/evidence/guidance-record?issuer_id=`, public like the issuer news rail).
+
+- **Figures.** The extraction above also asks for each guidance sentence's target (`next_quarter` or other) and, for
+  guides and for the sentences stating the quarter's reported result (kind `result`), its figures, each a basis and
+  phrases copied from the sentence ("$45.0 billion" plus or minus "2%", or a low and a high). `release-figures.ts`
+  reads the low and high from those phrases, never from a number the model wrote. A next-quarter guide and a
+  quarter's actual are stored in `earnings_release_figures` (migration 0086) with the guidance claim the guide binds.
+  Actuals are never claims, so no reader takes a release's "revenue was $7.7 billion" for a certified figure. Figures
+  need the release's quarter (`earnings_release_quarters`, its end as `reportedQuarterEnd` checks it), so a release
+  with none stores none.
+- **Review.** A phrase not in the sentence or not one amount, an amount not in the metric's unit (a growth rate for
+  revenue), a basis the sentence does not state, a loss, a percent plus or minus on a margin (points or a share of
+  it), or a low above its high goes to the fact review queue as kind `release_figure`, at a confidence that keeps it
+  out of bulk approval. Approving it stores the figure with the basis, low and high the reviewer set; the sentence and
+  what it is a figure of stay as queued.
+- **Same basis.** A guide's quarter is the issuer's next stored release quarter, ending 80 to 100 days after its
+  release's. A non-GAAP guide is compared only with that release's non-GAAP actual, and a GAAP guide with its GAAP
+  actual; certified facts are not used, so both sides are quoted figures of the same kind. A guide whose quarter is
+  reported with no actual on its basis is not comparable, as are conflicting guides or actuals for one quarter.
+- **Outcome.** Within the range is in line, above it a beat and below it a miss, reversed for operating expenses and
+  capex. A point guide is compared at its figure. The hit rate counts in line and beats per metric and basis over
+  the last 8 reported quarters; the latest release's guide shows as not yet reported.
+- **Run it** with the extraction (`npm run extract:earnings-releases`). A release read before figures existed has
+  `claims.figures_read_at` unset, so the next drain reads it once more (one model call each); its claims keep their
+  ids.
 
 ## What a chat turn asks for
 

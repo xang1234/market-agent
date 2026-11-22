@@ -4,13 +4,16 @@ import {
   approveFactReviewWithPool,
   editFactReviewCandidateWithPool,
   FactReviewThroughputExceededError,
+  factReviewKind,
   listFactReviewQueue,
   listStaleFactReviewQueueItems,
   rejectFactReviewWithPool,
+  resolveReleaseFigureReviewWithPool,
   type EditFactReviewCandidateInput,
   type FactClientPool,
   type FactInput,
 } from "./fact-repo.ts";
+import { loadGuidanceRecord, RECORD_QUARTERS } from "./guidance-record.ts";
 import { listIssuerNews } from "./issuer-news-repo.ts";
 import type { QueryExecutor } from "./types.ts";
 import { assertNonEmptyString, assertUuidV4 } from "./validators.ts";
@@ -29,6 +32,7 @@ export type EvidenceReviewServerDb = QueryExecutor & FactClientPool;
 type Route =
   | { action: "healthz" }
   | { action: "issuer_news"; issuer_id: string; limit: number }
+  | { action: "guidance_record"; issuer_id: string }
   | { action: "list"; stale_after_seconds: number | null; limit: number }
   | { action: "approve"; review_id: string }
   | { action: "reject"; review_id: string }
@@ -68,6 +72,11 @@ export function createEvidenceReviewServer(
         respondJson(res, 200, { items });
         return;
       }
+      // Also a public read, an issuer's guidance against its reported results (#733).
+      if (route.action === "guidance_record") {
+        respondJson(res, 200, { issuer_id: route.issuer_id, quarters: RECORD_QUARTERS, record: await loadGuidanceRecord(db, route.issuer_id) });
+        return;
+      }
 
       const reviewerId = readAuthenticatedUserId(req, options.auth);
       if (reviewerId === null) {
@@ -90,6 +99,21 @@ export function createEvidenceReviewServer(
 
       const body = await readJsonBody(req);
       const notes = optionalNotes(body);
+
+      // A release figure (#733) is reviewed on its own path, whose approval
+      // stores the figure rather than a fact.
+      if ((await factReviewKind(db, route.review_id)) === "release_figure") {
+        const review = await resolveReleaseFigureReviewWithPool(db, {
+          review_id: route.review_id,
+          reviewer_id: reviewerId,
+          action: route.action === "approve" ? "approved" : route.action === "reject" ? "rejected" : "edited",
+          candidate: route.action === "reject" ? undefined : body.candidate ?? undefined,
+          notes,
+          throughput_limit: DEFAULT_THROUGHPUT_LIMIT,
+        });
+        respondJson(res, 200, { review });
+        return;
+      }
 
       if (route.action === "approve") {
         const result = await approveFactReviewWithPool(db, {
@@ -163,6 +187,12 @@ function matchRoute(method: string, rawUrl: string): Route | null {
       issuer_id: issuerId,
       limit: optionalPositiveInteger(searchParams.get("limit"), "limit") ?? 8,
     };
+  }
+
+  if (method === "GET" && pathname === "/v1/evidence/guidance-record") {
+    const issuerId = searchParams.get("issuer_id") ?? "";
+    assertClientValidation(() => assertUuidV4(issuerId, "issuer_id"));
+    return { action: "guidance_record", issuer_id: issuerId };
   }
 
   if (method === "GET" && pathname === "/v1/evidence/fact-review-queue") {
@@ -253,6 +283,7 @@ function assertClientValidation<T>(assertion: () => T): T {
 
 function isValidationErrorMessage(message: string): boolean {
   return (
+    message.startsWith("release_figure: ") ||
     FACT_INPUT_VALIDATION_LABELS.some((label) => message.startsWith(`${label}: `)) ||
     FACT_INPUT_VALIDATION_MESSAGES.has(message)
   );
