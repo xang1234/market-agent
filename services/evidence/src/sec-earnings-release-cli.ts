@@ -4,7 +4,7 @@
 //   DATABASE_URL=... SEC_EDGAR_USER_AGENT=... \
 //     LLM_CHANNELS=<provider> LLM_<PROVIDER>_BASE_URL=... LLM_<PROVIDER>_API_KEY=... \
 //     LLM_<PROVIDER>_MODELS=<model> LITELLM_MODEL=<provider>/<model> \
-//     npm run extract:earnings-releases [-- --rebind [--retry] [--limit N]]
+//     npm run extract:earnings-releases [-- [--rebind [--retry]] [--limit N]]
 //   (or point LLM_SETTINGS_ENV_FILE=<path> at a file with the same vars.)
 //
 // Finds Item 2.02 8-Ks not yet processed, re-fetches each, and stores the
@@ -13,8 +13,8 @@
 // Idempotent: enriched_at marks each Item 2.02 claim processed.
 // --rebind instead binds explanations already stored with no fiscal period, in
 // place, reading each release once (#542). --retry first clears the marks on
-// those a rebind read but could not bind, so it reads them again; --limit N
-// reads at most N releases.
+// those a rebind read but could not bind, so it reads them again. --limit N
+// reads at most N releases, so a daily run works through a backlog in batches.
 import { parseArgs } from "node:util";
 import { Pool } from "pg";
 import { logPoolErrors } from "../../shared/src/pool-client.ts";
@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   const { values: flags } = parseArgs({ options: { rebind: { type: "boolean" }, retry: { type: "boolean" }, limit: { type: "string" } } });
   const limit = flags.limit === undefined ? undefined : Number(flags.limit);
   if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) throw new Error("--limit takes a whole number of releases");
-  if (!flags.rebind && (flags.retry || limit !== undefined)) throw new Error("--retry and --limit apply to --rebind");
+  if (!flags.rebind && flags.retry) throw new Error("--retry applies to --rebind");
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
   const llm = await createLlmRouterFromEnv(process.env, { purpose: "extraction" });
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
       );
       incomplete = drainIncomplete(result);
     } else {
-      const result = await runReleaseExtractionDrain({ db: pool, llm, secClient }, { onClaim: (candidate, outcome) => report(candidate.accession, outcome) });
+      const result = await runReleaseExtractionDrain({ db: pool, llm, secClient }, { limit, onClaim: (candidate, outcome) => report(candidate.accession, outcome) });
       console.log(
         `done: ${result.extracted} extracted, ${result.empty} empty, ${result.unparseable} unparseable, ` +
           `${result.no_exhibits} without exhibits, ${result.noop} already-done, ${result.failed} failed`,

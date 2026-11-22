@@ -46,7 +46,9 @@ export async function backfillIssuer8k(
   const sinceDays = input.sinceDays ?? 180;
   const maxFilings = input.maxFilings ?? 50;
   const now = input.now ?? (() => new Date());
-  const cutoffMs = now().getTime() - sinceDays * DAY_MS;
+  // SEC filing dates parse as midnight UTC, so the window starts at midnight on
+  // its oldest day: --since-days 1 at any hour still takes yesterday's filings.
+  const cutoffMs = Math.floor(now().getTime() / DAY_MS) * DAY_MS - sinceDays * DAY_MS;
 
   // One issuer per call; resolve once up front (skip the whole issuer if untracked).
   const issuerId = await resolveIssuerIdByCik(deps.db, input.cik);

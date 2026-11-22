@@ -1,18 +1,27 @@
 // Backfill recent 8-K material events for issuers.
 //
 //   DATABASE_URL=... SEC_EDGAR_USER_AGENT=... S3_* =... \
-//     npm run backfill:sec-8k [-- <issuer_uuid> ...]
+//     npm run backfill:sec-8k [-- [--since-days N] [--tracked] <issuer_uuid> ...]
 //
-// With no arguments, backfills every issuer that has a CIK. 8-K ingestion is
+// With no issuer ids, backfills every issuer that has a CIK; --tracked narrows
+// that to issuers with an 8-K already stored, as the daily run does.
+// --since-days sets how far back to look (default 180). 8-K ingestion is
 // atomic per filing (document + mention + per-item events + material-event
 // claims), so a rerun is idempotent: accessions already stored are skipped.
 
+import { parseArgs } from "node:util";
 import { createEvidenceCliRuntime } from "./evidence-cli-runtime.ts";
 import { backfillIssuer8k } from "./sec-8k-backfill.ts";
 
 async function main(): Promise<void> {
+  const { values: flags, positionals: requestedIds } = parseArgs({
+    allowPositionals: true,
+    options: { "since-days": { type: "string" }, tracked: { type: "boolean" } },
+  });
+  const sinceDays = flags["since-days"] === undefined ? undefined : Number(flags["since-days"]);
+  if (sinceDays !== undefined && !(Number.isInteger(sinceDays) && sinceDays > 0)) throw new Error("--since-days takes a whole number of days");
+  if (flags.tracked && requestedIds.length) throw new Error("--tracked takes no issuer ids");
   const { db: pool, objectStore, secClient } = createEvidenceCliRuntime();
-  const requestedIds = process.argv.slice(2);
   let hadFailures = false;
   try {
     const issuers = requestedIds.length
@@ -21,7 +30,14 @@ async function main(): Promise<void> {
           [requestedIds],
         )
       : await pool.query<{ issuer_id: string; legal_name: string; cik: string | null }>(
-          `select issuer_id::text as issuer_id, legal_name, cik from issuers where cik is not null order by legal_name`,
+          `select issuer_id::text as issuer_id, legal_name, cik from issuers i
+            where cik is not null
+              and (not $1 or exists (
+                select 1 from mentions m join documents d on d.document_id = m.document_id
+                 where m.subject_kind = 'issuer' and m.subject_id = i.issuer_id
+                   and d.kind = 'filing' and d.title in ('8-K', '8-K/A')))
+            order by legal_name`,
+          [flags.tracked === true],
         );
 
     for (const issuer of issuers.rows) {
@@ -31,7 +47,7 @@ async function main(): Promise<void> {
         continue;
       }
       try {
-        const result = await backfillIssuer8k({ db: pool, objectStore, secClient }, { cik });
+        const result = await backfillIssuer8k({ db: pool, objectStore, secClient }, { cik, sinceDays });
         console.log(
           `${issuer.legal_name}: ingested ${result.ingested} 8-K filing(s), skipped ${result.skipped} already present`,
         );

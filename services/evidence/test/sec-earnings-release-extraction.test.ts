@@ -477,6 +477,17 @@ test("a filing without EX-99 exhibits is marked processed without a model call",
   assert.deepEqual(await findReleaseCandidates(client), []);
 });
 
+test("a limited drain reads at most that many releases and leaves the rest for the next run", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-drain-limit");
+  const client = await connectedClient(t, databaseUrl);
+  await seedItem202(client);
+  await seedItem202(client, { ...AMD_Q2 });
+  const bare = SUBMISSION.replace(/<DOCUMENT>\n<TYPE>EX-99[\s\S]*?<\/DOCUMENT>/g, "");
+  const result = await runReleaseExtractionDrain({ db: client, llm: fakeLlm("{}").llm, secClient: fakeSec(bare) }, { limit: 1 });
+  assert.equal(result.no_exhibits, 1);
+  assert.equal((await findReleaseCandidates(client)).length, 1);
+});
+
 // AMD's Q2 2025 8-K (Item 2.02), filed 2025-08-05, cut down. The MI308
 // sentences are its EX-99.1's own (as in the chat golden dataset); the other
 // lines are written for this test.
