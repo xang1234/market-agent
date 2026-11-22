@@ -383,6 +383,34 @@ test("an Analyze section is neither offered the price tool nor told of it (#678)
   assert.ok(!JSON.stringify(request!.messages).includes("get_price_performance"));
 });
 
+test("a section argued against gets one more model call, as its case against takes a judge call of its own (#735)", async () => {
+  const calls = async (argued: boolean) => {
+    let answered = 0;
+    const router = scripted(Array.from({ length: 8 }, () => ({ toolCalls: [call("get_company_profile", { subject_ref: { kind: "issuer", id: A } })] })));
+    const runId = randomUUID();
+    const section = analystSectionRunner({
+      financial: { pool: {} as never, evidence: createEvidenceFinancialPort },
+      router: async (beforeModelCall) => metered(router, beforeModelCall),
+      read: async (name) => ({ tool: name, status: "ok", truncated: false, reads: [readOf(A)], no_filing: [], claims: [filingClaim(randomUUID(), "We sell widgets.")] }) as AnalystToolResult,
+      compose: async (_input, _turn, _onAnswered, beforeModelCall) => {
+        try {
+          for (;;) {
+            beforeModelCall();
+            answered += 1;
+          }
+        } catch (spent) {
+          if (!(spent instanceof LlmClientError)) throw spent;
+        }
+        // Nothing is answered: the test counts the calls the answer was left.
+        return { assertions: null, blocks: [], without: () => ({ blocks: [] }) } as never;
+      },
+    });
+    await section({ subject: { issuer_id: A, label: "AAA" }, goal: "What is AAA's investment case?", ...(argued ? { argued: true as const } : {}), sectionId: "investment_thesis", userId: IDS.owner, runId, authority: chatAuthority(IDS.owner, runId, runId), snapshotId: randomUUID(), asOf: "2026-11-17T05:51:00.000Z" });
+    return router.sent.length + answered;
+  };
+  assert.deepEqual([await calls(false), await calls(true)], [7, 8]);
+});
+
 test("only a company a certified call asked figures of can be said to have none", () => {
   const profile: AnalystToolResult = { tool: "get_company_profile", status: "ok", truncated: false, reads: [readOf(A)], no_filing: [], claims: [filingClaim(randomUUID(), "We sell widgets.")] };
   const claimsOnly = mergePackets({ engine: [], analyst: [profile], figuresAskedFor: [], notes: [], labels: new Map([[A, "AAA"]]), cutoff: "2026-11-01T00:00:00.000Z" });

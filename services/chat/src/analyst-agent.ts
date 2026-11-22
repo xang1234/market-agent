@@ -265,7 +265,8 @@ export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystS
       conversation: async () => [],
       asOf: input.asOf,
       clock: () => input.asOf,
-      meter: callMeter(SECTION_CALLS),
+      // A case against is one more inference, so one more judge call (#735).
+      meter: callMeter(SECTION_CALLS + (input.argued ? 1 : 0)),
       snapshotId: input.snapshotId,
       scopedKey: (name) => `${input.sectionId}:${name}`,
       noFilingAsOfCutoff: true,
