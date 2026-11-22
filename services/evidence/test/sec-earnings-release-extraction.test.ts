@@ -1019,3 +1019,55 @@ test("a release read before figures existed is read once more for them, keeping 
   );
   assert.deepEqual(await findReleaseCandidates(client), []);
 });
+
+// Exhibit text as main's canonicalText stored it before #733: "&minus;" and
+// "&shy;" undecoded, U+2011 and a soft hyphen kept.
+const MAIN_ENTITIES: Readonly<Record<string, string>> = {
+  nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", rsquo: "'", lsquo: "'", rdquo: '"', ldquo: '"', mdash: "-", ndash: "-", hellip: "...",
+};
+const mainCanonicalText = (markup: string) => markup
+  .replace(/<[^>]+>/g, " ")
+  .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, name: string) =>
+    name[0] === "#" ? String.fromCodePoint(name[1]?.toLowerCase() === "x" ? Number.parseInt(name.slice(2), 16) : Number(name.slice(1))) : MAIN_ENTITIES[name.toLowerCase()] ?? entity)
+  .replace(/[‘’‚′]/g, "'")
+  .replace(/[“”„″]/g, '"')
+  .replace(/[–—−]/g, "-")
+  .replace(/\s+/g, " ")
+  .trim();
+
+test("a claim stored in the form before #733 is found again by the re-read and located by the rebind, never stored twice", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-old-form");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  const explanationHtml = "Non&#8209;GAAP gross margin was lower, driven by a &minus;$0.8 billion inven­tory charge for the MI308.";
+  const guidanceHtml = "For the third quarter of 2025, AMD expects Non‑GAAP operating expenses of approxi&shy;mately $2.6 billion.";
+  // Doubly encoded, so its canonical text keeps "&#8217;": stored now, it is found as stored.
+  const encodedHtml = "Operating income rose on AMD&amp;#8217;s data center sales in the quarter.";
+  const [explanation, guidance, encoded] = [explanationHtml, guidanceHtml, encodedHtml].map(canonicalText);
+  const old = new Map([explanation, guidance].map((text, n) => [text, mainCanonicalText([explanationHtml, guidanceHtml][n]!)]));
+  for (const [text, stored] of old) assert.notEqual(stored, text, "the test stores a form that differs");
+  const submission = amdSubmission(["AMD Reports Second Quarter 2025 Financial Results", explanationHtml, guidanceHtml, encodedHtml]);
+  const reply = JSON.stringify({ quarter_end: null, statements: [
+    explains("gross_margin", "quarter", explanation!),
+    // Copied as the filing spells it, so its canonical text is in the exhibit's.
+    explains("operating_income", "quarter", encodedHtml),
+    { kind: "guidance", metric: "operating_expenses", about: "other", target: "next_quarter", quote: guidance },
+  ] });
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(reply).llm, secClient: fakeSec(submission) });
+  // As main stored them, and before figures were read.
+  for (const [text, stored] of old) await client.query(`update claims set text_canonical = $2 where text_canonical = $1`, [text, stored]);
+  await client.query(`update claims set figures_read_at = null where claim_id = $1`, [seeded.claimId]);
+  const before = await releaseClaims(client, seeded.documentId);
+  assert.deepEqual(before.map((claim) => claim.text_canonical).sort(), [...old.values(), encoded].sort());
+
+  assert.equal((await runReleaseExtractionDrain({ db: client, llm: fakeLlm(reply).llm, secClient: fakeSec(submission) })).extracted, 1);
+  assert.deepEqual(await releaseClaims(client, seeded.documentId), before, "the re-read finds each stored claim, and stores no second one");
+
+  const { llm, listed } = rebindLlm("2025-06-28", () => "quarter");
+  assert.deepEqual(await runRebindDrain({ db: client, llm, secClient: fakeSec(submission) }), { bound: 1, unbound: 0, unparseable: 0, noop: 0, unasked: 0, failed: 0, unlocated: 0 });
+  assert.deepEqual(listed, [[explanation, encoded]], "the model is shown each sentence as the exhibit has it now");
+  assert.deepEqual(periodsOf(await releaseClaims(client, seeded.documentId)).filter((claim) => claim[0] !== "guidance.operating_expenses"), [
+    ["management.explanation.gross_margin", old.get(explanation!), "fiscal_q", "2025-06-28"],
+    ["management.explanation.operating_income", encoded, "fiscal_q", "2025-06-28"],
+  ]);
+});

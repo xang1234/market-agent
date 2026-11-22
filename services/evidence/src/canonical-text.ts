@@ -7,12 +7,22 @@
 // Exhibit HTML (or text) as comparable text: tags dropped, entities decoded,
 // then plain.
 export function canonicalText(markup: string): string {
-  return plainText(decodeEntities(
+  return storedText(
     markup
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
       .replace(/<[^>]+>/g, " "),
-  ));
+  );
+}
+
+// Text with no markup, a claim's text_canonical among them, in the form
+// canonicalText gives. A claim stored before #733 may keep "&minus;", "&shy;",
+// U+2011 or a soft hyphen, so stored text that is not fresh text as stored is
+// compared in this form. Its tags are not stripped, as stored text may hold a
+// "<". ponytail: not idempotent on a doubly encoded entity ("&amp;#8217;"
+// stays "&#8217;" in canonical text), so callers try the stored form first.
+export function storedText(text: string): string {
+  return plainText(decodeEntities(text));
 }
 
 // Decoded text made plain: typographic quotes, every dash, minus and hyphen as

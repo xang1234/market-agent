@@ -38,7 +38,7 @@ import { createClaimEvidence } from "./claim-evidence-repo.ts";
 import { createClaim, type ClaimPeriod } from "./claim-repo.ts";
 import type { SecFilingFetcher } from "./sec-edgar.ts";
 import { withTransaction } from "./transaction.ts";
-import { canonicalText, endMarkBefore, SENTENCE_START } from "./canonical-text.ts";
+import { canonicalText, endMarkBefore, SENTENCE_START, storedText } from "./canonical-text.ts";
 import { readFigure, RELEASE_METRICS, storeReleaseFigures, type RawFigure, type ReleaseMetric } from "./release-figures.ts";
 import type { QueryExecutor } from "./types.ts";
 import { isIsoDate } from "./validators.ts";
@@ -576,14 +576,16 @@ export async function extractReleaseStatements(
     const claimIds: string[] = [];
     const claimOf = new Map<string, string>();
     for (const [key, statement] of verified) {
-      const { rows: existing } = await tx.db.query<{ claim_id: string }>(
-        `select c.claim_id::text as claim_id from claims c
-          where c.document_id = $1 and c.predicate = $2 and c.text_canonical = $3 and ${CURRENT_CLAIM_SQL}`,
-        [candidate.documentId, statement.predicate, statement.quote],
+      const { rows: stored } = await tx.db.query<{ claim_id: string; text_canonical: string }>(
+        `select c.claim_id::text as claim_id, c.text_canonical from claims c
+          where c.document_id = $1 and c.predicate = $2 and ${CURRENT_CLAIM_SQL}`,
+        [candidate.documentId, statement.predicate],
       );
       // Stored by an earlier read of the document (another of its Item 2.02
-      // claims): its period is filled if unbound, bound now and never
-      // backdated, and its id stays, so citations of it do.
+      // claims, or a read in the form before #733): its period is filled if
+      // unbound, bound now and never backdated, and its id stays, so citations
+      // of it do.
+      const existing = stored.filter((row) => row.text_canonical === statement.quote || storedText(row.text_canonical) === statement.quote);
       if (existing.length > 0) {
         if (statement.period) {
           await tx.db.query(
@@ -766,7 +768,10 @@ export async function findRebindCandidates(
 export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindCandidate): Promise<RebindResult> {
   const exhibits = await fetchReleaseExhibits(deps.secClient, candidate.issuerCik, candidate.accession);
   if (exhibits.length === 0) throw new Error(`${candidate.accession}: no EX-99 exhibits to rebind from`);
-  const prompts = releasePrompts(exhibits).map((text) => ({ text, listed: candidate.sentences.filter((sentence) => text.includes(sentence)) }));
+  // A sentence is located as stored, or in the form canonicalText gives now
+  // (storedText), and updated by its stored form.
+  const formIn = (text: string, sentence: string) => [sentence, storedText(sentence)].find((form) => text.includes(form));
+  const prompts = releasePrompts(exhibits).map((text) => ({ text, listed: candidate.sentences.filter((sentence) => formIn(text, sentence) !== undefined) }));
   // ponytail: an unlocated sentence stays a candidate, so each run fetches its
   // release again, asks nothing of it, and reports the drain incomplete; mark
   // it read if that churn ever shows.
@@ -782,7 +787,7 @@ export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindC
       deps,
       "rebind_earnings_release.prompt",
       { document_id: candidate.documentId, accession: candidate.accession, prompt: index + 1, prompts: prompts.length },
-      buildRebindMessages(prompt, listed),
+      buildRebindMessages(prompt, listed.map((sentence) => formIn(prompt, sentence)!)),
     );
     model = completion.model;
     const reply = parseRebindReply(completion.text, listed.length);

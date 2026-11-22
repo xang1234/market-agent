@@ -577,17 +577,24 @@ next release reports, on the same basis (`services/evidence/src/guidance-record.
   Actuals are never claims, so no reader takes a release's "revenue was $7.7 billion" for a certified figure. Figures
   need the release's quarter (`earnings_release_quarters`, its end as `reportedQuarterEnd` checks it), so a release
   with none stores none.
-- **Basis.** A figure's basis is read for its amount. A sentence naming no basis, or GAAP alone, states GAAP figures;
-  one naming non-GAAP alone states non-GAAP figures after its label. One naming both settles a basis only for a
-  subject they share ("GAAP and non-GAAP gross margins"), in order with "respectively" or as one figure for both
-  ("were both 75.0%"). EPS is diluted EPS.
+- **Basis.** A figure's basis comes only from its own clause (a sentence split at a semicolon and at a comma before
+  "and", "while", "but" or "compared"). A sentence with no basis marker states GAAP figures. The markers are GAAP,
+  non-GAAP, adjusted (non-GAAP), "excluding", "excl." and "ex-" (non-GAAP, but for no figure, as the amount after one
+  may be the amount excluded), "on a … basis", pro forma and constant currency (neither basis). A clause naming one
+  basis states it for the figures a marker reaches, with no comma between: a label the figures right after it ("$3.9
+  billion and $3.5 billion"), "on a … basis" its whole clause when it opens the clause ("On a non-GAAP basis, gross
+  margin was 56%, operating income was $3.9 billion"), else the figures right before it, or with none, right after it.
+  A clause naming both settles a basis only for a subject they share ("GAAP and non-GAAP gross margins"), in order
+  with "respectively" or as one figure for both ("were both 75.0%"). A figure in a parenthesis, in a clause with no
+  marker when another clause has one, or not reached goes to review. EPS is diluted EPS.
 - **Review.** A phrase not in the sentence, in it twice, or not one whole amount of it ("$45.0" of "$45.0 billion",
   "2.5%" of "72.5%"), an amount not in the metric's unit (a growth rate for revenue), a basis the sentence does not
-  state for that amount, a negative figure stated in words ("operating loss", "cash used in"), a negative revenue,
-  cost or capex, basic EPS, a percent plus or minus on a margin (points or a share of it), or a low above its high
-  goes to the fact review queue as kind `release_figure`, at a confidence that keeps it out of bulk approval.
-  Approving it stores the figure with the basis, low and high the reviewer set, replacing the bounds of one stored for
-  that sentence on that basis; the sentence and what it is a figure of stay as queued.
+  state for that amount, a plus or minus not stated on the figure ("up 2%"), a negative figure stated in words
+  ("operating loss", "cash used in"), a negative revenue, cost or capex, basic EPS, a percent plus or minus on a
+  margin (points or a share of it), or a low above its high goes to the fact review queue as kind `release_figure`, at
+  a confidence that keeps it out of bulk approval. Approving it stores the figure with the basis, low and high the
+  reviewer set, replacing the bounds of one stored for that sentence on that basis; the sentence and what it is a
+  figure of stay as queued.
 - **Same basis.** A guide's quarter is the issuer's next stored release quarter, ending 80 to 100 days after its
   release's. A non-GAAP guide is compared only with that release's non-GAAP actual, and a GAAP guide with its GAAP
   actual; certified facts are not used, so both sides are quoted figures of the same kind. A guide whose quarter is

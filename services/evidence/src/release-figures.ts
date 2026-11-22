@@ -124,15 +124,42 @@ function fits(amount: Amount, unit: FigureUnit): boolean {
     : amount.dollars && amount.mark === null && (unit === "usd" || amount.scale === null);
 }
 
-const LABEL = /\bnon-? ?gaap\b|\badjusted\b|\bgaap\b/gi;
+// A figure's basis is read from its own clause, and a phrasing these rules do
+// not place goes to review. A sentence names a basis with a marker, which
+// names one of:
+// - GAAP, non-GAAP or adjusted, a label for the figures that follow it;
+// - "on a … basis", for its whole clause when it opens the clause ("On a
+//   non-GAAP (*) basis, gross margin was 56%, operating income was $3.9
+//   billion"), else for the figures just before it, or with none, just after;
+// - "excluding", "excl." or "ex-", non-GAAP but for no figure, since the
+//   amount after it may be the one excluded ("Excluding the $4.5 billion
+//   charge");
+// - pro forma, constant currency, or an "on a … basis" naming neither or both
+//   bases, a basis no figure here is compared on.
+const MARKER = /\bon an? ((?:[^\s,;.]+ ){0,4}?)basis\b(?! points?\b)|\bnon-? ?gaap\b|\bgaap\b|\badjusted\b|\bexclu(?:ding|des?|ded|sive of)\b|\bexcl\.|\bex-(?=[a-z])|\bpro forma\b|\bconstant currency\b/gi;
+type Marker = { start: number; end: number; basis: FigureBasis | "other"; reach: "after" | "before" | "none" };
+
+function markerAt(found: RegExpMatchArray, offset: number): Marker {
+  const [word, inner] = found;
+  const span = { start: offset + found.index!, end: offset + found.index! + word.length };
+  if (inner !== undefined) {
+    const nonGaap = /non-? ?gaap|adjusted/i.test(inner);
+    const gaap = /\bgaap\b/i.test(inner.replace(/non-? ?gaap/gi, ""));
+    return { ...span, basis: nonGaap === gaap ? "other" : nonGaap ? "non_gaap" : "gaap", reach: "before" };
+  }
+  if (/^gaap$/i.test(word)) return { ...span, basis: "gaap", reach: "after" };
+  if (/^(?:non|adjusted)/i.test(word)) return { ...span, basis: "non_gaap", reach: "after" };
+  return { ...span, basis: /^ex/i.test(word) ? "non_gaap" : "other", reach: "none" };
+}
+
 // "GAAP and non-GAAP gross margins", a subject both bases share.
-const SHARED = /\b(non-? ?gaap|gaap) and (non-? ?gaap|gaap)\b/i;
-// "On a non-GAAP (*) basis," the basis of every amount after it in its sentence.
-const CLAUSE_BASIS = /\bon an? (?:non-? ?gaap|adjusted)\b[^,.;]*?\bbasis\b/i;
-// What joins the amounts one noun phrase states: "were $3.9 billion and $3.5
-// billion", "$1.10-$1.20", "$3.5 billion, or $2.09 per diluted share".
-const LISTED = /^,? ?(?:and|or|to|-)? ?$/i;
-const basisOfLabel = (label: string): FigureBasis => (/^gaap$/i.test(label) ? "gaap" : "non_gaap");
+const SHARED = /\b(?:non-? ?gaap|gaap) and (?:non-? ?gaap|gaap)\b/i;
+// A comma that starts a clause of its own.
+const CONJUNCTION = /^ (?:and|while|but|compared)\b/i;
+// What joins the amounts one noun phrase states: "$3.9 billion and $3.5
+// billion", "$1.10-$1.20", "$4.0 to $4.1 billion". Not a bare comma or space,
+// which a list of other subjects or a flattened table has.
+const JOINED = /^ ?(?:and|or|to|-) ?$/i;
 
 // The sentence of the quote an offset is in, and where it starts.
 function sentenceAt(quote: string, at: number): { start: number; text: string } {
@@ -144,46 +171,108 @@ function sentenceAt(quote: string, at: number): { start: number; text: string } 
 // An amount that is a figure, not a bare number such as a year or a date.
 const isFigure = (amount: Amount) => amount.dollars || amount.mark !== null || amount.scale !== null;
 
-// Whether a non-GAAP label at `labelAt` states the amount `at`: the first
-// figure of its own noun phrase, with no comma or semicolon before it, or one
-// listed with that figure ("Non-GAAP operating income and net income were $3.9
-// billion and $3.5 billion"). "Non-GAAP gross margin was 43%, and revenue was
-// $7.7 billion" states no non-GAAP revenue.
-function labelStates(quote: string, amounts: ReadonlyArray<Amount>, labelAt: number, at: Amount): boolean {
-  const figures = amounts.filter((amount) => amount.start > labelAt && isFigure(amount));
-  if (figures.length === 0 || /[,;]/.test(quote.slice(labelAt, figures[0]!.start))) return false;
-  for (let n = 0; figures[n] !== at; n += 1) {
-    if (figures[n + 1] === undefined || !LISTED.test(quote.slice(figures[n]!.end, figures[n + 1]!.start))) return false;
+// A sentence's clauses, split at a semicolon and at a comma before "and",
+// "while", "but" or "compared", its amounts inside a parenthesis (an aside),
+// and its other commas. An amount's own accounting parentheses are no aside.
+function layout(quote: string, start: number, end: number, amounts: ReadonlyArray<Amount>) {
+  const clauses: Array<{ start: number; end: number }> = [];
+  const asides = new Set<Amount>();
+  const commas: number[] = [];
+  const inside = amounts.filter((amount) => amount.start >= start && amount.end <= end);
+  let depth = 0;
+  let from = start;
+  for (let i = start, next = 0; i < end; i += 1) {
+    const amount = inside[next];
+    if (amount?.start === i) {
+      if (depth > 0) asides.add(amount);
+      i = amount.end - 1;
+      next += 1;
+      continue;
+    }
+    const char = quote[i];
+    if (char === "(") depth += 1;
+    else if (char === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0 && (char === ";" || (char === "," && CONJUNCTION.test(quote.slice(i + 1, end))))) {
+      clauses.push({ start: from, end: i });
+      from = i + 1;
+    } else if (depth === 0 && char === ",") commas.push(i);
   }
-  return true;
+  clauses.push({ start: from, end });
+  return { clauses, asides, commas };
 }
 
-// The bases the sentence of the amount `at` states it on, given the amounts the
-// figure reads. A sentence naming no basis, or GAAP alone, states GAAP figures.
-// One naming non-GAAP alone states non-GAAP figures in a label's noun phrase,
-// or after "On a non-GAAP basis," anywhere in its sentence. One naming both
-// settles a basis only for a subject they share, in order with "respectively",
-// else as one figure for both when the figure reads every amount after the
-// subject ("were both 75.0%"). Any other amount settles none.
+// Figures in order, grouped where JOINED links one to the next.
+function runsOf(quote: string, figures: ReadonlyArray<Amount>): Amount[][] {
+  const runs: Amount[][] = [];
+  for (const figure of figures) {
+    const last = runs.at(-1);
+    if (last !== undefined && JOINED.test(quote.slice(last.at(-1)!.end, figure.start))) last.push(figure);
+    else runs.push([figure]);
+  }
+  return runs;
+}
+
+// The bases the sentence states the amount `at` on, given the amounts the
+// figure reads. A sentence with no marker states GAAP figures. Otherwise the
+// figure's own clause decides, and an aside, a clause with no marker or one
+// naming another basis, settles none. A clause naming one basis states it for
+// the figures a marker reaches, with no comma between: a label the run of
+// figures right after it, "on a … basis" every run when it opens the clause,
+// else the run right before it, or with none, right after. One naming both
+// settles a basis only for the subject they share and nothing else
+// (pairedBases).
 function basesOf(quote: string, amounts: ReadonlyArray<Amount>, at: Amount, read: ReadonlyArray<Amount>): ReadonlyArray<FigureBasis> {
   const sentence = sentenceAt(quote, at.start);
-  const labels = [...sentence.text.matchAll(LABEL)].map((label) => ({ at: sentence.start + label.index, basis: basisOfLabel(label[0]) }));
-  const named = new Set(labels.map((label) => label.basis));
-  if (!named.has("non_gaap")) return ["gaap"];
-  if (!named.has("gaap")) {
-    const clause = CLAUSE_BASIS.exec(sentence.text);
-    const stated = clause !== null ? at.start > sentence.start + clause.index : labels.some((label) => labelStates(quote, amounts, label.at, at));
-    return stated ? ["non_gaap"] : [];
-  }
-  const shared = SHARED.exec(sentence.text);
-  if (shared === null || basisOfLabel(shared[1]!) === basisOfLabel(shared[2]!)) return [];
-  const from = sentence.start + shared.index + shared[0].length;
-  const after = amounts.filter((amount) => amount.start >= from && amount.end <= sentence.start + sentence.text.length && isFigure(amount));
-  const respectively = sentence.text.slice(from - sentence.start).search(/\brespectively\b/i);
-  if (respectively < 0) return after.includes(at) && after.every((amount) => read.includes(amount)) ? ["gaap", "non_gaap"] : [];
-  const listed = after.filter((amount) => amount.end <= from + respectively);
+  const end = sentence.start + sentence.text.length;
+  const markers = [...sentence.text.matchAll(MARKER)].map((found) => markerAt(found, sentence.start));
+  if (markers.length === 0) return ["gaap"];
+  const { clauses, asides, commas } = layout(quote, sentence.start, end, amounts);
+  if (asides.has(at)) return [];
+  const clause = clauses.find((part) => part.start <= at.start && at.end <= part.end)!;
+  const within = (span: { start: number; end: number }) => span.start >= clause.start && span.end <= clause.end;
+  const own = markers.filter(within);
+  const bases = new Set(own.map((marker) => marker.basis));
+  if (own.length === 0 || bases.has("other")) return [];
+  const figures = amounts.filter((amount) => within(amount) && isFigure(amount));
+  if (bases.size === 2) return pairedBases(quote, clause, own, figures, at, read);
+  const runs = runsOf(quote, figures.filter((figure) => !asides.has(figure)));
+  const run = runs.find((group) => group.includes(at))!;
+  const noComma = (from: number, to: number) => !commas.some((comma) => comma >= from && comma < to);
+  const reaches = (marker: Marker) => {
+    if (marker.reach === "after") return runs.find((group) => group[0]!.start >= marker.end) === run && noComma(marker.end, run[0]!.start);
+    if (marker.reach === "none") return false;
+    if (/^\W*$/.test(quote.slice(clause.start, marker.start))) return true;
+    const before = runs.filter((group) => group.at(-1)!.end <= marker.start).at(-1);
+    if (before === undefined) return runs.find((group) => group[0]!.start >= marker.end) === run && noComma(marker.end, run[0]!.start);
+    return before === run && noComma(run.at(-1)!.end, marker.start);
+  };
+  return own.some(reaches) ? [own[0]!.basis as FigureBasis] : [];
+}
+
+// A clause whose only markers are a subject both bases share ("GAAP and
+// non-GAAP gross margins") states its figures after the subject: in order with
+// "respectively" when there are two, or as one figure for both when the figure
+// reads every amount after it ("were both 75.0%", "74.0%, plus or minus 50
+// basis points").
+function pairedBases(
+  quote: string,
+  clause: { start: number; end: number },
+  own: ReadonlyArray<Marker>,
+  figures: ReadonlyArray<Amount>,
+  at: Amount,
+  read: ReadonlyArray<Amount>,
+): ReadonlyArray<FigureBasis> {
+  const text = quote.slice(clause.start, clause.end);
+  const shared = SHARED.exec(text);
+  if (shared === null) return [];
+  const [subject, from] = [clause.start + shared.index, clause.start + shared.index + shared[0].length];
+  if (own.length !== 2 || own.some((marker) => marker.start < subject || marker.end > from)) return [];
+  const after = figures.filter((figure) => figure.start >= from);
+  const respectively = text.slice(from - clause.start).search(/\brespectively\b/i);
+  if (respectively < 0) return after.includes(at) && after.every((figure) => read.includes(figure)) ? ["gaap", "non_gaap"] : [];
+  const listed = after.filter((figure) => figure.end <= from + respectively);
   const index = listed.indexOf(at);
-  return listed.length === 2 && index >= 0 ? [basisOfLabel(shared[index + 1]!)] : [];
+  return listed.length === 2 && index >= 0 ? [own[index]!.basis as FigureBasis] : [];
 }
 
 // Twelve significant digits, so arithmetic on a parsed figure ("$45.0 billion"
@@ -193,8 +282,9 @@ const exact = (n: number) => Number(n.toPrecision(12));
 // The figure the sentence states, or why it goes to review. That is a negative
 // figure stated in words, basic EPS, a phrase not in the sentence or not one
 // whole amount of it, an amount not in the metric's unit, a negative revenue,
-// cost or capex, a basis the sentence does not state for that amount, a percent
-// plus or minus on a margin (points or a share of it?), or a low above its high.
+// cost or capex, a basis the sentence does not state for that amount, a plus or
+// minus it does not state on the value, a percent plus or minus on a margin
+// (points or a share of it?), or a low above its high.
 // A result is one value; a guide is a value, with or without plus_minus, or a
 // low and a high.
 export function readFigure(
@@ -237,6 +327,9 @@ export function readFigure(
   let to: number;
   if (value !== null) {
     const center = level(value);
+    if (plusMinus !== null && !statedAsTolerance(quote, amounts, found.get(value)!, found.get(plusMinus)!)) {
+      return { review: `its sentence does not state "${plusMinus}" as a plus or minus on "${value}"` };
+    }
     const spread = plusMinus === null ? 0 : tolerance(found.get(plusMinus)!, unit, found.get(value)!, center);
     if (typeof spread === "string") return { review: spread };
     [from, to] = [center - spread, center + spread];
@@ -256,6 +349,19 @@ function statedAsRange(quote: string, low: Amount, high: Amount): boolean {
   const between = quote.slice(low.end, high.start);
   return low.end <= high.start &&
     (/^ ?(?:to|-) ?$/i.test(between) || (/^ and $/i.test(between) && /\bbetween (?:\w+ )?$/i.test(quote.slice(0, low.start))));
+}
+
+// Whether a plus or minus is stated on the amount `of`: right after it, or
+// after the run it is listed in ("71.8% and 72.0%, respectively, plus or minus
+// 50 basis points"). "$45 billion, up 2% year over year" states a growth rate.
+const TOLERANCE = /^,? ?(?:respectively, )?(?:plus or minus|plus\/minus|\+\/-|±) ?$/i;
+function statedAsTolerance(quote: string, amounts: ReadonlyArray<Amount>, of: Amount, spread: Amount): boolean {
+  let last = of;
+  for (const next of amounts.filter((amount) => isFigure(amount) && amount.start >= of.end && amount.end <= spread.start)) {
+    if (!JOINED.test(quote.slice(last.end, next.start))) return false;
+    last = next;
+  }
+  return TOLERANCE.test(quote.slice(last.end, spread.start));
 }
 
 // How far either side of `center` (the amount `of`) a plus_minus reaches, or
