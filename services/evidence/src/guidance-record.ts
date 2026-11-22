@@ -15,7 +15,7 @@ import type { QueryExecutor } from "./types.ts";
 
 // An earnings release, by the quarter it reports.
 // form is "8-K", or "8-K/A" for an amendment.
-export type StoredRelease = { document_id: string; quarter_end: IsoDate; filed_on: IsoDate; form: string | null; url: string | null };
+export type StoredRelease = { document_id: string; quarter_end: IsoDate; filed_on: IsoDate; form: string | null; accession: string | null; url: string | null };
 // A guide (claim_id names the guidance claim it binds) or a reported actual (low
 // and high both the value), in dollars or percent.
 export type StoredFigure = {
@@ -95,7 +95,7 @@ export async function loadGuidanceRecord(db: QueryExecutor, issuerId: string): P
             array(select distinct s.execution_date::text from listing join listing_splits s using (listing_id) order by 1) as splits`,
     [issuerId],
   );
-  return guidanceRecord(releases.map(({ accession, cik, ...release }) => ({ ...release, url: releaseUrl(cik, accession) })), figures, splits!);
+  return guidanceRecord(releases.map(({ cik, ...release }) => ({ ...release, url: releaseUrl(cik, release.accession) })), figures, splits!);
 }
 
 // The filing's EDGAR index, or null for a release whose CIK or accession is
@@ -201,7 +201,9 @@ function push<T>(map: Map<string, T[]>, key: string, value: T): void {
 }
 
 const latestFirst = <T extends { release: StoredRelease; document_id: string }>(picks: ReadonlyArray<T>): T[] =>
-  [...picks].sort((a, b) => b.release.filed_on.localeCompare(a.release.filed_on) || a.document_id.localeCompare(b.document_id));
+  // Same-day filings: the later accession is the later filing (#754).
+  [...picks].sort((a, b) => b.release.filed_on.localeCompare(a.release.filed_on) ||
+    (b.release.accession ?? "").localeCompare(a.release.accession ?? "") || a.document_id.localeCompare(b.document_id));
 
 // The latest 8-K/A's figure replaces the others (#752), as nonGaapHistory reads a quarter; originals alone may conflict.
 // Every figure of that one amendment stays, so two exhibits of it that disagree still conflict.
