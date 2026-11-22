@@ -264,10 +264,17 @@ test("extractNonGaapReconciliations keys basic EPS apart from diluted, the quali
     <tr><td>Non-GAAP net income per share (basic)</td><td>$1.12</td></tr>
     <tr><td>GAAP net income per share (diluted)</td><td>$1.00</td></tr>
     <tr><td>Non-GAAP net income per share (diluted)</td><td>$1.10</td></tr>
+  </table>
+  <table>
+    <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th></tr>
+    <tr><td>GAAP net income/(loss) per share</td><td>$0.98</td></tr>
+    <tr><td>Non-GAAP net income/(loss) per share</td><td>$1.08</td></tr>
   </table>`;
   assert.deepEqual(lines(html).map(([measure, , gaap, nonGaap]) => [measure, gaap, nonGaap]), [
     ["eps_basic", 1.02, 1.12],
     ["eps_diluted", 1, 1.1],
+    // "/(loss)" names one measure, never two.
+    ["eps_diluted", 0.98, 1.08],
   ]);
 });
 
@@ -282,8 +289,9 @@ test("extractNonGaapReconciliations reads a row of net income and EPS as one mea
   </table>
   <table>
     <tr><th>Reconciliation of GAAP to non-GAAP</th><th colspan="2">September 27, 2025</th></tr>
-    <tr><td>GAAP net income</td><td>$1,243</td><td>$0.75</td></tr>
-    <tr><td>Non-GAAP net income</td><td>$1,965</td><td>$1.20</td></tr>
+    <tr><th></th><th>Net income</th><th>Per share</th></tr>
+    <tr><td>GAAP net income / earnings per share</td><td>$1,243</td><td>$0.75</td></tr>
+    <tr><td>Non-GAAP net income / earnings per share</td><td>$1,965</td><td>$1.20</td></tr>
   </table>`;
   const sep2025 = "Three Months Ended September 27, 2025";
   const sep2024 = "Three Months Ended September 28, 2024";

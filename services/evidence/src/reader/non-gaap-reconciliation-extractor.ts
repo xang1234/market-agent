@@ -247,10 +247,10 @@ function isGaapLabel(label: string): boolean {
   return GAAP_PATTERN.test(label) && !NON_GAAP_PATTERN.test(label);
 }
 
-// The measure a GAAP or non-GAAP row names at a slot. A row with several
-// figures in one period, as "net income / earnings per share" prints its two,
-// names one measure per figure in order, and none when the counts differ. A
-// row naming none, as "GAAP" alone, takes its section's.
+// The measure a GAAP or non-GAAP row names at a slot. A row naming several,
+// as "net income / earnings per share", names one per figure of the slot's
+// period in order, and none when the counts differ. A row naming none, as
+// "GAAP" alone, takes its section's.
 function measureOf(
   periods: ReadonlyArray<string>,
   amounts: ReadonlyArray<readonly [number, ParsedValue]>,
@@ -258,11 +258,22 @@ function measureOf(
   label: string,
   section: string,
 ): string | null {
+  const own = measuresIn(label, true);
+  const measures = own.length > 0 ? own : measuresIn(section, false);
+  if (measures.length < 2) return measures[0] ?? "";
   const together = periods[slot] ? amounts.map(([other]) => other).filter((other) => periods[other] === periods[slot]) : [slot];
-  if (together.length === 1) return measureKeyFromLabel(label, true) || measureKeyFromLabel(section, false);
-  const named = (text: string) => text.split("/").map((part) => measureKeyFromLabel(part, true)).filter((key) => MEASURES.has(key));
-  const measures = named(label).length > 0 ? named(label) : named(section);
   return measures.length === together.length ? measures[together.indexOf(slot)]! : null;
+}
+
+// Several measures where "/" joins two, but "income/(loss) per share" is one.
+function measuresIn(text: string, head: boolean): string[] {
+  const joined = text.split("/")
+    .filter((part) => !/^\s*per\b/i.test(part.replace(/\([^)]*\)/g, "")))
+    .map((part) => measureKeyFromLabel(part, head))
+    .filter((key) => MEASURES.has(key));
+  if (joined.length > 1) return joined;
+  const key = measureKeyFromLabel(text, head);
+  return key === "" ? [] : [key];
 }
 
 // A row label names the measure its head names, so "Impact of non-GAAP
