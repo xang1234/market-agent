@@ -1,4 +1,5 @@
-import { blockText, canonicalText, type ReleaseExhibit } from "./sec-earnings-release-extraction.ts";
+import { canonicalText } from "./canonical-text.ts";
+import { blockText, type ReleaseExhibit } from "./sec-earnings-release-extraction.ts";
 
 export const TEN_K_ITEMS = ["1", "1A"] as const;
 export type TenKItem = (typeof TEN_K_ITEMS)[number];

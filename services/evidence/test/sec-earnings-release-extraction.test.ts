@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { canonicalText } from "../src/canonical-text.ts";
 import {
-  canonicalText,
   extractReleaseStatements,
   findReleaseCandidates,
   parseRebindReply,
@@ -903,4 +903,171 @@ test("a release whose only bound explanation is superseded is rebound for its cu
   assert.deepEqual(listed, [[AMD_YEAR_TO_DATE]]);
   const mi308 = (await client.query<{ period_end: string }>(`select period_end::text as period_end from claims where text_canonical = $1`, [MI308_EXPLANATION])).rows;
   assert.deepEqual(mi308, [{ period_end: "2025-06-30" }]);
+});
+
+// #733: the figures of AMD's Q2 2025 release, its sentences cut down.
+const AMD_REVENUE_RESULT = "Second quarter revenue was $7.7 billion.";
+const AMD_MARGIN_RESULT = "On a non-GAAP basis, gross margin was 43%, operating income was $897 million and diluted earnings per share was $0.48.";
+const AMD_MARGIN_GUIDANCE = "Non-GAAP gross margin is expected to be approximately 54%.";
+const AMD_YEAR_GUIDANCE = "For the full year 2025, AMD expects revenue to grow approximately 30%.";
+const AMD_FIGURES_SUBMISSION = amdSubmission([
+  "AMD Reports Second Quarter 2025 Financial Results",
+  "Financial results for the three months ended June 28, 2025 are in the tables below.",
+  AMD_REVENUE_RESULT,
+  AMD_MARGIN_RESULT,
+  AMD_GUIDANCE,
+  AMD_MARGIN_GUIDANCE,
+  AMD_YEAR_GUIDANCE,
+]);
+const amdFiguresReply = (quarterEnd: string | null) => JSON.stringify({ quarter_end: quarterEnd, statements: [
+  { kind: "result", metric: "revenue", about: "quarter", quote: AMD_REVENUE_RESULT, figures: [{ basis: "gaap", value: "$7.7 billion" }] },
+  // One sentence states three metrics, each figure naming its own.
+  { kind: "result", metric: "gross_margin", about: "quarter", quote: AMD_MARGIN_RESULT, figures: [
+    { basis: "non_gaap", value: "43%" },
+    { metric: "operating_income", basis: "non_gaap", value: "$897 million" },
+    { metric: "eps", basis: "non_gaap", value: "$0.48" },
+  ] },
+  { kind: "guidance", metric: "revenue", about: "other", target: "next_quarter", quote: AMD_GUIDANCE, figures: [{ basis: "gaap", value: "approximately $8.7 billion", plus_minus: "$300 million" }] },
+  // The sentence says non-GAAP; read as GAAP, it waits for review.
+  { kind: "guidance", metric: "gross_margin", about: "other", target: "next_quarter", quote: AMD_MARGIN_GUIDANCE, figures: [{ basis: "non_gaap", value: "54%" }, { basis: "gaap", value: "54%" }] },
+  // A full year's guide is no next quarter's, so it is a claim with no figure.
+  { kind: "guidance", metric: "revenue", about: "other", target: "other", quote: AMD_YEAR_GUIDANCE, figures: [{ basis: "gaap", value: "30%" }] },
+] });
+
+async function releaseFigures(client: { query: QueryExecutor["query"] }) {
+  return (await client.query<{ kind: string; metric: string; basis: string; low: string; high: string; quote: string; claim_predicate: string | null }>(
+    `select f.kind, f.metric, f.basis, f.low::text as low, f.high::text as high, f.quote, c.predicate as claim_predicate
+       from earnings_release_figures f left join claims c on c.claim_id = f.claim_id
+      order by f.kind, f.metric, f.basis`,
+  )).rows.map((row) => [row.kind, row.metric, row.basis, Number(row.low), Number(row.high), row.quote, row.claim_predicate]);
+}
+
+test("a release's next-quarter guides and its quarter's actuals are stored as figures on their stated basis, and a parse its sentence does not bear out waits for review", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-figures");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  const result = await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdFiguresReply("2025-06-28")).llm, secClient: fakeSec(AMD_FIGURES_SUBMISSION) });
+  assert.equal(result.extracted, 1);
+  assert.deepEqual(
+    (await client.query(`select document_id::text as document_id, issuer_id::text as issuer_id, quarter_end::text as quarter_end, filed_on::text as filed_on from earnings_release_quarters`)).rows,
+    [{ document_id: seeded.documentId, issuer_id: seeded.issuerId, quarter_end: "2025-06-28", filed_on: "2025-08-05" }],
+  );
+  assert.deepEqual(await releaseFigures(client), [
+    ["guidance", "gross_margin", "non_gaap", 54, 54, AMD_MARGIN_GUIDANCE, "guidance.gross_margin"],
+    ["guidance", "revenue", "gaap", 8.4e9, 9.0e9, AMD_GUIDANCE, "guidance.revenue"],
+    ["result", "eps", "non_gaap", 0.48, 0.48, AMD_MARGIN_RESULT, null],
+    ["result", "gross_margin", "non_gaap", 43, 43, AMD_MARGIN_RESULT, null],
+    ["result", "operating_income", "non_gaap", 897e6, 897e6, AMD_MARGIN_RESULT, null],
+    ["result", "revenue", "gaap", 7.7e9, 7.7e9, AMD_REVENUE_RESULT, null],
+  ]);
+  // Actuals are figures, never claims, so no reader takes "revenue was $7.7
+  // billion" for a certified figure.
+  assert.deepEqual((await releaseClaims(client, seeded.documentId)).map((claim) => [claim.predicate, claim.text_canonical]), [
+    ["guidance.gross_margin", AMD_MARGIN_GUIDANCE],
+    ["guidance.revenue", AMD_YEAR_GUIDANCE],
+    ["guidance.revenue", AMD_GUIDANCE],
+  ]);
+  const queued = (await client.query<{ kind: string; reason: string; status: string; source_id: string; candidate: Record<string, unknown> }>(
+    `select kind, reason, status, source_id::text as source_id, candidate from fact_review_queue`,
+  )).rows;
+  assert.equal(queued.length, 1);
+  assert.deepEqual([queued[0]!.kind, queued[0]!.status, queued[0]!.reason], ["release_figure", "queued", 'its sentence does not state "54%" as a GAAP figure']);
+  assert.deepEqual(
+    [queued[0]!.candidate.document_id, queued[0]!.candidate.kind, queued[0]!.candidate.metric, queued[0]!.candidate.quote, queued[0]!.candidate.figure],
+    [seeded.documentId, "guidance", "gross_margin", AMD_MARGIN_GUIDANCE, { basis: "gaap", value: "54%" }],
+  );
+  assert.equal(typeof queued[0]!.candidate.claim_id, "string");
+  // Read for its figures, so no longer a candidate.
+  assert.deepEqual(
+    (await client.query(`select enriched_at is not null as enriched, figures_read_at is not null as read from claims where claim_id = $1`, [seeded.claimId])).rows,
+    [{ enriched: true, read: true }],
+  );
+  assert.deepEqual(await findReleaseCandidates(client), []);
+});
+
+test("a release whose quarter end is unknown stores its claims but no figure, and queues none", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-figures-no-quarter");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdFiguresReply(null)).llm, secClient: fakeSec(AMD_FIGURES_SUBMISSION) });
+  assert.equal((await releaseClaims(client, seeded.documentId)).length, 3);
+  assert.deepEqual(await releaseFigures(client), []);
+  assert.equal((await client.query(`select 1 from earnings_release_quarters`)).rowCount, 0);
+  assert.equal((await client.query(`select 1 from fact_review_queue`)).rowCount, 0);
+});
+
+test("a release read before figures existed is read once more for them, keeping its claims and their ids", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-figures-reread");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  // The read before #733: claims only, the Item 2.02 claim marked enriched.
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply("2025-06-28")).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  await client.query(`update claims set figures_read_at = null where claim_id = $1`, [seeded.claimId]);
+  await client.query(`delete from earnings_release_figures`);
+  const before = await releaseClaims(client, seeded.documentId);
+
+  const reread = await runReleaseExtractionDrain({ db: client, llm: fakeLlm(JSON.stringify({ quarter_end: "2025-06-28", statements: [
+    { kind: "explanation", metric: "gross_margin", about: "quarter", quote: MI308_EXPLANATION },
+    { kind: "guidance", metric: "revenue", about: "other", target: "next_quarter", quote: AMD_GUIDANCE, figures: [{ basis: "gaap", value: "approximately $8.7 billion", plus_minus: "$300 million" }] },
+  ] })).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  assert.equal(reread.extracted, 1);
+  assert.deepEqual(await releaseClaims(client, seeded.documentId), before);
+  const guidanceClaim = before.find((claim) => claim.predicate === "guidance.revenue")!;
+  assert.deepEqual(
+    (await client.query(`select claim_id::text as claim_id, low::text as low from earnings_release_figures`)).rows,
+    [{ claim_id: guidanceClaim.claim_id, low: "8400000000" }],
+  );
+  assert.deepEqual(await findReleaseCandidates(client), []);
+});
+
+// Exhibit text as main's canonicalText stored it before #733: "&minus;" and
+// "&shy;" undecoded, U+2011 and a soft hyphen kept.
+const MAIN_ENTITIES: Readonly<Record<string, string>> = {
+  nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", rsquo: "'", lsquo: "'", rdquo: '"', ldquo: '"', mdash: "-", ndash: "-", hellip: "...",
+};
+const mainCanonicalText = (markup: string) => markup
+  .replace(/<[^>]+>/g, " ")
+  .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, name: string) =>
+    name[0] === "#" ? String.fromCodePoint(name[1]?.toLowerCase() === "x" ? Number.parseInt(name.slice(2), 16) : Number(name.slice(1))) : MAIN_ENTITIES[name.toLowerCase()] ?? entity)
+  .replace(/[‘’‚′]/g, "'")
+  .replace(/[“”„″]/g, '"')
+  .replace(/[–—−]/g, "-")
+  .replace(/\s+/g, " ")
+  .trim();
+
+test("a claim stored in the form before #733 is found again by the re-read and located by the rebind, never stored twice", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-old-form");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  const explanationHtml = "Non&#8209;GAAP gross margin was lower, driven by a &minus;$0.8 billion inven­tory charge for the MI308.";
+  const guidanceHtml = "For the third quarter of 2025, AMD expects Non‑GAAP operating expenses of approxi&shy;mately $2.6 billion.";
+  // Doubly encoded, so its canonical text keeps "&#8217;": stored now, it is found as stored.
+  const encodedHtml = "Operating income rose on AMD&amp;#8217;s data center sales in the quarter.";
+  const [explanation, guidance, encoded] = [explanationHtml, guidanceHtml, encodedHtml].map(canonicalText);
+  const old = new Map([explanation, guidance].map((text, n) => [text, mainCanonicalText([explanationHtml, guidanceHtml][n]!)]));
+  for (const [text, stored] of old) assert.notEqual(stored, text, "the test stores a form that differs");
+  const submission = amdSubmission(["AMD Reports Second Quarter 2025 Financial Results", explanationHtml, guidanceHtml, encodedHtml]);
+  const reply = JSON.stringify({ quarter_end: null, statements: [
+    explains("gross_margin", "quarter", explanation!),
+    // Copied as the filing spells it, so its canonical text is in the exhibit's.
+    explains("operating_income", "quarter", encodedHtml),
+    { kind: "guidance", metric: "operating_expenses", about: "other", target: "next_quarter", quote: guidance },
+  ] });
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(reply).llm, secClient: fakeSec(submission) });
+  // As main stored them, and before figures were read.
+  for (const [text, stored] of old) await client.query(`update claims set text_canonical = $2 where text_canonical = $1`, [text, stored]);
+  await client.query(`update claims set figures_read_at = null where claim_id = $1`, [seeded.claimId]);
+  const before = await releaseClaims(client, seeded.documentId);
+  assert.deepEqual(before.map((claim) => claim.text_canonical).sort(), [...old.values(), encoded].sort());
+
+  assert.equal((await runReleaseExtractionDrain({ db: client, llm: fakeLlm(reply).llm, secClient: fakeSec(submission) })).extracted, 1);
+  assert.deepEqual(await releaseClaims(client, seeded.documentId), before, "the re-read finds each stored claim, and stores no second one");
+
+  const { llm, listed } = rebindLlm("2025-06-28", () => "quarter");
+  assert.deepEqual(await runRebindDrain({ db: client, llm, secClient: fakeSec(submission) }), { bound: 1, unbound: 0, unparseable: 0, noop: 0, unasked: 0, failed: 0, unlocated: 0 });
+  assert.deepEqual(listed, [[explanation, encoded]], "the model is shown each sentence as the exhibit has it now");
+  assert.deepEqual(periodsOf(await releaseClaims(client, seeded.documentId)).filter((claim) => claim[0] !== "guidance.operating_expenses"), [
+    ["management.explanation.gross_margin", old.get(explanation!), "fiscal_q", "2025-06-28"],
+    ["management.explanation.operating_income", encoded, "fiscal_q", "2025-06-28"],
+  ]);
 });

@@ -22,6 +22,10 @@
 // Chat reads these as management attributions: the only causes an answer may
 // state (llm-runtime.ts). A rebind binds explanations stored with no period
 // (rebindRelease).
+//
+// The figures of a guide for the next quarter, and of the quarter's reported
+// actuals, are stored as release figures (release-figures.ts, #733), never as
+// claims, since no answer may take an actual for a certified figure.
 
 import { createHash } from "node:crypto";
 
@@ -34,10 +38,12 @@ import { createClaimEvidence } from "./claim-evidence-repo.ts";
 import { createClaim, type ClaimPeriod } from "./claim-repo.ts";
 import type { SecFilingFetcher } from "./sec-edgar.ts";
 import { withTransaction } from "./transaction.ts";
+import { canonicalText, endMarkBefore, SENTENCE_START, storedText } from "./canonical-text.ts";
+import { readFigure, RELEASE_METRICS, storeReleaseFigures, type RawFigure, type ReleaseMetric } from "./release-figures.ts";
 import type { QueryExecutor } from "./types.ts";
 import { isIsoDate } from "./validators.ts";
 
-export const RELEASE_STATEMENT_KINDS = ["explanation", "guidance"] as const;
+export const RELEASE_STATEMENT_KINDS = ["explanation", "guidance", "result"] as const;
 export type ReleaseStatementKind = (typeof RELEASE_STATEMENT_KINDS)[number];
 
 // The period a statement is about, in the release's terms, and the claim period
@@ -47,26 +53,12 @@ const PERIOD_KIND_OF = { quarter: "fiscal_q", year: "fiscal_y", other: null } as
 export type ReleaseStatementAbout = keyof typeof PERIOD_KIND_OF;
 const RELEASE_STATEMENT_ABOUTS = Object.keys(PERIOD_KIND_OF) as ReadonlyArray<ReleaseStatementAbout>;
 
-// The metric a statement concerns. "other" keeps a real explanation whose
-// subject is none of these (a segment, a product line).
-export const RELEASE_METRICS = [
-  "revenue",
-  "gross_margin",
-  "operating_expenses",
-  "operating_income",
-  "net_income",
-  "eps",
-  "operating_cash_flow",
-  "free_cash_flow",
-  "capex",
-  "other",
-] as const;
-export type ReleaseMetric = (typeof RELEASE_METRICS)[number];
 
 // The claim's confidence: the words are verified, their reading as an
 // explanation or guidance is the model's (as for enriched 8-K narratives).
 const RELEASE_CONFIDENCE = 0.8;
-const MAX_STATEMENTS = 8;
+// Explanations and guidance, and the quarter's actuals beside them.
+const MAX_STATEMENTS = 16;
 export const MIN_QUOTE_CHARS = 20;
 export const MAX_QUOTE_CHARS = 600;
 // The release and the CFO commentary together run to ~40k characters.
@@ -100,7 +92,16 @@ export type ReleaseCandidate = {
 // cells, headings) start and end in it: a heading has no full stop, so a block
 // edge is a sentence edge too.
 export type ReleaseExhibit = { type: string; text: string; edges: ReadonlySet<number> };
-export type ReleaseStatement = { kind: ReleaseStatementKind; metric: ReleaseMetric; about: ReleaseStatementAbout; quote: string };
+// A guide for the next quarter has target next_quarter; a guide or an actual
+// may give its figures as the sentence states them.
+export type ReleaseStatement = {
+  kind: ReleaseStatementKind;
+  metric: ReleaseMetric;
+  about: ReleaseStatementAbout;
+  quote: string;
+  target?: "next_quarter";
+  figures?: RawFigure[];
+};
 export type VerifiedStatement = ReleaseStatement & { exhibit: string; start: number; end: number };
 // One prompt's reply: the end of the quarter the release reports, as its text
 // dates it, and the statements picked from it.
@@ -110,7 +111,8 @@ export type ReleaseReply = { quarterEnd: IsoDate | null; statements: ReleaseStat
 // run already processed the claim.
 export type ExtractReleaseOutcome = "extracted" | "empty" | "unparseable" | "no_exhibits" | "noop";
 
-// Item 2.02 claims not yet processed, with what is needed to fetch the filing.
+// Item 2.02 claims whose release is not yet read for figures, with what is
+// needed to fetch the filing. One read before figures existed is read again.
 export async function findReleaseCandidates(
   db: QueryExecutor,
   opts: { afterClaimId?: string; limit?: number } = {},
@@ -137,7 +139,7 @@ export async function findReleaseCandidates(
        join documents d on d.document_id = c.document_id
        join issuers i on i.issuer_id = ca.subject_id
       where c.predicate = 'material_event.guidance_update'
-        and c.enriched_at is null
+        and c.figures_read_at is null
         and i.cik is not null
         and c.claim_id > $1::uuid
       order by c.claim_id
@@ -213,52 +215,19 @@ function plainTextBlocks(body: string): string[] {
   });
 }
 
-// Exhibit HTML (or text) as comparable text: tags dropped, entities decoded,
-// typographic quotes and dashes made plain, whitespace collapsed. Quotes are
-// matched in this form, and stored from it.
-export function canonicalText(markup: string): string {
-  return plainPunctuation(decodeEntities(
-    markup
-      .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " "),
-  )).replace(/\s+/g, " ").trim();
-}
-
-const NAMED_ENTITIES: Readonly<Record<string, string>> = {
-  nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
-  rsquo: "'", lsquo: "'", rdquo: '"', ldquo: '"', mdash: "-", ndash: "-", hellip: "...",
-};
-
-function decodeEntities(text: string): string {
-  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, name: string) => {
-    if (name[0] === "#") {
-      const code = name[1] === "x" || name[1] === "X" ? Number.parseInt(name.slice(2), 16) : Number(name.slice(1));
-      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
-    }
-    return NAMED_ENTITIES[name.toLowerCase()] ?? entity;
-  });
-}
-
-function plainPunctuation(text: string): string {
-  return text
-    .replace(/[‘’‚′]/g, "'")
-    .replace(/[“”„″]/g, '"')
-    .replace(/[–—−]/g, "-")
-    .replace(/ /g, " ");
-}
-
 // The model's reply, or null when it is not the expected shape. A malformed
 // statement makes the whole reply unparseable, so the filing is read again
 // rather than marked done without it. A quarter_end that is no date, or an
 // about that is none of the three, only binds nothing: a date-format slip
-// would otherwise cost the release its statements on every drain.
+// would otherwise cost the release its statements on every drain. So does a
+// figure of the wrong shape, which is no figure (release-figures.ts reads the
+// rest).
 export function parseReleaseReply(text: string): ReleaseReply | null {
   const { quarter_end: quarterEnd, statements: items } = replyObject(text) ?? {};
   if (!Array.isArray(items)) return null;
   const statements: ReleaseStatement[] = [];
   for (const item of items.slice(0, MAX_STATEMENTS)) {
-    const { kind, metric, about, quote } = (item ?? {}) as Record<string, unknown>;
+    const { kind, metric, about, quote, target, figures } = (item ?? {}) as Record<string, unknown>;
     if (
       typeof quote !== "string" ||
       !(RELEASE_STATEMENT_KINDS as ReadonlyArray<unknown>).includes(kind) ||
@@ -266,7 +235,15 @@ export function parseReleaseReply(text: string): ReleaseReply | null {
     ) {
       return null;
     }
-    statements.push({ kind: kind as ReleaseStatementKind, metric: metric as ReleaseMetric, about: statementAbout(about), quote });
+    const given = Array.isArray(figures) ? figures.filter(isObject) : [];
+    statements.push({
+      kind: kind as ReleaseStatementKind,
+      metric: metric as ReleaseMetric,
+      about: statementAbout(about),
+      quote,
+      ...(target === "next_quarter" ? { target } : {}),
+      ...(given.length > 0 ? { figures: given } : {}),
+    });
   }
   return { quarterEnd: isIsoDate(quarterEnd) ? quarterEnd : null, statements };
 }
@@ -353,12 +330,6 @@ export function verifyStatement<S extends { quote: string }>(
   return null;
 }
 
-// What a sentence starts with: a capital, a figure, a quote, a bracket or a
-// bullet. A full stop before anything else ("the U.S. due to") is an
-// abbreviation's. ponytail: a sentence opening lower-case ("iPhone revenue")
-// counts only at a block edge.
-const SENTENCE_START = /^["'($•[0-9A-Z]/;
-
 // A block ending in a colon, semicolon, comma or dash, or in a word that joins
 // it to more ("but", "and", "of"), runs on into the next ("This is not company
 // guidance -", "due to stronger demand,", "This is not company guidance but"):
@@ -371,22 +342,6 @@ const CONTINUES = /(?:[:;,-]|\b(?:and|but|or|nor|yet|so|while|whereas|although|t
 function blockBreak(text: string, before: number, after: number): boolean {
   return !CONTINUES.test(text.slice(Math.max(0, before - 16), before)) &&
     (after >= text.length || SENTENCE_START.test(text.slice(after)));
-}
-
-// An abbreviation's full stop, which ends no sentence even before a capital
-// ("the U.S. Data Center market"): initials ("U.S.", "e.g.", "J.") or a word
-// shortened by convention ("Inc.", "approx.", "Dec."). ponytail: a sentence that ends
-// in one ("...sales in the U.S.") counts only at a block edge.
-const INITIALS = /(?:^|[\s("'])(?:(?:[A-Za-z]\.){2,}|[A-Z]\.)$/;
-const SHORTENED = /(?:^|[\s("'])(?:inc|corp|co|ltd|no|nos|approx|vs|mr|ms|dr|jr|sr|st|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\.$/i;
-
-// Whether the text before `at` ends a sentence with one of `marks` (and a
-// closing quote or bracket), not with an abbreviation's full stop.
-function endMarkBefore(text: string, at: number, marks: RegExp): boolean {
-  const head = text.slice(Math.max(0, at - 16), at);
-  if (!marks.test(head)) return false;
-  const stop = head.replace(/["')]$/, "");
-  return !(stop.endsWith(".") && (INITIALS.test(stop) || SHORTENED.test(stop)));
 }
 
 // A sentence starts where a block starts, or after a sentence's end (a full
@@ -459,14 +414,24 @@ function buildMessages(text: string): LlmChatMessage[] {
       role: "system",
       content: [
         "You read a company's earnings release and CFO commentary from an SEC 8-K, and pick the sentences in which",
-        "management (1) explains why a reported result changed, or (2) gives guidance for a coming period.",
-        'Reply with minified JSON only: {"quarter_end":"<YYYY-MM-DD>"|null,"statements":[{"kind":"explanation"|"guidance","metric":"<metric>","about":"quarter"|"year"|"other","quote":"<sentence>"}]}',
+        "management (1) explains why a reported result changed, (2) gives guidance for a coming period, or (3) states the quarter's reported result.",
+        'Reply with minified JSON only: {"quarter_end":"<YYYY-MM-DD>"|null,"statements":[{"kind":"explanation"|"guidance"|"result","metric":"<metric>","about":"quarter"|"year"|"other","quote":"<sentence>","target":"next_quarter"|"other","figures":[<figure>]}]}',
         ...QUARTER_END_RULE,
         `metric is one of: ${RELEASE_METRICS.join(", ")} (other when the subject is none of these).`,
         ...ABOUT_RULE,
         "quote is copied EXACTLY from the text, character for character: one or two whole sentences, no paraphrase,",
         "no ellipsis, nothing added. A quote that is not in the text is discarded.",
         "An explanation names a cause (a charge, a product, a mix shift, pricing, a ramp), not just the figure.",
+        'A result states the reported quarter\'s figure for a metric ("Revenue for the quarter was $44.1 billion"); its about is "quarter".',
+        'target, for guidance: "next_quarter" when it guides the quarter after the one reported, else "other" (a full year, a later period).',
+        'figures, for guidance and results: each figure the sentence states, as {"metric":"<metric>","basis":"gaap"|"non_gaap","value":"<phrase>","plus_minus":"<phrase>"}',
+        'or {"metric":"<metric>","basis":"gaap"|"non_gaap","low":"<phrase>","high":"<phrase>"}, plus_minus left out when the sentence gives none.',
+        "A sentence stating several metrics gives one figure for each, with that figure's own metric.",
+        "Give a result for each metric the release states for the quarter in a sentence, revenue first.",
+        'Each phrase is copied EXACTLY from the sentence, the whole amount with its minus sign or parentheses and its scale word',
+        '("$45.0 billion", "2%", "50 basis points", "approximately 54%", "($0.05)"), never computed or rounded.',
+        'basis is "non_gaap" for a non-GAAP or adjusted figure, else "gaap". A sentence stating a GAAP and a non-GAAP figure',
+        '("71.8% and 72.0%, respectively") gives one figure for each. A figure in no unit of its metric, such as a growth rate, is left out.',
         "Skip boilerplate: forward-looking-statement disclaimers, non-GAAP definitions, table rows.",
         `At most ${MAX_STATEMENTS} statements, the most informative first. If there are none, reply with "statements":[] and quarter_end as above.`,
       ].join("\n"),
@@ -541,6 +506,8 @@ export async function extractReleaseStatements(
       "extract_earnings_release.prompt",
       { claim_id: candidate.claimId, accession: candidate.accession, prompt: index + 1, prompts: prompts.length },
       buildMessages(prompt),
+      // Up to MAX_STATEMENTS quotes of up to MAX_QUOTE_CHARS, and their figures.
+      6_000,
     );
     model = completion.model;
     const reply = parseReleaseReply(completion.text);
@@ -562,6 +529,7 @@ export async function extractReleaseStatements(
   for (const pick of found) if (pick.kind === "explanation") noteAbout(abouts, pick.quote, pick.about);
   const verified = new Map<string, VerifiedStatement & { predicate: string; period: ClaimPeriod | null }>();
   for (const pick of found) {
+    if (pick.kind === "result") continue;
     const predicate = `${pick.kind === "explanation" ? "management.explanation" : "guidance"}.${pick.metric}`;
     const key = JSON.stringify([predicate, pick.quote]);
     if (verified.has(key)) continue;
@@ -582,16 +550,22 @@ export async function extractReleaseStatements(
     });
     return "unparseable";
   }
+  // The figures of each guide for the next quarter and of each of the
+  // quarter's actuals, read only once the release's quarter is known. Without
+  // it no guide has a quarter to compare with, nor an actual its period.
+  const filedOn = candidate.effectiveTime?.slice(0, 10) ?? null;
+  const figured = quarterEnd === null || filedOn === null ? [] : found.filter((pick) =>
+    pick.kind === "guidance" ? pick.target === "next_quarter" : pick.kind === "result" && pick.about === "quarter");
   const outcome: ExtractReleaseOutcome = exhibits.length === 0
     ? "no_exhibits"
-    : verified.size > 0
+    : verified.size > 0 || figured.length > 0
     ? "extracted"
     : "empty";
 
   let applied = false;
   await withTransaction(deps.db, async (tx) => {
     const stamped = await tx.db.query(
-      `update claims set enriched_at = now() where claim_id = $1 and enriched_at is null`,
+      `update claims set enriched_at = coalesce(enriched_at, now()), figures_read_at = now() where claim_id = $1 and figures_read_at is null`,
       [candidate.claimId],
     );
     if ((stamped.rowCount ?? 0) === 0) return;
@@ -600,15 +574,18 @@ export async function extractReleaseStatements(
     // until this one commits, so its lookups below see the claims stored now.
     await tx.db.query(`select 1 from documents where document_id = $1 for no key update`, [candidate.documentId]);
     const claimIds: string[] = [];
-    for (const statement of verified.values()) {
-      const { rows: existing } = await tx.db.query<{ claim_id: string }>(
-        `select c.claim_id::text as claim_id from claims c
-          where c.document_id = $1 and c.predicate = $2 and c.text_canonical = $3 and ${CURRENT_CLAIM_SQL}`,
-        [candidate.documentId, statement.predicate, statement.quote],
+    const claimOf = new Map<string, string>();
+    for (const [key, statement] of verified) {
+      const { rows: stored } = await tx.db.query<{ claim_id: string; text_canonical: string }>(
+        `select c.claim_id::text as claim_id, c.text_canonical from claims c
+          where c.document_id = $1 and c.predicate = $2 and ${CURRENT_CLAIM_SQL}`,
+        [candidate.documentId, statement.predicate],
       );
       // Stored by an earlier read of the document (another of its Item 2.02
-      // claims): its period is filled if unbound, bound now and never
-      // backdated, and its id stays, so citations of it do.
+      // claims, or a read in the form before #733): its period is filled if
+      // unbound, bound now and never backdated, and its id stays, so citations
+      // of it do.
+      const existing = stored.filter((row) => row.text_canonical === statement.quote || storedText(row.text_canonical) === statement.quote);
       if (existing.length > 0) {
         if (statement.period) {
           await tx.db.query(
@@ -618,6 +595,7 @@ export async function extractReleaseStatements(
           );
         }
         claimIds.push(...existing.map((row) => row.claim_id));
+        claimOf.set(key, existing[0]!.claim_id);
         continue;
       }
       const claim = await createClaim(tx.db, {
@@ -643,7 +621,21 @@ export async function extractReleaseStatements(
         confidence: 1,
       });
       claimIds.push(claim.claim_id);
+      claimOf.set(key, claim.claim_id);
     }
+    // A figure names its own metric when its sentence states several ("gross
+    // margin was 55%, operating income was $2.5 billion"); a guide binds its
+    // sentence's claim whatever the figure's metric.
+    const figures = figured.flatMap((pick) => (pick.figures ?? []).flatMap((raw) => {
+      const kind = pick.kind as "guidance" | "result";
+      const metric = (RELEASE_METRICS as ReadonlyArray<unknown>).includes(raw.metric) ? raw.metric as ReleaseMetric : pick.metric;
+      if (metric === "other") return [];
+      const claimId = kind === "guidance" ? claimOf.get(JSON.stringify([`guidance.${pick.metric}`, pick.quote]))! : null;
+      return [{ kind, metric, quote: pick.quote, claimId, raw, read: readFigure({ kind, metric, quote: pick.quote }, raw) }];
+    }));
+    const stored = quarterEnd === null || filedOn === null
+      ? { stored: 0, queued: 0 }
+      : await storeReleaseFigures(tx.db, { documentId: candidate.documentId, issuerId: candidate.issuerId, sourceId: candidate.sourceId, quarterEnd, filedOn }, figures);
     // An audit row, as for 8-K enrichment: tool_call_logs stores digests of
     // args and result, so it records that the call ran, not what it said.
     await writeToolCallLog(tx.db, {
@@ -656,6 +648,8 @@ export async function extractReleaseStatements(
         verified: verified.size,
         quarter_end: quarterEnd,
         claim_ids: claimIds,
+        figures: stored.stored,
+        figures_queued: stored.queued,
       },
       status: outcome === "extracted" ? "ok" : "skipped",
     });
@@ -774,7 +768,10 @@ export async function findRebindCandidates(
 export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindCandidate): Promise<RebindResult> {
   const exhibits = await fetchReleaseExhibits(deps.secClient, candidate.issuerCik, candidate.accession);
   if (exhibits.length === 0) throw new Error(`${candidate.accession}: no EX-99 exhibits to rebind from`);
-  const prompts = releasePrompts(exhibits).map((text) => ({ text, listed: candidate.sentences.filter((sentence) => text.includes(sentence)) }));
+  // A sentence is located as stored, or in the form canonicalText gives now
+  // (storedText), and updated by its stored form.
+  const formIn = (text: string, sentence: string) => [sentence, storedText(sentence)].find((form) => text.includes(form));
+  const prompts = releasePrompts(exhibits).map((text) => ({ text, listed: candidate.sentences.filter((sentence) => formIn(text, sentence) !== undefined) }));
   // ponytail: an unlocated sentence stays a candidate, so each run fetches its
   // release again, asks nothing of it, and reports the drain incomplete; mark
   // it read if that churn ever shows.
@@ -790,7 +787,7 @@ export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindC
       deps,
       "rebind_earnings_release.prompt",
       { document_id: candidate.documentId, accession: candidate.accession, prompt: index + 1, prompts: prompts.length },
-      buildRebindMessages(prompt, listed),
+      buildRebindMessages(prompt, listed.map((sentence) => formIn(prompt, sentence)!)),
     );
     model = completion.model;
     const reply = parseRebindReply(completion.text, listed.length);

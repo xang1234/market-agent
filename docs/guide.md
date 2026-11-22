@@ -12,7 +12,7 @@ Type a ticker or company name into the top search to open its page. It has five 
 
 - **Overview** shows key stats and a performance chart, each with its source.
 - **Financials** shows the income statement, as reported or as restated, and segment revenue by business or geography.
-- **Earnings** shows the last eight quarters, analyst consensus, and price targets.
+- **Earnings** shows the last eight quarters, analyst consensus, price targets, and each guide from an earnings release beside the next release's actual on the same basis, with how often the actual met it.
 - **Holders** shows institutional holders and insider transactions.
 - **Signals** shows the sentiment trend, recent claim clusters, and theme rationale.
 
@@ -68,7 +68,7 @@ Build a manual watchlist, or a dynamic one that follows a screen, a theme, or a 
 
 ## Review
 
-The review queue lists candidate facts that extraction was not confident about. A reviewer can correct a candidate, then approve or reject it. An approved fact is stored as authoritative.
+The review queue lists candidate facts that extraction was not confident about. A reviewer can correct a candidate, then approve or reject it. An approved fact is stored as authoritative. It also lists earnings-release figures whose sentence did not bear out their reading, such as a guide read as GAAP in a sentence that says non-GAAP. Approving one stores the figure with the basis, low and high the reviewer set.
 
 ## Settings
 

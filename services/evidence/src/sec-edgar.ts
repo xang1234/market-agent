@@ -161,7 +161,7 @@ function defaultSleep(ms: number): Promise<void> {
 
 // Mirrors the regex in services/fundamentals/src/sec-edgar.ts; intentionally
 // duplicated to keep evidence and fundamentals decoupled.
-const ACCESSION_PATTERN = /^\d{10}-\d{2}-\d{6}$/;
+export const ACCESSION_PATTERN = /^\d{10}-\d{2}-\d{6}$/;
 // Filename whitelist guards against path traversal ("../") and any
 // caller-supplied subpaths that could redirect the fetch elsewhere on
 // sec.gov. The URL builder is the one chokepoint both the client and

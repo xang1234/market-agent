@@ -37,7 +37,7 @@ export type FiscalPeriod = ClaimPeriod & BoundPeriod;
 export type Explained = Readonly<{ issuer: string } & ({ kind: "none" } | { kind: "figures"; period: FiscalPeriod; metrics: ReadonlyArray<string> })>;
 
 // Each figure a release explains, by the release metric of its own
-// explanations (sec-earnings-release-extraction.ts RELEASE_METRICS). A release
+// explanations (release-figures.ts RELEASE_METRICS). A release
 // explains a margin by the income it divides, and files gross profit as gross
 // margin. A figure not listed (a balance item, a share count, a valuation, a
 // ratio other than a margin) has no filed cause.

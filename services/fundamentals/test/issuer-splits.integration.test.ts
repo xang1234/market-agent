@@ -327,8 +327,20 @@ test("a merge moves every row keyed by the merged issuer, the kept issuer's own 
     [vendor, ["2026-11-09", "2026-11-10"]],
   );
 
+  // An earnings release read for its figures (#733), one row per release.
+  const release = await insertDocument(db, vendor, "filing");
+  await db.query(`insert into earnings_release_quarters (document_id, issuer_id, quarter_end, filed_on) values ($1, $2, '2026-09-30', '2026-10-29')`, [release, id(2)]);
+  await db.query(
+    `insert into earnings_release_figures (document_id, kind, metric, basis, low, high, quote) values ($1, 'result', 'revenue', 'gaap', 102.3e9, 102.3e9, 'Revenues were $102.3 billion.')`,
+    [release],
+  );
+
   await repairIssuerSplits(db, new Map([["GOOGL", "1652044"], ["GOOG", "1652044"]]), quiet);
 
+  assert.deepEqual(
+    (await db.query(`select q.issuer_id::text as issuer_id, f.low::float8 as low from earnings_release_quarters q join earnings_release_figures f using (document_id)`)).rows,
+    [{ issuer_id: id(1), low: 102.3e9 }],
+  );
   const { rows: issuers } = await db.query(`select issuer_id::text as issuer_id, legal_name, former_names, cik, sector from issuers`);
   assert.deepEqual(issuers, [
     {
