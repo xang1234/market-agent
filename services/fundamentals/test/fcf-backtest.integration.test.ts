@@ -163,10 +163,11 @@ test("the closes are one capture's: the newest, whichever source took it", { tim
   );
   await capture("2026-11-01", [["2018-02-16", "999"]]);
   const yahoo = await closeSeries(db, ISSUER);
-  assert.deepEqual(yahoo.kind === "closes" && [yahoo.captured_on, yahoo.closes.find((close) => close.trade_date === "2018-02-16"), yahoo.closes.length, new Set(yahoo.closes.map((close) => close.trade_date)).size],
-    ["2026-11-10", { trade_date: "2018-02-16", close_text: "57.7245" }, 2608, 2608]);
+  // Retrieved at 01:00 UTC on 2026-11-10, which is 20:00 on 2026-11-09 in New York: a split on 2026-11-10 is not in these closes.
+  assert.deepEqual(yahoo.kind === "closes" && [yahoo.basis_date, yahoo.closes.find((close) => close.trade_date === "2018-02-16"), yahoo.closes.length, new Set(yahoo.closes.map((close) => close.trade_date)).size],
+    ["2026-11-09", { trade_date: "2018-02-16", close_text: "57.7245" }, 2608, 2608]);
   await capture("2026-11-12", [["2018-02-16", "58"], ["2026-11-11", "120"]]);
-  assert.deepEqual(await closeSeries(db, ISSUER), { kind: "closes", captured_on: "2026-11-12", currency: "USD", closes: [{ trade_date: "2018-02-16", close_text: "58" }, { trade_date: "2026-11-11", close_text: "120" }] });
+  assert.deepEqual(await closeSeries(db, ISSUER), { kind: "closes", basis_date: "2026-11-11", currency: "USD", closes: [{ trade_date: "2018-02-16", close_text: "58" }, { trade_date: "2026-11-11", close_text: "120" }] });
 });
 
 test("ids print only when every ticker resolves: an empty list would backfill every SEC issuer", { timeout: 300_000 }, async (t) => {

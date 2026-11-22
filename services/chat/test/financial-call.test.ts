@@ -11,9 +11,11 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
-import { ADVICE_WORDS, STANCE_WORDS, type CallContent } from "../../financial-core/src/index.ts";
-import type { PlanningModel } from "../../financial-engine/src/planner.ts";
+import { ADVICE_WORDS, callModelOperations, DEFAULT_CALL_SETTINGS, STANCE_WORDS, type CallContent, type CallContentV1 } from "../../financial-core/src/index.ts";
+import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
+import { buildDeterministicPlan, type PlanningModel } from "../../financial-engine/src/planner.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
+import { publishRequest } from "../../financial-engine/src/request.ts";
 import { IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { createSecBackedStatementRepository } from "../../fundamentals/src/sec-facts-repository.ts";
 import { secCompanyFetcher } from "../../fundamentals/test/fakes.ts";
@@ -21,6 +23,8 @@ import { mergeIssuerAway } from "../../fundamentals/test/issuer-merge-fixture.ts
 import { aaplCallInputs } from "../../fundamentals/test/sec-call-inputs-fixture.ts";
 import { POLYGON_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import { callBlockHash, verifyCalls, type CallBlock } from "../../snapshot/src/call.ts";
+import { publishCall } from "../src/call.ts";
+import { chatAuthority } from "../src/financial-runtime.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { chatDatabase, chatHarness, completed, resolveMention } from "./financial-fixtures.ts";
@@ -144,7 +148,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     const message = (await listChatMessagesForThread(pool, { thread_id: threadId, user_id: IDS.owner }))!.messages.find((candidate) => candidate.message_id === done.message_id)!;
     return { threadId, message, block: (message.blocks as unknown as CallBlock[])[0]! };
   };
-  const rows = (call: CallContent) => [...call.facts, ...call.assumptions, ...call.requires].map((row) => [row.id, row.kind, row.basis.length > 0, row.figure.text]);
+  const rows = (call: CallContent | CallContentV1) => [...call.facts, ...call.assumptions, ...call.requires].map((row) => [row.id, row.kind, row.basis.length > 0, row.figure.text]);
 
   await t.test("AAPL: a sealed Call shows 36.15x and 7.3% a year, labels every row, and declines under rule 1", async () => {
     const { threadId, message, block } = await ask("Make a Call on AAPL");
@@ -160,8 +164,12 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
       ["share_price", "market_observation", true, "USD 342.37 per share"],
       ["required_return", "owner_policy", true, "10%"],
       ["exit_multiple", "deterministic_result", true, "36.15x"],
+      // No closes are captured here; financial-call-anchor.test.ts anchors AAPL's ten fiscal years.
+      ["anchored_exit_multiple", "agent_assumption", true, "Not anchored: no closes are captured for the listing by the Call's cutoff."],
       ["share_change", "agent_assumption", true, "0.277% a year"],
+      ["bear_case", "agent_assumption", true, "Not anchored"],
       ["required_growth", "deterministic_result", true, "7.3% a year"],
+      ["required_growth_anchored", "deterministic_result", true, "Not computed: the exit multiple is not anchored."],
       ["consensus", "attributed_consensus", true, "8.18%"],
     ]);
     assert.deepEqual(call.facts.map((row) => row.citations.map((citation) => citation.text)), [
@@ -171,7 +179,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
       ["0000320193-26-000026, cover date 2026-10-23, public by 2026-11-09"],
       ["Close on 2026-11-06"],
     ]);
-    assert.deepEqual([call.stance.kind, call.stance.rule, call.stance.reasons.map((reason) => reason.cites)], ["declined", 1, ["exit_multiple"]]);
+    assert.deepEqual([call.stance.kind, call.stance.rule, call.stance.reasons.map((reason) => reason.cites)], ["declined", 1, ["anchored_exit_multiple", "bear_case"]]);
     const stored = (await db.query(`select call_date::text, settings, inputs_fingerprint, content_hash from calls where snapshot_id = $1`, [block.snapshot_id])).rows;
     assert.deepEqual(stored, [{ call_date: "2026-11-09", settings: call.settings, inputs_fingerprint: call.inputs.fingerprint, content_hash: callBlockHash(block) }]);
     assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the stored block");
@@ -181,11 +189,65 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
 
   await t.test("the seal fails a tampered Call", async () => {
     const { threadId, block } = await ask("What's your call on AAPL?");
-    const tampered = { ...block, call: { ...block.call, requires: [{ ...block.call.requires[0]!, figure: { kind: "value", text: "9.9% a year" } }, block.call.requires[1]!] } };
+    const tampered = { ...block, call: { ...block.call, requires: [{ ...block.call.requires[0]!, figure: { kind: "value", text: "9.9% a year" } }, ...block.call.requires.slice(1)] } };
     assert.deepEqual(await verifyCalls([tampered as CallBlock], threadId, pool), [{ block_id: block.id, reason: "block" }]);
     const settings = { ...block, call: { ...block.call, settings: { ...block.call.settings, required_return: "0" } } };
     assert.deepEqual(await verifyCalls([settings as CallBlock], threadId, pool), [{ block_id: block.id, reason: "request" }]);
     assert.deepEqual(await verifyCalls([block], randomUUID(), pool), [{ block_id: block.id, reason: "inputs" }], "another thread's certificate");
+  });
+
+  await t.test("a Call saved before #605 (call.v1) regenerates as it was saved, so its seal still holds", async () => {
+    // Its inputs as chat published them then (de724754): the model's nodes alone, and their six outputs.
+    const threadId = randomUUID();
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [threadId, IDS.owner]);
+    const turnId = randomUUID();
+    const authority = chatAuthority(IDS.owner, threadId, turnId);
+    const outcome = await publishRequest(pool, {
+      authority,
+      request_key: turnId,
+      plan: async () => buildDeterministicPlan({
+        plan_id: randomUUID(),
+        origin: { kind: "chat_request", ref: `chat:${threadId}:${turnId}` },
+        knowledge_cutoff: CUTOFF,
+        cutoff_timezone: "UTC",
+        reporting_basis: "as_restated",
+        freshness_max_age_days: null,
+        authority,
+        parent_limits: {},
+        max_model_calls: 0,
+        requested_subjects: [{ mention: "AAPL", resolution: { status: "resolved", subject_ref: { kind: "issuer", id: AAPL.issuer }, label: "AAPL" } }],
+        publication_unit_kind: "chat_section",
+      }, {
+        subjects: [{ slot_id: "a", mention: "AAPL" }],
+        operations: callModelOperations("a"),
+        outputs: ["free_cash_flow", "net_cash", "stock_based_compensation", "market_cap", "market_cap_px", "market_cap_shares"].map((node) => ({ output_id: `out_${node}`, node_id: node })),
+        thresholds: [],
+      }),
+      evidence: createEvidenceFinancialPort,
+      persistParent: async () => {},
+    });
+    assert.equal(outcome.status, "driven");
+    const unit = (await db.query(`select snapshot_id::text as snapshot_id from financial_run_units where run_id = $1::uuid and state = 'sealed'`, [outcome.status === "driven" ? outcome.run_id : null])).rows[0];
+    const messageId = randomUUID();
+    assert.equal(await publishCall(pool, { thread_id: threadId, user_id: IDS.owner, message_id: messageId, inputs_snapshot_id: unit.snapshot_id, settings: DEFAULT_CALL_SETTINGS }), "saved");
+    const message = (await listChatMessagesForThread(pool, { thread_id: threadId, user_id: IDS.owner }))!.messages.find((candidate) => candidate.message_id === messageId)!;
+    const block = (message.blocks as unknown as CallBlock[])[0]!;
+    // What main's test asserted of this Call.
+    assert.equal(block.call.version, "call.v1");
+    assert.deepEqual(rows(block.call), [
+      ["free_cash_flow", "deterministic_result", true, "USD 136,056,000,000"],
+      ["net_cash", "deterministic_result", true, "USD 56,824,000,000"],
+      ["stock_based_compensation", "reported_fact", true, "USD 13,789,000,000"],
+      ["shares_outstanding", "reported_fact", true, "14,532,182,000 shares"],
+      ["share_price", "market_observation", true, "USD 342.37 per share"],
+      ["required_return", "owner_policy", true, "10%"],
+      ["exit_multiple", "deterministic_result", true, "36.15x"],
+      ["share_change", "agent_assumption", true, "0.277% a year"],
+      ["required_growth", "deterministic_result", true, "7.3% a year"],
+      ["consensus", "attributed_consensus", true, "8.18%"],
+    ]);
+    assert.deepEqual([block.call.stance.rule, block.call.stance.reasons.map((reason) => reason.cites)], [1, ["exit_multiple"]]);
+    assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the call.v1 block");
   });
 
   await t.test("a retry of a Call turn returns the saved Call and seals nothing more", async () => {
@@ -220,7 +282,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
 
   await t.test("with no consensus within 7 days the row says so, and the Call is otherwise AAPL's", async () => {
     const { call } = (await ask("Make a Call on NOCN")).block;
-    assert.deepEqual(call.requires.map((row) => row.figure.text), ["7.3% a year", "no consensus within 7 days"]);
+    assert.deepEqual(call.requires.map((row) => row.figure.text), ["7.3% a year", "Not computed: the exit multiple is not anchored.", "no consensus within 7 days"]);
     assert.equal(call.stance.rule, 1);
   });
 
@@ -237,6 +299,16 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     assert.equal((await listChatMessagesForThread(pool, { thread_id: threadId, user_id: IDS.owner }))!.messages.some((entry) => entry.message_id === message.message_id), false);
   });
 
+  await t.test("a consensus captured after the cutoff, on the Call date, leaves the sealed Call as it was", async () => {
+    const { threadId, block } = await ask("Make a Call on NOCN");
+    await db.query(
+      `insert into consensus_captures (issuer_id, listing_id, source_id, captured_on, retrieved_at, field_key, raw_label, raw_value, value, unit)
+       values ($1, $2, $3, '2026-11-09', '2026-11-09T20:00:00Z', 'eps_growth_next_5y', 'EPS next 5Y', '9.5%', 9.5, 'percent')`,
+      [NOCN.issuer, NOCN.listing, FINVIZ],
+    );
+    assert.deepEqual(await verifyCalls([block], threadId, pool), []);
+  });
+
   await t.test("a factual answer carries no Call and no stance wording", async () => {
     const { message } = await ask("What was AAPL's free cash flow for FY2026?", { model: freeCashFlowModel });
     const kinds = (message.blocks as Array<{ kind: string }>).map((block) => block.kind);
@@ -248,7 +320,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
   await t.test("the morning after Thanksgiving, Wednesday's close is the latest session's, so the Call is not declined for it (#611)", async () => {
     const { call } = (await ask("Make a Call on HOLI", { clock: "2026-11-27T15:00:00.000Z" })).block;
     assert.deepEqual([call.call_date, call.facts[4]!.figure.text, call.facts[4]!.citations.map((citation) => citation.text)], ["2026-11-27", "USD 342.37 per share", ["Close on 2026-11-25"]]);
-    assert.deepEqual([call.stance.rule, call.stance.reasons.map((reason) => reason.cites)], [1, ["exit_multiple"]]);
+    assert.deepEqual([call.stance.rule, call.stance.reasons.map((reason) => reason.cites)], [1, ["anchored_exit_multiple", "bear_case"]]);
   });
 
   await t.test("a Call made at 21:00 in New York is dated that day, as is a last trade at 20:30 there (#614)", async () => {
@@ -267,7 +339,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     const { block } = await ask("Make a Call on AAPL", { clock: "2026-11-10T02:00:00.000Z" });
     const call = block.call;
     assert.deepEqual([call.call_date, call.facts[4]!.figure.text, call.facts[4]!.citations.map((citation) => citation.text)], ["2026-11-09", "USD 343.1 per share", ["Close on 2026-11-09"]]);
-    assert.deepEqual([call.stance.rule, call.requires[1]!.figure.text], [1, "8.18%"]);
+    assert.deepEqual([call.stance.rule, call.requires[2]!.figure.text], [1, "8.18%"]);
     const stored = (await db.query(`select call_date::text from calls where snapshot_id = $1`, [block.snapshot_id])).rows;
     assert.deepEqual(stored, [{ call_date: "2026-11-09" }]);
   });

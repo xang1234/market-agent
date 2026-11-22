@@ -7,44 +7,16 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
-import { assembleCall, DEFAULT_CALL_SETTINGS, type CallContent, type CallEvidence } from "../src/index.ts";
+import { assembleCall, assembleCallV1, type CallContent, type CallContentV1 } from "../src/index.ts";
 
 const SCHEMA = JSON.parse(readFileSync(new URL("../../../spec/finance_research_block_schema.json", import.meta.url), "utf8"));
 const WEB_FIXTURE = new URL("../../../web/src/blocks/call.fixture.json", import.meta.url);
+// main's web fixture at de724754, byte for byte: the two Calls #604 generated before the exit multiple was anchored (#605).
+const V1_FIXTURE = new URL("../../../web/src/blocks/call.v1.fixture.json", import.meta.url);
 
-const TEN_K = "00000000-0000-4000-8000-0000000000a1";
-const PRICE_SOURCE = "00000000-0000-4000-8000-0000000000b1";
-const CONSENSUS_SOURCE = "00000000-0000-4000-8000-0000000000c1";
-const filing = (period_end: string) => ({ source_id: TEN_K, accession: "0000320193-26-000026", period_end, date: "2026-11-03" });
+import { AAPL, PRICE_SOURCE, TEN_K } from "./call-fixtures.ts";
 
-// ADR 0006's AAPL probe: F0, N and SBC from the FY2026 10-K, the cover count, and Friday's close.
-const AAPL: CallEvidence = {
-  call_date: "2026-11-09",
-  listing_timezone: "America/New_York",
-  subject: { issuer_id: "00000000-0000-4000-8000-0000000000d1", label: "AAPL" },
-  settings: DEFAULT_CALL_SETTINGS,
-  inputs: { snapshot_id: "00000000-0000-4000-8000-0000000000e1", run_id: "00000000-0000-4000-8000-0000000000e2", unit_id: "call", fingerprint: "f".repeat(64) },
-  figures: {
-    free_cash_flow: { kind: "value", value: "136056000000", currency: "USD" },
-    net_cash: { kind: "value", value: "56824000000", currency: "USD" },
-    stock_based_compensation: { kind: "value", value: "13789000000", currency: "USD" },
-    shares_outstanding: { kind: "value", value: "14532182000", currency: null },
-    share_price: { kind: "value", value: "342.37", currency: "USD" },
-    market_cap: { kind: "value", value: "4975383151340", currency: "USD" },
-  },
-  citations: {
-    free_cash_flow: [filing("2026-09-26")],
-    net_cash: [filing("2026-09-26")],
-    stock_based_compensation: [filing("2026-09-26")],
-    shares_outstanding: [filing("2026-10-23")],
-    share_price: [{ source_id: PRICE_SOURCE, accession: null, period_end: null, date: "2026-11-06" }],
-  },
-  fiscal_year_end: "2026-09-26",
-  price_date: "2026-11-06",
-  consensus: [{ source_id: CONSENSUS_SOURCE, captured_on: "2026-11-09", eps_growth_next_5y: "8.18" }],
-};
-
-function block(id: string, call: CallContent) {
+function block(id: string, call: CallContent | CallContentV1) {
   return {
     id,
     kind: "call",
@@ -57,13 +29,14 @@ function block(id: string, call: CallContent) {
   };
 }
 
-test("a Call declined under rule 1 and one under rule 0 satisfy the canonical block schema, and are the web's fixture", () => {
+test("a Call declined under rule 1 with its exit multiple anchored, one with it unanchored, and one under rule 0 satisfy the canonical block schema, and are the web's fixture", () => {
   const ajv = new Ajv2020({ allErrors: true, strict: false });
   ajv.addSchema(SCHEMA);
   const validate = ajv.getSchema(`${SCHEMA.$id}#/$defs/Block`)!;
   const blocks = [
     block("call-1", assembleCall(AAPL)),
     block("call-2", assembleCall({ ...AAPL, subject: { ...AAPL.subject, label: "NVDA" }, figures: { ...AAPL.figures, free_cash_flow: { kind: "gap", disposition: "blocked_dependency", reason_code: "blocked_by_dependency" } }, consensus: [] })),
+    block("call-3", assembleCall({ ...AAPL, subject: { ...AAPL.subject, label: "COST" }, closes: null })),
   ];
   for (const candidate of blocks) assert.ok(validate(candidate), JSON.stringify(validate.errors));
   assert.equal(validate({ ...blocks[0], title: "Buy" }), false, "no title field");
@@ -72,4 +45,20 @@ test("a Call declined under rule 1 and one under rule 0 satisfy the canonical bl
   const text = `${JSON.stringify(blocks, null, 2)}\n`;
   if (process.env.UPDATE_FIXTURES === "1") writeFileSync(WEB_FIXTURE, text);
   assert.equal(readFileSync(WEB_FIXTURE, "utf8"), text);
+});
+
+test("a Call saved before #605 still meets the canonical block schema as call.v1, and its inputs regenerate it exactly", () => {
+  const ajv = new Ajv2020({ allErrors: true, strict: false });
+  ajv.addSchema(SCHEMA);
+  const validate = ajv.getSchema(`${SCHEMA.$id}#/$defs/Block`)!;
+  const saved = JSON.parse(readFileSync(V1_FIXTURE, "utf8")) as ReadonlyArray<ReturnType<typeof block>>;
+  for (const candidate of saved) assert.ok(validate(candidate), JSON.stringify(validate.errors));
+  const { history: _history, closes: _closes, splits: _splits, ...before } = AAPL;
+  assert.deepEqual(saved, [
+    block("call-1", assembleCallV1(before)),
+    block("call-2", assembleCallV1({ ...before, subject: { ...before.subject, label: "NVDA" }, figures: { ...before.figures, free_cash_flow: { kind: "gap", disposition: "blocked_dependency", reason_code: "blocked_by_dependency" } }, consensus: [] })),
+  ]);
+  const current = block("call-1", assembleCall(AAPL));
+  assert.equal(validate({ ...saved[0], call: { ...saved[0]!.call, version: "call.v2" } }), false, "a call.v2 has the anchor's rows");
+  assert.equal(validate({ ...current, call: { ...current.call, version: "call.v1" } }), false, "a call.v1 has only the rows it had");
 });

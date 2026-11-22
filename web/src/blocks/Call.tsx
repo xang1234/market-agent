@@ -4,6 +4,9 @@ import type { CallBlock, CallContent, CallInputKind, CallRow } from './types.ts'
 
 type CallProps = { block: CallBlock }
 
+// A call.v1, saved before the exit multiple was anchored (#605), shows its own rows the same way.
+const CALL_VERSIONS: ReadonlySet<string> = new Set<CallContent['version']>(['call.v1', 'call.v2'])
+
 const KIND_LABEL: Readonly<Record<CallInputKind, string>> = {
   reported_fact: 'Reported fact',
   attributed_consensus: 'Attributed consensus',
@@ -20,7 +23,7 @@ const KIND_LABEL: Readonly<Record<CallInputKind, string>> = {
 // label, and an unknown version shows no values.
 export function Call({ block }: CallProps): ReactElement {
   const testId = `block-call-${block.id}`
-  const call = block.call.version === 'call.v1' ? (block.call as CallContent) : null
+  const call = CALL_VERSIONS.has(block.call.version) ? (block.call as CallContent) : null
   if (call === null) {
     return (
       <ChartCard testId={testId} blockKind="call" title="Agent opinion">

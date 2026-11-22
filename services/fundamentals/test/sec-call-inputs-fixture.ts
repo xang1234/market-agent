@@ -6,6 +6,16 @@ export function callInputsCompanyFacts(): Record<string, unknown> {
   return parseFinancialJson(readFileSync(new URL("./sec-call-inputs.companyfacts.json", import.meta.url), "utf8")) as Record<string, unknown>;
 }
 
+/**
+ * AAPL's companyfacts as downloaded for ADR 0006's hand audit on 2026-11-09, trimmed to the FY2017 to FY2026
+ * 10-Ks' entries of the Call's input tags (#605): ten fiscal years of operating cash flow, PP&E capex, cash,
+ * marketable securities, debt, diluted weighted-average shares, stock-based compensation and cover counts, and
+ * net income, without which no income statement, and so no diluted count, extracts.
+ */
+export function aaplHistoryCompanyFacts(): unknown {
+  return parseFinancialJson(readFileSync(new URL("./aapl-history.companyfacts.json", import.meta.url), "utf8"));
+}
+
 // The fixture holds no cash and equivalents for any filer. This one is not
 // from companyfacts: it is the value ADR 0006's hand audit read off AAPL's
 // FY2026 10-K (accession 0000320193-26-000026), USD 36,305M at 2026-09-26,

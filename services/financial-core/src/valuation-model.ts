@@ -218,7 +218,8 @@ function monthsAfter(date: IsoDate, months: number): IsoDate {
   return new Date(Date.UTC(year, index, Math.min(day, lastDay))).toISOString().slice(0, 10);
 }
 
-function sessionsAfter(from: IsoDate, to: IsoDate, timeZone: string): number {
+/** The sessions of the listing's exchange after `from` and on or before `to`, counted only up to 6. */
+export function sessionsAfter(from: IsoDate, to: IsoDate, timeZone: string): number {
   let count = 0;
   for (let day = Date.parse(`${from}T00:00:00Z`) + DAY_MS; day <= Date.parse(`${to}T00:00:00Z`) && count <= 5; day += DAY_MS) {
     if (isSessionDate(new Date(day).toISOString().slice(0, 10), timeZone)) count += 1;
