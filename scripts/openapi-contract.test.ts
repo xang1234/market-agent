@@ -7,6 +7,7 @@ import Ajv2020 from "../web/node_modules/ajv/dist/2020.js";
 import { parseBrief } from "../services/discovery/src/validation.ts";
 import { briefFixture } from "../services/discovery/test/fixtures.ts";
 import { deriveBlockProof, UNPROVEN } from "../services/snapshot/src/block-proof.ts";
+import { guidanceRecord } from "../services/evidence/src/guidance-record.ts";
 
 const REPO_ROOT = dirname(dirname(new URL(import.meta.url).pathname));
 const OPENAPI_PATH = join(REPO_ROOT, "spec", "finance_research_openapi.yaml");
@@ -36,6 +37,7 @@ const FRONTEND_V1_ROUTES = [
   "/v1/evidence/fact-review-queue/{reviewId}/approve",
   "/v1/evidence/fact-review-queue/{reviewId}/candidate",
   "/v1/evidence/fact-review-queue/{reviewId}/reject",
+  "/v1/evidence/guidance-record",
   "/v1/fundamentals/consensus",
   "/v1/fundamentals/earnings",
   "/v1/fundamentals/holders",
@@ -199,6 +201,40 @@ test("OpenAPI documents the runs a chat messages read reports (#332)", async () 
   assert.equal(validate([{ run_id: "r1", turn_id: "u1", status: "queued" }]), false, "status is one of four");
   assert.equal(validate([{ run_id: "r1", turn_id: "u1", status: "stopped", message_id: "a1" }]), false, "a stopped run names no message");
   assert.equal(validate([{ run_id: "r1", turn_id: "u1", status: "in_flight", message_id: "a1" }]), false, "only a completed run names a message");
+});
+
+test("OpenAPI documents the guidance record and the review of a release figure (#733)", async () => {
+  type Schema = Record<string, unknown>;
+  const spec = load(await readFile(OPENAPI_PATH, "utf8")) as {
+    paths: Record<string, Record<string, { security?: unknown[]; parameters?: Array<{ name: string; required: boolean }>; requestBody?: { content: Record<string, { schema: Schema }> }; responses: Record<string, { content?: Record<string, { schema: Schema }> }> }>>;
+    components: Schema;
+  };
+  // A schema with the document's components beside it, where its references point.
+  const compile = (schema: Schema) => new Ajv2020({ strict: false }).compile({ ...schema, components: spec.components });
+  const read = spec.paths["/v1/evidence/guidance-record"].get;
+  assert.deepEqual(read.security, [], "a public read, as the symbol page is");
+  assert.deepEqual(read.parameters?.map(({ name, required }) => [name, required]), [["issuer_id", true]]);
+  const validate = compile(read.responses["200"].content!["application/json"].schema);
+  const release = (document_id: string, quarter_end: string, filed_on: string) => ({ document_id, quarter_end, filed_on, url: null });
+  const [q1, q2] = [release("q1", "2025-04-27", "2025-05-28"), release("q2", "2025-07-27", "2025-08-27")];
+  const figure = (of: typeof q1, kind: "guidance" | "result", metric: "revenue" | "eps", low: number, high: number) =>
+    ({ document_id: of.document_id, claim_id: kind === "guidance" ? "c" : null, kind, metric, basis: "gaap" as const, low, high, quote: "q" });
+  const record = guidanceRecord([q1, q2], [
+    figure(q1, "guidance", "revenue", 44e9, 46e9), figure(q2, "result", "revenue", 47e9, 47e9),
+    figure(q1, "guidance", "eps", 1, 1.1), figure(q2, "result", "eps", 1.2, 1.2), figure(q2, "guidance", "revenue", 50e9, 52e9),
+  ], { checked_through: null, splits: [] });
+  assert.deepEqual(record.rows.map((row) => row.outcome), ["not_yet_reported", "beat", "not_comparable"]);
+  const envelope = { issuer_id: "00000000-0000-4000-8000-000000000001", quarters: 8, record };
+  assert.ok(validate(envelope), JSON.stringify(validate.errors));
+  assert.equal(validate({ ...envelope, record: { ...record, rows: [{ ...record.rows[1], outcome: "better" }] } }), false, "an outcome is one of five");
+
+  for (const action of ["approve", "candidate"] as const) {
+    const operation = spec.paths[`/v1/evidence/fact-review-queue/{reviewId}/${action}`][action === "approve" ? "post" : "patch"];
+    const body = compile(operation.requestBody!.content["application/json"].schema);
+    const candidate = { key: "k", document_id: "d", claim_id: "c", kind: "guidance", metric: "gross_margin", quote: "Non-GAAP gross margin is expected to be approximately 54%.", figure: { basis: "gaap", value: "54%" }, basis: "non_gaap", low: 54, high: 54 };
+    assert.ok(body({ candidate, notes: "the sentence says non-GAAP" }), JSON.stringify(body.errors));
+    assert.equal(body({ candidate: { ...candidate, basis: "adjusted" } }), false, "a figure's basis is gaap or non_gaap");
+  }
 });
 
 test("OpenAPI gives every discovery operation browser-safe response and error schemas", async () => {

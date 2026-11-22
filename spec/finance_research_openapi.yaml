@@ -533,33 +533,123 @@ paths:
   /v1/evidence/fact-review-queue/{reviewId}/approve:
     post:
       tags: [Evidence]
-      summary: Approve a queued fact candidate
+      summary: Approve a queued fact candidate or release figure
       operationId: approveFactReview
+      description: A queue item of kind fact stores the fact. One of kind release_figure stores the earnings-release figure with the basis, low and high the reviewer set, replacing those of a figure already stored for that sentence on that basis, and names it as the item's release_figure_id. Its document, claim, kind, metric and quote stay as queued.
       parameters:
         - $ref: '#/components/parameters/ReviewIdPath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FactReviewDecisionInput'
       responses:
         '200':
           description: Candidate approved
   /v1/evidence/fact-review-queue/{reviewId}/candidate:
     patch:
       tags: [Evidence]
-      summary: Edit a queued fact candidate
+      summary: Edit a queued fact candidate or release figure
       operationId: editFactReviewCandidate
+      description: The item stays queued with the corrected candidate. A release figure's candidate is checked as an approval would check it.
       parameters:
         - $ref: '#/components/parameters/ReviewIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FactReviewDecisionInput'
       responses:
         '200':
           description: Candidate edited
   /v1/evidence/fact-review-queue/{reviewId}/reject:
     post:
       tags: [Evidence]
-      summary: Reject a queued fact candidate
+      summary: Reject a queued fact candidate or release figure
       operationId: rejectFactReview
+      description: Dismisses the item and stores nothing.
       parameters:
         - $ref: '#/components/parameters/ReviewIdPath'
       responses:
         '200':
           description: Candidate rejected
+  /v1/evidence/guidance-record:
+    get:
+      tags: [Evidence]
+      summary: An issuer's guidance against its reported results (#733)
+      operationId: getGuidanceRecord
+      description: Each guide an 8-K Item 2.02 earnings release gives for the next quarter beside the next release's actual on the same basis, both quoted with their filings, over the issuer's last 8 reported quarters, and the guides of its latest release, not yet reported. A guide with no actual on its basis, conflicting guides or actuals, and EPS across a stock split or without split history through the later release are not comparable. A hit is an actual in line with or better than the guide, and below the range is better for operating expenses and capex. Public, as the symbol page is.
+      security: []
+      parameters:
+        - in: query
+          name: issuer_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The issuer's guidance record
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [issuer_id, quarters, record]
+                properties:
+                  issuer_id: { type: string }
+                  quarters: { type: integer, const: 8 }
+                  record:
+                    type: object
+                    additionalProperties: false
+                    required: [rows, hit_rates]
+                    properties:
+                      rows:
+                        type: array
+                        items:
+                          type: object
+                          additionalProperties: false
+                          required: [quarter_end, metric, basis, unit, guided, actual, outcome]
+                          properties:
+                            quarter_end:
+                              type: ['string', 'null']
+                              format: date
+                              description: The quarter guided, null until a release reports it.
+                            metric: { type: string, enum: [revenue, gross_margin, operating_expenses, operating_income, net_income, eps, operating_cash_flow, free_cash_flow, capex] }
+                            basis: { type: string, enum: [gaap, non_gaap] }
+                            unit: { type: string, enum: [usd, usd_per_share, percent] }
+                            guided:
+                              type: object
+                              additionalProperties: false
+                              required: [low, high, source]
+                              properties:
+                                low: { type: number }
+                                high: { type: number }
+                                source: { $ref: '#/components/schemas/GuidanceFigureSource' }
+                            actual:
+                              type: ['object', 'null']
+                              additionalProperties: false
+                              required: [value, source]
+                              properties:
+                                value: { type: number }
+                                source: { $ref: '#/components/schemas/GuidanceFigureSource' }
+                            outcome: { type: string, enum: [beat, in_line, miss, not_comparable, not_yet_reported] }
+                            reason: { type: string, enum: [no_same_basis_actual, conflicting_guidance, conflicting_actuals, split_between_releases, split_history_missing] }
+                      hit_rates:
+                        type: array
+                        items:
+                          type: object
+                          additionalProperties: false
+                          required: [metric, basis, hits, compared]
+                          properties:
+                            metric: { type: string }
+                            basis: { type: string, enum: [gaap, non_gaap] }
+                            hits: { type: integer, minimum: 0 }
+                            compared: { type: integer, minimum: 1 }
+        '400':
+          description: issuer_id is not a UUID
   /v1/snapshots/{snapshotId}:
     get:
       tags: [Snapshots]
@@ -2405,6 +2495,48 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/DiscoveryError' }
   schemas:
+    GuidanceFigureSource:
+      type: object
+      additionalProperties: false
+      required: [document_id, claim_id, filed_on, url, quote]
+      properties:
+        document_id: { type: string }
+        claim_id:
+          type: ['string', 'null']
+          description: The guidance claim a guide binds; null for an actual.
+        filed_on: { type: string, format: date }
+        url:
+          type: ['string', 'null']
+          description: The filing's EDGAR index.
+        quote: { type: string, description: The sentence the figure is read from, as the exhibit has it. }
+    FactReviewDecisionInput:
+      type: object
+      properties:
+        candidate:
+          description: The corrected candidate, a fact's for an item of kind fact and a release figure's for one of kind release_figure. Approval without one stores the queued candidate.
+          anyOf:
+            - $ref: '#/components/schemas/FactReviewFactCandidate'
+            - $ref: '#/components/schemas/ReleaseFigureCandidate'
+        notes: { type: ['string', 'null'] }
+    FactReviewFactCandidate:
+      type: object
+      required: [subject_kind, subject_id, metric_id, period_kind, unit, as_of, observed_at, source_id, method, verification_status, freshness_class, coverage_level, confidence]
+      additionalProperties: true
+    ReleaseFigureCandidate:
+      type: object
+      description: An earnings-release figure the extraction could not read for sure. figure holds the phrases the model copied, for the reviewer to read against quote.
+      required: [document_id, claim_id, kind, metric, quote, basis, low, high]
+      properties:
+        key: { type: string }
+        document_id: { type: string }
+        claim_id: { type: ['string', 'null'] }
+        kind: { type: string, enum: [guidance, result] }
+        metric: { type: string }
+        quote: { type: string }
+        figure: { type: object, additionalProperties: true }
+        basis: { type: string, enum: [gaap, non_gaap] }
+        low: { type: number }
+        high: { type: number, description: An actual's high is its low. }
     DiscoveryError:
       type: object
       required: [error, code]

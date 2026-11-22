@@ -571,21 +571,31 @@ next release reports, on the same basis (`services/evidence/src/guidance-record.
 - **Figures.** The extraction above also asks for each guidance sentence's target (`next_quarter` or other) and, for
   guides and for the sentences stating the quarter's reported result (kind `result`), its figures, each a metric (a
   sentence may state several), a basis and phrases copied from the sentence ("$45.0 billion" plus or minus "2%", or a
-  low and a high). `release-figures.ts`
-  reads the low and high from those phrases, never from a number the model wrote. A next-quarter guide and a
-  quarter's actual are stored in `earnings_release_figures` (migration 0086) with the guidance claim the guide binds.
+  low and a high). `release-figures.ts` reads the low and high from the sentence's own amounts, each with its minus
+  sign or accounting parentheses and its scale, and a phrase only picks one, never a number the model wrote. A next-quarter guide and a
+  quarter's actual are stored in `earnings_release_figures` (migration 0087) with the guidance claim the guide binds.
   Actuals are never claims, so no reader takes a release's "revenue was $7.7 billion" for a certified figure. Figures
   need the release's quarter (`earnings_release_quarters`, its end as `reportedQuarterEnd` checks it), so a release
   with none stores none.
-- **Review.** A phrase not in the sentence or not one amount, an amount not in the metric's unit (a growth rate for
-  revenue), a basis the sentence does not state, a loss, a percent plus or minus on a margin (points or a share of
-  it), or a low above its high goes to the fact review queue as kind `release_figure`, at a confidence that keeps it
-  out of bulk approval. Approving it stores the figure with the basis, low and high the reviewer set; the sentence and
-  what it is a figure of stay as queued.
+- **Basis.** A figure's basis is read for its amount. A sentence naming no basis, or GAAP alone, states GAAP figures;
+  one naming non-GAAP alone states non-GAAP figures after its label. One naming both settles a basis only for a
+  subject they share ("GAAP and non-GAAP gross margins"), in order with "respectively" or as one figure for both
+  ("were both 75.0%"). EPS is diluted EPS.
+- **Review.** A phrase not in the sentence, in it twice, or not one whole amount of it ("$45.0" of "$45.0 billion",
+  "2.5%" of "72.5%"), an amount not in the metric's unit (a growth rate for revenue), a basis the sentence does not
+  state for that amount, a negative figure stated in words ("operating loss", "cash used in"), a negative revenue,
+  cost or capex, basic EPS, a percent plus or minus on a margin (points or a share of it), or a low above its high
+  goes to the fact review queue as kind `release_figure`, at a confidence that keeps it out of bulk approval.
+  Approving it stores the figure with the basis, low and high the reviewer set, replacing the bounds of one stored for
+  that sentence on that basis; the sentence and what it is a figure of stay as queued.
 - **Same basis.** A guide's quarter is the issuer's next stored release quarter, ending 80 to 100 days after its
   release's. A non-GAAP guide is compared only with that release's non-GAAP actual, and a GAAP guide with its GAAP
   actual; certified facts are not used, so both sides are quoted figures of the same kind. A guide whose quarter is
-  reported with no actual on its basis is not comparable, as are conflicting guides or actuals for one quarter.
+  reported with no actual on its basis is not comparable, as are conflicting guides or actuals for one quarter, the
+  latest release's included. EPS is compared only on one share count, so a stock split (`listing_splits`) executed
+  between the two releases' filing days, or split history not checked through the later one (`npm run sync:splits`
+  in services/market), makes the pair not comparable. It is not adjusted for the split, since a release that
+  announces one may already guide on the new share count.
 - **Outcome.** Within the range is in line, above it a beat and below it a miss, reversed for operating expenses and
   capex. A point guide is compared at its figure. The hit rate counts in line and beats per metric and basis over
   the last 8 reported quarters; the latest release's guide shows as not yet reported.
