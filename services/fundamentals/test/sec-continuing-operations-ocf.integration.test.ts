@@ -70,7 +70,11 @@ async function setUp(t: test.TestContext, name: string) {
     const selection = await selectFiscalYear(db, { issuerId: ISSUER_ID, metricKey: "operating_cash_flow", fiscalYear: 2024, fiscalPeriod }, "2026-06-01T00:00:00Z", basis);
     return selection.status === "selected" ? selection.input.candidate.value_text : selection.reason_code;
   };
-  return { db, download, lookup, backfill, ocf, shown, relations, picked };
+  const pickedScope = async (basis: "as_reported" | "as_restated") => {
+    const selection = await selectFiscalYear(db, { issuerId: ISSUER_ID, metricKey: "operating_cash_flow", fiscalYear: 2024, fiscalPeriod: "FY" }, "2026-06-01T00:00:00Z", basis);
+    return selection.status === "selected" ? selection.input.candidate.inference ?? null : selection.reason_code;
+  };
+  return { db, download, lookup, backfill, ocf, shown, relations, picked, pickedScope };
 }
 
 test("operating cash flow filed for continuing operations certifies with its concept recorded", { timeout: 300_000 }, async (t) => {
@@ -212,16 +216,41 @@ test("operating cash flow filed for continuing operations certifies with its con
     assert.deepEqual([await picked("as_reported", "Q1"), await picked("as_reported", "Q2")], ["100", "context_unverified"]);
   });
 
-  // CAT and COST switched to the total this way, CAT in its FY2019 10-K and COST in its FY2020 one.
-  await t.test("a later 10-K that switches to the total at an equal figure states the same one", async (t) => {
-    const { download, lookup, relations, picked } = await setUp(t, "fin-ocf-continuing-switch-equal");
+  // CAT and COST switched to the total this way, CAT in its FY2019 10-K and
+  // COST in its FY2020 one. The first equal total restates the year in that
+  // scope (operator 2026-11-22, #752), so its growth to a total year counts.
+  await t.test("a later 10-K that switches to the total at an equal figure restates the year as the total", async (t) => {
+    const { download, lookup, backfill, relations, picked, pickedScope } = await setUp(t, "fin-ocf-continuing-switch-equal");
     download.text = companyFacts({
       [CONTINUING]: [year(2024, 2024, 120)],
       [TOTAL]: [year(2025, 2024, 120), year(2025, 2025, 140), year(2026, 2024, 120)],
     });
     await lookup();
-    assert.deepEqual(await relations(), [{ method: "reported", value: "120", flags: [SCOPE], relation: "original" }]);
+    const rows = [
+      { method: "reported", value: "120", flags: [SCOPE], relation: "original" },
+      { method: "restated", value: "120", flags: [], relation: "economic_restatement" },
+    ];
+    assert.deepEqual(await relations(), rows);
     assert.deepEqual([await picked("as_reported"), await picked("as_restated")], ["120", "120"]);
+    assert.deepEqual([await pickedScope("as_reported"), await pickedScope("as_restated")], [SCOPE, null]);
+    await backfill();
+    assert.deepEqual(await relations(), rows, "a rerun adds nothing");
+  });
+
+  // CAT's FY2017, restated within continuing operations before its FY2019 10-K repeats that figure as the total.
+  await t.test("a total equal to a restated continuing-operations figure restates the year as the total", async (t) => {
+    const { download, lookup, relations, pickedScope } = await setUp(t, "fin-ocf-continuing-restated-switch-equal");
+    download.text = companyFacts({
+      [CONTINUING]: [year(2024, 2024, 120), year(2025, 2024, 118), year(2025, 2025, 140)],
+      [TOTAL]: [year(2026, 2024, 118), year(2026, 2025, 140), year(2026, 2026, 150)],
+    });
+    await lookup();
+    assert.deepEqual((await relations()).map(({ value, flags, relation }) => [value, flags, relation]), [
+      ["120", [SCOPE], "original"],
+      ["118", [SCOPE], "economic_restatement"],
+      ["118", [], "economic_restatement"],
+    ]);
+    assert.equal(await pickedScope("as_restated"), null);
   });
 
   await t.test("a later 10-K that switches to the total at another figure is an unverified restatement", async (t) => {

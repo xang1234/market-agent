@@ -16,7 +16,7 @@ const PRODUCTIVE_ASSETS = { kind: "productive_assets_capex", concept: "PaymentsT
 
 const CONTINUING_OPERATIONS = { kind: "continuing_operations_ocf", concept: "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations" } as const;
 
-function inputs(asOf: string, periodEnd: string, fcf: string, shares: string, capexScope: AsOfInputs["capex_scope"] = null, ocfScope: AsOfInputs["ocf_scope"] = null): AsOfInputs {
+function inputs(asOf: string, periodEnd: string, fcf: string, shares: string, capexScope: AsOfInputs["capex_scope"] = null, ocfScope: AsOfInputs["ocf_scope"] = null, ocfTotalFrom: string | null = null): AsOfInputs {
   const figure = (text: string): Figure => ({ kind: "value", value: Number(text), text });
   const values = { free_cash_flow: fcf, net_cash: "200000000", stock_based_compensation: "50000000", shares_outstanding: shares };
   return {
@@ -27,6 +27,7 @@ function inputs(asOf: string, periodEnd: string, fcf: string, shares: string, ca
     fiscal_year_end: periodEnd,
     capex_scope: capexScope,
     ocf_scope: ocfScope,
+    ocf_total_from: ocfTotalFrom,
     bound: [
       { slot: "operating_cash_flow", fiscal_year: Number(periodEnd.slice(0, 4)), period_end: periodEnd, public_by: `${asOf}T04:59:59.999Z`, locator: null },
       { slot: "market_cap_shares", fiscal_year: Number(asOf.slice(0, 4)), period_end: asOf, public_by: `${asOf}T04:59:59.999Z`, locator: null },
@@ -213,6 +214,29 @@ test("realized growth across a change of OCF scope is a named outcome, never a r
     }
   }
   assert.match(realized(row(pairs[1]!, pairs[0]!).realized.fcf), /continuing operations at one end and as the total at the other/u);
+});
+
+// CAT's FY2019 10-K, filed 2020-02-19, states FY2018 OCF as the total at its continuing-operations figure.
+test("growth from continuing-operations OCF to the total counts once a filing public by the window's end restates the start as an equal total (#752)", () => {
+  const row = (base: AsOfInputs, later: AsOfInputs) => backtestRow({
+    ticker: "SWCH", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0, base, later, earlier: noEarlier, closes, splits: split,
+  });
+  const realized = (one: BacktestRow) => one.kind === "read" ? [one.realized.fcf, one.realized.per_share].map((figure) => figure.kind === "outcome" ? figure.outcome : figure.text) : [];
+  const start = (scope: AsOfInputs["ocf_scope"], totalFrom: string | null) => inputs("2018-02-16", "2017-12-31", "1100000000", "100000000", null, scope, totalFrom);
+  const end = (scope: AsOfInputs["ocf_scope"], totalFrom: string | null = null) => inputs("2023-02-16", "2022-12-31", "1600000000", "100000000", null, scope, totalFrom);
+  assert.deepEqual([
+    row(start(CONTINUING_OPERATIONS, "2020-02-19"), end(null)),
+    row(start(CONTINUING_OPERATIONS, "2023-02-16"), end(null)),
+    row(start(CONTINUING_OPERATIONS, "2023-02-17"), end(null)),
+    row(start(CONTINUING_OPERATIONS, null), end(null)),
+    row(start(null, null), end(CONTINUING_OPERATIONS, "2024-02-20")),
+  ].map(realized), [
+    ["7.78%", "23.81%"],
+    ["7.78%", "23.81%"],
+    ["incompatible_definition", "incompatible_definition"],
+    ["incompatible_definition", "incompatible_definition"],
+    ["incompatible_definition", "incompatible_definition"],
+  ]);
 });
 
 test("a row's free cash flow names each concept scope it was computed in, and a total over PP&E reads bare (#731, #743)", () => {

@@ -31,7 +31,7 @@ function assertPublicByFilingDate(inputs: AsOfInputs): void {
   }
 }
 
-async function seeded(t: test.TestContext) {
+async function seeded(t: test.TestContext, companyFacts: () => unknown = annualHistoryCompanyFacts) {
   const { databaseUrl } = await bootstrapDatabase(t, "fin-fcf-backtest");
   const db = await connectedPool(t, databaseUrl);
   for (const seed of ["metrics.sql", "sources.sql"]) await db.query(await readFile(join(workspaceRoot, "db", "seed", seed), "utf8"));
@@ -51,7 +51,7 @@ async function seeded(t: test.TestContext) {
       where extract(isodow from d) < 6`,
     [LISTING, YAHOO_FINANCE_DEV_MARKET_SOURCE_ID],
   );
-  assert.deepEqual(await backfillSecStatements(db, secCompanyFetcher(annualHistoryCompanyFacts), [ISSUER], quiet, 12), { failures: 0 });
+  assert.deepEqual(await backfillSecStatements(db, secCompanyFetcher(companyFacts as typeof annualHistoryCompanyFacts), [ISSUER], quiet, 12), { failures: 0 });
   return { db, databaseUrl };
 }
 
@@ -194,4 +194,36 @@ test("ids print only when every ticker resolves: an empty list would backfill ev
   for (const id of ["issuer_id", "listing_id"] as const) {
     await assert.rejects(subjectIds(db, ["HIST", "NONE", "GONE"], id), { message: "unresolved tickers, no ids printed: NONE (0 active US common-stock listings), GONE (0 active US common-stock listings)" });
   }
+});
+
+// As CAT: each 10-K through FY2018's tags OCF for continuing operations only, and
+// from FY2019's the total, whose FY2018 comparative repeats FY2018's figure (#752).
+function switchingCompanyFacts() {
+  const facts = annualHistoryCompanyFacts();
+  const gaap: Record<string, { units: { USD: Array<{ fy: number }> } }> = facts.facts["us-gaap"];
+  const ocf = gaap.NetCashProvidedByUsedInOperatingActivities!;
+  gaap.NetCashProvidedByUsedInOperatingActivitiesContinuingOperations = { ...ocf, units: { USD: ocf.units.USD.filter((value) => value.fy <= 2018) } };
+  gaap.NetCashProvidedByUsedInOperatingActivities = { ...ocf, units: { USD: ocf.units.USD.filter((value) => value.fy > 2018) } };
+  return facts;
+}
+
+test("growth from continuing-operations OCF to the total counts only from a year a later 10-K restates as an equal total (#752)", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for backtest coverage");
+    return;
+  }
+  const { db } = await seeded(t, switchingCompanyFacts);
+  const run = await runBacktest(db, ["HIST"]);
+  const text = (figure: { kind: string; text: string; outcome?: string }) => figure.kind === "value" ? figure.text : figure.outcome;
+  const growths = run.rows.flatMap((row) => row.kind === "read" ? [[row.fiscal_year, text(row.realized.fcf), text(row.trailing[3].fcf)]] : []);
+  // FY2016 and FY2017 are never stated as the total. FY2018's 1,200M free cash flow grows to FY2023's 1,700M,
+  // (17 / 12)^(1/5) - 1, and is FY2021's 3-year base, to 1,500M: (15 / 12)^(1/3) - 1.
+  assert.deepEqual(growths, [
+    [2016, "incompatible_definition", "no_fy_facts"],
+    [2017, "incompatible_definition", "no_fy_facts"],
+    [2018, "7.21%", "10.06%"],
+    [2019, "6.72%", "incompatible_definition"],
+    [2020, "6.30%", "incompatible_definition"],
+    [2021, "5.92%", "7.72%"],
+  ]);
 });
