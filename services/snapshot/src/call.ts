@@ -134,7 +134,12 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
   };
   const observed = bound.get("market_cap_px")?.bound_payload?.observed_at;
   const capexInference = bound.get("capex")?.bound_payload?.inference;
-  const ocfInference = bound.get("operating_cash_flow")?.bound_payload?.inference;
+  const ocfScope = (slot: string): CallEvidence["ocf_scope"] => {
+    const inference = bound.get(slot)?.bound_payload?.inference;
+    return isRecord(inference) && inference.kind === "continuing_operations_ocf"
+      ? { kind: "continuing_operations_ocf", concept: "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations" }
+      : null;
+  };
 
   const callDate = localDate(plan.time.knowledge_cutoff);
   const bindingsHashed = bindings.map((row) => ({ slot: row.input_slot, status: row.binding_status, payload_hash: row.payload_hash, gap_reason: row.gap_reason }));
@@ -152,9 +157,7 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     capex_scope: isRecord(capexInference) && capexInference.kind === "productive_assets_capex"
       ? { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" }
       : null,
-    ocf_scope: isRecord(ocfInference) && ocfInference.kind === "continuing_operations_ocf"
-      ? { kind: "continuing_operations_ocf", concept: "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations" }
-      : null,
+    ocf_scope: ocfScope("operating_cash_flow"),
     consensus: await consensusCaptures(db, issuer, callDate, plan.time.knowledge_cutoff),
   };
   const generated = (content: CallContent | CallContentV1): GeneratedCall => {
@@ -172,6 +175,7 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
       period_end: period(nodes.cited.free_cash_flow[0]!),
       figures: year as CallEvidence["history"][number]["figures"],
       citations: { free_cash_flow: cited(nodes.cited.free_cash_flow), net_cash: cited(nodes.cited.net_cash), shares: cited(nodes.cited.shares) },
+      ocf_scope: ocfScope(nodes.cited.free_cash_flow[0]!),
     };
   });
   // The listing whose splits the engine restated the counts with, and whose closes the anchor prices them at.

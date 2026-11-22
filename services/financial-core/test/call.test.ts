@@ -116,6 +116,13 @@ test("each year cites every filing its free cash flow, net cash and diluted shar
   ]);
 });
 
+test("a year whose operating cash flow is filed for continuing operations names that scope in its citation (#743)", () => {
+  const texts = (evidence: CallEvidence) => anchored(evidence).citations.map((citation) => citation.text);
+  const scoped = texts({ ...AAPL, history: year(2019, (entry) => ({ ...entry, ocf_scope: CONTINUING_OPERATIONS })) });
+  assert.deepEqual(scoped, texts(AAPL).map((text) => text.startsWith("FY2019: 15.61x, ") ? `${text}. ${CONTINUING_NOTE}` : text));
+  assert.deepEqual(texts({ ...AAPL, history: year(2019, (entry) => ({ ...entry, ocf_scope: null })) }), texts(AAPL), "a total OCF year reads as before");
+});
+
 test("the basis names the share-count gap between the years' diluted averages and today's cover count, either way", () => {
   // A cover count of 15,000,000,000 is above FY2026's diluted 14,720,306,000 by 1.86%.
   const above = anchored({ ...AAPL, figures: { ...AAPL.figures, shares_outstanding: { kind: "value", value: "15000000000", currency: null } } });

@@ -270,6 +270,8 @@ export type CallHistoryYear = Readonly<{
   period_end: IsoDate | null;
   figures: Readonly<{ free_cash_flow: CallEngineFigure; net_cash: CallEngineFigure; shares: CallEngineFigure }>;
   citations: Readonly<{ free_cash_flow: ReadonlyArray<CallSource>; net_cash: ReadonlyArray<CallSource>; shares: ReadonlyArray<CallSource> }>;
+  /** Present when the year's operating cash flow is filed for continuing operations (#743); older callers omit it. */
+  ocf_scope?: ContinuingOperationsOcfV1 | null;
 }>;
 
 /** One set of dev split-adjusted daily closes, as captured (daily_close_captures): never certified. */
@@ -618,7 +620,7 @@ function yearMultiple(year: CallHistoryYear, closes: CallCloses, capturedOn: Iso
     multiple,
     citations: [...filings.values()].map(({ source, figures }, index) => ({
       ...source,
-      text: `${index === 0 ? `${computed}; ` : `FY${year.fiscal_year}: `}${LIST.format(figures)} from ${tenK(source)}`,
+      text: `${index === 0 ? `${computed}; ` : `FY${year.fiscal_year}: `}${LIST.format(figures)} from ${tenK(source)}${index === 0 && year.ocf_scope != null ? `. ${inferenceNote(year.ocf_scope).text}` : ""}`,
     })),
   };
 }

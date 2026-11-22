@@ -252,7 +252,8 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
   await t.test("a year whose operating cash flow is filed for continuing operations still anchors the exit multiple (#743)", async () => {
     const { call } = (await ask("Make a Call on OCFY")).block;
     assert.deepEqual(row(call, "anchored_exit_multiple").figure, { kind: "value", text: "17.33x" });
-    assert.ok(row(call, "anchored_exit_multiple").citations.some((citation) => citation.text.startsWith("FY2019: 15.61x, ")));
+    const scoped = row(call, "anchored_exit_multiple").citations.filter((citation) => citation.text.endsWith("which excludes discontinued operations."));
+    assert.deepEqual(scoped.map((citation) => citation.text.slice(0, 16)), ["FY2019: 15.61x, "], "only FY2019's citation names the scope");
   });
 
   await t.test("a year with no capex leaves the exit multiple unanchored, and rule 1 names both anchors", async () => {
