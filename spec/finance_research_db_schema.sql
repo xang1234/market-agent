@@ -753,8 +753,10 @@ create table fact_review_queue (
       and reviewed_by is not null
       and length(btrim(reviewed_by)) > 0
       and reviewed_at is not null
-      and (fact_id is not null) = (kind = 'fact')
-      and (kind = 'release_figure' or release_figure_id is null)
+      and (
+        (kind = 'fact' and fact_id is not null and release_figure_id is null)
+        or (kind = 'release_figure' and fact_id is null)
+      )
     ) or (
       status = 'dismissed'
       and reviewed_by is not null

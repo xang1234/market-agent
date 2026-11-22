@@ -58,8 +58,10 @@ alter table fact_review_queue add constraint fact_review_queue_review_metadata_c
     and length(btrim(reviewed_by)) > 0
     and reviewed_at is not null
     -- A reviewed figure's id is cleared when its release is deleted.
-    and (fact_id is not null) = (kind = 'fact')
-    and (kind = 'release_figure' or release_figure_id is null)
+    and (
+      (kind = 'fact' and fact_id is not null and release_figure_id is null)
+      or (kind = 'release_figure' and fact_id is null)
+    )
   ) or (
     status = 'dismissed'
     and reviewed_by is not null
