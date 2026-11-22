@@ -32,13 +32,18 @@ const DAY_MS = 86_400_000;
 const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const DATE = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})\b/i;
-const THREE_MONTHS = /\b(?:three|3)[\s-]+months?\b|\bquarter\b|\b(?:13|thirteen)[\s-]+weeks?\b/i;
+const QUARTER = /\b(?:three|3)[\s-]+months?\b|\bquarter\b|\b(?:13|thirteen)[\s-]+weeks?\b/i;
+const LONGER = /\byears?[\s-]+(?:ended|to[\s-]+date)\b|\bytd\b|\b(?:six|nine|twelve|6|9|12)[\s-]+months?\b|\b(?:26|39|52|53)[\s-]+weeks?\b/i;
+const DURATION = new RegExp(`${QUARTER.source}|${LONGER.source}`, "gi");
 const REVENUE = /^(?:total\s+)?(?:net\s+)?(?:revenues?|sales)$/i;
 
-// The end of the three months a column header names, if it names one.
+// The end of the three months a column header names, if it names one. Its
+// own heading is its lowest, so the last duration it names is the column's,
+// as under a "Fourth Quarter and Fiscal Year Ended" banner.
 export function quarterEndOf(label: string | null | undefined): IsoDate | null {
-  if (!label || !THREE_MONTHS.test(label)) return null;
-  const match = DATE.exec(label);
+  const duration = label ? [...label.matchAll(DURATION)].at(-1)?.[0] : undefined;
+  if (duration === undefined || LONGER.test(duration)) return null;
+  const match = DATE.exec(label!);
   if (!match) return null;
   const [, month, day, year] = match;
   const date = new Date(Date.UTC(Number(year), MONTHS.indexOf(month!.toLowerCase()), Number(day)));
@@ -62,7 +67,7 @@ export function releaseReconciliations(submission: string, filedOn: IsoDate | nu
   const filed = filedOn === null ? Number.NaN : Date.parse(filedOn);
   // The latest quarter any table's header names, ended by the filing and not long before it.
   const quarter_end = exhibits
-    .flatMap((exhibit) => exhibit.tables.flatMap((table) => [...table.periodLabels.values()].map(quarterEndOf)))
+    .flatMap((exhibit) => exhibit.tables.flatMap((table) => table.periods.map(quarterEndOf)))
     .filter((end): end is IsoDate => end !== null && Date.parse(end) <= filed && filed - Date.parse(end) <= MAX_REPORT_LAG_DAYS * DAY_MS)
     .sort()
     .at(-1) ?? null;
@@ -72,10 +77,11 @@ export function releaseReconciliations(submission: string, filedOn: IsoDate | nu
   const reconciliations: StoredReconciliation[] = [];
   for (const exhibit of exhibits) {
     for (const table of exhibit.tables) {
-      if (revenue !== null) break;
-      const row = table.rows.find((candidate) => REVENUE.test(candidate.label.replace(/:$/, "")));
-      const value = row?.values.find(([column]) => quarterEndOf(table.periodLabels.get(column)) === quarter_end);
-      if (row && value) revenue = { exhibit: exhibit.type, label: row.label, value_num: value[1].value_num, scale: table.scale ?? null };
+      for (const row of table.rows) {
+        if (revenue !== null || !REVENUE.test(row.label.replace(/:$/, ""))) continue;
+        const value = row.values.find(([slot, figure]) => figure.unit !== "percent" && quarterEndOf(table.periods[slot]) === quarter_end);
+        if (value) revenue = { exhibit: exhibit.type, label: row.label, value_num: value[1].value_num, scale: table.scale ?? null };
+      }
     }
     const { items } = extractNonGaapReconciliations({ html: exhibit.html, source_id: "", as_of: "" });
     for (const item of items) {

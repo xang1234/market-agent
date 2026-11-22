@@ -9,12 +9,12 @@
 // reader fix reaches releases read before it. Exits non-zero when any release
 // failed, so it is read again next run.
 import { parseArgs } from "node:util";
-import { createEvidenceCliRuntime } from "./evidence-cli-runtime.ts";
+import { createEvidenceStoreRuntime } from "./evidence-cli-runtime.ts";
 import { runReconciliationDrain } from "./sec-non-gaap-reconciliations.ts";
 
 async function main(): Promise<void> {
   const { values: flags } = parseArgs({ options: { reread: { type: "boolean" } } });
-  const { db, objectStore } = createEvidenceCliRuntime();
+  const { db, objectStore } = createEvidenceStoreRuntime();
   try {
     if (flags.reread) console.log(`reread: ${(await db.query("delete from non_gaap_reconciliations")).rowCount ?? 0} releases to read again`);
     const result = await runReconciliationDrain({ db, objectStore }, {

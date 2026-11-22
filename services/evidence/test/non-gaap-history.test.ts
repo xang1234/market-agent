@@ -1,11 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { addBackCategory, loadNonGaapHistory, nonGaapHistory, type StoredRelease } from "../src/non-gaap-history.ts";
 import { MemoryObjectStore, rawBlobIdFromBytes } from "../src/object-store.ts";
-import { readReleaseReconciliations, releaseReconciliations, runReconciliationDrain } from "../src/sec-non-gaap-reconciliations.ts";
+import { readTables } from "../src/reader/non-gaap-reconciliation-extractor.ts";
+import { quarterEndOf, readReleaseReconciliations, releaseReconciliations, runReconciliationDrain } from "../src/sec-non-gaap-reconciliations.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { EXAMPLE_ACCESSION, EXAMPLE_FILED_ON, RELEASE_SUBMISSION } from "./fixtures/sec-8k-release.ts";
+import { AMD_SHAPED_FILED_ON, AMD_SHAPED_SUBMISSION, EXAMPLE_ACCESSION, EXAMPLE_FILED_ON, RELEASE_SUBMISSION, submissionOf } from "./fixtures/sec-8k-release.ts";
 
 test("a release keeps the quarter it reports: the latest three-month column ended by its filing", () => {
   const read = releaseReconciliations(RELEASE_SUBMISSION, EXAMPLE_FILED_ON);
@@ -23,6 +27,64 @@ test("a release keeps the quarter it reports: the latest three-month column ende
   assert.equal(releaseReconciliations(RELEASE_SUBMISSION, "2025-10-20").quarter_end, "2025-07-27");
   assert.equal(releaseReconciliations(RELEASE_SUBMISSION, "2026-06-01").quarter_end, null);
   assert.deepEqual(releaseReconciliations(RELEASE_SUBMISSION, "2026-06-01").reconciliations, []);
+});
+
+test("a release laid out as AMD's keeps its quarter, its revenue's scale, an add-back in a $ cell's column and its EPS", () => {
+  const read = releaseReconciliations(AMD_SHAPED_SUBMISSION, AMD_SHAPED_FILED_ON);
+  // The outlook footnote's as-of date heads no column of figures.
+  assert.equal(read.quarter_end, "2025-09-27");
+  // The statement's "(In millions ...)" sits above its table.
+  assert.deepEqual(read.revenue, { exhibit: "EX-99.1", label: "Net revenue", value_num: 9_246, scale: "millions" });
+  assert.deepEqual(read.reconciliations.map((line) => [line.measure_key, line.gaap.value_num, line.non_gaap.value_num, line.adjustments.map((adjustment) => adjustment.value_num)]), [
+    ["operating_income", 1_270, 2_256, [419, 567]],
+    ["net_income", 1_243, 1_965, [419, 567, -264]],
+    ["eps_diluted", 0.75, 1.2, [0.26, 0.35, -0.16]],
+  ]);
+  const [quarter] = nonGaapHistory([{ document_id: "d", source_id: "s", accession: null, filed_on: AMD_SHAPED_FILED_ON, ...read }]).quarters;
+  assert.deepEqual(quarter!.operating_margin, { revenue: 9_246, gaap_pct: 13.7, non_gaap_pct: 24.4, spread_pp: 10.7 });
+});
+
+test("a release's revenue is the first revenue row with a figure in its quarter, past a heading row", () => {
+  const read = releaseReconciliations(submissionOf(`<table>
+    <tr><td>(In millions)</td><td>Three Months Ended September 30, 2025</td></tr>
+    <tr><td>Revenue:</td><td></td></tr>
+    <tr><td>Product</td><td>$100</td></tr>
+    <tr><td>Services</td><td>50</td></tr>
+    <tr><td>Total revenue</td><td>$150</td></tr>
+    <tr><td>GAAP operating income</td><td>$30</td></tr>
+    <tr><td>Stock-based compensation</td><td>6</td></tr>
+    <tr><td>Non-GAAP operating income</td><td>$36</td></tr>
+  </table>`), "2025-10-28");
+  assert.deepEqual(read.revenue, { exhibit: "EX-99.1", label: "Total revenue", value_num: 150, scale: "millions" });
+});
+
+test("a column is a quarter only when the last duration its header names is three months", () => {
+  assert.equal(quarterEndOf("Three Months Ended October 26, 2025"), "2025-10-26");
+  assert.equal(quarterEndOf("Fourth Quarter and Fiscal Year Ended Three Months Ended December 31, 2025"), "2025-12-31");
+  assert.equal(quarterEndOf("Fourth Quarter and Fiscal Year Ended Fiscal Year Ended December 31, 2025"), null);
+  assert.equal(quarterEndOf("Third Quarter Year-to-Date Ended September 30, 2025"), null);
+  assert.equal(quarterEndOf("Nine Months Ended October 26, 2025"), null);
+});
+
+test("the reader lays out NVIDIA's real 10-K income statement: its scale above the table, a $ cell and its figure one column", () => {
+  const html = readFileSync(new URL("./fixtures/sec-10k/nvda.htm", import.meta.url), "utf8");
+  const statement = readTables(html).find((table) => table.rows.some((row) => row.label === "Net income per share:"))!;
+  assert.equal(statement.scale, "millions");
+  const row = (label: string) => statement.rows.find((candidate) => candidate.label === label)!.values.map(([slot, value]) => [statement.periods[slot], value.value_num]);
+  assert.deepEqual(row("Revenue"), [["Year Ended Jan 25, 2026", 215_938], ["Year Ended Jan 26, 2025", 130_497], ["Year Ended Jan 28, 2024", 60_922]]);
+  assert.deepEqual(row("Cost of revenue"), [["Year Ended Jan 25, 2026", 62_475], ["Year Ended Jan 26, 2025", 32_639], ["Year Ended Jan 28, 2024", 16_621]]);
+  assert.deepEqual(row("Interest expense"), [["Year Ended Jan 25, 2026", -259], ["Year Ended Jan 26, 2025", -247], ["Year Ended Jan 28, 2024", -257]]);
+});
+
+test("extract:non-gaap asks for no SEC user agent, as it makes no SEC request", () => {
+  const cli = fileURLToPath(new URL("../src/sec-non-gaap-cli.ts", import.meta.url));
+  const run = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", cli], {
+    env: { PATH: process.env.PATH, DATABASE_URL: "postgres://127.0.0.1:9/none", S3_BUCKET: "none", S3_REGION: "us-east-1" },
+    encoding: "utf8",
+  });
+  assert.equal(run.status, 1);
+  assert.doesNotMatch(run.stderr, /SEC_EDGAR_USER_AGENT/);
+  assert.match(run.stderr, /ECONNREFUSED/, "it gets as far as the database");
 });
 
 test("an add-back's category comes from its label, else the label is its own", () => {

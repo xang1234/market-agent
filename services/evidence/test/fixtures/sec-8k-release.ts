@@ -98,3 +98,55 @@ export const RELEASE_SUBMISSION = [
   document("EX-101.SCH", "<xs:schema>GAAP net income</xs:schema>"),
   "</SEC-DOCUMENT>",
 ].join("\n");
+
+// A release laid out as AMD's EX-99.1 is (PR #745 review): the statement's
+// "(In millions ...)" note in a paragraph above its table; a "$" cell before
+// a figure, where an add-back puts its figure in that "$" cell's column; net
+// income and EPS on one row, a figure of each per period; and an outlook
+// footnote dated the day of filing. The company and numbers are invented.
+export const AMD_SHAPED_FILED_ON = "2025-11-04";
+
+const AMD_SHAPED_RELEASE = `<html><body>
+<p>ADVANCED EXAMPLE DEVICES, INC.</p>
+<p>CONDENSED CONSOLIDATED STATEMENTS OF OPERATIONS</p>
+<p>(In millions, except per share amounts)</p>
+<table>
+<tr><td></td><td colspan="7">Three Months Ended</td></tr>
+<tr><td></td><td colspan="3">September 27, 2025</td><td></td><td colspan="3">September 28, 2024</td></tr>
+<tr><td>Net revenue</td><td>$</td><td>9,246</td><td></td><td></td><td>$</td><td>6,819</td><td></td></tr>
+<tr><td>Cost of sales</td><td colspan="2">4,327</td><td></td><td></td><td colspan="2">3,167</td><td></td></tr>
+<tr><td>Operating income</td><td colspan="2">1,270</td><td></td><td></td><td colspan="2">724</td><td></td></tr>
+</table>
+<table>
+<tr><td colspan="9">Reconciliation of GAAP to Non-GAAP Operating Income (In millions)</td></tr>
+<tr><td></td><td colspan="7">Three Months Ended</td></tr>
+<tr><td></td><td colspan="3">September 27, 2025</td><td></td><td colspan="3">September 28, 2024</td></tr>
+<tr><td>GAAP operating income (loss)</td><td>$</td><td>1,270</td><td></td><td></td><td>$</td><td>724</td><td></td></tr>
+<tr><td>Stock-based compensation</td><td>419</td><td></td><td></td><td></td><td>353</td><td></td><td></td></tr>
+<tr><td>Amortization of acquisition-related intangibles</td><td>567</td><td></td><td></td><td></td><td>591</td><td></td><td></td></tr>
+<tr><td>Non-GAAP operating income</td><td>$</td><td>2,256</td><td></td><td></td><td>$</td><td>1,668</td><td></td></tr>
+</table>
+<table>
+<tr><td colspan="14">Reconciliation of GAAP to Non-GAAP Net Income / Earnings Per Share (In millions, except per share amounts)</td></tr>
+<tr><td></td><td colspan="13">Three Months Ended</td></tr>
+<tr><td></td><td colspan="6">September 27, 2025</td><td></td><td colspan="6">September 28, 2024</td></tr>
+<tr><td>GAAP net income / earnings per share</td><td>$</td><td>1,243</td><td></td><td>$</td><td>0.75</td><td></td><td></td><td>$</td><td>771</td><td></td><td>$</td><td>0.47</td><td></td></tr>
+<tr><td>Stock-based compensation</td><td colspan="2">419</td><td></td><td colspan="2">0.26</td><td></td><td></td><td colspan="2">353</td><td></td><td colspan="2">0.22</td><td></td></tr>
+<tr><td>Amortization of acquisition-related intangibles</td><td colspan="2">567</td><td></td><td colspan="2">0.35</td><td></td><td></td><td colspan="2">591</td><td></td><td colspan="2">0.36</td><td></td></tr>
+<tr><td>Income tax provision</td><td colspan="2">(264</td><td>)</td><td colspan="2">(0.16</td><td>)</td><td></td><td colspan="2">(224</td><td>)</td><td colspan="2">(0.14</td><td>)</td></tr>
+<tr><td>Non-GAAP net income / earnings per share</td><td>$</td><td>1,965</td><td></td><td>$</td><td>1.20</td><td></td><td></td><td>$</td><td>1,491</td><td></td><td>$</td><td>0.91</td><td></td></tr>
+</table>
+<p>Current Outlook</p>
+<table><tr><td>(1)</td><td>The outlook for the fourth quarter of 2025 reflects the company's expectations as of November 4, 2025.</td></tr></table>
+</body></html>`;
+
+export const AMD_SHAPED_SUBMISSION = [
+  "<SEC-DOCUMENT>0009999998-25-000163.txt",
+  document("8-K", "<html><body>Item 2.02 Results of Operations and Financial Condition.</body></html>"),
+  document("EX-99.1", AMD_SHAPED_RELEASE),
+  "</SEC-DOCUMENT>",
+].join("\n");
+
+export function submissionOf(exhibitHtml: string): string {
+  return ["<SEC-DOCUMENT>0009999997-25-000001.txt", document("EX-99.1", exhibitHtml), "</SEC-DOCUMENT>"].join("\n");
+}
