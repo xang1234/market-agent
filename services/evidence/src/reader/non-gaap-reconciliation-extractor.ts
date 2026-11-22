@@ -278,9 +278,12 @@ function scalesIn(text: string): TableScale[] {
 // A row's figures: a "$" in the cell before one is its currency, and a "%" in
 // the next cell with text makes it a percent, past a ")" split from "(2.5".
 function figuresOf(row: ReadonlyArray<GridCell>): Figure[] {
+  const isWords = (cell: GridCell) => cell.text !== "" && cell.text !== "$" && !/^\)?%?$/.test(cell.text) && parseValue(cell.text) === null;
   return row.flatMap((cell, index) => {
     const parsed = parseValue(cell.text);
     if (!parsed) return [];
+    // A number leading a row of words, as "(1) | Excludes …", marks a footnote and is no figure.
+    if (!row.slice(0, index).some(isWords) && row.slice(index + 1).some(isWords)) return [];
     const dollar = row[index - 1]?.text === "$" ? row[index - 1]! : undefined;
     const percent = /^\)?%$/.test(row.slice(index + 1).find((next) => next.text !== "" && next.text !== ")")?.text ?? "");
     const value: ParsedValue = percent

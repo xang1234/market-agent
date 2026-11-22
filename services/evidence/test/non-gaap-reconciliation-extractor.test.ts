@@ -400,3 +400,19 @@ test("extractNonGaapReconciliations reads a negative percent split across cells 
   </table>`;
   assert.deepEqual(lines(html), [["net_income", "Q3 2025", 100, 105, [["Gain on investments", -5], ["Stock-based compensation", 10]]]]);
 });
+
+test("a footnote row inside the table is a note, not a column of figures", () => {
+  const table = (footnote: string) => `<table>
+    <tr><td></td><td>Three Months Ended June 30, 2025</td></tr>
+    <tr><td>GAAP net income</td><td>100</td></tr>
+    <tr><td>Stock-based compensation</td><td>10</td></tr>
+    <tr><td>Non-GAAP net income</td><td>110</td></tr>
+    ${footnote}
+  </table>`;
+  const read = (html: string) => extractNonGaapReconciliations({ html, source_id: SAMPLE_SOURCE_UUID, as_of: "2026-05-06T00:00:00.000Z" }).items
+    .map((item) => [item.measure_key, item.gaap.value_num, item.non_gaap.value_num, item.adjustments.map((line) => line.value_num)]);
+  const expected = [["net_income", 100, 110, [10]]];
+  assert.deepEqual(read(table("")), expected);
+  assert.deepEqual(read(table("<tr><td>(1)</td><td>Excludes stock-based compensation.</td></tr>")), expected);
+  assert.deepEqual(read(table("<tr><td>1</td><td>Excludes stock-based compensation.</td></tr>")), expected);
+});
