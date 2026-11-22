@@ -137,6 +137,17 @@ test("a quarter's latest 8-K/A restating a guide or an actual replaces the earli
   ]);
 });
 
+test("two figures of one 8-K/A that disagree still conflict", () => {
+  const Q2A = release("q2a", "2025-07-27", "2025-09-10", "8-K/A");
+  const record = guidanceRecord([Q1, Q2, Q2A], [
+    guide(Q1, "gross_margin", "gaap", 71, 72),
+    result(Q2, "gross_margin", "gaap", 71.5),
+    result(Q2A, "gross_margin", "gaap", 73),
+    { ...result(Q2A, "gross_margin", "gaap", 69), quote: "gaap gross_margin was 69 (EX-99.2)." },
+  ], NO_SPLITS);
+  assert.deepEqual(record.rows.map((entry) => [entry.metric, entry.outcome, entry.reason]), [["gross_margin", "not_comparable", "conflicting_actuals"]]);
+});
+
 test("the hit rate counts in-line and beaten guides over the last 8 reported quarters, per metric and basis, leaving out ones not comparable", () => {
   // Ten quarters, 91 days apart, each guiding the next.
   const releases = Array.from({ length: 10 }, (_, n) => {

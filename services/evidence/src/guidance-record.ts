@@ -204,9 +204,10 @@ const latestFirst = <T extends { release: StoredRelease; document_id: string }>(
   [...picks].sort((a, b) => b.release.filed_on.localeCompare(a.release.filed_on) || a.document_id.localeCompare(b.document_id));
 
 // The latest 8-K/A's figure replaces the others (#752), as nonGaapHistory reads a quarter; originals alone may conflict.
+// Every figure of that one amendment stays, so two exhibits of it that disagree still conflict.
 const amended = <T extends { release: StoredRelease }>(latest: T[]): T[] => {
   const amendment = latest.find((pick) => pick.release.form === "8-K/A");
-  return amendment ? [amendment] : latest;
+  return amendment ? latest.filter((pick) => pick.release.document_id === amendment.release.document_id) : latest;
 };
 
 const sourceOf = (figure: StoredFigure & { release: StoredRelease }): FigureSource => ({

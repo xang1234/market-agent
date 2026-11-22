@@ -150,6 +150,11 @@ const RELEASES = [
     document_id: "f0000000-0000-4000-8000-000000000003", source_id: "f1000000-0000-4000-8000-000000000003", accession: "0001045810-25-000100",
     filed_on: "2025-05-28", quarter_end: null, revenue: null, reconciliations: [],
   },
+  // The original the 8-K/A of 2025-08-27 replaces, so a quarter lists a superseded release.
+  {
+    document_id: "f0000000-0000-4000-8000-000000000004", source_id: "f1000000-0000-4000-8000-000000000004", accession: "0001045810-25-000190", form: "8-K",
+    filed_on: "2025-08-20", quarter_end: "2025-07-27", revenue: null, reconciliations: [],
+  },
 ];
 
 const NVDA_FILING = `10-K, accession 0001045810-26-000021, filed 2026-02-25, ${NVDA_LINK}`;
@@ -214,7 +219,7 @@ function schemaGaps(value: unknown, schema: Schema, path = "$"): string[] {
   if (value === null || typeof value !== "object" || !schema.properties) return [];
   const record = value as Record<string, unknown>;
   return [
-    ...(schema.required ?? []).filter((key) => !(key in record)).map((key) => `${path}.${key} missing`),
+    ...(schema.required ?? []).filter((key) => record[key] === undefined).map((key) => `${path}.${key} missing`),
     ...Object.keys(record).flatMap((key) => schema.properties![key]
       ? schemaGaps(record[key], schema.properties![key]!, `${path}.${key}`)
       : schema.additionalProperties === false ? [`${path}.${key} not in schema`] : []),
@@ -226,6 +231,7 @@ test("non-GAAP history's result has exactly the fields its registry output schem
   const schema = registry.tools.find((tool) => tool.name === "get_non_gaap_history")!.output_json_schema;
   const result = await runAnalystTool(stackDb(), "get_non_gaap_history", { issuer_ids: [NVDA], as_of: AS_OF });
   assert.deepEqual(schemaGaps(result, schema), []);
+  assert.ok(JSON.stringify(result).includes('"superseded":[{'), "a superseded release is walked too");
 });
 
 test("each tool says when no stored source exists, as a typed status", async () => {
