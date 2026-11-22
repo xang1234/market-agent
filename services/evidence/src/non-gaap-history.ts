@@ -26,6 +26,8 @@ export type StoredRelease = {
   document_id: string;
   source_id: string;
   accession: string | null;
+  // The filing's form: "8-K", or "8-K/A" for an amendment.
+  form: string | null;
   filed_on: string;
   quarter_end: string | null;
   revenue: ReleaseRevenue | null;
@@ -34,8 +36,12 @@ export type StoredRelease = {
 
 export type SbcBasis = "net_income" | "operating_income" | "gross_profit_and_operating_expenses";
 
-export type NonGaapQuarter = Pick<StoredRelease, "document_id" | "source_id" | "accession" | "filed_on"> & {
+type ReleaseRef = Pick<StoredRelease, "document_id" | "accession" | "filed_on">;
+
+export type NonGaapQuarter = Pick<StoredRelease, "document_id" | "source_id" | "accession" | "form" | "filed_on"> & {
   quarter_end: string;
+  // The quarter's earlier releases this one replaces, as an 8-K/A replaces its original.
+  superseded: ReadonlyArray<ReleaseRef>;
   eps: { gaap: number; non_gaap: number; spread: number } | null;
   // Each amount in the scale of the table that reconciles it.
   operating_income: { gaap: number; non_gaap: number; scale: TableScale | null } | null;
@@ -85,21 +91,34 @@ export function addBackCategory(label: string): { key: string; label: string } {
 const round = (value: number, places: number) => Number(value.toFixed(places));
 
 export function nonGaapHistory(releases: ReadonlyArray<StoredRelease>): NonGaapHistory {
-  // The release that first reported each quarter.
-  const firsts = new Map<string, StoredRelease>();
-  for (const release of [...releases].sort((a, b) => a.filed_on.localeCompare(b.filed_on) || a.document_id.localeCompare(b.document_id))) {
-    if (release.quarter_end !== null && !firsts.has(release.quarter_end)) firsts.set(release.quarter_end, release);
+  // Each quarter's latest 8-K/A with a reconciliation (#752), else the release
+  // that first reported it. Filings of one day order original first, then by accession.
+  const picked = new Map<string, StoredRelease>();
+  const amends = (release: StoredRelease) => (release.form === "8-K/A" ? 1 : 0);
+  const filed = [...releases].sort((a, b) =>
+    a.filed_on.localeCompare(b.filed_on) || amends(a) - amends(b) || (a.accession ?? "").localeCompare(b.accession ?? "") || a.document_id.localeCompare(b.document_id));
+  for (const release of filed) {
+    if (release.quarter_end === null) continue;
+    const current = picked.get(release.quarter_end);
+    if (current === undefined || (amends(release) === 1 && (release.reconciliations.length > 0 || current.reconciliations.length === 0))) {
+      picked.set(release.quarter_end, release);
+    }
   }
-  const quarters = [...firsts.values()]
+  const supersededBy = (release: StoredRelease): ReleaseRef[] =>
+    filed
+      .slice(0, filed.indexOf(release))
+      .filter((other) => other.quarter_end === release.quarter_end)
+      .map(({ document_id, accession, filed_on }) => ({ document_id, accession, filed_on }));
+  const quarters = [...picked.values()]
     .sort((a, b) => b.quarter_end!.localeCompare(a.quarter_end!))
     .slice(0, HISTORY_QUARTERS)
-    .map(quarterOf);
+    .map((release) => ({ ...quarterOf(release), superseded: supersededBy(release) }));
   const labels = new Map<string, string>();
   const seen = new Map<string, string[]>();
   for (const quarter of quarters) {
     for (const key of quarter.categories) seen.set(key, [...(seen.get(key) ?? []), quarter.quarter_end]);
   }
-  for (const release of firsts.values()) {
+  for (const release of picked.values()) {
     for (const line of release.reconciliations.flatMap((reconciliation) => reconciliation.adjustments)) {
       const category = addBackCategory(line.label);
       if (!labels.has(category.key)) labels.set(category.key, category.label);
@@ -111,7 +130,7 @@ export function nonGaapHistory(releases: ReadonlyArray<StoredRelease>): NonGaapH
   return { quarters, categories, undated: releases.filter((release) => release.quarter_end === null).length };
 }
 
-function quarterOf(release: StoredRelease): NonGaapQuarter {
+function quarterOf(release: StoredRelease): Omit<NonGaapQuarter, "superseded"> {
   const of = (key: string) => release.reconciliations.find((reconciliation) => reconciliation.measure_key === key);
   const eps = of("eps_diluted");
   const operating = of("operating_income");
@@ -122,6 +141,7 @@ function quarterOf(release: StoredRelease): NonGaapQuarter {
     document_id: release.document_id,
     source_id: release.source_id,
     accession: release.accession,
+    form: release.form,
     filed_on: release.filed_on,
     quarter_end: release.quarter_end!,
     eps: eps ? { gaap: eps.gaap.value_num, non_gaap: eps.non_gaap.value_num, spread: round(eps.non_gaap.value_num - eps.gaap.value_num, 4) } : null,
@@ -182,7 +202,7 @@ export async function loadNonGaapHistory(
 ): Promise<NonGaapHistory> {
   const { rows } = await db.query<StoredRelease>(
     `select distinct on (r.document_id)
-            r.document_id::text as document_id, d.source_id::text as source_id, d.provider_doc_id as accession,
+            r.document_id::text as document_id, d.source_id::text as source_id, d.provider_doc_id as accession, d.title as form,
             to_char(c.effective_time at time zone 'UTC', 'YYYY-MM-DD') as filed_on,
             r.quarter_end::text as quarter_end, r.revenue, r.reconciliations
        from non_gaap_reconciliations r

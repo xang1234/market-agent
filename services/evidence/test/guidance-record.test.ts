@@ -10,8 +10,8 @@ import { bootstrapDatabase, connectedClient, connectedPool, dockerAvailable } fr
 const Q1 = release("q1", "2025-04-27", "2025-05-28");
 const Q2 = release("q2", "2025-07-27", "2025-08-27");
 
-function release(document_id: string, quarter_end: string, filed_on: string): StoredRelease {
-  return { document_id, quarter_end, filed_on, url: `https://www.sec.gov/${document_id}` };
+function release(document_id: string, quarter_end: string, filed_on: string, form = "8-K", accession: string | null = null): StoredRelease {
+  return { document_id, quarter_end, filed_on, form, accession, url: `https://www.sec.gov/${document_id}` };
 }
 
 function guide(of: StoredRelease, metric: StoredFigure["metric"], basis: StoredFigure["basis"], low: number, high: number): StoredFigure {
@@ -126,6 +126,66 @@ test("the same guide repeated in two exhibits is one guide; different ranges or 
   ]);
 });
 
+test("a quarter's latest 8-K/A restating a guide or an actual replaces the earlier figure; two originals still conflict", () => {
+  const Q1A = release("q1a", "2025-04-27", "2025-06-10", "8-K/A");
+  const Q2A = release("q2a", "2025-07-27", "2025-09-10", "8-K/A");
+  const Q2B = release("q2b", "2025-07-27", "2025-09-20", "8-K/A");
+  const Q2Late = release("q2late", "2025-07-27", "2025-10-01");
+  const record = guidanceRecord([Q1, Q1A, Q2, Q2A, Q2B, Q2Late], [
+    guide(Q1, "revenue", "gaap", 44.1e9, 45.9e9),
+    guide(Q1A, "revenue", "gaap", 46.1e9, 47.9e9),
+    result(Q2, "revenue", "gaap", 46.7e9),
+    result(Q2A, "revenue", "gaap", 48.5e9),
+    result(Q2B, "revenue", "gaap", 47.5e9),
+    // An original filed after the amendments changes nothing.
+    result(Q2Late, "revenue", "gaap", 40e9),
+    // An amendment with no figure for a metric leaves that metric's originals.
+    guide(Q1, "gross_margin", "gaap", 71, 72),
+    result(Q2, "gross_margin", "gaap", 71.5),
+  ], NO_SPLITS);
+  assert.deepEqual(record.rows.map((entry) => [entry.metric, entry.outcome, entry.reason, entry.guided.source.document_id, entry.actual?.source.document_id]), [
+    ["revenue", "in_line", undefined, "q1a", "q2b"],
+    ["gross_margin", "in_line", undefined, "q1", "q2"],
+  ]);
+});
+
+test("two figures of one 8-K/A that disagree still conflict", () => {
+  const Q2A = release("q2a", "2025-07-27", "2025-09-10", "8-K/A");
+  const record = guidanceRecord([Q1, Q2, Q2A], [
+    guide(Q1, "gross_margin", "gaap", 71, 72),
+    result(Q2, "gross_margin", "gaap", 71.5),
+    result(Q2A, "gross_margin", "gaap", 73),
+    { ...result(Q2A, "gross_margin", "gaap", 69), quote: "gaap gross_margin was 69 (EX-99.2)." },
+  ], NO_SPLITS);
+  assert.deepEqual(record.rows.map((entry) => [entry.metric, entry.outcome, entry.reason]), [["gross_margin", "not_comparable", "conflicting_actuals"]]);
+});
+
+test("of two 8-K/As filed the same day, the later accession replaces the earlier", () => {
+  // document ids sort the other way, so only the accession can order them.
+  const late = release("z-late", "2025-07-27", "2025-09-10", "8-K/A", "0000000001-25-000011");
+  const early = release("a-early", "2025-07-27", "2025-09-10", "8-K/A", "0000000001-25-000010");
+  const record = guidanceRecord([Q1, Q2, late, early], [
+    guide(Q1, "revenue", "gaap", 10, 12),
+    result(Q2, "revenue", "gaap", 11),
+    result(early, "revenue", "gaap", 9),
+    result(late, "revenue", "gaap", 13),
+  ], NO_SPLITS);
+  assert.deepEqual(record.rows.map((entry) => [entry.outcome, entry.actual?.source.document_id]), [["beat", "z-late"]]);
+});
+
+test("an 8-K/A guide filed after its quarter's results were first filed does not replace the guide", () => {
+  const before = release("q1a-before", "2025-04-27", "2025-08-01", "8-K/A");
+  const after = release("q1a-after", "2025-04-27", "2025-09-01", "8-K/A");
+  const record = guidanceRecord([Q1, Q2, before, after], [
+    guide(Q1, "revenue", "gaap", 100, 110),
+    guide(before, "revenue", "gaap", 95, 105),
+    // Filed after Q2's results (2025-08-27), knowing them.
+    guide(after, "revenue", "gaap", 85, 95),
+    result(Q2, "revenue", "gaap", 90),
+  ], NO_SPLITS);
+  assert.deepEqual(record.rows.map((entry) => [entry.outcome, entry.guided.source.document_id, entry.guided.source.form]), [["miss", "q1a-before", "8-K/A"]]);
+});
+
 test("the hit rate counts in-line and beaten guides over the last 8 reported quarters, per metric and basis, leaving out ones not comparable", () => {
   // Ten quarters, 91 days apart, each guiding the next.
   const releases = Array.from({ length: 10 }, (_, n) => {
@@ -232,8 +292,8 @@ test("an issuer's record is a public read: each guide beside the next release's 
     metric: "revenue",
     basis: "gaap",
     unit: "usd",
-    guided: { low: 44.1e9, high: 45.9e9, source: { document_id: q1, claim_id: claimId, filed_on: "2025-05-28", url: "https://www.sec.gov/Archives/edgar/data/1045810/000104581025000115/0001045810-25-000115-index.htm", quote: guide } },
-    actual: { value: 46.7e9, source: { document_id: q2, claim_id: null, filed_on: "2025-08-27", url: "https://www.sec.gov/Archives/edgar/data/1045810/000104581025000207/0001045810-25-000207-index.htm", quote: "Revenue was $46.7 billion." } },
+    guided: { low: 44.1e9, high: 45.9e9, source: { document_id: q1, claim_id: claimId, filed_on: "2025-05-28", form: null, url: "https://www.sec.gov/Archives/edgar/data/1045810/000104581025000115/0001045810-25-000115-index.htm", quote: guide } },
+    actual: { value: 46.7e9, source: { document_id: q2, claim_id: null, filed_on: "2025-08-27", form: null, url: "https://www.sec.gov/Archives/edgar/data/1045810/000104581025000207/0001045810-25-000207-index.htm", quote: "Revenue was $46.7 billion." } },
     outcome: "beat",
   }]);
   assert.deepEqual(body.record.rows.slice(1).map((entry) => [entry.metric, entry.outcome, entry.reason]), [["eps", "not_comparable", "split_between_releases"]]);

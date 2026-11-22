@@ -310,7 +310,7 @@ const inScale = (scale: TableScale | null) => (scale ? ` in ${scale}` : "");
 
 // Each figure as the release states it, in its own table's scale, or a difference or ratio of its figures.
 function nonGaapQuarterText(quarter: NonGaapQuarter): string {
-  const head = `non-GAAP reconciliation for the quarter ended ${quarter.quarter_end} (8-K accession ${quarter.accession ?? "unknown"}, filed ${quarter.filed_on})`;
+  const head = `non-GAAP reconciliation for the quarter ended ${quarter.quarter_end} (${quarter.form ?? "8-K"} accession ${quarter.accession ?? "unknown"}, filed ${quarter.filed_on})`;
   // The reader's rules found none, which says nothing of what the release discloses.
   if (!quarter.reconciled) return `${head}: no GAAP to non-GAAP reconciliation could be read from the release`;
   const { eps, operating_income: income, operating_margin: margin, sbc } = quarter;

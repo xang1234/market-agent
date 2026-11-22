@@ -2505,6 +2505,9 @@ components:
           type: ['string', 'null']
           description: The guidance claim a guide binds; null for an actual.
         filed_on: { type: string, format: date }
+        form:
+          type: ['string', 'null']
+          description: The filing's form, 8-K or 8-K/A.
         url:
           type: ['string', 'null']
           description: The filing's EDGAR index.

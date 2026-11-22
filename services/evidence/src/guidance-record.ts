@@ -14,7 +14,8 @@ import { ACCESSION_PATTERN, filingIndexUrl } from "./sec-edgar.ts";
 import type { QueryExecutor } from "./types.ts";
 
 // An earnings release, by the quarter it reports.
-export type StoredRelease = { document_id: string; quarter_end: IsoDate; filed_on: IsoDate; url: string | null };
+// form is "8-K", or "8-K/A" for an amendment.
+export type StoredRelease = { document_id: string; quarter_end: IsoDate; filed_on: IsoDate; form: string | null; accession: string | null; url: string | null };
 // A guide (claim_id names the guidance claim it binds) or a reported actual (low
 // and high both the value), in dollars or percent.
 export type StoredFigure = {
@@ -28,7 +29,7 @@ export type StoredFigure = {
   quote: string;
 };
 
-export type FigureSource = { document_id: string; claim_id: string | null; filed_on: IsoDate; url: string | null; quote: string };
+export type FigureSource = { document_id: string; claim_id: string | null; filed_on: IsoDate; form: string | null; url: string | null; quote: string };
 export type GuidanceOutcome = "beat" | "in_line" | "miss" | "not_comparable" | "not_yet_reported";
 export type NotComparableReason =
   | "no_same_basis_actual"
@@ -68,9 +69,9 @@ const POINT_GUIDE_BAND = 0.01 * (1 + 1e-9);
 // another reads as the one kept). A guide whose claim is no longer current
 // (superseded, rejected) guides nothing.
 export async function loadGuidanceRecord(db: QueryExecutor, issuerId: string): Promise<GuidanceRecord> {
-  const { rows: releases } = await db.query<{ document_id: string; quarter_end: IsoDate; filed_on: IsoDate; accession: string | null; cik: string | null }>(
+  const { rows: releases } = await db.query<{ document_id: string; quarter_end: IsoDate; filed_on: IsoDate; form: string | null; accession: string | null; cik: string | null }>(
     `select q.document_id::text as document_id, q.quarter_end::text as quarter_end, q.filed_on::text as filed_on,
-            d.provider_doc_id as accession, i.cik
+            d.title as form, d.provider_doc_id as accession, i.cik
        from earnings_release_quarters q
        join documents d on d.document_id = q.document_id and d.deleted_at is null
        join issuers i on i.issuer_id = q.issuer_id
@@ -97,7 +98,7 @@ export async function loadGuidanceRecord(db: QueryExecutor, issuerId: string): P
             array(select distinct s.execution_date::text from listing join listing_splits s using (listing_id) order by 1) as splits`,
     [issuerId],
   );
-  return guidanceRecord(releases.map(({ accession, cik, ...release }) => ({ ...release, url: releaseUrl(cik, accession) })), figures, splits!);
+  return guidanceRecord(releases.map(({ cik, ...release }) => ({ ...release, url: releaseUrl(cik, release.accession) })), figures, splits!);
 }
 
 // The filing's EDGAR index, or null for a release whose CIK or accession is
@@ -115,6 +116,13 @@ function releaseUrl(cik: string | null, accession: string | null): string | null
 export function guidanceRecord(releases: ReadonlyArray<StoredRelease>, figures: ReadonlyArray<StoredFigure>, splits: SplitHistory): GuidanceRecord {
   const byDocument = new Map(releases.map((release) => [release.document_id, release]));
   const ends = [...new Set(releases.map((release) => release.quarter_end))].sort();
+  // The day each quarter's results were first filed: an 8-K/A guide filed after
+  // that is written once the outcome was known, so it never replaces the guide.
+  const firstReported = new Map<IsoDate, IsoDate>();
+  for (const release of releases) {
+    const first = firstReported.get(release.quarter_end);
+    if (first === undefined || release.filed_on < first) firstReported.set(release.quarter_end, release.filed_on);
+  }
   const recorded = new Set(ends.slice(-RECORD_QUARTERS));
   const guides = new Map<string, Array<StoredFigure & { release: StoredRelease }>>();
   const actuals = new Map<string, Array<StoredFigure & { release: StoredRelease }>>();
@@ -129,6 +137,7 @@ export function guidanceRecord(releases: ReadonlyArray<StoredRelease>, figures: 
     // ponytail: a guide whose next release is not on file, though a later one
     // is, is left out; show it when stored releases have gaps worth naming.
     if (target === null ? release.quarter_end !== ends.at(-1) : !recorded.has(target)) continue;
+    if (target !== null && release.form === "8-K/A" && release.filed_on > firstReported.get(target)!) continue;
     push(guides, seriesKey(target, figure), { ...figure, release });
   }
   const rows = [...guides.entries()].map(([key, picks]) => compare(key, picks, actuals.get(key) ?? [], splits));
@@ -145,7 +154,7 @@ function compare(
   reported: ReadonlyArray<StoredFigure & { release: StoredRelease }>,
   splits: SplitHistory,
 ): GuidanceComparison {
-  const [guide, ...others] = latestFirst(picks);
+  const [guide, ...others] = amended(latestFirst(picks));
   const quarterEnd = JSON.parse(key)[0] as IsoDate | null;
   const base = {
     quarter_end: quarterEnd,
@@ -154,7 +163,7 @@ function compare(
     unit: figureUnit(guide!.metric),
     guided: { low: guide!.low, high: guide!.high, source: sourceOf(guide!) },
   };
-  const [actual, ...restated] = latestFirst(reported);
+  const [actual, ...restated] = amended(latestFirst(reported));
   const shown = actual === undefined ? null : { value: actual.low, source: sourceOf(actual) };
   if (others.some((other) => other.low !== guide!.low || other.high !== guide!.high)) {
     return { ...base, actual: shown, outcome: "not_comparable", reason: "conflicting_guidance" };
@@ -204,12 +213,22 @@ function push<T>(map: Map<string, T[]>, key: string, value: T): void {
 }
 
 const latestFirst = <T extends { release: StoredRelease; document_id: string }>(picks: ReadonlyArray<T>): T[] =>
-  [...picks].sort((a, b) => b.release.filed_on.localeCompare(a.release.filed_on) || a.document_id.localeCompare(b.document_id));
+  // Same-day filings: the later accession is the later filing (#754).
+  [...picks].sort((a, b) => b.release.filed_on.localeCompare(a.release.filed_on) ||
+    (b.release.accession ?? "").localeCompare(a.release.accession ?? "") || a.document_id.localeCompare(b.document_id));
+
+// The latest 8-K/A's figure replaces the others (#752), as nonGaapHistory reads a quarter; originals alone may conflict.
+// Every figure of that one amendment stays, so two exhibits of it that disagree still conflict.
+const amended = <T extends { release: StoredRelease }>(latest: T[]): T[] => {
+  const amendment = latest.find((pick) => pick.release.form === "8-K/A");
+  return amendment ? latest.filter((pick) => pick.release.document_id === amendment.release.document_id) : latest;
+};
 
 const sourceOf = (figure: StoredFigure & { release: StoredRelease }): FigureSource => ({
   document_id: figure.document_id,
   claim_id: figure.claim_id,
   filed_on: figure.release.filed_on,
+  form: figure.release.form,
   url: figure.release.url,
   quote: figure.quote,
 });

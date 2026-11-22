@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { isUnavailableRead, runAnalystTool, runRegisteredAnalystTool } from "../src/analyst-tools.ts";
 import { parseCliArgs, entryLine } from "../src/analyst-tools-cli.ts";
@@ -130,7 +131,7 @@ const reconciliation = (measure_key: string, gaap: number, non_gaap: number, adj
 });
 const RELEASES = [
   {
-    document_id: "f0000000-0000-4000-8000-000000000001", source_id: "f1000000-0000-4000-8000-000000000001", accession: "0001045810-25-000230",
+    document_id: "f0000000-0000-4000-8000-000000000001", source_id: "f1000000-0000-4000-8000-000000000001", accession: "0001045810-25-000230", form: "8-K",
     filed_on: "2025-11-19", quarter_end: "2025-10-26",
     revenue: { exhibit: "EX-99.1", label: "Revenue", value_num: 57_006, scale: "millions" },
     reconciliations: [
@@ -142,12 +143,17 @@ const RELEASES = [
     ],
   },
   {
-    document_id: "f0000000-0000-4000-8000-000000000002", source_id: "f1000000-0000-4000-8000-000000000002", accession: "0001045810-25-000200",
+    document_id: "f0000000-0000-4000-8000-000000000002", source_id: "f1000000-0000-4000-8000-000000000002", accession: "0001045810-25-000200", form: "8-K/A",
     filed_on: "2025-08-27", quarter_end: "2025-07-27", revenue: null, reconciliations: [],
   },
   {
     document_id: "f0000000-0000-4000-8000-000000000003", source_id: "f1000000-0000-4000-8000-000000000003", accession: "0001045810-25-000100",
     filed_on: "2025-05-28", quarter_end: null, revenue: null, reconciliations: [],
+  },
+  // The original the 8-K/A of 2025-08-27 replaces, so a quarter lists a superseded release.
+  {
+    document_id: "f0000000-0000-4000-8000-000000000004", source_id: "f1000000-0000-4000-8000-000000000004", accession: "0001045810-25-000190", form: "8-K",
+    filed_on: "2025-08-20", quarter_end: "2025-07-27", revenue: null, reconciliations: [],
   },
 ];
 
@@ -187,7 +193,7 @@ test("non-GAAP history is each quarter's reconciled figures and each add-back's 
   assert.equal(result.status, "ok");
   assert.deepEqual(analystPacketEntries([result]).map((entry) => [entry.id, entry.company, entry.predicate, entry.text]), [
     ["C1", "NVDA", "non_gaap.quarter", "non-GAAP reconciliation for the quarter ended 2025-10-26 (8-K accession 0001045810-25-000230, filed 2025-11-19): diluted EPS GAAP 1.30, non-GAAP 1.36, a spread of 0.06; operating income GAAP 36,010, non-GAAP 37,822 in millions; operating margin on revenue of 57,006 in millions, GAAP 63.2%, non-GAAP 66.3%, a spread of 3.2 percentage points; stock-based compensation added back 1,652 in millions (gross profit and operating expenses lines), 5.0% of non-GAAP net income of 33,366"],
-    ["C2", "NVDA", "non_gaap.quarter", "non-GAAP reconciliation for the quarter ended 2025-07-27 (8-K accession 0001045810-25-000200, filed 2025-08-27): no GAAP to non-GAAP reconciliation could be read from the release"],
+    ["C2", "NVDA", "non_gaap.quarter", "non-GAAP reconciliation for the quarter ended 2025-07-27 (8-K/A accession 0001045810-25-000200, filed 2025-08-27): no GAAP to non-GAAP reconciliation could be read from the release"],
     ["C3", "NVDA", "non_gaap.add_back", "non-GAAP add-back \"stock-based compensation\": in 1 of the 2 latest quarters on file (2025-10-26); recurring means in 5 or more of the last 8 quarters, which this is not"],
     ["C4", "NVDA", "non_gaap.add_back", "non-GAAP add-back \"Other\": in 1 of the 2 latest quarters on file (2025-10-26); recurring means in 5 or more of the last 8 quarters, which this is not"],
     ["C5", "NVDA", "non_gaap.add_back", "non-GAAP add-back \"income tax effects\": in 1 of the 2 latest quarters on file (2025-10-26); recurring means in 5 or more of the last 8 quarters, which this is not"],
@@ -204,6 +210,28 @@ test("non-GAAP history is each quarter's reconciled figures and each add-back's 
   const undated = await runAnalystTool(stackDb(), "get_non_gaap_history", { issuer_ids: [INTC], as_of: AS_OF });
   assert.equal(undated.status, "ok");
   assert.equal(statusNote(undated, "INTC"), "INTC: 1 stored earnings release could not be dated to a quarter, so its reconciliation is not shown.");
+});
+
+// Each key the value has that its registry schema closes out, or lacks that it requires.
+type Schema = { properties?: Record<string, Schema>; required?: string[]; additionalProperties?: boolean; items?: Schema };
+function schemaGaps(value: unknown, schema: Schema, path = "$"): string[] {
+  if (Array.isArray(value)) return schema.items ? value.flatMap((item, n) => schemaGaps(item, schema.items!, `${path}[${n}]`)) : [];
+  if (value === null || typeof value !== "object" || !schema.properties) return [];
+  const record = value as Record<string, unknown>;
+  return [
+    ...(schema.required ?? []).filter((key) => record[key] === undefined).map((key) => `${path}.${key} missing`),
+    ...Object.keys(record).flatMap((key) => schema.properties![key]
+      ? schemaGaps(record[key], schema.properties![key]!, `${path}.${key}`)
+      : schema.additionalProperties === false ? [`${path}.${key} not in schema`] : []),
+  ];
+}
+
+test("non-GAAP history's result has exactly the fields its registry output schema names", async () => {
+  const registry = JSON.parse(readFileSync(new URL("../../../spec/finance_research_tool_registry.json", import.meta.url), "utf8")) as { tools: Array<{ name: string; output_json_schema: Schema }> };
+  const schema = registry.tools.find((tool) => tool.name === "get_non_gaap_history")!.output_json_schema;
+  const result = await runAnalystTool(stackDb(), "get_non_gaap_history", { issuer_ids: [NVDA], as_of: AS_OF });
+  assert.deepEqual(schemaGaps(result, schema), []);
+  assert.ok(JSON.stringify(result).includes('"superseded":[{'), "a superseded release is walked too");
 });
 
 test("each tool says when no stored source exists, as a typed status", async () => {
