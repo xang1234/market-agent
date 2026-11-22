@@ -698,7 +698,7 @@ const THEME_SHAPE = [
 
 const WRITING = {
   chat: (askedFigures: boolean) => (askedFigures
-    ? { instructions: [...ANSWER_RULES, ...ANALYSIS_RULES], counterpoint: true as const }
+    ? { instructions: [...ANSWER_RULES, ...ANALYSIS_RULES], counterpoint: "last" as const }
     : { instructions: ANSWER_RULES, answerShape: DESCRIPTION_SHAPE, inferences: false as const }),
   themes: () => ({ instructions: ANSWER_RULES, answerShape: THEME_SHAPE }),
   thesis: () => ({ instructions: ANSWER_RULES, answerShape: [...THEME_SHAPE, ...counterpointRule("the investment case its themes make")], counterpoint: true as const }),

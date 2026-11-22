@@ -1267,7 +1267,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
       read,
       compose: (input, turn, onAnswered) => {
         rules.push([...(input.instructions ?? []), ...(input.answerShape ?? [])]);
-        against.push(input.counterpoint === true);
+        against.push(input.counterpoint !== undefined);
         return answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: '```assertions\n[{"kind":"management_attribution","text":"It sells widgets.","evidence":["C1"]}]\n```' }), onAnswered });
       },
       asOf: () => new Date().toISOString(),

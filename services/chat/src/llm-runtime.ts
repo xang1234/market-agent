@@ -169,7 +169,8 @@ export async function composeAnalystBlocksWithLlm(input: {
   // Set false to reject every analyst_inference the answer lists, with no repair asked for one.
   inferences?: false;
   // Set when the answer must argue against its takeaway (#735): with a takeaway shown and no case against, it says why none shows.
-  counterpoint?: true;
+  // last: its rules list the counterpoint as its last inference, so the last of two or more is the case against when none is typed.
+  counterpoint?: true | "last";
   // Set when a model failed before the turn read anything, so an answer with nothing to write from says so (#695).
   modelFailed?: true;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
@@ -392,7 +393,8 @@ function droppedNotes(dropped: DroppedClaims): string[] {
 }
 
 // notes: said after the rest, rendered or not.
-function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionReport, notes: ReadonlyArray<string> = []): { report: AssertionReport; answer: Answer } {
+function answerOf(input: AnswerInput, packet: EvidencePacket, written: AssertionReport, notes: ReadonlyArray<string> = []): { report: AssertionReport; answer: Answer } {
+  const report = input.counterpoint === "last" ? lastArgues(written) : written;
   const factBlocks = input.factBlocks ?? [];
   const renderAccepted = (): Rendering => {
     if (report.status !== "checked" || report.accepted.length === 0) return { answer: null, report };
@@ -624,6 +626,14 @@ function statements(segments: ReadonlyArray<Segment>): CommentaryPart[] {
     else parts.at(-1)!.push({ ...segment });
   }
   return parts.filter((part) => part.length > 0).map((part) => ({ kind: "figures", segments: part }));
+}
+
+// The report with its last inference typed as the case against, when it lists two or more and types none.
+function lastArgues(report: AssertionReport): AssertionReport {
+  const inferences = report.accepted.filter((entry) => entry.kind === "analyst_inference");
+  if (inferences.length < 2 || inferences.some((entry) => entry.role === "counterpoint")) return report;
+  const last = inferences.at(-1)!.index;
+  return { ...report, accepted: report.accepted.map((entry) => (entry.index === last ? { ...entry, role: "counterpoint" as const } : entry)) };
 }
 
 // Why an answer asked to argue against its takeaway shows no case against,

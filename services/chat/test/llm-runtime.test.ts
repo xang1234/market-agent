@@ -1624,3 +1624,27 @@ test("an answer that must argue against its takeaway labels its case against, an
   assert.deepEqual(notes(answer([against], true), []), [], "with no takeaway shown there is nothing to argue against");
   assert.deepEqual(notes(answer([]), [[1, "shown"]]), [], "an answer not asked for one says nothing of it");
 });
+
+test("in an answer whose counterpoint is its last inference, an untyped second inference is its case against, and no note says none was found (#735)", () => {
+  const list = [
+    { kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] },
+    { kind: "analyst_inference", text: "Outlook: it expects a better year.", supports: [0] },
+    { kind: "management_attribution", text: "Management cut its buyback.", evidence: ["C3"] },
+    { kind: "analyst_inference", text: "Buyback: it is returning less cash to holders.", supports: [2] },
+  ];
+  const [block] = renderedAnswer(
+    { blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [SEALED_TOOL_CALL], factBlocks: A_BLOCKS, counterpoint: "last" },
+    SEALED_PACKET,
+    checkAssertions(list, SEALED_PACKET),
+  ).blocks(new Map([[1, "shown"], [3, "shown"]]));
+  const commentary = block!.commentary as Array<Record<string, unknown>>;
+  assert.deepEqual(commentary.filter((part) => part.kind === "inference").map((part) => part.against), [undefined, true]);
+  assert.deepEqual(commentary.filter((part) => part.kind === "note"), []);
+  assert.match(plain(block!), /> \*\*Case against:\*\* Buyback/);
+  const one = renderedAnswer(
+    { blocks: [{ ...NARRATIVE_BLOCK, analyst_commentary: true }], toolCalls: [SEALED_TOOL_CALL], factBlocks: A_BLOCKS, counterpoint: "last" },
+    SEALED_PACKET,
+    checkAssertions(list.slice(0, 2), SEALED_PACKET),
+  ).blocks(new Map([[1, "shown"]]))[0]!.commentary as Array<Record<string, unknown>>;
+  assert.deepEqual(one.map((part) => [part.kind, part.against ?? part.text]), [["inference", "Outlook: it expects a better year."], ["note", NO_COUNTERPOINT]], "a lone takeaway is no case against itself");
+});
