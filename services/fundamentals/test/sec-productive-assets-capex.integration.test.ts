@@ -204,6 +204,22 @@ test("capex filed as productive assets certifies with its concept recorded", { t
     assert.deepEqual([await picked("as_reported"), await picked("as_restated")], ["30", "30"]);
   });
 
+  // Devin on #755. Each repeats the coarser original within its rounding, so
+  // neither changes it, in either order, though they disagree with each other.
+  await t.test("same-day filings that each repeat the figure as PP&E within its rounding leave it standing", async (t) => {
+    for (const accn of ["0000000731-26-000000", "0000000731-26-000002"]) {
+      const { download, lookup, relations, picked } = await setUp(t, `fin-capex-productive-same-day-${accn}`);
+      const tenKA = (of: number, val: number): Value => ({ ...year(2025, of, val), accn, form: "10-K/A" });
+      download.text = companyFacts({
+        PaymentsToAcquireProductiveAssets: [year(2024, 2024, 30_000_000), year(2024, 2023, 25_000_000)],
+        PaymentsToAcquirePropertyPlantAndEquipment: [year(2025, 2024, 30_400_000), year(2025, 2025, 28_123_000), tenKA(2024, 29_800_000), tenKA(2025, 28_123_000)],
+      });
+      await lookup();
+      assert.deepEqual((await relations()).map(({ relation }) => relation), ["original"]);
+      assert.equal(await picked("as_restated"), "30000000");
+    }
+  });
+
   await t.test("a later 10-K that switches to PP&E at another figure is an unverified restatement", async (t) => {
     const { download, lookup, relations, picked } = await setUp(t, "fin-capex-productive-switch-changed");
     download.text = companyFacts({

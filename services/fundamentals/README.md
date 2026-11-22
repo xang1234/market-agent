@@ -122,7 +122,21 @@ npm test         # contract + AAPL FY2024 income statement verification
   from `NetCashProvidedByUsedInOperatingActivitiesContinuingOperations` for a
   filing that tags only that (#743). That line excludes discontinued
   operations, so its fact carries a `continuing_operations_ocf` inference that
-  is read the same way as the capex one, later filings included. A
+  is read the same way as the capex one, later filings included, with one
+  exception (#752). A later filing that states the period only as the total
+  at an equal figure, within the coarser rounding, restates it in that scope.
+  A filing that states the total too keeps it there, and only one that states
+  it for continuing operations alone restates it back. Each such restatement
+  stores the figure that stands, with the proof and locator of the filing that
+  states it, so no number changes. Filings on one date, the original
+  included, that state the period in different scopes or figures leave it
+  unverified, since their order is unknown. Ingest does this in
+  `recordSecRestatements` and `opposedDates`
+  (`src/sec-facts-repository.ts`). as_restated growth from a
+  restated-as-total year to a total year computes, and the FCF backtest
+  counts such a window only when every restatement of the start public by its
+  end states it as that equal total (`growth` and `laterStatements` in
+  `src/fcf-backtest.ts`). A
   discontinuation changes which businesses that line covers under the same
   concept, so a quarter derived from another filing's year to date stays
   uncertified. Net income is
