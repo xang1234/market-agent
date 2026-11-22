@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { BoundFactInputV1, BoundPriceInputV1, FinancialUnit, FiscalPeriod, SplitAdjustmentV2, SubjectSlot } from "../src/contracts.ts";
+import type { BoundFactInputV1, BoundPriceInputV1, FactInferenceV1, FinancialUnit, FiscalPeriod, SplitAdjustmentV2, SubjectSlot } from "../src/contracts.ts";
 import type { MetricValueKind } from "../src/definitions.ts";
 import { parseFinancialDecimal } from "../src/exact-decimal.ts";
 import { operandFromBoundInput, type FinancialOperand } from "../src/operations.ts";
@@ -39,6 +39,7 @@ export type InputSpec = {
   calendar_version?: string;
   definition_version?: string;
   source_id?: string;
+  inference?: FactInferenceV1;
 };
 
 const USD: FinancialUnit = { kind: "currency", currency: "USD" };
@@ -85,6 +86,7 @@ export function boundInput(spec: InputSpec): BoundFactInputV1 {
     },
     observed_at: "2024-02-01T00:00:00Z",
     precision_status: "source_token_preserved",
+    ...(spec.inference ? { inference: spec.inference } : {}),
     eligibility: { selection_policy_version: "selection.v1", promotion_status: "authoritative", candidate_set_digest: HASH },
   };
 }

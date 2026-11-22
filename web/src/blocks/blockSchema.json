@@ -2182,7 +2182,7 @@
       ]
     },
     "FinancialAnswerContentV3": {
-      "description": "v2 content whose presentations may include P/E scenarios (#201). Every other content stays v2.",
+      "description": "v2 content whose presentations may include P/E scenarios (#201). Every other content stays v2. v4 is the same shape, for content that reads capex filed as productive assets, whose capex and free cash flow carry measure labels of their own (#731).",
       "type": "object",
       "required": [
         "presentation_version",
@@ -2197,7 +2197,10 @@
       ],
       "properties": {
         "presentation_version": {
-          "const": "financial-presentation.v3"
+          "enum": [
+            "financial-presentation.v3",
+            "financial-presentation.v4"
+          ]
         },
         "template_version": {
           "type": "string",
@@ -2323,7 +2326,10 @@
                   "if": {
                     "properties": {
                       "presentation_version": {
-                        "const": "financial-presentation.v3"
+                        "enum": [
+                          "financial-presentation.v3",
+                          "financial-presentation.v4"
+                        ]
                       }
                     }
                   },

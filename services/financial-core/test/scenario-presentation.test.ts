@@ -26,7 +26,7 @@ function present(value: string, edit: (plan: any) => void = () => {}): Financial
     plan, run_id: "run", unit_id: "section",
     results: publication.results.map((result) => ({ ...result, result_id: `r_${result.node_id}` })),
     subject_names: { a: "Alpha Industries Inc." },
-    periods: new Map([["eps", { fiscal_year: 2023, fiscal_period: "FY", end: "2023-12-31" }]]),
+    periods: new Map([["eps", { fiscal_year: 2023, fiscal_period: "FY", end: "2023-12-31" }]]), concept_scopes: new Map(),
   });
 }
 

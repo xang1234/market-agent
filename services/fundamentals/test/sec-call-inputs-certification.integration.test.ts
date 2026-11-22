@@ -1,6 +1,6 @@
 // A Call input is certified only from the concept #594 mapped to it. A concept
-// later mapped beside it (as PaymentsToAcquireProductiveAssets is beside capex's
-// reviewed one) is stored, readable in statements, but never certified.
+// later mapped beside it is stored, readable in statements, but never certified
+// until it is reviewed (as PaymentsToAcquireProductiveAssets was for capex, #731).
 
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
