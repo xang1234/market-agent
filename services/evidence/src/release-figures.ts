@@ -148,7 +148,7 @@ function basesOf(quote: string, amounts: ReadonlyArray<Amount>, at: Amount, read
   const from = sentence.start + shared.index + shared[0].length;
   const after = amounts.filter((amount) => amount.start >= from && amount.end <= sentence.start + sentence.text.length);
   const respectively = sentence.text.slice(from - sentence.start).search(/\brespectively\b/i);
-  if (respectively < 0) return after.every((amount) => read.includes(amount)) ? ["gaap", "non_gaap"] : [];
+  if (respectively < 0) return after.includes(at) && after.every((amount) => read.includes(amount)) ? ["gaap", "non_gaap"] : [];
   const listed = after.filter((amount) => amount.end <= from + respectively);
   const index = listed.indexOf(at);
   return listed.length === 2 && index >= 0 ? [basisOfLabel(shared[index + 1]!)] : [];

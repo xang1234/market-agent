@@ -129,6 +129,8 @@ test("a sentence stating both bases gives each figure the basis it names for tha
     read("guidance", "operating_expenses", opex, { basis: "gaap", value: "$3.6 billion" }),
     // Two amounts and no "respectively", so which is which is not stated.
     read("result", "gross_margin", "GAAP and non-GAAP gross margins were 60.5% and 61.0%.", { basis: "gaap", value: "60.5%" }),
+    // A shared subject covers only the amounts after it.
+    read("result", "revenue", "Revenue was $7.7 billion, as the GAAP and non-GAAP tables show.", { basis: "non_gaap", value: "$7.7 billion" }),
     // A non-GAAP label covers the amounts after it, not the GAAP one before.
     read("result", "gross_margin", "Gross margin was 40%, while non-GAAP gross margin was 43%.", { basis: "non_gaap", value: "40%" }),
     read("result", "gross_margin", two, { basis: "non_gaap", value: "40%" }),
