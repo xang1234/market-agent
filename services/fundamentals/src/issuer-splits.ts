@@ -64,6 +64,8 @@ export const ISSUER_KEYED_ROWS: ReadonlyArray<{
   // The newest filing either issuer downloaded: an older download must not re-infer what it refuted (#342).
   { table: "sec_issuer_downloads", id: "issuer_id", unique: [], combine: { newest_filed: "greatest(k.newest_filed, d.newest_filed)" } },
   { table: "consensus_captures", id: "issuer_id", unique: ["source_id", "captured_on", "field_key"], appendOnly: true },
+  // One row per release (its document), so the merged issuer's rows move as they are (#733).
+  { table: "earnings_release_quarters", id: "issuer_id" },
   { table: "facts", id: "subject_id", kind: "subject_kind" },
   // As linkDocumentMentions adds up one subject's mentions in a document.
   {
