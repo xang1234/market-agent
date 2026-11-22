@@ -66,6 +66,7 @@ test('each guide shows beside the actual on its basis, both quoted with their fi
     assert.equal(unmatched.querySelectorAll('a').length, 0, 'a filing with no link is named, not linked')
     assert.match(doc.querySelector('[data-testid="guidance-row-next-revenue-gaap"]')!.textContent!, /Next quarterNot yet reported/)
     assert.match(doc.body.textContent!, /For operating expenses and capex, an actual below the guided range counts as a beat\./)
+    assert.match(doc.body.textContent!, /Against a single guided figure, an actual within 1% of it counts as in line\./)
   } finally {
     await done()
   }

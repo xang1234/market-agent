@@ -580,7 +580,7 @@ paths:
       tags: [Evidence]
       summary: An issuer's guidance against its reported results (#733)
       operationId: getGuidanceRecord
-      description: Each guide an 8-K Item 2.02 earnings release gives for the next quarter beside the next release's actual on the same basis, both quoted with their filings, over the issuer's last 8 reported quarters, and the guides of its latest release, not yet reported. A guide with no actual on its basis, conflicting guides or actuals, and EPS across a stock split or without split history through the later release are not comparable. A hit is an actual in line with or better than the guide, and below the range is better for operating expenses and capex. Public, as the symbol page is.
+      description: Each guide an 8-K Item 2.02 earnings release gives for the next quarter beside the next release's actual on the same basis, both quoted with their filings, over the issuer's last 8 reported quarters, and the guides of its latest release, not yet reported. A guide with no actual on its basis, conflicting guides or actuals, and EPS across a stock split or without split history through the later release are not comparable. An actual within 1% of a point guide is in line. A hit is an actual in line with or better than the guide, and below the range is better for operating expenses and capex. Public, as the symbol page is.
       security: []
       parameters:
         - in: query

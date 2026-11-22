@@ -608,7 +608,7 @@ next release reports, on the same basis (`services/evidence/src/guidance-record.
   in services/market), makes the pair not comparable. It is not adjusted for the split, since a release that
   announces one may already guide on the new share count.
 - **Outcome.** Within the range is in line, above it a beat and below it a miss, reversed for operating expenses and
-  capex. A point guide is compared at its figure. The hit rate counts in line and beats per metric and basis over
+  capex. An actual within 1% of a point guide is in line. The hit rate counts in line and beats per metric and basis over
   the last 8 reported quarters; the latest release's guide shows as not yet reported.
 - **Run it** with the extraction (`npm run extract:earnings-releases`). A release read before figures existed has
   `claims.figures_read_at` unset, so the next drain reads it once more (one model call each); its claims keep their
