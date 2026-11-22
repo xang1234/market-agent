@@ -40,7 +40,7 @@ test("a release laid out as AMD's keeps its quarter, its revenue's scale, an add
     ["net_income", 1_243, 1_965, [419, 567, -264]],
     ["eps_diluted", 0.75, 1.2, [0.26, 0.35, -0.16]],
   ]);
-  const [quarter] = nonGaapHistory([{ document_id: "d", source_id: "s", accession: null, filed_on: AMD_SHAPED_FILED_ON, ...read }]).quarters;
+  const [quarter] = nonGaapHistory([{ document_id: "d", source_id: "s", accession: null, form: "8-K", filed_on: AMD_SHAPED_FILED_ON, ...read }]).quarters;
   assert.deepEqual(quarter!.operating_margin, { revenue: 9_246, gaap_pct: 13.7, non_gaap_pct: 24.4, spread_pp: 10.7 });
 });
 
@@ -161,6 +161,7 @@ function release(quarterEnd: string | null, n: number, lines: ReadonlyArray<[str
     document_id: `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
     source_id: `10000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
     accession: `0000000000-25-${String(n).padStart(6, "0")}`,
+    form: "8-K",
     filed_on: filedOn,
     quarter_end: quarterEnd,
     revenue: { exhibit: "EX-99.1", label: "Revenue", value_num: 1_000, scale: "millions" },
@@ -201,10 +202,10 @@ test("the history reads the last 8 quarters: spreads, each category's quarters, 
 
 test("the history leaves a margin unshown when revenue is missing or in another scale, and keeps the first release of a quarter", () => {
   const first = release("2025-04-30", 1, [["Stock-based compensation", 40]], "2025-05-20");
-  const amended = { ...release("2025-04-30", 2, [], "2025-06-01") };
+  const second = { ...release("2025-04-30", 2, [], "2025-06-01") };
   const noRevenue = { ...release("2025-01-31", 3, []), revenue: null };
   const otherScale = { ...release("2024-10-31", 4, []), revenue: { exhibit: "EX-99.1", label: "Revenue", value_num: 1_000_000, scale: "thousands" as const } };
-  const history = nonGaapHistory([amended, first, noRevenue, otherScale]);
+  const history = nonGaapHistory([second, first, noRevenue, otherScale]);
   assert.deepEqual(history.quarters.map((quarter) => [quarter.quarter_end, quarter.document_id]), [
     ["2025-04-30", first.document_id],
     ["2025-01-31", noRevenue.document_id],
@@ -216,14 +217,31 @@ test("the history leaves a margin unshown when revenue is missing or in another 
   assert.equal(history.quarters[1]!.sbc, null);
 });
 
+test("a quarter reads its latest 8-K/A, which supersedes its earlier releases, and an original filed after an amendment changes nothing", () => {
+  const original = release("2025-04-30", 1, [["Stock-based compensation", 40]], "2025-05-20");
+  const firstAmendment = { ...release("2025-04-30", 2, [["Stock-based compensation", 45]], "2025-06-01"), form: "8-K/A" };
+  const secondAmendment = { ...release("2025-04-30", 3, [["Stock-based compensation", 50]], "2025-06-15"), form: "8-K/A" };
+  const lateOriginal = release("2025-04-30", 4, [], "2025-07-01");
+  const history = nonGaapHistory([lateOriginal, secondAmendment, original, firstAmendment]);
+  assert.equal(history.quarters.length, 1);
+  const [quarter] = history.quarters;
+  assert.equal(quarter!.document_id, secondAmendment.document_id);
+  assert.equal(quarter!.form, "8-K/A");
+  assert.equal(quarter!.sbc!.value, 50);
+  assert.deepEqual(quarter!.superseded, [original, firstAmendment].map(({ document_id, accession, filed_on }) => ({ document_id, accession, filed_on })));
+  // An unamended quarter supersedes nothing.
+  assert.deepEqual(nonGaapHistory([original]).quarters[0]!.superseded, []);
+});
+
 // --- Against Postgres -------------------------------------------------------
 
 async function seedRelease(
   client: { query: (text: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, string>> }> },
   store: MemoryObjectStore,
-  input: { cik: number; accession: string; filedOn: string; bytes: Uint8Array | null; userId?: string },
+  input: { cik: number; accession: string; filedOn: string; bytes: Uint8Array | null; userId?: string; issuerId?: string; form?: string },
 ): Promise<{ issuerId: string; documentId: string }> {
-  const issuer = (await client.query(`insert into issuers (legal_name, cik) values ('Example Corp', $1) returning issuer_id::text as id`, [String(input.cik).padStart(10, "0")])).rows[0]!.id!;
+  const issuer = input.issuerId
+    ?? (await client.query(`insert into issuers (legal_name, cik) values ('Example Corp', $1) returning issuer_id::text as id`, [String(input.cik).padStart(10, "0")])).rows[0]!.id!;
   const source = (await client.query(
     `insert into sources (provider, kind, trust_tier, license_class, retrieved_at, user_id)
      values ('sec_edgar', 'filing', 'primary', 'public', now(), $1::uuid) returning source_id::text as id`,
@@ -234,9 +252,9 @@ async function seedRelease(
     blobId = (await store.put(input.bytes)).blob.raw_blob_id;
   }
   const document = (await client.query(
-    `insert into documents (source_id, kind, provider_doc_id, content_hash, raw_blob_id)
-     values ($1, 'filing', $2, $3, $3) returning document_id::text as id`,
-    [source, input.accession, blobId],
+    `insert into documents (source_id, kind, provider_doc_id, content_hash, raw_blob_id, title)
+     values ($1, 'filing', $2, $3, $3, $4) returning document_id::text as id`,
+    [source, input.accession, blobId, input.form ?? "8-K"],
   )).rows[0]!.id!;
   const claim = (await client.query(
     `insert into claims
@@ -291,4 +309,28 @@ test("a stored release is read once from its bytes, and the history reads it at 
   await runReconciliationDrain({ db: client, objectStore: store });
   assert.equal((await loadNonGaapHistory(client, { issuer_id: hidden.issuerId, as_of: "2025-12-31T00:00:00Z" })).quarters.length, 0);
   assert.equal((await loadNonGaapHistory(client, { issuer_id: hidden.issuerId, as_of: "2025-12-31T00:00:00Z", user_id: other })).quarters.length, 1);
+});
+
+test("an 8-K/A stored after its original was read is read by the next drain and supersedes it, with no reread", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "non-gaap-amended");
+  const client = await connectedClient(t, databaseUrl);
+  const store = new MemoryObjectStore();
+  const original = await seedRelease(client, store, {
+    cik: 9999999, accession: EXAMPLE_ACCESSION, filedOn: EXAMPLE_FILED_ON, bytes: new TextEncoder().encode(RELEASE_SUBMISSION),
+  });
+  assert.equal((await runReconciliationDrain({ db: client, objectStore: store })).read, 1);
+
+  // Filed later and restating the same quarter, as the daily job stores it.
+  const amendment = await seedRelease(client, store, {
+    cik: 9999999, accession: "0001045810-25-000240", filedOn: "2025-12-01", bytes: new TextEncoder().encode(`${RELEASE_SUBMISSION} `), issuerId: original.issuerId, form: "8-K/A",
+  });
+  assert.deepEqual(await runReconciliationDrain({ db: client, objectStore: store }), { read: 1, undated: 0, no_bytes: 0, noop: 0, failed: 0 });
+
+  const [quarter] = (await loadNonGaapHistory(client, { issuer_id: original.issuerId, as_of: "2025-12-31T00:00:00Z" })).quarters;
+  assert.equal(quarter!.document_id, amendment.documentId);
+  assert.equal(quarter!.form, "8-K/A");
+  assert.deepEqual(quarter!.superseded, [{ document_id: original.documentId, accession: EXAMPLE_ACCESSION, filed_on: EXAMPLE_FILED_ON }]);
+  // Before the amendment was filed, the original.
+  const [before] = (await loadNonGaapHistory(client, { issuer_id: original.issuerId, as_of: "2025-11-30T00:00:00Z" })).quarters;
+  assert.equal(before!.document_id, original.documentId);
 });

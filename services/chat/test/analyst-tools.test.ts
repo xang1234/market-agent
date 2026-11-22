@@ -130,7 +130,7 @@ const reconciliation = (measure_key: string, gaap: number, non_gaap: number, adj
 });
 const RELEASES = [
   {
-    document_id: "f0000000-0000-4000-8000-000000000001", source_id: "f1000000-0000-4000-8000-000000000001", accession: "0001045810-25-000230",
+    document_id: "f0000000-0000-4000-8000-000000000001", source_id: "f1000000-0000-4000-8000-000000000001", accession: "0001045810-25-000230", form: "8-K",
     filed_on: "2025-11-19", quarter_end: "2025-10-26",
     revenue: { exhibit: "EX-99.1", label: "Revenue", value_num: 57_006, scale: "millions" },
     reconciliations: [
@@ -142,7 +142,7 @@ const RELEASES = [
     ],
   },
   {
-    document_id: "f0000000-0000-4000-8000-000000000002", source_id: "f1000000-0000-4000-8000-000000000002", accession: "0001045810-25-000200",
+    document_id: "f0000000-0000-4000-8000-000000000002", source_id: "f1000000-0000-4000-8000-000000000002", accession: "0001045810-25-000200", form: "8-K/A",
     filed_on: "2025-08-27", quarter_end: "2025-07-27", revenue: null, reconciliations: [],
   },
   {
@@ -187,7 +187,7 @@ test("non-GAAP history is each quarter's reconciled figures and each add-back's 
   assert.equal(result.status, "ok");
   assert.deepEqual(analystPacketEntries([result]).map((entry) => [entry.id, entry.company, entry.predicate, entry.text]), [
     ["C1", "NVDA", "non_gaap.quarter", "non-GAAP reconciliation for the quarter ended 2025-10-26 (8-K accession 0001045810-25-000230, filed 2025-11-19): diluted EPS GAAP 1.30, non-GAAP 1.36, a spread of 0.06; operating income GAAP 36,010, non-GAAP 37,822 in millions; operating margin on revenue of 57,006 in millions, GAAP 63.2%, non-GAAP 66.3%, a spread of 3.2 percentage points; stock-based compensation added back 1,652 in millions (gross profit and operating expenses lines), 5.0% of non-GAAP net income of 33,366"],
-    ["C2", "NVDA", "non_gaap.quarter", "non-GAAP reconciliation for the quarter ended 2025-07-27 (8-K accession 0001045810-25-000200, filed 2025-08-27): no GAAP to non-GAAP reconciliation could be read from the release"],
+    ["C2", "NVDA", "non_gaap.quarter", "non-GAAP reconciliation for the quarter ended 2025-07-27 (8-K/A accession 0001045810-25-000200, filed 2025-08-27): no GAAP to non-GAAP reconciliation could be read from the release"],
     ["C3", "NVDA", "non_gaap.add_back", "non-GAAP add-back \"stock-based compensation\": in 1 of the 2 latest quarters on file (2025-10-26); recurring means in 5 or more of the last 8 quarters, which this is not"],
     ["C4", "NVDA", "non_gaap.add_back", "non-GAAP add-back \"Other\": in 1 of the 2 latest quarters on file (2025-10-26); recurring means in 5 or more of the last 8 quarters, which this is not"],
     ["C5", "NVDA", "non_gaap.add_back", "non-GAAP add-back \"income tax effects\": in 1 of the 2 latest quarters on file (2025-10-26); recurring means in 5 or more of the last 8 quarters, which this is not"],
