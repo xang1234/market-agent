@@ -65,7 +65,7 @@ const read = (kind: "guidance" | "result", metric: Parameters<typeof readFigure>
 const reviewed = (figure: ReturnType<typeof readFigure>) => "review" in figure;
 
 test("a minus sign or accounting parentheses make the figure negative; a phrase that leaves the sign out is no figure", () => {
-  assert.deepEqual(read("result", "free_cash_flow", "Free cash flow was -$1.2 billion.", { basis: "gaap", value: "-$1.2 billion" }), { basis: "gaap", low: -1.2e9, high: -1.2e9 });
+  assert.deepEqual(read("result", "free_cash_flow", "Free cash flow was -$1.2 billion.", { basis: "gaap", value: "-$1.2 billion" }), { basis: "non_gaap", low: -1.2e9, high: -1.2e9 });
   assert.deepEqual(read("result", "eps", "GAAP diluted EPS was -$0.25.", { basis: "gaap", value: "-$0.25" }), { basis: "gaap", low: -0.25, high: -0.25 });
   assert.deepEqual(read("result", "eps", "GAAP diluted EPS was $(0.25).", { basis: "gaap", value: "$(0.25)" }), { basis: "gaap", low: -0.25, high: -0.25 });
   assert.deepEqual(read("result", "operating_income", "Operating income was ($50 million).", { basis: "gaap", value: "($50 million)" }), { basis: "gaap", low: -5e7, high: -5e7 });
@@ -154,7 +154,7 @@ const KINDS: ReadonlyArray<{ kind: "guidance" | "result"; metric: Parameters<typ
   { kind: "guidance", metric: "revenue", text: "Revenue{at} is expected to be $45.0{B}, plus or minus $300{M}.", raw: { basis: "gaap", value: "$45.0{B}", plus_minus: "$300{M}" }, want: { basis: "gaap", low: 44.7e9, high: 45.3e9 } },
   { kind: "guidance", metric: "operating_expenses", text: "Non{h}GAAP operating expenses{at} are expected to be $1.0{B} to $1.1{B}.", raw: { basis: "non_gaap", low: "$1.0{B}", high: "$1.1{B}" }, want: { basis: "non_gaap", low: 1e9, high: 1.1e9 } },
   { kind: "guidance", metric: "eps", text: "Non{h}GAAP diluted EPS{at} is expected to be $1.10{-}$1.20.", raw: { basis: "non_gaap", low: "$1.10", high: "$1.20" }, want: { basis: "non_gaap", low: 1.1, high: 1.2 } },
-  { kind: "result", metric: "free_cash_flow", text: "Free cash flow{at} was {-}$1.2{B}.", raw: { basis: "gaap", value: "{-}$1.2{B}" }, want: { basis: "gaap", low: -1.2e9, high: -1.2e9 } },
+  { kind: "result", metric: "free_cash_flow", text: "Free cash flow{at} was {-}$1.2{B}.", raw: { basis: "gaap", value: "{-}$1.2{B}" }, want: { basis: "non_gaap", low: -1.2e9, high: -1.2e9 } },
   { kind: "result", metric: "eps", text: "Non{h}GAAP diluted EPS{at} was $0.96.", raw: { basis: "non_gaap", value: "$0.96" }, want: { basis: "non_gaap", low: 0.96, high: 0.96 } },
   { kind: "guidance", metric: "gross_margin", text: "Non{h}GAAP gross margin{at} is expected to be 72.0%, plus or minus 50 basis points.", raw: { basis: "non_gaap", value: "72.0%", plus_minus: "50 basis points" }, want: { basis: "non_gaap", low: 71.5, high: 72.5 } },
 ];
@@ -247,7 +247,7 @@ const SHAPES: ReadonlyArray<Shape> = [
     [{ basis: "gaap", value: "60.5%" }, at("gaap", 60.5)], [{ basis: "non_gaap", value: "61.0%" }, at("non_gaap", 61)],
     [{ basis: "gaap", value: "61.0%" }, REVIEW], [{ basis: "non_gaap", value: "60.5%" }, REVIEW],
   ]],
-  ["devin r1", "result", "free_cash_flow", "Free cash flow was -$150 million.", [[{ basis: "gaap", value: "-$150 million" }, at("gaap", -1.5e8)]]],
+  ["devin r1", "result", "free_cash_flow", "Free cash flow was -$150 million.", [[{ basis: "gaap", value: "-$150 million" }, at("non_gaap", -1.5e8)]]],
   ["devin r1", "result", "revenue", "Second quarter revenue was $7.7 billion.", [[{ basis: "gaap", value: "$7.7" }, REVIEW], [{ basis: "gaap", value: "$7.7 billion" }, at("gaap", 7.7e9)]]],
   ["devin r1", "result", "eps", "Basic and diluted earnings per share were $1.02 and $1.00, respectively.", [[{ basis: "gaap", value: "$1.00" }, REVIEW]]],
   ["codex r1", "result", "eps", "GAAP diluted EPS was ($0.50).", [[{ basis: "gaap", value: "($0.50)" }, at("gaap", -0.5)], [{ basis: "gaap", value: "$0.50" }, REVIEW]]],
@@ -259,7 +259,7 @@ const SHAPES: ReadonlyArray<Shape> = [
   ["verifier r2", "result", "revenue", "Revenue was $45.0 Billion.", [[{ basis: "gaap", value: "$45.0 Billion" }, at("gaap", 45e9)], [{ basis: "gaap", value: "$45.0" }, REVIEW]]],
   ["verifier r2", "result", "revenue", "Non-GAAP revenue in the U.S. Data Center segment was $5.0 billion.", [[{ basis: "non_gaap", value: "$5.0 billion" }, at("non_gaap", 5e9)], [{ basis: "gaap", value: "$5.0 billion" }, REVIEW]]],
   ["verifier r2", "result", "gross_margin", "Non-GAAP gross margin for Q1 vs. Q2 was 72.0%.", [[{ basis: "non_gaap", value: "72.0%" }, at("non_gaap", 72)], [{ basis: "gaap", value: "72.0%" }, REVIEW]]],
-  ["verifier r2", "result", "free_cash_flow", canonicalText("<p>Free cash flow was &minus;$1.2 billion.</p>"), [[{ basis: "gaap", value: "-$1.2 billion" }, at("gaap", -1.2e9)]]],
+  ["verifier r2", "result", "free_cash_flow", canonicalText("<p>Free cash flow was &minus;$1.2 billion.</p>"), [[{ basis: "gaap", value: "-$1.2 billion" }, at("non_gaap", -1.2e9)]]],
   ["verifier r2", "result", "gross_margin", canonicalText("<p>Non&#8209;GAAP gross margin was 72.0%.</p>"), [[{ basis: "non_gaap", value: "72.0%" }, at("non_gaap", 72)], [{ basis: "gaap", value: "72.0%" }, REVIEW]]],
   ["verifier r2", "result", "gross_margin", "Non-GAAP gross margin was 43%, and revenue was $7.7 billion.", [[{ basis: "non_gaap", value: "43%" }, at("non_gaap", 43)], [{ basis: "gaap", value: "43%" }, REVIEW]]],
   ["verifier r2", "result", "revenue", "Non-GAAP gross margin was 43%, and revenue was $7.7 billion.", [[{ basis: "non_gaap", value: "$7.7 billion" }, REVIEW], [{ basis: "gaap", value: "$7.7 billion" }, REVIEW]]],
@@ -373,7 +373,7 @@ const VERIFIER_R4: ReadonlyArray<[id: string, kind: "guidance" | "result", metri
   ["S04", "result", "gross_margin", "Gross margin was 71.3% on a GAAP excluding H20 basis.", []],
   ["S05", "result", "gross_margin", "Gross margin excl. H20 charges was 71.3%.", []],
   ["S06", "result", "gross_margin", "Non-GAAP gross margin excl. China was 71.3%.", []],
-  ["S07", "result", "eps", "On a non-GAAP basis, gross margin was 54%, operating income was $1.7 billion, and diluted EPS was $1.09.", []],
+  ["S07", "result", "eps", "On a non-GAAP basis, gross margin was 54%, operating income was $1.7 billion, and diluted EPS was $1.09.", [at("non_gaap", 1.09)]],
   ["S08", "result", "operating_income", "On a non-GAAP basis, gross margin was 54%, operating income was $1.7 billion and diluted EPS was $1.09.", [at("non_gaap", 1.09), at("non_gaap", 1700000000)]],
   ["S09", "guidance", "revenue", "For the third quarter of 2025, AMD expects revenue to be approximately $8.7 billion, plus or minus $300 million, up 28% from $6.8 billion a year ago.", [at("gaap", 300000000), at("gaap", 6800000000), at("gaap", 8400000000, 9000000000), at("gaap", 8700000000)]],
   ["S10", "result", "revenue", "Non-GAAP results improved significantly and revenue was $7.7 billion.", [at("non_gaap", 7700000000)]], // known limit: the label reaches the next figure
@@ -382,7 +382,7 @@ const VERIFIER_R4: ReadonlyArray<[id: string, kind: "guidance" | "result", metri
   ["S13", "result", "revenue", "Apple posted quarterly revenue of $95.4 billion, up 5 percent year over year from $90.8 billion, and quarterly earnings per diluted share of $1.65.", [at("gaap", 1.65), at("gaap", 90800000000), at("gaap", 95400000000)]],
   ["S14", "result", "eps", "Quarterly net income was $24.8 billion, or $1.65 per diluted share, compared with net income of $23.6 billion, or $1.53 per diluted share, in the year-ago quarter.", [at("gaap", 1.53), at("gaap", 1.65)]],
   ["S15", "guidance", "gross_margin", "We expect gross margin to be between 46.0% and 47.0%, including $900 million of tariff-related costs.", [at("gaap", 46, 47)]],
-  ["S16", "result", "revenue", "Revenue was $65.6 billion and increased 16% (up 16% in constant currency).", []],
+  ["S16", "result", "revenue", "Revenue was $65.6 billion and increased 16% (up 16% in constant currency).", [at("gaap", 65600000000)]],
   ["S17", "result", "revenue", "On a non-GAAP constant currency basis, revenue was $65.6 billion.", []],
   ["S18", "result", "operating_income", "Operating income was $30.6 billion on a GAAP constant currency basis.", []],
   ["S19", "result", "revenue", "Revenue was $65.6 billion in constant-currency.", []],
@@ -426,4 +426,84 @@ test("the verifier's round-4 sentences store exactly the figures their stated ba
     }
     assert.deepEqual([...got].sort(), stored.map((want) => JSON.stringify(want)).sort(), `${id}: ${quote}`);
   }
+});
+
+test("a word that restates a measure qualifies only the measure it names, in its own clause or parenthesis", () => {
+  const plain = [
+    "Revenue from our core business was $7.7 billion.",
+    "Revenue was $7.7 billion, up 5% from the comparable period last year.",
+    "Revenue from Organic Valley was $7.7 billion.",
+    "Revenue was $7.7 billion, reflecting strong underlying demand.",
+    "Revenue from Intel Core processors was $7.7 billion.",
+    "Revenue was $7.7 billion before the shares went ex-dividend.",
+    "Revenue was $7.7 billion, and comparable sales grew 3%.",
+    "Revenue was $7.7 billion (up 16% in constant currency).",
+    "Revenue was $7.7 billion (core revenue grew 12%).",
+  ];
+  for (const quote of plain) {
+    assert.deepEqual(read("result", "revenue", quote, { basis: "gaap", value: "$7.7 billion" }), { basis: "gaap", low: 7.7e9, high: 7.7e9 }, quote);
+    assert.ok(reviewed(read("result", "revenue", quote, { basis: "non_gaap", value: "$7.7 billion" })), quote);
+  }
+  const qualified = [
+    "Comparable store sales were $7.7 billion.",
+    "Core segment revenue was $7.7 billion.",
+    "Revenue was $7.7 billion and core EPS was $1.45.",
+    "Revenue was $7.7 billion on an organic basis.",
+    "Revenue was $7.7 billion (in constant currency).",
+    "Revenue was $7.7 billion (excluding $2.0 billion from China).",
+    "In constant currency, revenue grew 5%, and revenue was $7.7 billion.",
+    "Underlying, revenue was $7.7 billion, and comparable revenue was $7.0 billion.",
+    "Revenue ex-items was $7.7 billion.",
+  ];
+  for (const quote of qualified) {
+    for (const basis of ["gaap", "non_gaap"] as const) assert.ok(reviewed(read("result", "revenue", quote, { basis, value: "$7.7 billion" })), `${basis}: ${quote}`);
+  }
+  // The figure in the parenthesis a word qualifies is qualified, and the one before it is not.
+  const restated = "Revenue was $7.7 billion ($7.9 billion in constant currency).";
+  assert.ok(reviewed(read("result", "revenue", restated, { basis: "gaap", value: "$7.9 billion" })));
+  assert.deepEqual(read("result", "revenue", restated, { basis: "gaap", value: "$7.7 billion" }), { basis: "gaap", low: 7.7e9, high: 7.7e9 });
+});
+
+test("an exclusion spelled short, with or without its full stop, qualifies the measure", () => {
+  for (const quote of [
+    "Operating income (excl. Corp. items) was $2.2 billion.",
+    "Operating income (excl Corp. items) was $2.2 billion.",
+    "Operating income (exc. Corp. items) was $2.2 billion.",
+    "Operating income (ex. Corp. items) was $2.2 billion.",
+    "Operating income (w/o Corp. items) was $2.2 billion.",
+    "Non-GAAP operating income (exc. Corp. items) was $2.2 billion.",
+  ]) {
+    for (const basis of ["gaap", "non_gaap"] as const) assert.ok(reviewed(read("result", "operating_income", quote, { basis, value: "$2.2 billion" })), `${basis}: ${quote}`);
+  }
+});
+
+test("\"on an unadjusted basis\" states a GAAP figure", () => {
+  const quote = "Gross margin was 70.0% on an unadjusted basis.";
+  assert.deepEqual(read("result", "gross_margin", quote, { basis: "gaap", value: "70.0%" }), { basis: "gaap", low: 70, high: 70 });
+  assert.ok(reviewed(read("result", "gross_margin", quote, { basis: "non_gaap", value: "70.0%" })));
+});
+
+test("a range with its unit only on its high reads as that range, and neither end as a point", () => {
+  const quote = "We expect gross margin to be 71.0 to 72.0%.";
+  assert.deepEqual(read("guidance", "gross_margin", quote, { basis: "gaap", low: "71.0", high: "72.0%" }), { basis: "gaap", low: 71, high: 72 });
+  for (const value of ["72.0%", "71.0"]) assert.ok(reviewed(read("guidance", "gross_margin", quote, { basis: "gaap", value })), value);
+  // Two amounts not stated as a range keep their own units.
+  assert.ok(reviewed(read("guidance", "gross_margin", "In 2026 gross margin is expected to be 72.0%.", { basis: "gaap", low: "2026", high: "72.0%" })));
+});
+
+test("free cash flow is non-GAAP by definition, whatever its tag, unless its sentence states another basis", () => {
+  for (const basis of ["gaap", "non_gaap"] as const) {
+    assert.deepEqual(read("result", "free_cash_flow", "Free cash flow was $1.2 billion.", { basis, value: "$1.2 billion" }), { basis: "non_gaap", low: 1.2e9, high: 1.2e9 });
+    assert.deepEqual(read("guidance", "free_cash_flow", "Non-GAAP free cash flow is expected to be $1.2 billion.", { basis, value: "$1.2 billion" }), { basis: "non_gaap", low: 1.2e9, high: 1.2e9 });
+    assert.ok(reviewed(read("result", "free_cash_flow", "On a GAAP basis, free cash flow was $1.2 billion.", { basis, value: "$1.2 billion" })));
+  }
+});
+
+test("an opening \"on a non-GAAP basis\" reaches every item of the list it opens, the one after a serial comma too", () => {
+  const amd = "On a non-GAAP basis, gross margin was 54%, operating income was $1.7 billion, and diluted EPS was $1.09.";
+  assert.deepEqual(read("result", "eps", amd, { basis: "non_gaap", value: "$1.09" }), { basis: "non_gaap", low: 1.09, high: 1.09 });
+  assert.deepEqual(read("result", "operating_income", amd, { basis: "non_gaap", value: "$1.7 billion" }), { basis: "non_gaap", low: 1.7e9, high: 1.7e9 });
+  assert.ok(reviewed(read("result", "eps", amd, { basis: "gaap", value: "$1.09" })));
+  // Two items are no list: the second may be a clause of its own.
+  assert.ok(reviewed(read("result", "operating_income", "On a non-GAAP basis, gross margin was 54%, and operating income was $1.7 billion.", { basis: "non_gaap", value: "$1.7 billion" })));
 });

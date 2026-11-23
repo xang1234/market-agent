@@ -125,23 +125,52 @@ function fits(amount: Amount, unit: FigureUnit): boolean {
 }
 
 // Measures that are neither plain GAAP nor plain non-GAAP ("constant currency
-// revenue", "core EPS", "gross margin excl. H20"). This list only sends a
-// figure to review, and never settles a basis: a qualifier anywhere in a
-// figure's sentence sends it there, whatever basis markers the sentence also
-// has ("on a non-GAAP constant currency basis"). The words of an entry may be
-// joined by a space, a hyphen or nothing ("pro forma", "pro-forma",
-// "proforma"), and "ex" counts before a hyphen or a word ("ex-China", "ex SBC").
-const QUALIFIERS = [
-  "pro forma", "constant currency", "core", "underlying", "organic", "comparable", "normalized", "like for like",
-  "as adjusted", "adjusted for", "excluding", "excludes", "excluded", "exclusive of", "excl.",
-] as const;
-const QUALIFIED = new RegExp(
+// revenue", "core EPS", "gross margin excl. H20"). A qualifier only sends a
+// figure to review, and never settles a basis, whatever basis markers the
+// sentence also has ("on a non-GAAP constant currency basis"). The words of an
+// entry may be joined by a space, a hyphen or nothing ("pro forma",
+// "pro-forma", "proforma").
+const qualifierPattern = (entries: ReadonlyArray<string>, ...more: string[]) => new RegExp(
   [
-    ...QUALIFIERS.map((entry) => String.raw`\b${entry.split(" ").map((word) => word.replace(".", String.raw`\.`)).join("[- ]?")}${entry.endsWith(".") ? "" : String.raw`\b`}`),
-    String.raw`\bex[- ](?=[a-z])`,
+    ...entries.map((entry) => String.raw`\b${entry.split(" ").map((word) => word.replace(".", String.raw`\.`)).join("[- ]?")}${entry.endsWith(".") ? "" : String.raw`\b`}`),
+    ...more,
   ].join("|"),
-  "i",
+  "gi",
 );
+// A measure with something taken out or put in, in any spelling ("excl.",
+// "excl", "exc.", "ex.", "w/o", "ex-China", "ex SBC", not "ex-dividend"),
+// qualifies every figure of its sentence.
+const ADJUSTED = qualifierPattern(
+  ["pro forma", "as adjusted", "adjusted for", "excluding", "excludes", "excluded", "exclusive of", "excl", "exc.", "ex.", "w/o"],
+  String.raw`\bex[- ](?!dividends?\b)(?=[a-z])`,
+);
+// A measure restated another way. In a parenthesis that states a figure it
+// qualifies only that parenthesis's figures ("$65.6 billion (up 16% in constant
+// currency)"). Constant currency otherwise qualifies its whole sentence, and
+// the others only the clause they name a measure in ("core EPS", "comparable
+// store sales", "on an organic basis"), never ordinary prose ("core business",
+// "the comparable period", "underlying demand", "Intel Core processors").
+const RESTATED = qualifierPattern(["constant currency", "core", "underlying", "organic", "comparable", "normalized", "like for like"]);
+const NAMES_MEASURE = /^(?:\W+\w+){0,2}?\W+(?:revenues?|sales|eps|earnings|income|profits?|margins?|ebitda|ebit|a?ffo|funds|cash|expenses|opex|costs?|loss(?:es)?|results|net|operating|diluted|gross|per|gaap|non|basis|figures|measures)\b/i;
+
+// The qualifier in its sentence that qualifies the amount `at`, if any.
+function qualifierOf(quote: string, amounts: ReadonlyArray<Amount>, at: Amount): string | null {
+  const sentence = sentenceAt(quote, at.start);
+  const adjusted = sentence.text.match(ADJUSTED);
+  if (adjusted !== null) return adjusted[0];
+  const { clauses, parens } = layout(quote, sentence.start, sentence.start + sentence.text.length, amounts);
+  const clause = clauses.find((part) => part.start <= at.start && at.end <= part.end)!;
+  for (const found of sentence.text.matchAll(RESTATED)) {
+    const start = sentence.start + found.index;
+    const paren = parens.find((span) => span.start < start && start < span.end);
+    const inParen = (amount: Amount) => paren !== undefined && paren.start < amount.start && amount.end <= paren.end;
+    if (paren !== undefined && amounts.some((amount) => isFigure(amount) && inParen(amount))) {
+      if (inParen(at)) return found[0];
+    } else if (/^constant/i.test(found[0])) return found[0];
+    else if (NAMES_MEASURE.test(sentence.text.slice(found.index + found[0].length)) && clause.start <= start && start < clause.end) return found[0];
+  }
+  return null;
+}
 
 // A figure's basis is read from its own clause, and a phrasing these rules do
 // not place goes to review. A sentence names a basis with a marker, which
@@ -158,8 +187,8 @@ function markerAt(found: RegExpMatchArray, offset: number): Marker {
   const [word, inner] = found;
   const span = { start: offset + found.index!, end: offset + found.index! + word.length };
   if (inner !== undefined) {
-    const nonGaap = /non-? ?gaap|adjusted/i.test(inner);
-    const gaap = /\bgaap\b/i.test(inner.replace(/non-? ?gaap/gi, ""));
+    const nonGaap = /non-? ?gaap|\badjusted/i.test(inner);
+    const gaap = /\bgaap\b|\bunadjusted\b/i.test(inner.replace(/non-? ?gaap/gi, ""));
     return { ...span, basis: nonGaap === gaap ? "other" : nonGaap ? "non_gaap" : "gaap", reach: "before" };
   }
   return { ...span, basis: /^gaap$/i.test(word) ? "gaap" : "non_gaap", reach: "after" };
@@ -169,6 +198,7 @@ function markerAt(found: RegExpMatchArray, offset: number): Marker {
 const SHARED = /\b(?:non-? ?gaap|gaap) and (?:non-? ?gaap|gaap)\b/i;
 // A comma that starts a clause of its own.
 const CONJUNCTION = /^ (?:and|while|but|compared)\b/i;
+const OPENING_BASIS = /^\W*on an? (?:[^\s,;.]+ ){0,4}?basis,/i;
 // A word that starts another clause with no comma before it ("$1.5 billion
 // while on a non-GAAP basis ...").
 const CLAUSE_WORD = /\b(?:and|while|but|whereas|compared|versus|vs\.)(?!\w)/i;
@@ -199,6 +229,12 @@ function layout(quote: string, start: number, end: number, amounts: ReadonlyArra
   const inside = amounts.filter((amount) => amount.start >= start && amount.end <= end);
   let depth = 0;
   let from = start;
+  // The serial comma before the last item of a list an opening "on a … basis"
+  // heads ("On a non-GAAP basis, gross margin was 54%, operating income was
+  // $1.7 billion, and diluted EPS was $1.09"), which is no clause of its own.
+  // With one item before it, the "and" may start one.
+  const serial = (at: number) =>
+    /^ and\b/i.test(quote.slice(at + 1, end)) && OPENING_BASIS.test(quote.slice(from, at)) && commas.filter((comma) => comma >= from).length >= 2;
   for (let i = start, next = 0; i < end; i += 1) {
     const amount = inside[next];
     if (amount?.start === i) {
@@ -214,7 +250,7 @@ function layout(quote: string, start: number, end: number, amounts: ReadonlyArra
     } else if (char === ")" && depth > 0) {
       depth -= 1;
       if (depth === 0) parens.at(-1)!.end = i + 1;
-    } else if (depth === 0 && (char === ";" || (char === "," && CONJUNCTION.test(quote.slice(i + 1, end))))) {
+    } else if (depth === 0 && (char === ";" || (char === "," && CONJUNCTION.test(quote.slice(i + 1, end)) && !serial(i)))) {
       clauses.push({ start: from, end: i });
       from = i + 1;
     } else if (depth === 0 && char === ",") commas.push(i);
@@ -235,20 +271,21 @@ function runsOf(quote: string, figures: ReadonlyArray<Amount>): Amount[][] {
 }
 
 // The bases the sentence states the amount `at` on, given the amounts the
-// figure reads. A sentence with no marker states GAAP figures. Otherwise the
-// figure's own clause decides, and an aside, a clause with no marker, one
-// naming another basis or one with a marker in a parenthesis, settles none. A
+// figure reads. A sentence with no marker states its figures on the basis
+// `unmarked`. Otherwise the figure's own clause decides, and an aside, a
+// clause with no marker, one naming another basis or one with a marker in a
+// parenthesis, settles none. A
 // clause naming one basis states it for the figures a marker reaches, with no
 // comma between: a label the run of figures right after it, "on a … basis"
 // every run when it opens the clause, else the run right before it with no
 // conjunction between, or with no run before, the run right after. One naming
 // both settles a basis only for the subject they share and nothing else
 // (pairedBases).
-function basesOf(quote: string, amounts: ReadonlyArray<Amount>, at: Amount, read: ReadonlyArray<Amount>): ReadonlyArray<FigureBasis> {
+function basesOf(quote: string, amounts: ReadonlyArray<Amount>, at: Amount, read: ReadonlyArray<Amount>, unmarked: FigureBasis): ReadonlyArray<FigureBasis> {
   const sentence = sentenceAt(quote, at.start);
   const end = sentence.start + sentence.text.length;
   const markers = [...sentence.text.matchAll(MARKER)].map((found) => markerAt(found, sentence.start));
-  if (markers.length === 0) return ["gaap"];
+  if (markers.length === 0) return [unmarked];
   const { clauses, asides, parens, commas } = layout(quote, sentence.start, end, amounts);
   if (asides.has(at)) return [];
   const clause = clauses.find((part) => part.start <= at.start && at.end <= part.end)!;
@@ -316,8 +353,11 @@ export function readFigure(
 ): FigureRead {
   const { kind, metric } = statement;
   const quote = plainText(statement.quote);
-  const basis = raw.basis;
-  if (!(FIGURE_BASES as ReadonlyArray<unknown>).includes(basis)) return { review: `basis ${JSON.stringify(basis ?? null)} is neither gaap nor non_gaap` };
+  if (!(FIGURE_BASES as ReadonlyArray<unknown>).includes(raw.basis)) return { review: `basis ${JSON.stringify(raw.basis ?? null)} is neither gaap nor non_gaap` };
+  // Free cash flow is non-GAAP by definition, so the model's tag never decides it.
+  const freeCashFlow = metric === "free_cash_flow";
+  const unmarked: FigureBasis = freeCashFlow ? "non_gaap" : "gaap";
+  const basis: FigureBasis = freeCashFlow ? "non_gaap" : (raw.basis as FigureBasis);
   const negative = NEGATIVE[metric];
   if (negative.test(quote)) return { review: "its sentence states a negative figure in words, which would read as a positive one" };
   if (metric === "eps" && BASIC.test(quote)) return { review: "EPS is read as diluted, and its sentence names basic EPS" };
@@ -335,14 +375,19 @@ export function readFigure(
     if (typeof amount === "string") return { review: amount };
     found.set(given, amount);
   }
+  // A low with no unit of its own takes its high's ("71.0 to 72.0%").
+  if (low !== null && high !== null) {
+    const [from, to] = [found.get(low)!, found.get(high)!];
+    if (!isFigure(from) && statedAsRange(quote, from, to)) found.set(low, { ...from, dollars: to.dollars, mark: to.mark, scale: to.scale });
+  }
   const unit = figureUnit(metric);
   const levels = [value, low, high].filter((given): given is string => given !== null);
   const unfit = levels.find((given) => !fits(found.get(given)!, unit));
   if (unfit !== undefined) return { review: `"${unfit}" is not a figure in ${UNIT_WORDS[unit]}` };
   if (NEVER_NEGATIVE.has(metric) && levels.some((given) => found.get(given)!.n < 0)) return { review: `a negative ${metric.replaceAll("_", " ")} is misread` };
-  const qualified = levels.map((given) => QUALIFIED.exec(sentenceAt(quote, found.get(given)!.start).text)).find((match) => match !== null);
-  if (qualified) return { review: `its sentence qualifies the measure ("${qualified[0]}"), which settles neither basis` };
-  const misread = levels.find((given) => !basesOf(quote, amounts, found.get(given)!, [...found.values()]).includes(basis as FigureBasis));
+  const qualified = levels.map((given) => qualifierOf(quote, amounts, found.get(given)!)).find((match) => match !== null);
+  if (qualified) return { review: `its sentence qualifies the measure ("${qualified}"), which settles neither basis` };
+  const misread = levels.find((given) => !basesOf(quote, amounts, found.get(given)!, [...found.values()], unmarked).includes(basis));
   if (misread !== undefined) return { review: `its sentence does not state "${misread}" as a ${basis === "gaap" ? "GAAP" : "non-GAAP"} figure` };
   const level = (given: string, scale: number | null = null) => {
     const amount = found.get(given)!;
@@ -352,7 +397,7 @@ export function readFigure(
   let to: number;
   if (value !== null) {
     const point = found.get(value)!;
-    const ends = amounts.filter((other) => other.dollars === point.dollars && other.mark === point.mark);
+    const ends = amounts.filter((other) => !isFigure(other) || (other.dollars === point.dollars && other.mark === point.mark));
     if (kind === "guidance" && ends.some((other) => statedAsRange(quote, other, point) || statedAsRange(quote, point, other))) {
       return { review: `"${value}" is one end of a range its sentence states` };
     }
@@ -369,7 +414,7 @@ export function readFigure(
     [from, to] = [level(low!, found.get(high!)!.scale), level(high!)];
   }
   if (from > to) return { review: "its low is above its high" };
-  return { basis: basis as FigureBasis, low: exact(from), high: exact(to) };
+  return { basis, low: exact(from), high: exact(to) };
 }
 
 // Whether a low and a high are one range: "$4.0 to $4.1 billion",
