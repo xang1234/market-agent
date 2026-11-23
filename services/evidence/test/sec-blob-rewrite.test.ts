@@ -2,14 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Pool } from "pg";
 
+import { setTimeout as delay } from "node:timers/promises";
+
+import { runObjectBlobGcBatchWithPool } from "../src/blob-gc-repo.ts";
 import { rewriteFilingBlobs } from "../src/sec-blob-rewrite.ts";
+import { stripUuencodedBodies } from "../src/sec-submission-strip.ts";
 import { MemoryObjectStore, rawBlobIdFromBytes, type ObjectStore } from "../src/object-store.ts";
 import { releaseExhibits } from "../src/sec-earnings-release-extraction.ts";
 import { bootstrapDatabase, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { RELEASE_SUBMISSION } from "./fixtures/sec-8k-release.ts";
+import { JPEG_BYTES, uuencode } from "./fixtures/uuencode.ts";
 
 const encoder = new TextEncoder();
-const GRAPHIC = "<DOCUMENT>\n<TYPE>GRAPHIC\n<SEQUENCE>9\n<FILENAME>logo.jpg\n<TEXT>\nbegin 644 logo.jpg\nM_]C_X  02D9)1@ ! 0$ 8 !@  #_VP!#  ,\" @,\" @,# P,$ P,$!0@%!00$\n`\nend\n</TEXT>\n</DOCUMENT>";
+const GRAPHIC = `<DOCUMENT>\n<TYPE>GRAPHIC\n<SEQUENCE>9\n<FILENAME>logo.jpg\n<TEXT>\n${uuencode("logo.jpg", JPEG_BYTES)}\n</TEXT>\n</DOCUMENT>`;
 const withGraphic = (accession: string) =>
   encoder.encode(RELEASE_SUBMISSION.replace(/^<SEC-DOCUMENT>[^\n]*/, `<SEC-DOCUMENT>${accession}.txt`).replace("\n</SEC-DOCUMENT>", `\n${GRAPHIC}\n</SEC-DOCUMENT>`));
 
@@ -88,10 +93,108 @@ test("the rewrite strips stored submissions in place, keeps what offsets cite, a
   assert.equal(await store.has(quoted.id), true);
   assert.equal(await store.has(release.id), true, "the failed delete left SEC's bytes, queued");
 
+  await db.query(`update object_blob_gc_queue set next_attempt_at = now()`); // the backoff passes
   const rerun = await rewriteFilingBlobs({ db, objectStore: flakyStore }, { dryRun: false });
   assert.equal(rerun.forms["8-K"]?.stripped, 0);
   assert.equal(rerun.forms["8-K"]?.cited, 1);
   assert.equal(rerun.blobs_deleted, 1, "the next run deletes the blob the last one could not");
   assert.equal(await store.has(release.id), false);
   assert.equal(await store.has(moved.raw_blob_id), true);
+});
+
+async function secSource(db: Pool): Promise<string> {
+  const { rows: [source] } = await db.query<{ source_id: string }>(
+    `insert into sources (provider, kind, trust_tier, license_class, retrieved_at) values ('sec_edgar', 'filing', 'primary', 'public', now()) returning source_id::text`,
+  );
+  return source!.source_id;
+}
+
+test("a GC batch while the rewrite stores the stripped copy cannot delete it from under the document", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "sec-blob-rewrite-gc-race");
+  const db = new Pool({ connectionString: databaseUrl });
+  t.after(() => db.end());
+  const store = new MemoryObjectStore();
+  const bytes = withGraphic("0009999999-25-000010");
+  const seeded = await seedVerbatim(db, store, await secSource(db), "8-K", bytes);
+  const strippedId = rawBlobIdFromBytes(stripUuencodedBodies(bytes)!);
+  let gc: Promise<unknown> | undefined;
+  const racing: ObjectStore = {
+    put: async (put) => {
+      const result = await store.put(put);
+      if (result.blob.raw_blob_id === strippedId && gc === undefined) {
+        // An earlier run's raced copy of the same bytes, queued and drained now.
+        await db.query(`insert into object_blob_gc_queue (raw_blob_id, reason) values ($1, 'blob_rewrite')`, [strippedId]);
+        gc = runObjectBlobGcBatchWithPool(db, store);
+        await Promise.race([gc, delay(500)]);
+      }
+      return result;
+    },
+    get: (id) => store.get(id),
+    has: (id) => store.has(id),
+    delete: (id) => store.delete(id),
+  };
+
+  const report = await rewriteFilingBlobs({ db, objectStore: racing }, { dryRun: false });
+  await gc;
+  assert.equal(report.forms["8-K"]?.stripped, 1);
+  const { rows: [document] } = await db.query(`select raw_blob_id from documents where document_id = $1`, [seeded.documentId]);
+  assert.equal(document.raw_blob_id, strippedId);
+  assert.equal(await store.has(strippedId), true, "the document names stored bytes");
+});
+
+test("a run tries each queued deletion once, backs off a failure, and pages past blobs still named", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "sec-blob-rewrite-drain");
+  const db = new Pool({ connectionString: databaseUrl });
+  t.after(() => db.end());
+  const store = new MemoryObjectStore();
+  const broken = (await store.put(encoder.encode("a blob the store will not delete"))).blob.raw_blob_id;
+  const free = (await store.put(encoder.encode("a blob nothing names"))).blob.raw_blob_id;
+  let brokenAttempts = 0;
+  const objectStore: ObjectStore = {
+    put: (bytes) => store.put(bytes),
+    get: (id) => store.get(id),
+    has: (id) => store.has(id),
+    delete: async (id) => {
+      if (id !== broken) return store.delete(id);
+      brokenAttempts += 1;
+      throw new Error("access denied");
+    },
+  };
+  const sourceId = await secSource(db);
+  // A full GC batch of blobs still named by a document leads the queue.
+  await db.query(
+    `insert into documents (source_id, kind, title, content_hash, raw_blob_id, raw_blob_transform)
+     select $1, 'filing', '8-K', 'sha256:' || encode(sha256(('sent' || i)::bytea), 'hex'), 'sha256:' || encode(sha256(i::text::bytea), 'hex'), 'sec_uuencoded_bodies_removed.v1'
+       from generate_series(1, 100) i`,
+    [sourceId],
+  );
+  await db.query(
+    `insert into object_blob_gc_queue (raw_blob_id, reason, next_attempt_at)
+     select raw_blob_id, 'blob_rewrite', now() - interval '1 hour' from documents
+     union all select $1, 'blob_rewrite', now() - interval '30 minutes'
+     union all select $2, 'blob_rewrite', now() - interval '10 minutes'`,
+    [broken, free],
+  );
+  for (const accession of ["0009999999-25-000021", "0009999999-25-000022", "0009999999-25-000023"]) {
+    await seedVerbatim(db, store, sourceId, "8-K", withGraphic(accession));
+  }
+
+  const run = await rewriteFilingBlobs({ db, objectStore }, { dryRun: false, pageSize: 1 });
+  assert.equal(run.forms["8-K"]?.stripped, 3);
+  assert.equal(brokenAttempts, 1, "once per run, across every page's drain");
+  assert.equal(await store.has(free), false, "the drain reached past the blobs still named");
+  assert.deepEqual({ deleted: run.blobs_deleted, failed: run.blob_deletes_failed }, { deleted: 4, failed: 1 });
+  const { rows: [due] } = await db.query(`select next_attempt_at > now() + interval '30 seconds' as later from object_blob_gc_queue where raw_blob_id = $1`, [broken]);
+  assert.equal(due.later, true, "a failure waits before its next try");
+
+  await rewriteFilingBlobs({ db, objectStore }, { dryRun: false });
+  assert.equal(brokenAttempts, 1, "a run inside the backoff leaves it");
 });

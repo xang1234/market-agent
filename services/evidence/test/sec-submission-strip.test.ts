@@ -6,12 +6,12 @@ import { releaseExhibits } from "../src/sec-earnings-release-extraction.ts";
 import { releaseReconciliations } from "../src/sec-non-gaap-reconciliations.ts";
 import { classify8kHeader } from "../src/sec-8k-item-taxonomy.ts";
 import { EX99_RELEASE_HTML, EXAMPLE_FILED_ON } from "./fixtures/sec-8k-release.ts";
+import { JPEG_BYTES, uuencode } from "./fixtures/uuencode.ts";
 
 const encoder = new TextEncoder();
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
-// "<" and ">" are uuencode characters, so a body holds tag-like runs.
-const UUENCODED = "begin 644 logo.jpg\nM_]C_X  02D9)1@ ! 0$ 8 !@  #_VP!#  ,\" @,\" @,# P,$ P,$!0@%!00$\nM<PDF>.,,J%P<\\DDGG)VXZ9%=Z?#6C&_EOA8HEU+\"('DC9D)0 @#@C\n`\nend";
+const UUENCODED = uuencode("logo.jpg", JPEG_BYTES);
 const HEADER = "<SEC-DOCUMENT>0009999999-25-000042.txt : 20251119\n<SEC-HEADER>0009999999-25-000042.hdr.sgml : 20251119\nITEM INFORMATION:\t\tResults of Operations and Financial Condition\n</SEC-HEADER>";
 
 function document(type: string, sequence: number, filename: string, body: string): string {
@@ -59,4 +59,22 @@ test("bytes with nothing to remove, or that are no submission, are not rewritten
 test("a body that never closes is left whole", () => {
   const truncated = ORIGINAL.slice(0, ORIGINAL.indexOf("end\n</TEXT>"));
   assert.equal(stripUuencodedBodies(encoder.encode(truncated)), null);
+});
+
+test("a body is removed only when it is real uuencode filling a document's whole <TEXT>", () => {
+  const graphic = document("GRAPHIC", 2, "logo.jpg", UUENCODED);
+  const [, firstLine] = UUENCODED.split("\n");
+  const kept = [
+    document("EX-99.1", 3, "report.txt", "begin 644 report.txt\nRevenue grew 12% in the quarter.\nend"),
+    document("EX-99.2", 4, "outlook.txt", "begin 2025 guidance: revenue of $4 billion.\nMore to come."),
+    document("EX-99.3", 5, "ex99.htm", `<html><body><pre>\n<TEXT>\n${UUENCODED}\n</TEXT>\n</pre></body></html>`),
+    document("GRAPHIC", 6, "long.jpg", UUENCODED.replace(firstLine!, `${firstLine}A`)),
+    document("GRAPHIC", 7, "noend.jpg", UUENCODED.replace("\nend", "")),
+    document("GRAPHIC", 8, "trailer.jpg", `${UUENCODED}\nA caption.`),
+  ];
+  const original = [HEADER, graphic, ...kept, "</SEC-DOCUMENT>\n"].join("\n");
+  const stripped = stripUuencodedBodies(encoder.encode(original));
+  assert.ok(stripped);
+  assert.equal(decode(stripped), [HEADER, document("GRAPHIC", 2, "logo.jpg", "").replace("<TEXT>\n\n</TEXT>", "<TEXT>\n</TEXT>"), ...kept, "</SEC-DOCUMENT>\n"].join("\n"));
+  assert.equal(stripUuencodedBodies(encoder.encode([HEADER, ...kept, "</SEC-DOCUMENT>\n"].join("\n"))), null);
 });

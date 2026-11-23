@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { handle8k } from "../src/sec-8k-handler.ts";
 import { MemoryObjectStore, rawBlobIdFromBytes } from "../src/object-store.ts";
+import { JPEG_BYTES, uuencode } from "./fixtures/uuencode.ts";
 import type { FilingIndexEntry } from "../src/sec-daily-index.ts";
 import type { FormHandlerDeps } from "../src/sec-daily-crawl.ts";
 import type { QueryExecutor } from "../src/types.ts";
@@ -147,11 +148,12 @@ test("handle8k stores the submission without its uuencoded bodies, under SEC's c
   const { databaseUrl } = await bootstrapDatabase(t, "form8k-strip");
   const client = await connectedClient(t, databaseUrl);
   await client.query(`insert into issuers (legal_name, cik) values ('Apple Inc.', '0000320193')`);
+  const body = `${uuencode("logo.jpg", JPEG_BYTES)}\n`;
   const withGraphic = FIXTURE_TXT.replace(
     "</SEC-DOCUMENT>",
-    "<DOCUMENT>\n<TYPE>GRAPHIC\n<SEQUENCE>2\n<FILENAME>logo.jpg\n<TEXT>\nbegin 644 logo.jpg\nM_]C_X  02D9)1@\n`\nend\n</TEXT>\n</DOCUMENT>\n</SEC-DOCUMENT>",
+    `<DOCUMENT>\n<TYPE>GRAPHIC\n<SEQUENCE>2\n<FILENAME>logo.jpg\n<TEXT>\n${body}</TEXT>\n</DOCUMENT>\n</SEC-DOCUMENT>`,
   );
-  const stripped = withGraphic.replace("begin 644 logo.jpg\nM_]C_X  02D9)1@\n`\nend\n", "");
+  const stripped = withGraphic.replace(body, "");
   const objectStore = new MemoryObjectStore();
   const deps = { db: client as unknown as QueryExecutor, objectStore, client: fakeClient(withGraphic) } as unknown as FormHandlerDeps;
   assert.equal((await handle8k(entry(), deps)).ingested, true);
