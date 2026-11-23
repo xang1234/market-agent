@@ -89,6 +89,7 @@ test("createDocument inserts metadata and returns created status", async () => {
     DOC_BLOB_ID,
     DOC_BLOB_ID,
     "pending",
+    null,
   ]);
   assert.equal(result.status, "created");
   assert.equal(result.document.document_id, DOCUMENT_ID);
