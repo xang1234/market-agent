@@ -205,6 +205,56 @@ test("capex filed as productive assets certifies with its concept recorded", { t
     assert.deepEqual(asRestated, periods.map(() => "restatement_unverified"));
   });
 
+  // A derived figure cannot stand on a later filing's source, so only a line stating it exactly restates it.
+  await t.test("a derived quarter of productive-assets capex is unverified from a filing that states it equal only at its rounding, in either scope", async (t) => {
+    const filed = (accn: string, fy: number, fp: string, form: string, date: string) => (start: string, end: string, val: number): Value => ({ start, end, val, accn, fy, fp, form, filed: date });
+    const q1 = filed("0000000731-24-000101", 2024, "Q1", "10-Q", "2024-05-01");
+    const q2 = filed("0000000731-24-000102", 2024, "Q2", "10-Q", "2024-08-01");
+    const nextQ2 = filed("0000000731-25-000102", 2025, "Q2", "10-Q", "2025-08-01");
+    const nextQ2A = filed("0000000731-25-000202", 2025, "Q2", "10-Q/A", "2025-09-01");
+    const revenues = [q1("2024-01-01", "2024-03-31", 100), q2("2024-04-01", "2024-06-30", 100)];
+    const derived = [q1("2024-01-01", "2024-03-31", 25_000_000), q2("2024-01-01", "2024-06-30", 55_077_000)];
+    const scoped = (rows: Array<{ value: string; flags: unknown[]; relation: string | null }>) =>
+      rows.map(({ value, flags, relation }) => [value, flags.some((flag) => (flag as { kind?: string }).kind === SCOPE.kind), relation]);
+    const restatedProofs = async (db: Awaited<ReturnType<typeof setUp>>["db"]) => (await db.query<{ value: string; precision: string; derived: boolean }>(
+      `select f.value_num::text as value, a.precision_class as precision, a.derivation is not null as derived
+         from facts f join metrics m on m.metric_id = f.metric_id join current_fact_precision_attestations a on a.fact_id = f.fact_id
+        where f.subject_id = $1 and m.metric_key = 'capex' and f.method = 'restated' and f.invalidated_at is null order by f.created_at`,
+      [ISSUER_ID],
+    )).rows;
+
+    await t.test("the switch to PP&E", async (t) => {
+      const { db, download, lookup, backfill, relations, picked } = await setUp(t, "fin-capex-derived-rescoped-rounded");
+      download.text = companyFacts({
+        Revenues: revenues,
+        PaymentsToAcquireProductiveAssets: derived,
+        PaymentsToAcquirePropertyPlantAndEquipment: [nextQ2("2024-04-01", "2024-06-30", 30_000_000), nextQ2("2025-04-01", "2025-06-30", 28_000_000)],
+      });
+      await lookup("Q2");
+      const rows = [["30077000", true, "original"], ["30000000", false, "unverified_restatement"]];
+      assert.deepEqual(scoped(await relations()), rows);
+      assert.deepEqual(await restatedProofs(db), [{ value: "30000000", precision: "source_token_preserved", derived: false }], "the row states the later filing's own token");
+      assert.equal(await picked("as_restated", "Q2"), "restatement_unverified");
+      await backfill();
+      assert.deepEqual(scoped(await relations()), rows, "a rerun adds nothing");
+    });
+
+    await t.test("the restatement back to productive assets", async (t) => {
+      const { download, lookup, backfill, relations, picked } = await setUp(t, "fin-capex-derived-restated-back-rounded");
+      download.text = companyFacts({
+        Revenues: revenues,
+        PaymentsToAcquireProductiveAssets: [...derived, nextQ2A("2024-04-01", "2024-06-30", 30_000_000), nextQ2A("2025-04-01", "2025-06-30", 28_000_000)],
+        PaymentsToAcquirePropertyPlantAndEquipment: [nextQ2("2024-04-01", "2024-06-30", 30_077_000), nextQ2("2025-04-01", "2025-06-30", 28_033_000)],
+      });
+      await lookup("Q2");
+      const rows = [["30077000", true, "original"], ["30077000", false, "economic_restatement"], ["30000000", true, "unverified_restatement"]];
+      assert.deepEqual(scoped(await relations()), rows);
+      assert.equal(await picked("as_restated", "Q2"), "restatement_unverified");
+      await backfill();
+      assert.deepEqual(scoped(await relations()), rows, "a rerun adds nothing");
+    });
+  });
+
   // CAT retagged FY2018 and FY2019 this way in its FY2020 10-K, at equal
   // figures. The first equal PP&E line restates the year in that scope, so its
   // growth to a PP&E year counts.
