@@ -272,3 +272,40 @@ test(
     assert.equal(await inner.has(named.raw_blob_id), true, "the committed document names a stored blob");
   },
 );
+
+test(
+  "an ingest whose insert fails cannot delete a blob another ingest named once the failure freed the lock",
+  { skip: !dockerAvailable() },
+  async (t) => {
+    const { databaseUrl } = await bootstrapDatabase(t, "ingest-insert-failure-race");
+    const db = await connectedPool(t, databaseUrl, { max: 5 });
+    const inner = new MemoryObjectStore();
+    // Postgres frees a transaction's locks as soon as one of its statements fails.
+    await db.query(`create function fail_insert() returns trigger language plpgsql as $$ begin raise exception 'insert fails'; end $$`);
+    await db.query(`create trigger fail_insert before insert on documents for each row when (new.title = 'fails') execute function fail_insert()`);
+    const sec = await createSource(db, SEC_SOURCE);
+    const bytes = new TextEncoder().encode("<html>Another press release.</html>");
+    const ingest = (title: string) => ingestDocument({ db, objectStore }, { source: sec, bytes, document: { kind: "press_release", title } });
+    let other: Promise<{ raw_blob_id: string }> | undefined;
+    const objectStore: ObjectStore = {
+      put: async (put) => {
+        const result = await inner.put(put);
+        if (other === undefined) {
+          other = ingest("succeeds");
+          await waitForAdvisoryLockWaiter(db);
+        }
+        return result;
+      },
+      get: (id) => inner.get(id),
+      has: (id) => inner.has(id),
+      delete: async (id) => {
+        await Promise.race([other, delay(500)]);
+        return inner.delete(id);
+      },
+    };
+
+    await assert.rejects(ingest("fails"), /insert fails/);
+    const named = await other!;
+    assert.equal(await inner.has(named.raw_blob_id), true, "the committed document names a stored blob");
+  },
+);
