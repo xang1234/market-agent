@@ -84,12 +84,12 @@ function isZeroLengthLine(line: Buffer): boolean {
   return line.length === 0 || (line.length === 1 && (line[0] === 0x60 || line[0] === 0x20));
 }
 
-// Lines as EDGAR writes them: uuencode's alphabet (space to backtick) with
-// trailing spaces (zero bits) trimmed, and an optional CR. Every line but the
+// EDGAR writes each line in uuencode's alphabet (space to backtick), trims
+// its trailing spaces (zero bits) and may end it with a CR. Every line but the
 // last encodes 45 bytes, "M" and 60 characters. The last encodes at most 45
 // in 4 characters per 3; an encoder may add a guard character after them.
 // ponytail: a final line may be 6 characters short, the most a sample lost
-// (5: a ZIP's two zero closing bytes and padding); widen if a real body is kept.
+// (5, a ZIP's two zero closing bytes and padding); widen if a real body is kept.
 function isFullLine(line: Buffer): boolean {
   const end = payloadEnd(line);
   return line[0] === 0x4d && end <= 61 && inAlphabet(line, end);

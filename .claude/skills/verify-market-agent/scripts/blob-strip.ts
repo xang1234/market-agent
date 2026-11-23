@@ -9,7 +9,10 @@
 //                       raw_blob_id from this stack's object store.
 //   readers diff NAME   compare with a saved run by document; exit 1 on a change.
 //   reingest PATH...    ingest each file again as a filing through ingestDocument;
-//                       exit 1 when one makes a second document for its content_hash.
+//                       exit 1 when one makes a second filing for its content_hash,
+//                       or returns a user's upload or another kind's document.
+//   upload PATH...      ingest each file as one test user's upload, as a user
+//                       could upload an SEC .txt.
 //
 // Each digest hashes a reader's whole output. The extract tool's candidate
 // facts are the XBRL segment and non-GAAP readers over the decoded blob, run
@@ -22,6 +25,7 @@ import { join } from "node:path";
 
 import { createEvidenceStoreRuntime } from "../../../../services/evidence/src/evidence-cli-runtime.ts";
 import { ingestDocument } from "../../../../services/evidence/src/ingest.ts";
+import { ingestUserUpload } from "../../../../services/evidence/src/user-uploads.ts";
 import { issuerIrTextFromBytes } from "../../../../services/evidence/src/issuer-ir-extraction.ts";
 import { rawBlobIdFromBytes } from "../../../../services/evidence/src/object-store.ts";
 import { extractNonGaapReconciliations } from "../../../../services/evidence/src/reader/non-gaap-reconciliation-extractor.ts";
@@ -155,11 +159,12 @@ async function readers(action: string, name: string): Promise<number> {
 async function reingest(paths: string[]): Promise<number> {
   const { db, objectStore } = createEvidenceStoreRuntime();
   let duplicated = 0;
+  let foreign = 0;
   try {
     for (const file of filesUnder(paths)) {
       const bytes = new Uint8Array(readFileSync(file));
       const contentHash = rawBlobIdFromBytes(bytes);
-      const named = async () => (await db.query<{ document_id: string }>(`select document_id::text from documents where content_hash = $1 order by document_id`, [contentHash])).rows.map((row) => row.document_id);
+      const named = async () => (await db.query<{ document_id: string }>(`select document_id::text from documents where content_hash = $1 and kind = 'filing' order by document_id`, [contentHash])).rows.map((row) => row.document_id);
       const before = await named();
       const result = await ingestDocument({ db, objectStore }, {
         source: { source_id: SOURCE, license_class: "public" },
@@ -168,21 +173,40 @@ async function reingest(paths: string[]): Promise<number> {
       });
       const after = await named();
       if (after.length > Math.max(before.length, 1)) duplicated += 1;
-      console.log(`${file.split("/").pop()} documents ${before.length}->${after.length} ${before.includes(result.document.document_id) ? "found" : "new"} ${result.document.document_id} stored ${result.raw_blob_id === contentHash ? "as sent" : "stripped"}`);
+      const theirs = result.document.kind !== "filing" || result.document.source_id !== SOURCE;
+      if (theirs) foreign += 1;
+      console.log(`${file.split("/").pop()} filings ${before.length}->${after.length} ${before.includes(result.document.document_id) ? "found" : "new"} ${result.document.document_id} stored ${result.raw_blob_id === contentHash ? "as sent" : "stripped"}${theirs ? ` FOREIGN ${result.document.kind}` : ""}`);
     }
   } finally {
     await db.end();
   }
-  console.log(`files ${filesUnder(paths).length}, with a second document: ${duplicated}`);
-  return duplicated === 0 ? 0 : 1;
+  console.log(`files ${filesUnder(paths).length}, with a second filing: ${duplicated}, returned another source's document: ${foreign}`);
+  return duplicated === 0 && foreign === 0 ? 0 : 1;
+}
+
+async function upload(paths: string[]): Promise<void> {
+  const { db, objectStore } = createEvidenceStoreRuntime();
+  try {
+    const { rows: [user] } = await db.query<{ user_id: string }>(
+      `insert into users (email) values ('blob-strip-uploader@example.test') on conflict (email) do update set updated_at = now() returning user_id::text`,
+    );
+    for (const file of filesUnder(paths)) {
+      const name = file.split("/").pop()!;
+      const { ingest } = await ingestUserUpload({ db, objectStore }, { userId: user!.user_id, bytes: new Uint8Array(readFileSync(file)), title: name });
+      console.log(`uploaded ${name} as ${ingest.document.document_id} (${ingest.document.kind}, user ${user!.user_id}) blob ${ingest.raw_blob_id}`);
+    }
+  } finally {
+    await db.end();
+  }
 }
 
 const [mode, ...args] = process.argv.slice(2);
 if (mode === "files" && args.length > 0) process.exitCode = files(args);
 else if (mode === "seed" && args.length > 0) await seed(args);
 else if (mode === "reingest" && args.length > 0) process.exitCode = await reingest(args);
+else if (mode === "upload" && args.length > 0) await upload(args);
 else if (mode === "readers" && (args[0] === "save" || args[0] === "diff") && args[1]) process.exitCode = await readers(args[0], args[1]);
 else {
-  console.error("usage: blob-strip files PATH... | seed PATH... | readers save|diff NAME | reingest PATH...");
+  console.error("usage: blob-strip files PATH... | seed PATH... | readers save|diff NAME | reingest PATH... | upload PATH...");
   process.exitCode = 2;
 }

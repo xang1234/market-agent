@@ -177,7 +177,7 @@ async function ingestStoredDocumentWithBlobLock(
   );
 }
 
-// Deletes a blob a rolled-back transaction created, as the GC would: under the
+// Deletes a blob a rolled-back transaction created as the GC would, under the
 // blob's lock and only while no document names it. Postgres frees that
 // transaction's locks when a statement fails, before its rollback, so another
 // ingest may have named the blob since. Run after the transaction ends.

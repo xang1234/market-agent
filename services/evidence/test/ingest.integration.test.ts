@@ -253,7 +253,7 @@ test(
       put: (bytes) => inner.put(bytes),
       get: (id) => inner.get(id),
       has: (id) => inner.has(id),
-      // A slow delete: the other ingest gets as far as it can first.
+      // A slow delete, so the other ingest gets as far as it can first.
       delete: async (id) => {
         await Promise.race([other, delay(500)]);
         return inner.delete(id);

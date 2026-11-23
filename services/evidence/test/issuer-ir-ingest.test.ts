@@ -50,7 +50,7 @@ function recordingDb() {
         const row = assets.get(`${values?.[0]}:${values?.[1]}`);
         return result<R>(row ? [row] : []);
       }
-      // A rolled-back blob's cleanup: no document names it.
+      // The rolled-back blob's cleanup finds no document naming it.
       if (/from documents where raw_blob_id/i.test(text)) return result<R>([]);
       if (/insert into sources/i.test(text)) {
         sourceCounter += 1;

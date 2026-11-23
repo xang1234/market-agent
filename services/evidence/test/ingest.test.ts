@@ -24,7 +24,7 @@ function recordingDb() {
   const db: QueryExecutor = {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
-      // A rolled-back blob's cleanup: no document names it.
+      // The rolled-back blob's cleanup finds no document naming it.
       if (/from documents where raw_blob_id/i.test(text)) {
         return { rows: fakeRows<R>([]), command: "SELECT", rowCount: 0, oid: 0, fields: [] };
       }
