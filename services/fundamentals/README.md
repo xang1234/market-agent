@@ -128,7 +128,11 @@ npm test         # contract + AAPL FY2024 income statement verification
   the period only in the reviewed concept, the total or PP&E, at an equal
   figure, within the coarser rounding, restates it in that scope. A filing
   that states the reviewed concept too keeps it there, and only one that
-  states it in the scoped concept alone restates it back. Each such
+  states it in the scoped concept alone restates it back, at an equal
+  figure. At any other figure that line cannot tell a change of figure from
+  the change of scope, so it is unverified. A quarter's reviewed line switches
+  it even when the filing also repeats its derivation's inputs, if none moved.
+  Each such
   restatement stores the figure that stands, with the proof and locator of
   the filing that states it, so no number changes. A derivation proves a
   figure only on its own filing's source, so a derived quarter restates

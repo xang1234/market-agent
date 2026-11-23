@@ -1578,16 +1578,6 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
         await record(changed, "unverified_restatement");
         break;
       }
-      // A filing that states the reviewed concept reads as it (#731, #743), so once the year stands there it keeps it there.
-      const reviewed = filing.rescoped.find((line) => line.term === null);
-      if ((filing.statement === null || (asReviewed && reviewed !== undefined)) && filing.inputs.length === 0) {
-        const switched = asReviewed ? undefined : reviewed;
-        const [stored, relation] = switched ? rescope(switched) : [filing.rescoped[0]!, null];
-        await record(stored, relation);
-        if (relation === "unverified_restatement") break;
-        if (switched) asReviewed = true;
-        continue;
-      }
       let moved: FiledInput | null = null;
       for (const input of filing.inputs) {
         const figure: RoundedFigure = { value: input.statement.token, rounding: roundings.get(input.statement.accession) ?? null };
@@ -1596,6 +1586,17 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
         moved ??= input;
       }
       if (moved !== null) asDerived = false;
+      // A filing that states the reviewed concept reads as it (#731, #743), so once the year stands there it keeps it there.
+      // Inputs it repeats unmoved leave the quarter its reviewed line.
+      const reviewed = filing.rescoped.find((line) => line.term === null);
+      if (moved === null && (filing.statement === null || (asReviewed && reviewed !== undefined)) && (filing.inputs.length === 0 || reviewed !== undefined)) {
+        const switched = asReviewed ? undefined : reviewed;
+        const [stored, relation] = switched ? rescope(switched) : [filing.rescoped[0]!, null];
+        await record(stored, relation);
+        if (relation === "unverified_restatement") break;
+        if (switched) asReviewed = true;
+        continue;
+      }
       const statement = filing.statement !== null && isLater(filing.statement) ? filing.statement : null;
       if (statement === null) {
         if (moved !== null) {
@@ -1610,11 +1611,13 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
         ? "unverified_restatement"
         : asDerived ? null : await laterRelation(original.metric_key, standing, figure, splitsOn);
       const later: LaterStatement = { ...statement, concept: concept!, unit: unit! };
+      // Once the year stands in the reviewed concept, a line in the scoped one
+      // alone changes scope back, so only an equal one tells what it states.
       const back = asReviewed && relation === null;
-      const [stored, storedRelation] = back ? rescope(later) : [later, relation];
+      const [stored, storedRelation] = back ? rescope(later) : [later, asReviewed ? "unverified_restatement" : relation];
       await record(stored, storedRelation);
       if (storedRelation === "unverified_restatement") break;
-      if (relation !== null || back) asReviewed = false;
+      asReviewed = false;
       if (relation !== null) {
         standing = figure;
         standsOn = later;

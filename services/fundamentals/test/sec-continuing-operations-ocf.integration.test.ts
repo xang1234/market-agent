@@ -334,6 +334,25 @@ test("operating cash flow filed for continuing operations certifies with its con
     assert.deepEqual(await pickedScope("as_restated"), SCOPE);
   });
 
+  // Devin on #759. A continuing-operations line alone cannot tell a change of figure from a change of scope back.
+  await t.test("once the year stands as the total a 10-K stating another continuing-operations figure alone is an unverified restatement", async (t) => {
+    const { download, lookup, backfill, relations, picked } = await setUp(t, "fin-ocf-continuing-switch-back-changed");
+    download.text = companyFacts({
+      [CONTINUING]: [year(2024, 2024, 120), year(2026, 2024, 126), year(2026, 2026, 150)],
+      [TOTAL]: [year(2025, 2024, 120), year(2025, 2025, 140)],
+    });
+    await lookup();
+    const rows = [
+      ["120", [SCOPE], "original"],
+      ["120", [], "economic_restatement"],
+      ["126", [SCOPE], "unverified_restatement"],
+    ];
+    assert.deepEqual((await relations()).map(({ value, flags, relation }) => [value, flags, relation]), rows);
+    assert.equal(await picked("as_restated"), "restatement_unverified");
+    await backfill();
+    assert.deepEqual((await relations()).map(({ value, flags, relation }) => [value, flags, relation]), rows, "a rerun adds nothing");
+  });
+
   // Accession order is not filing order, so two totals filed the same day leave neither standing.
   await t.test("two totals filed the same day at different figures are unverified in either accession order", async (t) => {
     for (const [first, second] of [[120, 126], [126, 120]]) {
