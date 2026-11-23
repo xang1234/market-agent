@@ -1562,9 +1562,13 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     let asDerived = derivation !== null;
     let asReviewed = false;
     let standsOn: LaterStatement | null = null;
-    const rescope = (later: LaterStatement): LaterStatement => later.token === standing.value || (standsOn === null && original.token_proof_hash === null)
-      ? later
-      : { ...later, stands: standsOn ?? "original" };
+    // A restated row sits on the later filing's source, and a derivation proves
+    // only a fact on its first input's own source (#758), so a derived figure
+    // that a line repeats only within rounding is unverified there.
+    const rescope = (later: LaterStatement): [LaterStatement, LaterRelation] =>
+      later.token === standing.value || (standsOn === null && original.token_proof_hash === null) ? [later, "economic_restatement"]
+      : standsOn === null && derivation !== null ? [later, "unverified_restatement"]
+      : [{ ...later, stands: standsOn ?? "original" }, "economic_restatement"];
     for (const filing of filingsInOrder(statements, derivation, values, rescoped)) {
       // A line in another scope only ever repeats the figure that stands, or leaves it unverified (#731).
       const changed = unordered.has(filing.filed) && filing.rescoped.length > 0
@@ -1578,7 +1582,9 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
       const reviewed = filing.rescoped.find((line) => line.term === null);
       if ((filing.statement === null || (asReviewed && reviewed !== undefined)) && filing.inputs.length === 0) {
         const switched = asReviewed ? undefined : reviewed;
-        await record(switched ? rescope(switched) : filing.rescoped[0]!, switched ? "economic_restatement" : null);
+        const [stored, relation] = switched ? rescope(switched) : [filing.rescoped[0]!, null];
+        await record(stored, relation);
+        if (relation === "unverified_restatement") break;
         if (switched) asReviewed = true;
         continue;
       }
@@ -1605,8 +1611,9 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
         : asDerived ? null : await laterRelation(original.metric_key, standing, figure, splitsOn);
       const later: LaterStatement = { ...statement, concept: concept!, unit: unit! };
       const back = asReviewed && relation === null;
-      await record(back ? rescope(later) : later, back ? "economic_restatement" : relation);
-      if (relation === "unverified_restatement") break;
+      const [stored, storedRelation] = back ? rescope(later) : [later, relation];
+      await record(stored, storedRelation);
+      if (storedRelation === "unverified_restatement") break;
       if (relation !== null || back) asReviewed = false;
       if (relation !== null) {
         standing = figure;

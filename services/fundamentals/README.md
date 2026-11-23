@@ -130,7 +130,10 @@ npm test         # contract + AAPL FY2024 income statement verification
   that states the reviewed concept too keeps it there, and only one that
   states it in the scoped concept alone restates it back. Each such
   restatement stores the figure that stands, with the proof and locator of
-  the filing that states it, so no number changes. A later figure that
+  the filing that states it, so no number changes. A derivation proves a
+  figure only on its own filing's source, so a derived quarter restates
+  this way only at its exact figure, and at one equal only within rounding
+  it is unverified. A later figure that
   differs, or filings on one date, the original included, that state the
   period in different scopes or figures, leave it unverified, since their
   order is unknown. Ingest does this in `recordSecRestatements` and
