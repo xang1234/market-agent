@@ -114,6 +114,19 @@ export async function ingestDocumentInTransaction(
   const raw_blob_id = rawBlobIdFromBytes(storedBytes);
   await db.query("select pg_advisory_xact_lock(hashtext($1))", [raw_blob_id]);
   await lockSourceForBlobIngest(db, input.source.source_id);
+  // content_hash is the filing's identity, whatever blob holds it. One stored
+  // as sent (before #757, or kept whole for an offset that cites it) is the
+  // document these bytes name; the rewrite moves it only under the lock held.
+  if (stripped !== null) {
+    const { rows: [sent] } = await db.query(
+      `select 1 from documents where content_hash = $1 and raw_blob_id = $1 for share`,
+      [content_hash],
+    );
+    if (sent !== undefined) {
+      const result = await createDocument(db, { ...input.document, source_id: input.source.source_id, content_hash, raw_blob_id: content_hash });
+      return Object.freeze({ status: "blob_stored" as const, document: result.document, raw_blob_id: content_hash, policy });
+    }
+  }
   const putResult = await deps.objectStore.put(storedBytes);
   const storedRawBlobId = putResult.blob.raw_blob_id;
   let unregisterRollbackCleanup = () => {};
@@ -165,7 +178,7 @@ async function ingestStoredDocumentWithBlobLock(
   );
 }
 
-async function deleteCreatedBlobBestEffort(
+export async function deleteCreatedBlobBestEffort(
   objectStore: ObjectStore,
   rawBlobId: string,
   originalError: unknown,

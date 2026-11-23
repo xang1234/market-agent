@@ -13,6 +13,7 @@
 // Idempotent and resumable: a rewritten document leaves the candidate set, so
 // a rerun reads only what is left, and drains deletions a crash left queued.
 import { runObjectBlobGcBatchWithPool, type ObjectBlobGcClientPool } from "./blob-gc-repo.ts";
+import { deleteCreatedBlobBestEffort } from "./ingest.ts";
 import { rawBlobIdFromBytes, type ObjectStore } from "./object-store.ts";
 import { SEC_UUENCODED_BODIES_REMOVED, stripUuencodedBodies } from "./sec-submission-strip.ts";
 import { withTransaction } from "./transaction.ts";
@@ -45,7 +46,9 @@ export async function rewriteFilingBlobs(
   opts: { dryRun: boolean; after?: string; pageSize?: number; onDocument?: (candidate: Candidate, outcome: BlobRewriteOutcome, error?: unknown) => void },
 ): Promise<BlobRewriteReport> {
   const report: BlobRewriteReport = { forms: {}, cursor: null, blobs_deleted: 0, blob_deletes_failed: 0 };
-  if (!opts.dryRun) await drainDeletions(deps, report);
+  // Queued blobs this run tried and kept (still named, or the delete failed).
+  const tried = new Set<string>();
+  if (!opts.dryRun) await drainDeletions(deps, report, tried);
   let cursor = opts.after ?? ZERO_UUID;
   for (;;) {
     const { rows: page } = await deps.db.query<Candidate>(
@@ -73,7 +76,7 @@ export async function rewriteFilingBlobs(
       }
     }
     report.cursor = cursor;
-    if (!opts.dryRun) await drainDeletions(deps, report);
+    if (!opts.dryRun) await drainDeletions(deps, report, tried);
   }
   return report;
 }
@@ -91,12 +94,15 @@ async function rewriteOne(
   if (candidate.cited) return { outcome: "cited", before, after: before };
   if (dryRun) return { outcome: "stripped", before, after: stripped.length };
 
-  // Put first: a crash before the update leaves an unreferenced blob that a
-  // rerun puts again, never a document naming bytes that are not stored.
-  const { blob: { raw_blob_id: strippedId } } = await deps.objectStore.put(stripped);
-  if (strippedId !== rawBlobIdFromBytes(stripped)) throw new Error("object store returned a blob id that does not match the stripped bytes");
+  const strippedId = rawBlobIdFromBytes(stripped);
   const moved = await withTransaction(deps.db, async (tx) => {
+    // Lock, then put, as ingest does. A GC batch deletes the blob only under
+    // this lock and only once no document names it, so it cannot delete the
+    // copy between this put and the update that names it.
     await tx.db.query("select pg_advisory_xact_lock(hashtext($1))", [strippedId]);
+    const put = await deps.objectStore.put(stripped);
+    if (put.status === "created") tx.onRollback((error) => deleteCreatedBlobBestEffort(deps.objectStore, strippedId, error));
+    if (put.blob.raw_blob_id !== strippedId) throw new Error("object store returned a blob id that does not match the stripped bytes");
     const update = await tx.db.query(
       `update documents d
           set raw_blob_id = $3, raw_blob_transform = $4, updated_at = now()
@@ -119,17 +125,19 @@ async function rewriteOne(
   return moved ? { outcome: "stripped", before, after: stripped.length } : { outcome: "raced", before, after: before };
 }
 
-// Deletes every queued blob that is due and unreferenced. A delete that fails
-// is due again at once, so the next run retries it; a batch that deletes
-// nothing ends the drain.
+// Deletes every queued blob that is due and unreferenced, trying each at most
+// once per run. A blob still named, or whose delete failed, waits out the GC's
+// backoff and is left to a later run; a batch with nothing due ends the drain.
 async function drainDeletions(
   deps: { db: ObjectBlobGcClientPool; objectStore: ObjectStore },
   report: BlobRewriteReport,
+  tried: Set<string>,
 ): Promise<void> {
   for (;;) {
-    const batch = await runObjectBlobGcBatchWithPool(deps.db, deps.objectStore, { failureRetryAfterMs: 0 });
+    const batch = await runObjectBlobGcBatchWithPool(deps.db, deps.objectStore, { skipRawBlobIds: [...tried] });
     report.blobs_deleted += batch.deleted_raw_blob_ids.length;
     report.blob_deletes_failed += batch.failed_raw_blob_ids.length;
-    if (batch.deleted_raw_blob_ids.length === 0) return;
+    for (const id of [...batch.skipped_referenced_raw_blob_ids, ...batch.failed_raw_blob_ids]) tried.add(id);
+    if (batch.deleted_raw_blob_ids.length + batch.skipped_referenced_raw_blob_ids.length + batch.failed_raw_blob_ids.length === 0) return;
   }
 }

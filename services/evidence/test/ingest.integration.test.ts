@@ -165,7 +165,7 @@ test(
     const documentsNamed = async (contentHash: string) =>
       (await client.query(`select document_id::text, raw_blob_id from documents where content_hash = $1`, [contentHash])).rows;
 
-    // Stored as SEC sent it: before #757, or kept whole because an offset cites it.
+    // Stored as SEC sent it, before #757 or kept whole because an offset cites it.
     const sent = submission("0009999999-25-000001");
     const sentId = rawBlobIdFromBytes(sent);
     await objectStore.put(sent);
@@ -177,7 +177,7 @@ test(
     assert.equal(again.document.document_id, verbatim.document_id);
     assert.deepEqual(await documentsNamed(sentId), [{ document_id: verbatim.document_id, raw_blob_id: sentId }]);
 
-    // Stored stripped: ingested after #757, or rewritten.
+    // Stored stripped, ingested after #757 or rewritten.
     const fresh = submission("0009999999-25-000002");
     const first = await ingest(fresh);
     const second = await ingest(fresh);

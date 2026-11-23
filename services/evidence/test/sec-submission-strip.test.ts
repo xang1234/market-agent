@@ -68,7 +68,7 @@ test("a body is removed only when it is real uuencode filling a document's whole
     document("EX-99.1", 3, "report.txt", "begin 644 report.txt\nRevenue grew 12% in the quarter.\nend"),
     document("EX-99.2", 4, "outlook.txt", "begin 2025 guidance: revenue of $4 billion.\nMore to come."),
     document("EX-99.3", 5, "ex99.htm", `<html><body><pre>\n<TEXT>\n${UUENCODED}\n</TEXT>\n</pre></body></html>`),
-    document("GRAPHIC", 6, "long.jpg", UUENCODED.replace(firstLine!, `${firstLine}A`)),
+    document("GRAPHIC", 6, "long.jpg", UUENCODED.replace(firstLine!, `${firstLine}AA`)),
     document("GRAPHIC", 7, "noend.jpg", UUENCODED.replace("\nend", "")),
     document("GRAPHIC", 8, "trailer.jpg", `${UUENCODED}\nA caption.`),
   ];
