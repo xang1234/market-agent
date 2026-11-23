@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Pool } from "pg";
+import type { Pool } from "pg";
 
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -9,7 +9,7 @@ import { rewriteFilingBlobs } from "../src/sec-blob-rewrite.ts";
 import { stripUuencodedBodies } from "../src/sec-submission-strip.ts";
 import { MemoryObjectStore, rawBlobIdFromBytes, type ObjectStore } from "../src/object-store.ts";
 import { releaseExhibits } from "../src/sec-earnings-release-extraction.ts";
-import { bootstrapDatabase, dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { bootstrapDatabase, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { RELEASE_SUBMISSION } from "./fixtures/sec-8k-release.ts";
 import { JPEG_BYTES, uuencode } from "./fixtures/uuencode.ts";
 
@@ -44,8 +44,7 @@ test("the rewrite strips stored submissions in place, keeps what offsets cite, a
     return;
   }
   const { databaseUrl } = await bootstrapDatabase(t, "sec-blob-rewrite");
-  const db = new Pool({ connectionString: databaseUrl });
-  t.after(() => db.end());
+  const db = await connectedPool(t, databaseUrl, { max: 10 });
   const store = new MemoryObjectStore();
   let failDeletes = 1;
   const flakyStore: ObjectStore = {
@@ -115,8 +114,7 @@ test("a GC batch while the rewrite stores the stripped copy cannot delete it fro
     return;
   }
   const { databaseUrl } = await bootstrapDatabase(t, "sec-blob-rewrite-gc-race");
-  const db = new Pool({ connectionString: databaseUrl });
-  t.after(() => db.end());
+  const db = await connectedPool(t, databaseUrl, { max: 10 });
   const store = new MemoryObjectStore();
   const bytes = withGraphic("0009999999-25-000010");
   const seeded = await seedVerbatim(db, store, await secSource(db), "8-K", bytes);
@@ -152,8 +150,7 @@ test("a run tries each queued deletion once, backs off a failure, and pages past
     return;
   }
   const { databaseUrl } = await bootstrapDatabase(t, "sec-blob-rewrite-drain");
-  const db = new Pool({ connectionString: databaseUrl });
-  t.after(() => db.end());
+  const db = await connectedPool(t, databaseUrl, { max: 10 });
   const store = new MemoryObjectStore();
   const broken = (await store.put(encoder.encode("a blob the store will not delete"))).blob.raw_blob_id;
   const free = (await store.put(encoder.encode("a blob nothing names"))).blob.raw_blob_id;

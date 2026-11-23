@@ -8,6 +8,8 @@
 //   readers save NAME   each stored filing's reader digests, read through its
 //                       raw_blob_id from this stack's object store.
 //   readers diff NAME   compare with a saved run by document; exit 1 on a change.
+//   reingest PATH...    ingest each file again as a filing through ingestDocument;
+//                       exit 1 when one makes a second document for its content_hash.
 //
 // Each digest hashes a reader's whole output. The extract tool's candidate
 // facts are the XBRL segment and non-GAAP readers over the decoded blob, run
@@ -19,6 +21,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "n
 import { join } from "node:path";
 
 import { createEvidenceStoreRuntime } from "../../../../services/evidence/src/evidence-cli-runtime.ts";
+import { ingestDocument } from "../../../../services/evidence/src/ingest.ts";
 import { issuerIrTextFromBytes } from "../../../../services/evidence/src/issuer-ir-extraction.ts";
 import { rawBlobIdFromBytes } from "../../../../services/evidence/src/object-store.ts";
 import { extractNonGaapReconciliations } from "../../../../services/evidence/src/reader/non-gaap-reconciliation-extractor.ts";
@@ -149,11 +152,37 @@ async function readers(action: string, name: string): Promise<number> {
   return moved === 0 ? 0 : 1;
 }
 
+async function reingest(paths: string[]): Promise<number> {
+  const { db, objectStore } = createEvidenceStoreRuntime();
+  let duplicated = 0;
+  try {
+    for (const file of filesUnder(paths)) {
+      const bytes = new Uint8Array(readFileSync(file));
+      const contentHash = rawBlobIdFromBytes(bytes);
+      const named = async () => (await db.query<{ document_id: string }>(`select document_id::text from documents where content_hash = $1 order by document_id`, [contentHash])).rows.map((row) => row.document_id);
+      const before = await named();
+      const result = await ingestDocument({ db, objectStore }, {
+        source: { source_id: SOURCE, license_class: "public" },
+        bytes,
+        document: { kind: "filing", title: "8-K" },
+      });
+      const after = await named();
+      if (after.length > Math.max(before.length, 1)) duplicated += 1;
+      console.log(`${file.split("/").pop()} documents ${before.length}->${after.length} ${before.includes(result.document.document_id) ? "found" : "new"} ${result.document.document_id} stored ${result.raw_blob_id === contentHash ? "as sent" : "stripped"}`);
+    }
+  } finally {
+    await db.end();
+  }
+  console.log(`files ${filesUnder(paths).length}, with a second document: ${duplicated}`);
+  return duplicated === 0 ? 0 : 1;
+}
+
 const [mode, ...args] = process.argv.slice(2);
 if (mode === "files" && args.length > 0) process.exitCode = files(args);
 else if (mode === "seed" && args.length > 0) await seed(args);
+else if (mode === "reingest" && args.length > 0) process.exitCode = await reingest(args);
 else if (mode === "readers" && (args[0] === "save" || args[0] === "diff") && args[1]) process.exitCode = await readers(args[0], args[1]);
 else {
-  console.error("usage: blob-strip files PATH... | seed PATH... | readers save|diff NAME");
+  console.error("usage: blob-strip files PATH... | seed PATH... | readers save|diff NAME | reingest PATH...");
   process.exitCode = 2;
 }
