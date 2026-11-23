@@ -248,3 +248,34 @@ test("a later filing that disagrees with the equal total gaps every window it is
     [2021, "5.92%", "incompatible_definition"],
   ]);
 });
+
+// As CAT: each 10-K through FY2018's also tags capex as productive assets only,
+// and from FY2019's as PP&E, whose FY2018 comparative repeats FY2018's figure (#758).
+function switchingCapexCompanyFacts() {
+  const facts = switchingCompanyFacts();
+  const gaap: Record<string, { units: { USD: Array<{ fy: number }> } }> = facts.facts["us-gaap"];
+  const capex = gaap.PaymentsToAcquirePropertyPlantAndEquipment!;
+  gaap.PaymentsToAcquireProductiveAssets = { ...capex, units: { USD: capex.units.USD.filter((value) => value.fy <= 2018) } };
+  gaap.PaymentsToAcquirePropertyPlantAndEquipment = { ...capex, units: { USD: capex.units.USD.filter((value) => value.fy > 2018) } };
+  return facts;
+}
+
+test("growth from productive-assets capex to PP&E counts only from a year a later 10-K restates as an equal PP&E figure (#758)", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for backtest coverage");
+    return;
+  }
+  const { db } = await seeded(t, switchingCapexCompanyFacts);
+  const run = await runBacktest(db, ["HIST"]);
+  const text = (figure: { kind: string; text: string; outcome?: string }) => figure.kind === "value" ? figure.text : figure.outcome;
+  const growths = run.rows.flatMap((row) => row.kind === "read" ? [[row.fiscal_year, text(row.realized.fcf), text(row.trailing[3].fcf)]] : []);
+  // FY2018 is the only year both its OCF and its capex are restated in the later scope, as CAT's is.
+  assert.deepEqual(growths, [
+    [2016, "incompatible_definition", "no_fy_facts"],
+    [2017, "incompatible_definition", "no_fy_facts"],
+    [2018, "7.21%", "10.06%"],
+    [2019, "6.72%", "incompatible_definition"],
+    [2020, "6.30%", "incompatible_definition"],
+    [2021, "5.92%", "7.72%"],
+  ]);
+});
