@@ -50,6 +50,8 @@ function recordingDb() {
         const row = assets.get(`${values?.[0]}:${values?.[1]}`);
         return result<R>(row ? [row] : []);
       }
+      // A rolled-back blob's cleanup: no document names it.
+      if (/from documents where raw_blob_id/i.test(text)) return result<R>([]);
       if (/insert into sources/i.test(text)) {
         sourceCounter += 1;
         return result<R>([{
@@ -355,7 +357,8 @@ test("ingestIssuerIrSource rolls back source and document rows when IR asset per
   assert.ok(sourceIndex < documentIndex);
   assert.ok(documentIndex < assetIndex);
   assert.ok(assetIndex < rollbackIndex);
-  assert.equal(txQueries.some((query) => query === "commit"), false);
+  assert.equal(txQueries.slice(0, rollbackIndex).some((query) => query === "commit"), false);
+  assert.ok(txQueries.slice(rollbackIndex).some((query) => /pg_advisory_xact_lock/.test(query)), "the blob is deleted under its lock after the rollback");
   assert.equal(objectStore.deleteCalls, 1);
   assert.deepEqual(objectStore.deletedRawBlobIds, [rawBlobIdFromBytes(new TextEncoder().encode(body))]);
 });
