@@ -5,6 +5,7 @@ import type { Pool } from "pg";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { runObjectBlobGcBatchWithPool } from "../src/blob-gc-repo.ts";
+import { ingestDocument } from "../src/ingest.ts";
 import { rewriteFilingBlobs } from "../src/sec-blob-rewrite.ts";
 import { stripUuencodedBodies } from "../src/sec-submission-strip.ts";
 import { MemoryObjectStore, rawBlobIdFromBytes, type ObjectStore } from "../src/object-store.ts";
@@ -12,6 +13,7 @@ import { releaseExhibits } from "../src/sec-earnings-release-extraction.ts";
 import { bootstrapDatabase, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { RELEASE_SUBMISSION } from "./fixtures/sec-8k-release.ts";
 import { JPEG_BYTES, uuencode } from "./fixtures/uuencode.ts";
+import { waitForAdvisoryLockWaiter } from "./advisory-lock-waiter.ts";
 
 const encoder = new TextEncoder();
 const GRAPHIC = `<DOCUMENT>\n<TYPE>GRAPHIC\n<SEQUENCE>9\n<FILENAME>logo.jpg\n<TEXT>\n${uuencode("logo.jpg", JPEG_BYTES)}\n</TEXT>\n</DOCUMENT>`;
@@ -194,4 +196,68 @@ test("a run tries each queued deletion once, backs off a failure, and pages past
 
   await rewriteFilingBlobs({ db, objectStore }, { dryRun: false });
   assert.equal(brokenAttempts, 1, "a run inside the backoff leaves it");
+});
+
+test("a rewrite that fails after storing the stripped copy deletes it before another ingest can name it", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "sec-blob-rewrite-rollback-race");
+  const db = await connectedPool(t, databaseUrl, { max: 10 });
+  const store = new MemoryObjectStore();
+  const sourceId = await secSource(db);
+  const bytes = withGraphic("0009999999-25-000030");
+  await seedVerbatim(db, store, sourceId, "8-K", bytes);
+  const stripped = stripUuencodedBodies(bytes)!;
+  const strippedId = rawBlobIdFromBytes(stripped);
+  // The rewrite's update fails, after its put and while it holds the lock.
+  await db.query(`create function fail_update() returns trigger language plpgsql as $$ begin raise exception 'update fails'; end $$`);
+  await db.query(`create trigger fail_update before update on documents for each row execute function fail_update()`);
+  let other: Promise<{ raw_blob_id: string }> | undefined;
+  const racing: ObjectStore = {
+    put: async (put) => {
+      const result = await store.put(put);
+      if (result.blob.raw_blob_id === strippedId && other === undefined) {
+        // An ingest of the same bytes queues behind the rewrite's lock.
+        other = ingestDocument({ db, objectStore: racing }, {
+          source: { source_id: sourceId, license_class: "public" },
+          bytes: stripped,
+          document: { kind: "filing", title: "8-K" },
+        });
+        await waitForAdvisoryLockWaiter(db);
+      }
+      return result;
+    },
+    get: (id) => store.get(id),
+    has: (id) => store.has(id),
+    delete: async (id) => {
+      await Promise.race([other, delay(500)]);
+      return store.delete(id);
+    },
+  };
+
+  const report = await rewriteFilingBlobs({ db, objectStore: racing }, { dryRun: false });
+  assert.equal(report.forms["8-K"]?.failed, 1);
+  const named = await other!;
+  assert.equal(named.raw_blob_id, strippedId);
+  assert.equal(await store.has(strippedId), true, "the ingest's document names stored bytes");
+});
+
+test("a queued blob the first drain found still named is deleted in the same run once the rewrite frees it", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "sec-blob-rewrite-requeue");
+  const db = await connectedPool(t, databaseUrl, { max: 10 });
+  const store = new MemoryObjectStore();
+  const seeded = await seedVerbatim(db, store, await secSource(db), "8-K", withGraphic("0009999999-25-000040"));
+  // Queued by an earlier run that crashed before it moved the document.
+  await db.query(`insert into object_blob_gc_queue (raw_blob_id, reason) values ($1, 'blob_rewrite')`, [seeded.id]);
+
+  const run = await rewriteFilingBlobs({ db, objectStore: store }, { dryRun: false });
+  assert.equal(run.forms["8-K"]?.stripped, 1);
+  assert.equal(run.blobs_deleted, 1);
+  assert.equal(await store.has(seeded.id), false);
 });

@@ -78,3 +78,19 @@ test("a body is removed only when it is real uuencode filling a document's whole
   assert.equal(decode(stripped), [HEADER, document("GRAPHIC", 2, "logo.jpg", "").replace("<TEXT>\n\n</TEXT>", "<TEXT>\n</TEXT>"), ...kept, "</SEC-DOCUMENT>\n"].join("\n"));
   assert.equal(stripUuencodedBodies(encoder.encode([HEADER, ...kept, "</SEC-DOCUMENT>\n"].join("\n"))), null);
 });
+
+test("text that only looks like uuencode, or a body with a stray line, is kept", () => {
+  const [begin, first, ...rest] = UUENCODED.split("\n");
+  const lookalikes = [
+    "begin 644 notice.txt\nTHE BOARD DECLARED A DIVIDEND OF $0.25 PER SHARE.\nPAYABLE MARCH 1, 2026.\n\nend",
+    "begin 644 notice.htm\n<P>NOTICE TO HOLDERS</P>\n\nend",
+    "begin 644 call.txt\nMANAGEMENT WILL HOST A CALL AT 5 PM.\n\nend",
+    "begin 644 list.txt\nLIST OF SUBSIDIARIES AND JURISDICTIONS OF INCORPORATION\nACME HOLDINGS (DELAWARE)\n\nend",
+    [begin, first, "\r", ...rest].join("\n"),
+    [begin, first, "", ...rest].join("\n"),
+    [begin, `${first}`.replace(/^M/, "L"), ...rest].join("\n"),
+  ];
+  const kept = lookalikes.map((body, i) => document("EX-99.1", i + 2, `x${i}.txt`, body));
+  const original = [HEADER, ...kept, "</SEC-DOCUMENT>\n"].join("\n");
+  assert.equal(stripUuencodedBodies(encoder.encode(original)), null);
+});
