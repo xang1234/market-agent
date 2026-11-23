@@ -396,7 +396,10 @@ create table documents (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   -- A 10-K's read state per item (migration 0084).
-  read_state jsonb check (read_state is null or jsonb_typeof(read_state) = 'object')
+  read_state jsonb check (read_state is null or jsonb_typeof(read_state) = 'object'),
+  -- How the stored blob was made from the bytes sent, null when it is them
+  -- (migration 0088). content_hash names the bytes sent, raw_blob_id the stored.
+  raw_blob_transform text check (raw_blob_transform in ('sec_uuencoded_bodies_removed.v1'))
 );
 create unique index documents_content_hash_idx on documents(content_hash, raw_blob_id);
 create index documents_source_idx on documents(source_id);
@@ -450,7 +453,7 @@ create index ir_document_assets_source_idx
 
 create table object_blob_gc_queue (
   raw_blob_id text primary key check (raw_blob_id ~ '^sha256:[0-9a-f]{64}$'),
-  reason text not null check (reason in ('user_erasure')),
+  reason text not null check (reason in ('user_erasure', 'blob_rewrite')),
   source_user_id uuid references users(user_id) on delete set null,
   queued_at timestamptz not null default now(),
   next_attempt_at timestamptz not null default now(),

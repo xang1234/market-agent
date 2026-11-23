@@ -13,6 +13,7 @@ import {
 } from "./transaction.ts";
 import type { QueryExecutor } from "./types.ts";
 import { withPoolClient } from "../../shared/src/pool-client.ts";
+import { SEC_UUENCODED_BODIES_REMOVED, stripUuencodedBodies } from "./sec-submission-strip.ts";
 
 export type IngestDocumentDeps = {
   db: QueryExecutor;
@@ -106,10 +107,14 @@ export async function ingestDocumentInTransaction(
     });
   }
 
-  const raw_blob_id = rawBlobIdFromBytes(input.bytes);
+  // A filing's uuencoded attachments are not stored (#757); content_hash still
+  // names the bytes as sent.
+  const stripped = input.document.kind === "filing" ? stripUuencodedBodies(input.bytes) : null;
+  const storedBytes = stripped ?? input.bytes;
+  const raw_blob_id = rawBlobIdFromBytes(storedBytes);
   await db.query("select pg_advisory_xact_lock(hashtext($1))", [raw_blob_id]);
   await lockSourceForBlobIngest(db, input.source.source_id);
-  const putResult = await deps.objectStore.put(input.bytes);
+  const putResult = await deps.objectStore.put(storedBytes);
   const storedRawBlobId = putResult.blob.raw_blob_id;
   let unregisterRollbackCleanup = () => {};
   if (putResult.status === "created") {
@@ -126,6 +131,7 @@ export async function ingestDocumentInTransaction(
       source_id: input.source.source_id,
       content_hash,
       raw_blob_id,
+      raw_blob_transform: stripped === null ? null : SEC_UUENCODED_BODIES_REMOVED,
     });
     return Object.freeze({
       status: "blob_stored" as const,
