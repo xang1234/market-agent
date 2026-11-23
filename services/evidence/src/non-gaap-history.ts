@@ -77,6 +77,10 @@ const CATEGORIES: ReadonlyArray<readonly [key: string, label: string, pattern: R
   ["investment_gains_losses", "gains and losses on investments", /\binvestments?\b|\bequity securities\b/i],
 ];
 
+// A total of the adjustments, as NVIDIA prints "Total impact of non-GAAP
+// adjustments to operating income" in place of its lines: an add-back, but of no one kind.
+const ROLLUP = /^total\b.*\bnon[\s\u00a0-]*gaap\s+adjustments\b/i;
+
 // How a line is stated, so "stock-based compensation, net of tax" is that add-back, no tax effect.
 const TAX_BASIS = /\bnet\s+of\s+(?:income\s+)?tax(?:es)?\b|\b(?:after|pre)[\s-]?tax\b/gi;
 
@@ -156,7 +160,7 @@ function quarterOf(release: StoredRelease): Omit<NonGaapQuarter, "superseded"> {
       : null,
     sbc: sbcOf(release, net),
     categories: [...new Set(release.reconciliations.flatMap((reconciliation) => reconciliation.adjustments)
-      .filter((line) => line.value_num !== 0)
+      .filter((line) => line.value_num !== 0 && !ROLLUP.test(line.label))
       .map((line) => addBackCategory(line.label).key))],
     reconciled: release.reconciliations.length > 0,
   };

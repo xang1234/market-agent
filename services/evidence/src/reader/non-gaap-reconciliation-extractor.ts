@@ -77,6 +77,7 @@ type GaapAnchor = {
 const NON_GAAP_PATTERN = /\bnon(?:[\s\u00a0]|[-\u2010-\u2015])*gaap\b/i;
 const GAAP_PATTERN = /\bgaap\b/i;
 const BARE_YEAR = /^(?:19|20)\d{2}$/;
+const YEAR = /\b(?:19|20)\d{2}\b/;
 const DASH = /^[\u2012-\u2015-]+$/;
 // A margin is a ratio of the reconciled figures, unless printed in dollars.
 const MARGIN_PATTERN = /\bmargins?\b/i;
@@ -84,7 +85,7 @@ const MEASURES = new Set(["eps_basic", "eps_diluted", "operating_income", "net_i
 const ROW = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
 // Inline XBRL closes an empty cell in its tag: <td colspan="3"/>.
 const CELL = /<t[dh]\b([^>]*?)(?:\/>|>([\s\S]*?)<\/t[dh]>)/gi;
-const SCALE = /\bin\s+(thousands|millions|billions)\b/i;
+const SCALE = /(?:\bin\s+|^\s*)(thousands|millions|billions)\b/i;
 
 export function extractNonGaapReconciliations(
   input: ExtractNonGaapReconciliationsInput,
@@ -99,6 +100,9 @@ export function extractNonGaapReconciliations(
 
     const periods = table.periods.map((period) => period.join(" "));
     const anchors = new Map<number, GaapAnchor>();
+    // Each measure a GAAP row opened, which its non-GAAP row closes even
+    // when a later GAAP row took its slot, as NVIDIA's cost of revenue.
+    const opened = new Set<string>();
     // The last row with a label and no figures, which names the measure of a
     // row labelled "GAAP" or "Non-GAAP" alone.
     let section = "";
@@ -115,7 +119,9 @@ export function extractNonGaapReconciliations(
       if (isGaapLabel(label)) {
         for (const [slot, value] of amounts) {
           const measure_key = measureAt(slot, section);
-          if (measure_key !== null) anchors.set(slot, { label, value, measure_key, adjustments: [], section });
+          if (measure_key === null) continue;
+          anchors.set(slot, { label, value, measure_key, adjustments: [], section });
+          opened.add(measure_key);
         }
         continue;
       }
@@ -123,11 +129,14 @@ export function extractNonGaapReconciliations(
       for (const [slot, value] of amounts) {
         const anchor = anchors.get(slot);
         if (!anchor) continue;
-        if (!NON_GAAP_PATTERN.test(label) || measureAt(slot, anchor.section) !== anchor.measure_key) {
-          // A total restates the lines above it, and one with none above is
-          // the add-back itself. A non-GAAP row that closes nothing, such as
-          // the tax impact of the adjustments, is a line.
-          if (!/^total\b/i.test(label) || anchor.adjustments.length === 0) anchor.adjustments.push(Object.freeze({ label, value_num: value.value_num }));
+        const measure = measureAt(slot, anchor.section);
+        if (!NON_GAAP_PATTERN.test(label) || measure !== anchor.measure_key) {
+          // A total that restates lines above it is no line. A non-GAAP row
+          // that closes nothing, such as the tax impact of the adjustments, is one.
+          const closesOther = NON_GAAP_PATTERN.test(label) && measure !== null && opened.has(measure);
+          if (!closesOther && !(/^total\b/i.test(label) && restates(value.value_num, anchor.adjustments))) {
+            anchor.adjustments.push(Object.freeze({ label, value_num: value.value_num }));
+          }
           continue;
         }
         const item: NonGaapReconciliationItem = {
@@ -157,12 +166,15 @@ export function extractNonGaapReconciliations(
 export function readTables(html: string): ReadonlyArray<ParsedTable> {
   const tables: ParsedTable[] = [];
   let after = 0;
+  let scale: TableScale | undefined;
   for (const match of html.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)) {
-    // A statement's "(In millions ...)" can sit above its table.
+    // A statement's "(In millions ...)" can sit above its table, and a table
+    // straight after another continues its statement.
     const above = textContent(html.slice(after, match.index));
     after = match.index! + match[0].length;
-    const table = tableOf(gridOf(match[1] ?? ""), above);
+    const table = tableOf(gridOf(match[1] ?? ""), above, above === "" ? scale : undefined);
     if (table) tables.push(table);
+    scale = table?.scale;
   }
   return Object.freeze(tables);
 }
@@ -201,15 +213,21 @@ function spanOf(attributes: string, name: "colspan" | "rowspan"): number {
   return Math.max(1, Number(new RegExp(`\\b${name}\\s*=\\s*["']?(\\d+)`, "i").exec(attributes)?.[1] ?? 1));
 }
 
-// The header is the rows above the first with text before a figure that is
-// no bare year. ponytail: a header partway down a table is not read; the periods above apply.
-function tableOf(grid: ReadonlyArray<ReadonlyArray<GridCell>>, above: string): ParsedTable | null {
+// The header is the rows above the first with text before a figure. A bare
+// year is a figure there only under a header cell that already names a year,
+// as "GAAP net income | 2000" under "Q3 2025". ponytail: a header partway
+// down a table is not read; the periods above apply.
+function tableOf(grid: ReadonlyArray<ReadonlyArray<GridCell>>, above: string, continued: TableScale | undefined): ParsedTable | null {
   const cells = grid.filter((row) => row.length > 0);
   if (cells.length === 0) return null;
   const figures = cells.map(figuresOf);
   const isText = (cell: GridCell) => cell.text !== "" && parseValue(cell.text) === null;
-  const found = cells.findIndex((row, index) =>
-    figures[index]!.some((figure) => !figure.year && row.some((cell) => cell.column < figure.first && isText(cell))));
+  const dated = (index: number, figure: Figure, label: GridCell) => cells.slice(0, index).some((row) => row.some((cell) =>
+    YEAR.test(cell.text) && cell.column >= label.column + label.span && cell.column <= figure.last && cell.column + cell.span > figure.first));
+  const found = cells.findIndex((row, index) => figures[index]!.some((figure) => {
+    const label = row.find((cell) => cell.column < figure.first && isText(cell));
+    return label !== undefined && (!figure.year || dated(index, figure, label));
+  }));
   const start = found === -1 ? cells.length : found;
 
   const { slots, slotOf } = slotsOf(figures.slice(start));
@@ -234,7 +252,7 @@ function tableOf(grid: ReadonlyArray<ReadonlyArray<GridCell>>, above: string): P
     }),
   })]);
   const text = cells.flat().map((cell) => cell.text).join(" ");
-  const scale = scalesIn(text)[0] ?? scalesIn(above).at(-1);
+  const scale = scalesIn(text)[0] ?? scalesIn(above).at(-1) ?? continued;
   return Object.freeze({ rows: Object.freeze(rows), periods: Object.freeze(periods), text, ...(scale ? { scale } : {}) });
 }
 
@@ -266,10 +284,11 @@ function slotsOf(rows: ReadonlyArray<ReadonlyArray<Figure>>): { slots: Array<[fi
   };
 }
 
-// The scale each note names: its first, as "(In millions, except number of
-// shares, which are reflected in thousands)" is in millions.
+// The scale each note names, past its exceptions, as "(In millions, except
+// number of shares, which are reflected in thousands)" and "Amounts in
+// millions, except shares (in thousands)" are in millions.
 function scalesIn(text: string): TableScale[] {
-  return text.split(/[()]|\.\s/).flatMap((note) => {
+  return text.replace(/\bexcept\b(?:[^().]|\([^()]*\))*/gi, "").split(/[()]|\.\s/).flatMap((note) => {
     const scale = SCALE.exec(note)?.[1];
     return scale ? [scale.toLowerCase() as TableScale] : [];
   });
@@ -291,6 +310,15 @@ function figuresOf(row: ReadonlyArray<GridCell>): Figure[] {
       : dollar && parsed.currency === undefined ? { ...parsed, unit: "currency", currency: "USD" } : parsed;
     return [{ first: dollar?.column ?? cell.column, last: cell.column + cell.span - 1, value, year: BARE_YEAR.test(cell.text) }];
   });
+}
+
+// Whether a total sums a run of the lines just above it, to the rounding of
+// its printed figures: half a unit of the last decimal each.
+function restates(total: number, lines: ReadonlyArray<NonGaapAdjustment>): boolean {
+  const decimals = (value: number) => String(value).split(".")[1]?.length ?? 0;
+  const unit = 10 ** -Math.max(decimals(total), ...lines.map((line) => decimals(line.value_num)));
+  let sum = 0;
+  return [...lines].reverse().some((line, index) => Math.abs((sum += line.value_num) - total) <= ((index + 2) * unit) / 2);
 }
 
 function isGaapLabel(label: string): boolean {
@@ -374,7 +402,7 @@ function textContent(raw: string): string {
   return decodeHtml(raw.replace(/<br\b[^>]*>/gi, " ").replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
 }
 
-const NAMED_ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: "\u00a0", minus: "\u2212" };
+const NAMED_ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: "\u00a0", minus: "\u2212", mdash: "\u2014", ndash: "\u2013" };
 
 function decodeHtml(raw: string): string {
   return raw.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, name: string) => {

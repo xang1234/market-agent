@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { extractNonGaapReconciliations } from "../src/reader/non-gaap-reconciliation-extractor.ts";
+import { extractNonGaapReconciliations, readTables } from "../src/reader/non-gaap-reconciliation-extractor.ts";
 import { EX99_RELEASE_HTML } from "./fixtures/sec-8k-release.ts";
 
 const SAMPLE_SOURCE_UUID = "11111111-1111-4111-a111-111111111111";
@@ -415,4 +415,90 @@ test("a footnote row inside the table is a note, not a column of figures", () =>
   assert.deepEqual(read(table("")), expected);
   assert.deepEqual(read(table("<tr><td>(1)</td><td>Excludes stock-based compensation.</td></tr>")), expected);
   assert.deepEqual(read(table("<tr><td>1</td><td>Excludes stock-based compensation.</td></tr>")), expected);
+});
+
+test("a bare year under a column a header already dates is an amount, and heads its column only when nothing above names a year", () => {
+  const html = `<table>
+    <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th></tr>
+    <tr><td>GAAP net income</td><td>2000</td></tr>
+    <tr><td>Stock-based compensation</td><td>10</td></tr>
+    <tr><td>Non-GAAP net income</td><td>2,010</td></tr>
+  </table>
+  <table>
+    <tr><td></td><td colspan="2">Years Ended December 31,</td></tr>
+    <tr><td>(In millions)</td><td>2025</td><td>2024</td></tr>
+    <tr><td>GAAP net income</td><td>2000</td><td>1,900</td></tr>
+    <tr><td>Stock-based compensation</td><td>10</td><td>9</td></tr>
+    <tr><td>Non-GAAP net income</td><td>2,010</td><td>1,909</td></tr>
+  </table>`;
+  assert.deepEqual(lines(html), [
+    ["net_income", "Q3 2025", 2_000, 2_010, [["Stock-based compensation", 10]]],
+    ["net_income", "Years Ended December 31, 2025", 2_000, 2_010, [["Stock-based compensation", 10]]],
+    ["net_income", "Years Ended December 31, 2024", 1_900, 1_909, [["Stock-based compensation", 9]]],
+  ]);
+});
+
+test("a total is a subtotal only when it sums a run of the lines just above it, so a sole total after another line is a line", () => {
+  const html = `<table>
+    <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th></tr>
+    <tr><td>GAAP net income</td><td>$31,910</td></tr>
+    <tr><td>Income tax impact of non-GAAP adjustments</td><td>(532)</td></tr>
+    <tr><td>Total pre-tax impact of non-GAAP adjustments</td><td>389</td></tr>
+    <tr><td>Non-GAAP net income</td><td>$31,767</td></tr>
+    <tr><td>GAAP operating income</td><td>$120</td></tr>
+    <tr><td>Stock-based compensation: cost of revenue</td><td>4</td></tr>
+    <tr><td>Total cost of revenue adjustments</td><td>4</td></tr>
+    <tr><td>Stock-based compensation: research and development</td><td>6</td></tr>
+    <tr><td>Total operating expense adjustments</td><td>6</td></tr>
+    <tr><td>Total adjustments</td><td>10</td></tr>
+    <tr><td>Non-GAAP operating income</td><td>$130</td></tr>
+    <tr><td>GAAP diluted EPS</td><td>$0.75</td></tr>
+    <tr><td>Stock-based compensation</td><td>0.26</td></tr>
+    <tr><td>Amortization of intangibles</td><td>0.34</td></tr>
+    <tr><td>Income tax provision</td><td>(0.09)</td></tr>
+    <tr><td>Total adjustments</td><td>0.52</td></tr>
+    <tr><td>Non-GAAP diluted EPS</td><td>$1.27</td></tr>
+  </table>`;
+  assert.deepEqual(lines(html), [
+    ["net_income", "Q3 2025", 31_910, 31_767, [["Income tax impact of non-GAAP adjustments", -532], ["Total pre-tax impact of non-GAAP adjustments", 389]]],
+    ["operating_income", "Q3 2025", 120, 130, [["Stock-based compensation: cost of revenue", 4], ["Stock-based compensation: research and development", 6]]],
+    // 0.26 + 0.34 - 0.09 is 0.51, a cent off the printed 0.52 by rounding.
+    ["eps_diluted", "Q3 2025", 0.75, 1.27, [["Stock-based compensation", 0.26], ["Amortization of intangibles", 0.34], ["Income tax provision", -0.09]]],
+  ]);
+});
+
+test("&mdash; and &ndash; read as dashes: a row of them states no figure, and a label keeps its dash", () => {
+  const html = `<table>
+    <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th><th>Q3 2024</th></tr>
+    <tr><td>GAAP operating income</td><td>$100</td><td>$90</td></tr>
+    <tr><td>Stock-based compensation &ndash; cost of revenue</td><td>10</td><td>8</td></tr>
+    <tr><td>Restructuring charges</td><td>&mdash;</td><td>&ndash;</td></tr>
+    <tr><td>Non-GAAP operating income</td><td>$110</td><td>$98</td></tr>
+  </table>`;
+  assert.deepEqual(readTables(html)[0]!.rows.map((row) => row.label), [
+    "GAAP to non-GAAP reconciliation", "GAAP operating income", "Stock-based compensation – cost of revenue", "Non-GAAP operating income",
+  ]);
+  assert.deepEqual(lines(html)[0], ["operating_income", "Q3 2025", 100, 110, [["Stock-based compensation – cost of revenue", 10]]]);
+});
+
+test("a table's scale ignores an exception's parenthetical, and reads a bare \"(Millions)\" as AMD prints it", () => {
+  const table = `<table><tr><td></td><td>Q3 2025</td></tr><tr><td>Revenue</td><td>$100</td></tr></table>`;
+  assert.equal(readTables(`<p>Amounts in millions, except shares (in thousands)</p>${table}`)[0]!.scale, "millions");
+  assert.equal(readTables(`<p>(Millions) (Unaudited)</p>${table}`)[0]!.scale, "millions");
+  assert.equal(readTables(`<p>(Millions except per share amounts and percentages) (Unaudited)</p>${table}`)[0]!.scale, "millions");
+  assert.equal(readTables(`<p>(In thousands)</p>${table}`)[0]!.scale, "thousands");
+  // A table straight after another continues its statement, as AMD's net income table does its gross profit's.
+  assert.deepEqual(readTables(`<p>(in millions)</p>${table}\n${table}<p>Unaudited</p>${table}`).map((read) => read.scale), ["millions", "millions", undefined]);
+});
+
+test("NVIDIA's real reconciliation: the non-GAAP cost of revenue closes its own GAAP row, no add-back to gross profit", () => {
+  const html = readFileSync(new URL("./fixtures/sec-8k-nvda-reconciliation.htm", import.meta.url), "utf8");
+  const quarter = lines(html).filter(([, period]) => period === "Three Months Ended October 26, 2025");
+  assert.deepEqual(quarter, [
+    ["gross_profit", "Three Months Ended October 26, 2025", 41_849, 41_967, [["Acquisition-related and other costs (A)", 48], ["Stock-based compensation expense (B)", 70]]],
+    ["operating_expenses", "Three Months Ended October 26, 2025", 5_839, 4_215, [["Stock-based compensation expense (B)", -1_585], ["Acquisition-related and other costs (A)", -39]]],
+    ["operating_income", "Three Months Ended October 26, 2025", 36_010, 37_752, [["Total impact of non-GAAP adjustments to operating income", 1_742]]],
+    ["other_income_net", "Three Months Ended October 26, 2025", 1_926, 573, [["Gains from non-marketable equity securities and publicly-held equity securities, net", -1_354], ["Interest expense related to amortization of debt discount", 1]]],
+    ["net_income", "Three Months Ended October 26, 2025", 31_910, 31_767, [["Total pre-tax impact of non-GAAP adjustments", 389], ["Income tax impact of non-GAAP adjustments (C)", -532]]],
+  ]);
 });

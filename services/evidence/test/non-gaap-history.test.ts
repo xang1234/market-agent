@@ -135,6 +135,18 @@ test("an add-back's category comes from its label, else the label is its own", (
   assert.equal(addBackCategory("Provision for income taxes").key, "income_tax_effect");
 });
 
+test("a total of the non-GAAP adjustments is no category, as NVIDIA's real release rolls them up", () => {
+  const html = readFileSync(new URL("./fixtures/sec-8k-nvda-reconciliation.htm", import.meta.url), "utf8");
+  const read = releaseReconciliations(submissionOf(html), "2025-11-19");
+  assert.equal(read.quarter_end, "2025-10-26");
+  const [quarter] = nonGaapHistory([{ document_id: "d", source_id: "s", accession: null, form: "8-K", filed_on: "2025-11-19", ...read }]).quarters;
+  // The rollups stay their reconciliations' add-backs, each the only line it is printed as.
+  assert.deepEqual(read.reconciliations.find((line) => line.measure_key === "operating_income")!.adjustments, [{ label: "Total impact of non-GAAP adjustments to operating income", value_num: 1_742 }]);
+  assert.deepEqual(quarter!.categories.filter((key) => key.startsWith("other:")), []);
+  assert.ok(["acquisition_related", "stock_based_compensation", "investment_gains_losses", "income_tax_effect"].every((key) => quarter!.categories.includes(key)));
+  assert.deepEqual(quarter!.sbc, { value: 1_655, basis: "gross_profit_and_operating_expenses", scale: "millions", non_gaap_net_income: 31_767, share_pct: 5.2 });
+});
+
 test("an SBC reversal nets against its charge, in either sign convention", () => {
   // Net income 100 to 108: SBC 10 less a 2 reversal is 8, 4% of non-GAAP net income 200.
   const charge = release("2025-04-30", 1, [["Stock-based compensation", 10], ["Reversal of stock-based compensation", -2]]);
