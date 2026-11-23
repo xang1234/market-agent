@@ -29,7 +29,7 @@ if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   . "$ENV_FILE"
   set +a
-elif [[ "${1:-}" != "ten-k-sections" && "${1:-}" != "suite" ]]; then
+elif [[ "${1:-}" != "ten-k-sections" && "${1:-}" != "suite" && "${1:-}" != "blob-strip" ]]; then
   echo "no $ENV_FILE: run init-env first" >&2
   exit 2
 fi
@@ -419,6 +419,8 @@ case "${1:-}" in
   resolve) shift; cmd_resolve "$@" ;;
   identity) shift; cmd_identity "$@" ;;
   ten-k-sections) shift; cmd_ten_k_sections "$@" ;;
+  rewrite-blobs) shift; cd "$ROOT/services/evidence" && PATH="$NODE_APP:$PATH" caffeinate -ims node --experimental-strip-types --no-warnings src/sec-blob-rewrite-cli.ts "$@" ;;
+  blob-strip) shift; PATH="$NODE_APP:$PATH" caffeinate -ims node --experimental-strip-types --no-warnings --max-old-space-size=8192 "$HERE/blob-strip.ts" "$@" ;;
   import) shift; cmd_import "$@" ;;
   fill-ciks) cmd_fill_ciks ;;
   splits) shift; cmd_splits "$@" ;;
@@ -433,5 +435,5 @@ case "${1:-}" in
   scroll) shift; cmd_scroll "$@" ;;
   scorecard) shift; cmd_scorecard "$@" ;;
   suite) shift; cmd_suite "$@" ;;
-  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|ten-k-sections [save|diff NAME]|import [--force]|fill-ciks|splits [--repair]|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|analyze-layout [TICKER]|page-layout [TICKER]|agents [TICKER] [--stored] [--conditions=FILE]|lease-race [run-now|scheduled] [--thesis]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
+  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|ten-k-sections [save|diff NAME]|blob-strip files PATH...|seed PATH...|readers save|diff NAME|reingest PATH...|upload PATH...|rewrite-blobs [--dry-run] [--after ID]|import [--force]|fill-ciks|splits [--repair]|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|analyze-layout [TICKER]|page-layout [TICKER]|agents [TICKER] [--stored] [--conditions=FILE]|lease-race [run-now|scheduled] [--thesis]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
 esac

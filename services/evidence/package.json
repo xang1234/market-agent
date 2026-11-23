@@ -19,6 +19,7 @@
     "audit:claim-periods": "node --experimental-strip-types src/claim-period-audit-cli.ts",
     "reprocess:sec-13f": "node --experimental-strip-types src/sec-13f-reprocess-cli.ts",
     "crawl:sec-daily": "node --experimental-strip-types src/sec-daily-crawl-cli.ts",
+    "rewrite:sec-blobs": "node --experimental-strip-types src/sec-blob-rewrite-cli.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

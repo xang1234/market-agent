@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { handle8k } from "../src/sec-8k-handler.ts";
-import { MemoryObjectStore } from "../src/object-store.ts";
+import { MemoryObjectStore, rawBlobIdFromBytes } from "../src/object-store.ts";
+import { JPEG_BYTES, uuencode } from "./fixtures/uuencode.ts";
 import type { FilingIndexEntry } from "../src/sec-daily-index.ts";
 import type { FormHandlerDeps } from "../src/sec-daily-crawl.ts";
 import type { QueryExecutor } from "../src/types.ts";
@@ -137,4 +138,40 @@ CONFORMED SUBMISSION TYPE:	8-K
   assert.equal(result.ingested, false);
   const docs = await client.query(`select count(*)::int as n from documents`);
   assert.equal(docs.rows[0]!.n, 0, "no orphan document — the filing can be reprocessed later");
+});
+
+test("handle8k stores the submission without its uuencoded bodies, under SEC's content hash (#757)", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "form8k-strip");
+  const client = await connectedClient(t, databaseUrl);
+  await client.query(`insert into issuers (legal_name, cik) values ('Apple Inc.', '0000320193')`);
+  const body = `${uuencode("logo.jpg", JPEG_BYTES)}\n`;
+  const withGraphic = FIXTURE_TXT.replace(
+    "</SEC-DOCUMENT>",
+    `<DOCUMENT>\n<TYPE>GRAPHIC\n<SEQUENCE>2\n<FILENAME>logo.jpg\n<TEXT>\n${body}</TEXT>\n</DOCUMENT>\n</SEC-DOCUMENT>`,
+  );
+  const stripped = withGraphic.replace(body, "");
+  const objectStore = new MemoryObjectStore();
+  const deps = { db: client as unknown as QueryExecutor, objectStore, client: fakeClient(withGraphic) } as unknown as FormHandlerDeps;
+  assert.equal((await handle8k(entry(), deps)).ingested, true);
+
+  const { rows: [document] } = await client.query<{ content_hash: string; raw_blob_id: string; raw_blob_transform: string | null }>(
+    `select content_hash, raw_blob_id, raw_blob_transform from documents`,
+  );
+  assert.deepEqual(document, {
+    content_hash: rawBlobIdFromBytes(new TextEncoder().encode(withGraphic)),
+    raw_blob_id: rawBlobIdFromBytes(new TextEncoder().encode(stripped)),
+    raw_blob_transform: "sec_uuencoded_bodies_removed.v1",
+  });
+  assert.equal(new TextDecoder().decode((await objectStore.get(document!.raw_blob_id))!.bytes), stripped);
+  assert.equal(await objectStore.has(document!.content_hash), false, "SEC's bytes are not stored");
+
+  // A submission with nothing to strip is stored as SEC sent it.
+  await client.query(`delete from documents`);
+  assert.equal((await handle8k(entry(), { ...deps, client: fakeClient() } as unknown as FormHandlerDeps)).ingested, true);
+  const { rows: [verbatim] } = await client.query(`select content_hash = raw_blob_id as same, raw_blob_transform from documents`);
+  assert.deepEqual(verbatim, { same: true, raw_blob_transform: null });
 });

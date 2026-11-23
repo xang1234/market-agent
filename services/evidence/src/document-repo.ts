@@ -1,4 +1,5 @@
 import { assertRawBlobIdOrEphemeral } from "./object-store.ts";
+import type { SEC_UUENCODED_BODIES_REMOVED } from "./sec-submission-strip.ts";
 import type { QueryExecutor } from "./types.ts";
 import {
   assertIso8601WithOffset,
@@ -41,6 +42,8 @@ export type DocumentInput = {
   lang?: string | null;
   content_hash: string;
   raw_blob_id: string;
+  // How the stored blob was made from the bytes content_hash names; absent when it is them.
+  raw_blob_transform?: typeof SEC_UUENCODED_BODIES_REMOVED | null;
   parse_status?: ParseStatus;
 };
 
@@ -114,8 +117,9 @@ export async function createDocument(
         lang,
         content_hash,
         raw_blob_id,
-        parse_status)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        parse_status,
+        raw_blob_transform)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      on conflict (content_hash, raw_blob_id) do update
        set content_hash = excluded.content_hash
      returning (xmax = 0) as inserted, ${DOCUMENT_COLUMNS}`,
@@ -132,6 +136,7 @@ export async function createDocument(
       normalized.content_hash,
       normalized.raw_blob_id,
       normalized.parse_status,
+      normalized.raw_blob_transform,
     ],
   );
 
@@ -315,6 +320,7 @@ function normalizeDocumentInput(input: DocumentInput): Required<DocumentInput> {
     lang: input.lang ?? null,
     content_hash: input.content_hash,
     raw_blob_id: input.raw_blob_id,
+    raw_blob_transform: input.raw_blob_transform ?? null,
     parse_status: parseStatus,
   };
 }

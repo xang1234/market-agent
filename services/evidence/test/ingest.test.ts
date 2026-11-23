@@ -24,6 +24,10 @@ function recordingDb() {
   const db: QueryExecutor = {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
+      // The rolled-back blob's cleanup finds no document naming it.
+      if (/from documents where raw_blob_id/i.test(text)) {
+        return { rows: fakeRows<R>([]), command: "SELECT", rowCount: 0, oid: 0, fields: [] };
+      }
       if (/from sources/i.test(text) && /for key share/i.test(text)) {
         return {
           rows: fakeRows<R>([{ source_id: values?.[0] }]),
@@ -288,7 +292,9 @@ test("ingestDocument deletes a newly-created blob when document creation fails",
   assert.equal(objectStore.deleteCalls, 1);
   assert.deepEqual(objectStore.deletedRawBlobIds, [TWEET_HASH]);
   assert.equal(await objectStore.has(TWEET_HASH), false);
-  assert.match(queries.at(-1)?.text ?? "", /^rollback$/i);
+  const texts = queries.map((query) => query.text);
+  const rollback = texts.findIndex((text) => /^rollback$/i.test(text));
+  assert.ok(rollback >= 0 && texts.slice(rollback).some((text) => /pg_advisory_xact_lock/.test(text)), "deleted under the blob's lock after the rollback");
 });
 
 test("ingestDocument does not delete a pre-existing blob when document creation fails", async () => {
@@ -348,7 +354,9 @@ test("ingestDocument deletes the actual created blob id when object store return
   assert.equal(objectStore.putCalls, 1);
   assert.equal(objectStore.deleteCalls, 1);
   assert.deepEqual(objectStore.deletedRawBlobIds, [mismatchedRawBlobId]);
-  assert.match(queries.at(-1)?.text ?? "", /^rollback$/i);
+  const texts = queries.map((query) => query.text);
+  const rollback = texts.findIndex((text) => /^rollback$/i.test(text));
+  assert.ok(rollback >= 0 && texts.slice(rollback).some((text) => /pg_advisory_xact_lock/.test(text)), "deleted under the blob's lock after the rollback");
 });
 
 test("ingestDocument does not delete a new blob when commit outcome is uncertain", async () => {

@@ -42,6 +42,8 @@ export type ObjectBlobGcBatchOptions = Readonly<{
   limit?: number;
   referencedRetryAfterMs?: number;
   failureRetryAfterMs?: number;
+  // Queued blobs this batch leaves alone, such as ones a caller already tried.
+  skipRawBlobIds?: readonly string[];
 }>;
 
 export type ObjectBlobGcWorker = Readonly<{
@@ -221,10 +223,11 @@ export async function runObjectBlobGcBatch(
          from object_blob_gc_queue
         where deleted_at is null
           and next_attempt_at <= now()
+          and not (raw_blob_id = any($2::text[]))
         order by next_attempt_at, queued_at, raw_blob_id
         limit $1
         for update skip locked`,
-      [limit],
+      [limit, options.skipRawBlobIds ?? []],
     );
 
     for (const row of pending.rows) {
