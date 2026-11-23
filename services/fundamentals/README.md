@@ -114,29 +114,31 @@ npm test         # contract + AAPL FY2024 income statement verification
   `productive_assets_capex` inference in its `quality_flags` that the
   inspectors and the Call's free cash flow basis show. The engine never
   compares it with PP&E capex, and an answer labels it as a measure of its
-  own. A later filing's PP&E line for its period, or for a derived
-  quarter's input, is the same figure when equal within rounding, and
-  otherwise an unverified restatement. Operating cash
+  own. A later filing's PP&E line for a derived quarter's input is the same
+  figure when equal within rounding, and otherwise an unverified
+  restatement. Its PP&E line for the period itself changes the scope, as
+  below. Operating cash
   flow is certified from the total
   `NetCashProvidedByUsedInOperatingActivities`, the scope capex covers, or
   from `NetCashProvidedByUsedInOperatingActivitiesContinuingOperations` for a
   filing that tags only that (#743). That line excludes discontinued
   operations, so its fact carries a `continuing_operations_ocf` inference that
-  is read the same way as the capex one, later filings included, with one
-  exception (#752). A later filing that states the period only as the total
-  at an equal figure, within the coarser rounding, restates it in that scope.
-  A filing that states the total too keeps it there, and only one that states
-  it for continuing operations alone restates it back. Each such restatement
-  stores the figure that stands, with the proof and locator of the filing that
-  states it, so no number changes. Filings on one date, the original
-  included, that state the period in different scopes or figures leave it
-  unverified, since their order is unknown. Ingest does this in
-  `recordSecRestatements` and `opposedDates`
-  (`src/sec-facts-repository.ts`). as_restated growth from a
-  restated-as-total year to a total year computes, and the FCF backtest
-  counts such a window only when every restatement of the start public by its
-  end states it as that equal total (`growth` and `laterStatements` in
-  `src/fcf-backtest.ts`). A
+  is read the same way as the capex one, later filings included. For either
+  scoped concept (#752 for OCF, #758 for capex), a later filing that states
+  the period only in the reviewed concept, the total or PP&E, at an equal
+  figure, within the coarser rounding, restates it in that scope. A filing
+  that states the reviewed concept too keeps it there, and only one that
+  states it in the scoped concept alone restates it back. Each such
+  restatement stores the figure that stands, with the proof and locator of
+  the filing that states it, so no number changes. A later figure that
+  differs, or filings on one date, the original included, that state the
+  period in different scopes or figures, leave it unverified, since their
+  order is unknown. Ingest does this in `recordSecRestatements` and
+  `opposedDates` (`src/sec-facts-repository.ts`). as_restated growth from a
+  year restated this way to a year in the reviewed concept computes, and the
+  FCF backtest counts such a window only when every restatement of the start
+  public by its end states it as that equal figure without the scope
+  (`growth` and `laterStatements` in `src/fcf-backtest.ts`). A
   discontinuation changes which businesses that line covers under the same
   concept, so a quarter derived from another filing's year to date stays
   uncertified. Net income is
