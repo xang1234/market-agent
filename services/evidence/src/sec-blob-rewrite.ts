@@ -13,7 +13,7 @@
 // Idempotent and resumable: a rewritten document leaves the candidate set, so
 // a rerun reads only what is left, and drains deletions a crash left queued.
 import { runObjectBlobGcBatchWithPool, type ObjectBlobGcClientPool } from "./blob-gc-repo.ts";
-import { deleteCreatedBlobBestEffort } from "./ingest.ts";
+import { deleteBlobIfUnnamed } from "./ingest.ts";
 import { rawBlobIdFromBytes, type ObjectStore } from "./object-store.ts";
 import { SEC_UUENCODED_BODIES_REMOVED, stripUuencodedBodies } from "./sec-submission-strip.ts";
 import { withTransaction } from "./transaction.ts";
@@ -65,7 +65,9 @@ export async function rewriteFilingBlobs(
       const tally = (report.forms[candidate.form] ??= { documents: 0, stripped: 0, cited: 0, verbatim: 0, missing: 0, raced: 0, failed: 0, bytes_before: 0, bytes_after: 0 });
       tally.documents += 1;
       try {
-        const { outcome, before, after } = await rewriteOne(deps, candidate, opts.dryRun);
+        const { outcome, before, after, queued } = await rewriteOne(deps, candidate, opts.dryRun);
+        // Queued just now, so the next drain tries it even if an earlier one did.
+        if (queued !== undefined) tried.delete(queued);
         tally[outcome] += 1;
         tally.bytes_before += before;
         tally.bytes_after += after;
@@ -85,7 +87,7 @@ async function rewriteOne(
   deps: { db: QueryExecutor; objectStore: ObjectStore },
   candidate: Candidate,
   dryRun: boolean,
-): Promise<{ outcome: BlobRewriteOutcome; before: number; after: number }> {
+): Promise<{ outcome: BlobRewriteOutcome; before: number; after: number; queued?: string }> {
   const blob = await deps.objectStore.get(candidate.raw_blob_id);
   if (blob === null) return { outcome: "missing", before: 0, after: 0 };
   const before = blob.bytes.length;
@@ -101,28 +103,34 @@ async function rewriteOne(
     // copy between this put and the update that names it.
     await tx.db.query("select pg_advisory_xact_lock(hashtext($1))", [strippedId]);
     const put = await deps.objectStore.put(stripped);
-    if (put.status === "created") tx.onRollback((error) => deleteCreatedBlobBestEffort(deps.objectStore, strippedId, error));
-    if (put.blob.raw_blob_id !== strippedId) throw new Error("object store returned a blob id that does not match the stripped bytes");
-    const update = await tx.db.query(
-      `update documents d
-          set raw_blob_id = $3, raw_blob_transform = $4, updated_at = now()
-        where d.document_id = $1::uuid and d.raw_blob_id = $2 and d.raw_blob_transform is null
-          and not ${CITED_BY_OFFSET}
-          and not exists (select 1 from documents o where o.content_hash = d.content_hash and o.raw_blob_id = $3)`,
-      [candidate.document_id, candidate.raw_blob_id, strippedId, SEC_UUENCODED_BODIES_REMOVED],
-    );
-    const moved = update.rowCount === 1;
-    // The blob no document now names: SEC's bytes, or the stripped copy when
-    // the document changed under this run. Deleted only once unreferenced.
-    await tx.db.query(
-      `insert into object_blob_gc_queue (raw_blob_id, reason) values ($1, 'blob_rewrite')
-       on conflict (raw_blob_id) do update
-             set next_attempt_at = now(), deleted_at = null, last_checked_at = null, last_error = null, updated_at = now()`,
-      [moved ? candidate.raw_blob_id : strippedId],
-    );
-    return moved;
+    if (put.status === "created") tx.onRollback((error) => deleteBlobIfUnnamed(tx.db, deps.objectStore, put.blob.raw_blob_id, error));
+    return moveToStripped(tx.db, candidate, strippedId, put.blob.raw_blob_id);
   });
-  return moved ? { outcome: "stripped", before, after: stripped.length } : { outcome: "raced", before, after: before };
+  return moved
+    ? { outcome: "stripped", before, after: stripped.length, queued: candidate.raw_blob_id }
+    : { outcome: "raced", before, after: before, queued: strippedId };
+}
+
+// Names the stripped copy and queues the blob no document now names: SEC's
+// bytes, or the stripped copy when the document changed under this run.
+async function moveToStripped(db: QueryExecutor, candidate: Candidate, strippedId: string, storedId: string): Promise<boolean> {
+  if (storedId !== strippedId) throw new Error("object store returned a blob id that does not match the stripped bytes");
+  const update = await db.query(
+    `update documents d
+        set raw_blob_id = $3, raw_blob_transform = $4, updated_at = now()
+      where d.document_id = $1::uuid and d.raw_blob_id = $2 and d.raw_blob_transform is null
+        and not ${CITED_BY_OFFSET}
+        and not exists (select 1 from documents o where o.content_hash = d.content_hash and o.raw_blob_id = $3)`,
+    [candidate.document_id, candidate.raw_blob_id, strippedId, SEC_UUENCODED_BODIES_REMOVED],
+  );
+  const moved = update.rowCount === 1;
+  await db.query(
+    `insert into object_blob_gc_queue (raw_blob_id, reason) values ($1, 'blob_rewrite')
+     on conflict (raw_blob_id) do update
+           set next_attempt_at = now(), deleted_at = null, last_checked_at = null, last_error = null, updated_at = now()`,
+    [moved ? candidate.raw_blob_id : strippedId],
+  );
+  return moved;
 }
 
 // Deletes every queued blob that is due and unreferenced, trying each at most

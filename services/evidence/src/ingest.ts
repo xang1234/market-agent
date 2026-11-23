@@ -114,13 +114,23 @@ export async function ingestDocumentInTransaction(
   const raw_blob_id = rawBlobIdFromBytes(storedBytes);
   await db.query("select pg_advisory_xact_lock(hashtext($1))", [raw_blob_id]);
   await lockSourceForBlobIngest(db, input.source.source_id);
-  // content_hash is the filing's identity, whatever blob holds it. One stored
-  // as sent (before #757, or kept whole for an offset that cites it) is the
-  // document these bytes name; the rewrite moves it only under the lock held.
+  // content_hash is the filing's identity, whatever blob holds it. A public
+  // filing of this provider stored as sent (before #757, or kept whole for an
+  // offset that cites it) is the document these bytes name, unless one is
+  // stored stripped. A user's upload or another kind's document with the same
+  // bytes never is. The rewrite moves it only under the lock held.
   if (stripped !== null) {
     const { rows: [sent] } = await db.query(
-      `select 1 from documents where content_hash = $1 and raw_blob_id = $1 for share`,
-      [content_hash],
+      `select 1
+         from documents d
+         join sources s on s.source_id = d.source_id
+         join sources mine on mine.source_id = $3::uuid
+        where d.content_hash = $1 and d.raw_blob_id = $1 and d.kind = 'filing'
+          and s.user_id is null and mine.user_id is null
+          and s.provider = mine.provider and s.license_class = mine.license_class
+          and not exists (select 1 from documents x where x.content_hash = $1 and x.raw_blob_id = $2)
+          for share of d`,
+      [content_hash, raw_blob_id, input.source.source_id],
     );
     if (sent !== undefined) {
       const result = await createDocument(db, { ...input.document, source_id: input.source.source_id, content_hash, raw_blob_id: content_hash });
@@ -129,36 +139,25 @@ export async function ingestDocumentInTransaction(
   }
   const putResult = await deps.objectStore.put(storedBytes);
   const storedRawBlobId = putResult.blob.raw_blob_id;
-  let unregisterRollbackCleanup = () => {};
   if (putResult.status === "created") {
-    unregisterRollbackCleanup = deps.tx.onRollback((error) =>
-      deleteCreatedBlobBestEffort(deps.objectStore, storedRawBlobId, error)
-    );
+    deps.tx.onRollback((error) => deleteBlobIfUnnamed(db, deps.objectStore, storedRawBlobId, error));
   }
-  try {
-    if (storedRawBlobId !== raw_blob_id) {
-      throw new Error("ingestDocument: object store returned a blob id that does not match the input bytes");
-    }
-    const result = await createDocument(db, {
-      ...input.document,
-      source_id: input.source.source_id,
-      content_hash,
-      raw_blob_id,
-      raw_blob_transform: stripped === null ? null : SEC_UUENCODED_BODIES_REMOVED,
-    });
-    return Object.freeze({
-      status: "blob_stored" as const,
-      document: result.document,
-      raw_blob_id,
-      policy,
-    });
-  } catch (error) {
-    unregisterRollbackCleanup();
-    if (putResult.status === "created") {
-      await deleteCreatedBlobBestEffort(deps.objectStore, storedRawBlobId, error);
-    }
-    throw error;
+  if (storedRawBlobId !== raw_blob_id) {
+    throw new Error("ingestDocument: object store returned a blob id that does not match the input bytes");
   }
+  const result = await createDocument(db, {
+    ...input.document,
+    source_id: input.source.source_id,
+    content_hash,
+    raw_blob_id,
+    raw_blob_transform: stripped === null ? null : SEC_UUENCODED_BODIES_REMOVED,
+  });
+  return Object.freeze({
+    status: "blob_stored" as const,
+    document: result.document,
+    raw_blob_id,
+    policy,
+  });
 }
 
 export async function ingestDocumentWithPool(
@@ -178,16 +177,25 @@ async function ingestStoredDocumentWithBlobLock(
   );
 }
 
-export async function deleteCreatedBlobBestEffort(
+// Deletes a blob a rolled-back transaction created, as the GC would: under the
+// blob's lock and only while no document names it. Postgres frees that
+// transaction's locks when a statement fails, before its rollback, so another
+// ingest may have named the blob since. Run after the transaction ends.
+export async function deleteBlobIfUnnamed(
+  db: QueryExecutor,
   objectStore: ObjectStore,
   rawBlobId: string,
   originalError: unknown,
 ): Promise<void> {
   try {
-    await objectStore.delete(rawBlobId);
-  } catch (deleteError) {
+    await withTransaction(db, async (tx) => {
+      await tx.db.query("select pg_advisory_xact_lock(hashtext($1))", [rawBlobId]);
+      const named = await tx.db.query("select 1 from documents where raw_blob_id = $1 limit 1", [rawBlobId]);
+      if (named.rowCount === 0) await objectStore.delete(rawBlobId);
+    });
+  } catch (cleanupError) {
     if (originalError instanceof Error) {
-      (originalError as { cleanup_error?: unknown }).cleanup_error = deleteError;
+      (originalError as { cleanup_error?: unknown }).cleanup_error = cleanupError;
     }
   }
 }

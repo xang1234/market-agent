@@ -67,27 +67,46 @@ function uuencodedText(buffer: Buffer, header: number, close: number): { start: 
   const pdf = line?.toString("latin1") === "<PDF>";
   if (pdf) line = nextLine();
   if (line === null || !BEGIN.test(line.toString("latin1"))) return null;
-  for (line = nextLine(); line !== null && !isLastPayloadLine(line); line = nextLine()) {
-    if (!isPayloadLine(line)) return null;
+  // Full 45-byte lines, then a final line, then the zero-length line.
+  let previous: Buffer | null = null;
+  for (line = nextLine(); line !== null && !isZeroLengthLine(line); line = nextLine()) {
+    if (previous !== null && !isFullLine(previous)) return null;
+    previous = line;
   }
-  if (line === null || nextLine()?.toString("latin1") !== "end") return null;
+  if (line === null || previous === null || !isFinalLine(previous)) return null;
+  if (nextLine()?.toString("latin1") !== "end") return null;
   if (pdf && nextLine()?.toString("latin1") !== "</PDF>") return null;
   return at === textClose + 1 ? { start, end: at } : null;
 }
 
 // A line that encodes no bytes, "`" or a space (or that space trimmed away).
-function isLastPayloadLine(line: Buffer): boolean {
+function isZeroLengthLine(line: Buffer): boolean {
   return line.length === 0 || (line.length === 1 && (line[0] === 0x60 || line[0] === 0x20));
 }
 
-// A length character for 1 to 63 bytes, then four characters per three of
-// them, every one in uuencode's alphabet (space to backtick). EDGAR trims a
-// line's trailing spaces (zero bits), so a line may fall short; an encoder
-// may end one with a guard character that keeps those spaces, or with CRLF.
-function isPayloadLine(line: Buffer): boolean {
-  const end = line[line.length - 1] === 0x0d ? line.length - 1 : line.length;
-  const count = (line[0]! - 0x20) & 0x3f;
-  if (count === 0 || end > 2 + 4 * Math.ceil(count / 3)) return false;
+// Lines as EDGAR writes them: uuencode's alphabet (space to backtick) with
+// trailing spaces (zero bits) trimmed, and an optional CR. Every line but the
+// last encodes 45 bytes, "M" and 60 characters. The last encodes at most 45
+// in 4 characters per 3; an encoder may add a guard character after them.
+// ponytail: a final line may be 6 characters short, the most a sample lost
+// (5: a ZIP's two zero closing bytes and padding); widen if a real body is kept.
+function isFullLine(line: Buffer): boolean {
+  const end = payloadEnd(line);
+  return line[0] === 0x4d && end <= 61 && inAlphabet(line, end);
+}
+
+function isFinalLine(line: Buffer): boolean {
+  const end = payloadEnd(line);
+  const count = line[0]! - 0x20;
+  const encoded = 1 + 4 * Math.ceil(count / 3);
+  return count >= 1 && count <= 45 && end >= encoded - 6 && end <= encoded + 1 && inAlphabet(line, end);
+}
+
+function payloadEnd(line: Buffer): number {
+  return line[line.length - 1] === 0x0d ? line.length - 1 : line.length;
+}
+
+function inAlphabet(line: Buffer, end: number): boolean {
   for (let i = 0; i < end; i++) if (line[i]! < 0x20 || line[i]! > 0x60) return false;
   return true;
 }
