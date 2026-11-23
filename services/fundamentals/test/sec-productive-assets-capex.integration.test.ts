@@ -1,7 +1,9 @@
 // Capex a filer tags as PaymentsToAcquireProductiveAssets instead of
 // PaymentsToAcquirePropertyPlantAndEquipment certifies (operator 2026-11-21,
 // #731), recording that concept, since productive assets may include purchased
-// intangibles. A filing that tags both keeps PP&E, a later one included.
+// intangibles. A filing that tags both keeps PP&E, a later one included. A
+// later filing stating the year only as an equal PP&E figure restates it in
+// that scope, as for continuing-operations OCF (operator 2026-11-23, #758).
 
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -67,7 +69,18 @@ async function setUp(t: test.TestContext, name: string) {
     const selection = await selectFiscalYear(db, { issuerId: ISSUER_ID, metricKey: "capex", fiscalYear: 2024, fiscalPeriod }, "2026-06-01T00:00:00Z", basis);
     return selection.status === "selected" ? selection.input.candidate.value_text : selection.reason_code;
   };
-  return { db, download, lookup, backfill, capex, shown, relations, picked };
+  const pickedScope = async (basis: "as_reported" | "as_restated") => {
+    const selection = await selectFiscalYear(db, { issuerId: ISSUER_ID, metricKey: "capex", fiscalYear: 2024, fiscalPeriod: "FY" }, "2026-06-01T00:00:00Z", basis);
+    return selection.status === "selected" ? selection.input.candidate.inference ?? null : selection.reason_code;
+  };
+  const proofs = async () => (await db.query<{ value: string; locator: string; proof: string }>(
+    `select f.value_num::text as value, a.source_locator as locator, a.token_proof_hash as proof
+       from facts f join metrics m on m.metric_id = f.metric_id join current_fact_precision_attestations a on a.fact_id = f.fact_id
+      where f.subject_id = $1 and m.metric_key = 'capex' and f.invalidated_at is null
+      order by f.method, f.created_at`,
+    [ISSUER_ID],
+  )).rows;
+  return { db, download, lookup, backfill, capex, shown, relations, picked, pickedScope, proofs };
 }
 
 test("capex filed as productive assets certifies with its concept recorded", { timeout: 300_000 }, async (t) => {
@@ -192,21 +205,204 @@ test("capex filed as productive assets certifies with its concept recorded", { t
     assert.deepEqual(asRestated, periods.map(() => "restatement_unverified"));
   });
 
-  // CAT retagged FY2018 and FY2019 this way in its FY2020 10-K, at equal figures.
-  await t.test("a later 10-K that switches to PP&E at an equal figure states the same one", async (t) => {
-    const { download, lookup, relations, picked } = await setUp(t, "fin-capex-productive-switch-equal");
+  // A derived figure cannot stand on a later filing's source, so only a line stating it exactly restates it.
+  await t.test("a derived quarter of productive-assets capex is unverified from a filing that states it equal only at its rounding, in either scope", async (t) => {
+    const filed = (accn: string, fy: number, fp: string, form: string, date: string) => (start: string, end: string, val: number): Value => ({ start, end, val, accn, fy, fp, form, filed: date });
+    const q1 = filed("0000000731-24-000101", 2024, "Q1", "10-Q", "2024-05-01");
+    const q2 = filed("0000000731-24-000102", 2024, "Q2", "10-Q", "2024-08-01");
+    const nextQ2 = filed("0000000731-25-000102", 2025, "Q2", "10-Q", "2025-08-01");
+    const nextQ2A = filed("0000000731-25-000202", 2025, "Q2", "10-Q/A", "2025-09-01");
+    const revenues = [q1("2024-01-01", "2024-03-31", 100), q2("2024-04-01", "2024-06-30", 100)];
+    const derived = [q1("2024-01-01", "2024-03-31", 25_000_000), q2("2024-01-01", "2024-06-30", 55_077_000)];
+    const scoped = (rows: Array<{ value: string; flags: unknown[]; relation: string | null }>) =>
+      rows.map(({ value, flags, relation }) => [value, flags.some((flag) => (flag as { kind?: string }).kind === SCOPE.kind), relation]);
+    const restatedProofs = async (db: Awaited<ReturnType<typeof setUp>>["db"]) => (await db.query<{ value: string; precision: string; derived: boolean }>(
+      `select f.value_num::text as value, a.precision_class as precision, a.derivation is not null as derived
+         from facts f join metrics m on m.metric_id = f.metric_id join current_fact_precision_attestations a on a.fact_id = f.fact_id
+        where f.subject_id = $1 and m.metric_key = 'capex' and f.method = 'restated' and f.invalidated_at is null order by f.created_at`,
+      [ISSUER_ID],
+    )).rows;
+
+    await t.test("the switch to PP&E", async (t) => {
+      const { db, download, lookup, backfill, relations, picked } = await setUp(t, "fin-capex-derived-rescoped-rounded");
+      download.text = companyFacts({
+        Revenues: revenues,
+        PaymentsToAcquireProductiveAssets: derived,
+        PaymentsToAcquirePropertyPlantAndEquipment: [nextQ2("2024-04-01", "2024-06-30", 30_000_000), nextQ2("2025-04-01", "2025-06-30", 28_000_000)],
+      });
+      await lookup("Q2");
+      const rows = [["30077000", true, "original"], ["30000000", false, "unverified_restatement"]];
+      assert.deepEqual(scoped(await relations()), rows);
+      assert.deepEqual(await restatedProofs(db), [{ value: "30000000", precision: "source_token_preserved", derived: false }], "the row states the later filing's own token");
+      assert.equal(await picked("as_restated", "Q2"), "restatement_unverified");
+      await backfill();
+      assert.deepEqual(scoped(await relations()), rows, "a rerun adds nothing");
+    });
+
+    await t.test("the restatement back to productive assets", async (t) => {
+      const { download, lookup, backfill, relations, picked } = await setUp(t, "fin-capex-derived-restated-back-rounded");
+      download.text = companyFacts({
+        Revenues: revenues,
+        PaymentsToAcquireProductiveAssets: [...derived, nextQ2A("2024-04-01", "2024-06-30", 30_000_000), nextQ2A("2025-04-01", "2025-06-30", 28_000_000)],
+        PaymentsToAcquirePropertyPlantAndEquipment: [nextQ2("2024-04-01", "2024-06-30", 30_077_000), nextQ2("2025-04-01", "2025-06-30", 28_033_000)],
+      });
+      await lookup("Q2");
+      const rows = [["30077000", true, "original"], ["30077000", false, "economic_restatement"], ["30000000", true, "unverified_restatement"]];
+      assert.deepEqual(scoped(await relations()), rows);
+      assert.equal(await picked("as_restated", "Q2"), "restatement_unverified");
+      await backfill();
+      assert.deepEqual(scoped(await relations()), rows, "a rerun adds nothing");
+    });
+  });
+
+  // Devin on #759. The next year's Q2 10-Q repeats the six-month productive-asset
+  // input unchanged and states the quarter itself as PP&E.
+  await t.test("a derived quarter switches to a PP&E line from a filing that also repeats its inputs unchanged, only when the line states it exactly", async (t) => {
+    for (const [q1, ytd, ppe, expected] of [[5, 12, 7, "economic_restatement"], [25_000_000, 55_077_000, 30_000_000, "unverified_restatement"]] as const) {
+      const { download, lookup, backfill, relations, picked } = await setUp(t, `fin-capex-derived-switch-repeated-inputs-${ppe}`);
+      const filed = (accn: string, fy: number, fp: string, date: string) => (start: string, end: string, val: number): Value => ({ start, end, val, accn, fy, fp, form: "10-Q", filed: date });
+      const first = filed("0000000731-24-000101", 2024, "Q1", "2024-05-01");
+      const second = filed("0000000731-24-000102", 2024, "Q2", "2024-08-01");
+      const next = filed("0000000731-25-000102", 2025, "Q2", "2025-08-01");
+      download.text = companyFacts({
+        Revenues: [first("2024-01-01", "2024-03-31", 100), second("2024-04-01", "2024-06-30", 100)],
+        PaymentsToAcquireProductiveAssets: [first("2024-01-01", "2024-03-31", q1), second("2024-01-01", "2024-06-30", ytd), next("2024-01-01", "2024-06-30", ytd)],
+        PaymentsToAcquirePropertyPlantAndEquipment: [next("2024-04-01", "2024-06-30", ppe), next("2025-04-01", "2025-06-30", ppe + 1_000_000)],
+      });
+      await lookup("Q2");
+      const rows = [[String(ytd - q1), true, "original"], [String(ppe), false, expected]];
+      const scoped = async () => (await relations()).map(({ value, flags, relation }) => [value, flags.some((flag) => (flag as { kind?: string }).kind === SCOPE.kind), relation]);
+      assert.deepEqual(await scoped(), rows);
+      assert.equal(await picked("as_restated", "Q2"), expected === "economic_restatement" ? String(ppe) : "restatement_unverified");
+      await backfill();
+      assert.deepEqual(await scoped(), rows, "a rerun adds nothing");
+    }
+  });
+
+  // CAT retagged FY2018 and FY2019 this way in its FY2020 10-K, at equal
+  // figures. The first equal PP&E line restates the year in that scope, so its
+  // growth to a PP&E year counts.
+  await t.test("a later 10-K that switches to PP&E at an equal figure restates the year as PP&E", async (t) => {
+    const { download, lookup, backfill, relations, picked, pickedScope } = await setUp(t, "fin-capex-productive-switch-equal");
     download.text = companyFacts({
       PaymentsToAcquireProductiveAssets: [year(2024, 2024, 30)],
       PaymentsToAcquirePropertyPlantAndEquipment: [year(2025, 2024, 30), year(2025, 2025, 28), year(2026, 2024, 30)],
     });
     await lookup();
-    assert.deepEqual(await relations(), [{ method: "reported", value: "30", flags: [SCOPE], relation: "original" }]);
+    const rows = [
+      { method: "reported", value: "30", flags: [SCOPE], relation: "original" },
+      { method: "restated", value: "30", flags: [], relation: "economic_restatement" },
+    ];
+    assert.deepEqual(await relations(), rows);
     assert.deepEqual([await picked("as_reported"), await picked("as_restated")], ["30", "30"]);
+    assert.deepEqual([await pickedScope("as_reported"), await pickedScope("as_restated")], [SCOPE, null]);
+    await backfill();
+    assert.deepEqual(await relations(), rows, "a rerun adds nothing");
   });
 
-  // Devin on #755. Each repeats the coarser original within its rounding, so
-  // neither changes it, in either order, though they disagree with each other.
-  await t.test("same-day filings that each repeat the figure as PP&E within its rounding leave it standing", async (t) => {
+  // The row shows, locates and proves the figure that stands, from the filing that states it.
+  await t.test("a PP&E figure equal only at the coarser rounding restates the year at the figure that stands", async (t) => {
+    for (const [productive, ppe] of [[[30_077_000, 25_033_000], [30_000_000, 28_000_000]], [[30_000_000, 25_000_000], [30_400_000, 28_300_000]]] as const) {
+      const { download, lookup, relations, pickedScope, proofs } = await setUp(t, `fin-capex-productive-switch-rounded-${productive[0]}`);
+      download.text = companyFacts({
+        PaymentsToAcquireProductiveAssets: [year(2024, 2024, productive[0]), year(2024, 2023, productive[1])],
+        PaymentsToAcquirePropertyPlantAndEquipment: [year(2025, 2024, ppe[0]), year(2025, 2025, ppe[1])],
+      });
+      await lookup();
+      assert.deepEqual((await relations()).map(({ value, flags, relation }) => [value, flags, relation]), [
+        [String(productive[0]), [SCOPE], "original"],
+        [String(productive[0]), [], "economic_restatement"],
+      ]);
+      assert.equal(await pickedScope("as_restated"), null);
+      const [original, restated] = await proofs();
+      assert.deepEqual(restated, original);
+    }
+  });
+
+  await t.test("a PP&E figure equal to a restated productive-assets one restates the year as PP&E, citing the filing that restated it", async (t) => {
+    const { download, lookup, relations, proofs } = await setUp(t, "fin-capex-productive-restated-switch");
+    download.text = companyFacts({
+      PaymentsToAcquireProductiveAssets: [year(2024, 2024, 30_000_000), year(2024, 2023, 25_000_000), year(2025, 2024, 31_077_000), year(2025, 2025, 28_033_000)],
+      PaymentsToAcquirePropertyPlantAndEquipment: [year(2026, 2024, 31_000_000), year(2026, 2026, 33_000_000)],
+    });
+    await lookup();
+    assert.deepEqual((await relations()).map(({ value, flags, relation }) => [value, flags, relation]), [
+      ["30000000", [SCOPE], "original"],
+      ["31077000", [SCOPE], "economic_restatement"],
+      ["31077000", [], "economic_restatement"],
+    ]);
+    const [, restated, rescoped] = await proofs();
+    assert.deepEqual(rescoped, restated);
+  });
+
+  // A filing that tags both reads as PP&E (#731), so once the year stands as
+  // PP&E it keeps it there, and only one stating productive assets alone restates it back.
+  await t.test("once the year stands as PP&E a filing that tags both keeps it there, and one tagging productive assets alone restates it back", async (t) => {
+    const { download, lookup, relations, pickedScope } = await setUp(t, "fin-capex-productive-switch-back");
+    const tenKA = (of: number, val: number): Value => ({ ...year(2025, of, val), accn: "0000000731-26-000002", form: "10-K/A", filed: "2026-04-01" });
+    download.text = companyFacts({
+      PaymentsToAcquireProductiveAssets: [year(2024, 2024, 30), tenKA(2024, 30), tenKA(2025, 28), year(2026, 2024, 30), year(2026, 2026, 33)],
+      PaymentsToAcquirePropertyPlantAndEquipment: [year(2025, 2024, 30), year(2025, 2025, 28), tenKA(2024, 30), tenKA(2025, 28)],
+    });
+    await lookup();
+    assert.deepEqual((await relations()).map(({ value, flags, relation }) => [value, flags, relation]), [
+      ["30", [SCOPE], "original"],
+      ["30", [], "economic_restatement"],
+      ["30", [SCOPE], "economic_restatement"],
+    ]);
+    assert.deepEqual(await pickedScope("as_restated"), SCOPE);
+  });
+
+  // Devin on #759. A productive-assets line alone cannot tell a change of figure from a change of scope back.
+  await t.test("once the year stands as PP&E a 10-K stating another productive-assets figure alone is an unverified restatement", async (t) => {
+    const { download, lookup, backfill, relations, picked } = await setUp(t, "fin-capex-productive-switch-back-changed");
+    download.text = companyFacts({
+      PaymentsToAcquireProductiveAssets: [year(2024, 2024, 30), year(2026, 2024, 35), year(2026, 2026, 40)],
+      PaymentsToAcquirePropertyPlantAndEquipment: [year(2025, 2024, 30), year(2025, 2025, 28)],
+    });
+    await lookup();
+    const rows = [
+      ["30", [SCOPE], "original"],
+      ["30", [], "economic_restatement"],
+      ["35", [SCOPE], "unverified_restatement"],
+    ];
+    assert.deepEqual((await relations()).map(({ value, flags, relation }) => [value, flags, relation]), rows);
+    assert.equal(await picked("as_restated"), "restatement_unverified");
+    await backfill();
+    assert.deepEqual((await relations()).map(({ value, flags, relation }) => [value, flags, relation]), rows, "a rerun adds nothing");
+  });
+
+  await t.test("a later PP&E figure that disagrees with the equal one leaves the year unverified", async (t) => {
+    const { download, lookup, relations, picked } = await setUp(t, "fin-capex-productive-switch-then-changed");
+    download.text = companyFacts({
+      PaymentsToAcquireProductiveAssets: [year(2024, 2024, 30)],
+      PaymentsToAcquirePropertyPlantAndEquipment: [year(2025, 2024, 30), year(2025, 2025, 28), year(2026, 2024, 26), year(2026, 2026, 33)],
+    });
+    await lookup();
+    assert.deepEqual((await relations()).map(({ value, flags, relation }) => [value, flags, relation]), [
+      ["30", [SCOPE], "original"],
+      ["30", [], "economic_restatement"],
+      ["26", [], "unverified_restatement"],
+    ]);
+    assert.equal(await picked("as_restated"), "restatement_unverified");
+  });
+
+  // The original 10-K is one of that day's filings, so neither is known to be later.
+  await t.test("an original 10-K and a filing the same day stating the year only as an equal PP&E figure are unverified in either accession order", async (t) => {
+    for (const accn of ["0000000731-25-000000", "0000000731-25-000002"]) {
+      const { download, lookup, relations, picked } = await setUp(t, `fin-capex-productive-switch-original-day-${accn}`);
+      const tenKA = (val: number): Value => ({ ...year(2024, 2024, val), accn, form: "10-K/A" });
+      download.text = companyFacts({ PaymentsToAcquireProductiveAssets: [year(2024, 2024, 30), year(2024, 2023, 25)], PaymentsToAcquirePropertyPlantAndEquipment: [tenKA(30)] });
+      await lookup();
+      assert.deepEqual((await relations()).map(({ flags, relation }) => [flags, relation]), [[[SCOPE], "original"], [[], "unverified_restatement"]]);
+      assert.equal(await picked("as_restated"), "restatement_unverified");
+    }
+  });
+
+  // Devin on #755. Either would restate the year as PP&E and they disagree
+  // with each other, so, as two OCF totals filed one day do, they leave it
+  // unverified, though here either order stores the coarser original (#756).
+  await t.test("same-day filings that each repeat the figure as a different PP&E figure within its rounding leave it unverified", async (t) => {
     for (const accn of ["0000000731-26-000000", "0000000731-26-000002"]) {
       const { download, lookup, relations, picked } = await setUp(t, `fin-capex-productive-same-day-${accn}`);
       const tenKA = (of: number, val: number): Value => ({ ...year(2025, of, val), accn, form: "10-K/A" });
@@ -215,8 +411,8 @@ test("capex filed as productive assets certifies with its concept recorded", { t
         PaymentsToAcquirePropertyPlantAndEquipment: [year(2025, 2024, 30_400_000), year(2025, 2025, 28_123_000), tenKA(2024, 29_800_000), tenKA(2025, 28_123_000)],
       });
       await lookup();
-      assert.deepEqual((await relations()).map(({ relation }) => relation), ["original"]);
-      assert.equal(await picked("as_restated"), "30000000");
+      assert.deepEqual((await relations()).map(({ relation }) => relation), ["original", "unverified_restatement"]);
+      assert.equal(await picked("as_restated"), "restatement_unverified");
     }
   });
 

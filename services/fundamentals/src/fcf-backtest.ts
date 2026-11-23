@@ -132,7 +132,9 @@ export type AsOfInputs = Readonly<{
   /** Present when the bound operating cash flow is filed for continuing operations (#743). */
   ocf_scope: ConceptScopeV1 | null;
   /** Each later statement on file of that continuing-operations figure: its filing date, and whether it states it as the total at that value (#752). */
-  ocf_restated: ReadonlyArray<Readonly<{ filed: IsoDate; as_total: boolean }>>;
+  ocf_restated: LaterStatements;
+  /** Each later statement on file of that productive-assets figure: its filing date, and whether it states it as PP&E at that value (#758). */
+  capex_restated: LaterStatements;
   bound: ReadonlyArray<BoundInput>;
 }>;
 
@@ -302,28 +304,37 @@ export async function inputsAsOf(client: SqlExecutor, issuerId: string, asOf: Is
     const binding = bindings.get(slot);
     return binding?.status === "bound" && "fact_id" in binding.input ? conceptScope(binding.input.inference) : null;
   };
-  const ocfScope = scopeOf("operating_cash_flow");
-  const ocfBinding = bindings.get("operating_cash_flow");
-  const ocfRestated = ocfScope !== null && ocfBinding?.status === "bound" && "fact_id" in ocfBinding.input ? await laterStatements(client, ocfBinding.input.fact_id, asOf) : [];
-  return { as_of: asOf, figures, exact, currency, fiscal_year_end: operating?.period_end ?? null, capex_scope: scopeOf("capex"), ocf_scope: ocfScope, ocf_restated: ocfRestated, bound };
+  const restatedOf = async (slot: string): Promise<LaterStatements> => {
+    const binding = bindings.get(slot);
+    const scope = scopeOf(slot);
+    return scope !== null && binding?.status === "bound" && "fact_id" in binding.input ? laterStatements(client, binding.input.fact_id, asOf, scope) : [];
+  };
+  return {
+    as_of: asOf, figures, exact, currency, fiscal_year_end: operating?.period_end ?? null,
+    capex_scope: scopeOf("capex"), ocf_scope: scopeOf("operating_cash_flow"),
+    ocf_restated: await restatedOf("operating_cash_flow"), capex_restated: await restatedOf("capex"), bound,
+  };
 }
 
-// The restatements on file of a continuing-operations OCF fact's period filed
-// after the read's own cutoff, so only a window whose other end is read by then
-// may use them. Ingest stores a change of scope at an equal figure as an
-// economic restatement at the figure that stands (#752).
-async function laterStatements(client: SqlExecutor, factId: string, asOf: IsoDate): Promise<AsOfInputs["ocf_restated"]> {
-  const { rows } = await client.query<{ filed: IsoDate; as_total: boolean }>(
+/** A scoped fact's later statements: each one's filing date, and whether it states the figure unchanged without the scope. */
+type LaterStatements = ReadonlyArray<Readonly<{ filed: IsoDate; unscoped: boolean }>>;
+
+// The restatements on file of a scoped fact's period filed after the read's
+// own cutoff, so only a window whose other end is read by then may use them.
+// Ingest stores a change of scope at an equal figure as an economic
+// restatement at the figure that stands (#752, #758).
+async function laterStatements(client: SqlExecutor, factId: string, asOf: IsoDate, scope: ConceptScopeV1): Promise<LaterStatements> {
+  const { rows } = await client.query<{ filed: IsoDate; unscoped: boolean }>(
     `select (r.reported_at at time zone 'UTC')::date::text as filed,
             c.disclosure_relation = 'economic_restatement' and r.value_num = b.value_num
-              and not r.quality_flags @> '[{"kind": "continuing_operations_ocf"}]'::jsonb as as_total
+              and not r.quality_flags @> jsonb_build_array(jsonb_build_object('kind', $3::text)) as unscoped
        from facts b
        join facts r on r.supersedes = coalesce(b.supersedes, b.fact_id) and r.method = 'restated'
                    and r.invalidated_at is null and r.superseded_by is null
        left join fact_financial_contexts c on c.fact_id = r.fact_id
       where b.fact_id = $1::uuid and (r.reported_at at time zone 'UTC')::date > $2::date
       order by r.reported_at`,
-    [factId, asOf],
+    [factId, asOf, scope.kind],
   );
   return rows;
 }
@@ -443,13 +454,15 @@ function growth(from: Read | Absent, to: Read | Absent, years: number, splits: S
     ? outcome("non_positive_shares", "A share count at one end is zero or negative, so it has no growth rate.")
     : divideRationals(exact(end, "shares_outstanding"), multiplyRationals(exact(start, "shares_outstanding"), splitFactor(splits, start.inputs.as_of, end.inputs.as_of))!)!;
   // Free cash flow over capex, or OCF, in two scopes is no growth of one measure (#731, #743), unless every
-  // filing public by the end that restates the start's continuing-operations OCF states it as an equal total (#752).
-  const restatedBy = start.inputs.ocf_restated.filter(({ filed }) => filed <= end.inputs.as_of);
-  const restatedAsTotal = start.inputs.ocf_scope !== null && end.inputs.ocf_scope === null
-    && restatedBy.length > 0 && restatedBy.every(({ as_total }) => as_total);
-  const rescoped = (): Figure | null => (start.inputs.capex_scope === null) !== (end.inputs.capex_scope === null)
+  // filing public by the end that restates the start's scoped figure states it unscoped at an equal value (#752, #758).
+  const oneScope = (from: ConceptScopeV1 | null, to: ConceptScopeV1 | null, restated: LaterStatements) => {
+    if ((from === null) === (to === null)) return true;
+    const restatedBy = restated.filter(({ filed }) => filed <= end.inputs.as_of);
+    return from !== null && restatedBy.length > 0 && restatedBy.every(({ unscoped }) => unscoped);
+  };
+  const rescoped = (): Figure | null => !oneScope(start.inputs.capex_scope, end.inputs.capex_scope, start.inputs.capex_restated)
     ? outcome("incompatible_definition", "Capex is filed as PaymentsToAcquireProductiveAssets at one end and as PP&E at the other, so the two free cash flows do not measure the same spending.")
-    : (start.inputs.ocf_scope === null) !== (end.inputs.ocf_scope === null) && !restatedAsTotal
+    : !oneScope(start.inputs.ocf_scope, end.inputs.ocf_scope, start.inputs.ocf_restated)
     ? outcome("incompatible_definition", "Operating cash flow is filed for continuing operations at one end and as the total at the other, so the two free cash flows do not measure the same cash flow.")
     : null;
   const shares = (): Figure => {

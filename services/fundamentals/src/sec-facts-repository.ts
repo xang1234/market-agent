@@ -1548,39 +1548,35 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     const statements = periodStatements(values, original.period_start, original.period_end, original.fiscal_period === "FY");
     const isLater = ({ accession, filed }: PeriodStatement) => filed >= originalFiled && (derivation !== null || accession !== originalAccession);
     const rescoped = reviewedLines(usGaap, original, concept!, unit!, roundingsFor).filter((line) => line.input !== undefined || isLater(line));
-    // Continuing-operations OCF changes scope at an equal figure (operator
-    // 2026-11-22, #752): a filing that states it only as the total restates it
-    // there, and a later one stating it for continuing operations alone
-    // restates it back. Capex keeps #731's rule. Equal is within rounding, so
-    // the restatement keeps the figure that stands, from the filing it stands on.
-    const switches = secConceptScope(original.metric_key, concept!)?.kind === "continuing_operations_ocf";
+    // A figure in a scoped concept changes scope at an equal figure: a filing
+    // that states it only in the reviewed concept restates it there, and a
+    // later one stating it in the scoped concept alone restates it back, for
+    // continuing-operations OCF (operator 2026-11-22, #752) and productive-assets
+    // capex (operator 2026-11-23, #758). Equal is within rounding, so the
+    // restatement keeps the figure that stands, from the filing it stands on.
     const unordered = unorderedDates([statements, ...(derivation?.terms ?? []).map((term) => termStatements(values, term))], roundings);
-    if (switches) for (const date of opposedDates(statements, rescoped, roundings, { accession: originalAccession!, filed: originalFiled })) unordered.add(date);
+    for (const date of opposedDates(statements, rescoped, roundings, { accession: originalAccession!, filed: originalFiled })) unordered.add(date);
     let standing: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on, rounding: roundings.get(originalAccession!) ?? null };
     const inputs: RoundedFigure[] = derivation?.terms.map((term) => ({ value: term.raw_token, rounding: roundings.get(term.source.accession) ?? null })) ?? [];
     // A derived figure stands on its unmoved inputs, whose rounding a line may fall within.
     let asDerived = derivation !== null;
-    let asTotal = false;
+    let asReviewed = false;
     let standsOn: LaterStatement | null = null;
-    const rescope = (later: LaterStatement): LaterStatement => later.token === standing.value || (standsOn === null && original.token_proof_hash === null)
-      ? later
-      : { ...later, stands: standsOn ?? "original" };
+    // A restated row sits on the later filing's source, and a derivation proves
+    // only a fact on its first input's own source (#758), so a derived figure
+    // that a line repeats only within rounding is unverified there.
+    const rescope = (later: LaterStatement): [LaterStatement, LaterRelation] =>
+      later.token === standing.value || (standsOn === null && original.token_proof_hash === null) ? [later, "economic_restatement"]
+      : standsOn === null && derivation !== null ? [later, "unverified_restatement"]
+      : [{ ...later, stands: standsOn ?? "original" }, "economic_restatement"];
     for (const filing of filingsInOrder(statements, derivation, values, rescoped)) {
       // A line in another scope only ever repeats the figure that stands, or leaves it unverified (#731).
-      const changed = switches && unordered.has(filing.filed) && filing.rescoped.length > 0
+      const changed = unordered.has(filing.filed) && filing.rescoped.length > 0
         ? filing.rescoped[0]
         : filing.rescoped.find((line) => sameRoundedFigure(line.term === null ? standing : inputs[line.term]!, { value: line.token, rounding: line.rounding }) !== true);
       if (changed !== undefined) {
         await record(changed, "unverified_restatement");
         break;
-      }
-      // A filing that states the total reads as it (#743), so once the year stands as the total it keeps it there.
-      const total = filing.rescoped.find((line) => line.term === null);
-      if ((filing.statement === null || (asTotal && total !== undefined)) && filing.inputs.length === 0) {
-        const switched = switches && !asTotal ? total : undefined;
-        await record(switched ? rescope(switched) : filing.rescoped[0]!, switched ? "economic_restatement" : null);
-        if (switched) asTotal = true;
-        continue;
       }
       let moved: FiledInput | null = null;
       for (const input of filing.inputs) {
@@ -1590,6 +1586,17 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
         moved ??= input;
       }
       if (moved !== null) asDerived = false;
+      // A filing that states the reviewed concept reads as it (#731, #743), so once the year stands there it keeps it there.
+      // Inputs it repeats unmoved leave the quarter its reviewed line.
+      const reviewed = filing.rescoped.find((line) => line.term === null);
+      if (moved === null && (filing.statement === null || (asReviewed && reviewed !== undefined)) && (filing.inputs.length === 0 || reviewed !== undefined)) {
+        const switched = asReviewed ? undefined : reviewed;
+        const [stored, relation] = switched ? rescope(switched) : [filing.rescoped[0]!, null];
+        await record(stored, relation);
+        if (relation === "unverified_restatement") break;
+        if (switched) asReviewed = true;
+        continue;
+      }
       const statement = filing.statement !== null && isLater(filing.statement) ? filing.statement : null;
       if (statement === null) {
         if (moved !== null) {
@@ -1604,10 +1611,13 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
         ? "unverified_restatement"
         : asDerived ? null : await laterRelation(original.metric_key, standing, figure, splitsOn);
       const later: LaterStatement = { ...statement, concept: concept!, unit: unit! };
-      const back = asTotal && relation === null;
-      await record(back ? rescope(later) : later, back ? "economic_restatement" : relation);
-      if (relation === "unverified_restatement") break;
-      if (relation !== null || back) asTotal = false;
+      // Once the year stands in the reviewed concept, a line in the scoped one
+      // alone changes scope back, so only an equal one tells what it states.
+      const back = asReviewed && relation === null;
+      const [stored, storedRelation] = back ? rescope(later) : [later, asReviewed ? "unverified_restatement" : relation];
+      await record(stored, storedRelation);
+      if (storedRelation === "unverified_restatement") break;
+      asReviewed = false;
       if (relation !== null) {
         standing = figure;
         standsOn = later;
@@ -1684,16 +1694,17 @@ function unorderedDates(statementLists: ReadonlyArray<ReadonlyArray<PeriodStatem
     .map(({ filed }) => filed)));
 }
 
-/** One filing's statement of continuing-operations OCF for a year, by scope (#752). */
-type ScopedFigures = { accession: string; filed: string; continuing?: RoundedFigure; total?: RoundedFigure };
+/** One filing's statement of a scoped figure's period, in the scoped and the reviewed concept (#752, #758). */
+type ScopedFigures = { accession: string; filed: string; scoped?: RoundedFigure; reviewed?: RoundedFigure };
 
 /**
- * The dates on which the original or a later filing states continuing-operations
- * OCF, by scope, differently from another filing that day, so that which stands
- * depends on their unknown order (#752). Filings stating the same figures in
- * the same scopes agree. So do a filing stating both scopes at one figure and a
- * filing stating that figure only as the total, or the original, in either
- * order. One filing's two scopes are its own to reconcile (#743).
+ * The dates on which the original or a later filing states a scoped figure's
+ * period, by scope, differently from another filing that day, so that which
+ * stands depends on their unknown order (#752, #758). Filings stating the same
+ * figures in the same scopes agree. So do a filing stating both scopes at one
+ * figure and a filing stating that figure only in the reviewed concept, or the
+ * original, in either order. One filing's two scopes are its own to reconcile
+ * (#731, #743).
  */
 function opposedDates(
   statements: ReadonlyArray<PeriodStatement>,
@@ -1704,17 +1715,17 @@ function opposedDates(
   const byFiling = new Map<string, ScopedFigures>();
   const of = ({ accession, filed }: PeriodStatement) => byFiling.get(accession) ?? byFiling.set(accession, { accession, filed }).get(accession)!;
   for (const statement of statements) {
-    if (statement.filed >= original.filed) of(statement).continuing = { value: statement.token, rounding: roundings.get(statement.accession) ?? null };
+    if (statement.filed >= original.filed) of(statement).scoped = { value: statement.token, rounding: roundings.get(statement.accession) ?? null };
   }
-  for (const line of lines) if (line.term === null) of(line).total = { value: line.token, rounding: line.rounding };
+  for (const line of lines) if (line.term === null) of(line).reviewed = { value: line.token, rounding: line.rounding };
   const same = (one: RoundedFigure | undefined, other: RoundedFigure | undefined) => one === undefined ? other === undefined : other !== undefined && sameRoundedFigure(one, other) === true;
   const agree = (one: ScopedFigures, other: ScopedFigures) => {
-    if ((one.continuing === undefined) === (other.continuing === undefined) && (one.total === undefined) === (other.total === undefined)) {
-      return same(one.continuing, other.continuing) && same(one.total, other.total);
+    if ((one.scoped === undefined) === (other.scoped === undefined) && (one.reviewed === undefined) === (other.reviewed === undefined)) {
+      return same(one.scoped, other.scoped) && same(one.reviewed, other.reviewed);
     }
-    const [both, single] = one.continuing && one.total ? [one, other] : [other, one];
-    const figure = single.total ?? (single.accession === original.accession ? single.continuing : undefined);
-    return figure !== undefined && same(both.continuing, figure) && same(both.total, figure);
+    const [both, single] = one.scoped && one.reviewed ? [one, other] : [other, one];
+    const figure = single.reviewed ?? (single.accession === original.accession ? single.scoped : undefined);
+    return figure !== undefined && same(both.scoped, figure) && same(both.reviewed, figure);
   };
   const filings = [...byFiling.values()];
   return new Set(filings
@@ -1838,7 +1849,7 @@ type LaterStatement = PeriodStatement & Readonly<{
   concept: string;
   unit: string;
   input?: DerivationTerm;
-  /** For a change of scope only: the statement whose figure it repeats within rounding and stores, or the original (#752). */
+  /** For a change of scope only: the statement whose figure it repeats within rounding and stores, or the original (#752, #758). */
   stands?: LaterStatement | "original";
 }>;
 
