@@ -11,6 +11,7 @@
 // filings up to a cursor a progress line printed. Run it while no discovery
 // campaign is running: a campaign quotes offsets into the text it loaded.
 // Exits non-zero when any filing failed, so a rerun reads it again.
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { createEvidenceStoreRuntime } from "./evidence-cli-runtime.ts";
 import { rewriteFilingBlobs, type BlobRewriteReport } from "./sec-blob-rewrite.ts";
@@ -51,7 +52,7 @@ async function main(): Promise<void> {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
     console.error(err);
     process.exitCode = 1;

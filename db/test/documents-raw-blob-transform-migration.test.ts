@@ -26,6 +26,11 @@ test("0088 documents raw blob transform", { timeout: 300_000 }, async (t) => {
     await expectRejected(db, `insert into object_blob_gc_queue (raw_blob_id, reason) values ('sha256:${"b".repeat(64)}', 'cleanup')`, /object_blob_gc_queue_reason_check/);
   });
 
+  await t.test("down refuses while a rewritten blob would lose its transform", async () => {
+    await assert.rejects(applyMigration(db, "0088", "down"), /cannot roll back 0088/);
+    assert.equal((await db.query(`select count(*)::int as n from documents where raw_blob_transform is not null`)).rows[0].n, 1);
+  });
+
   await t.test("down drops the column and rewrite deletions; up rebuilds what the canonical schema defines, and reruns cleanly", async () => {
     await db.query(`delete from documents`);
     const canonical = await catalogSnapshot(db);
