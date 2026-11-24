@@ -41,7 +41,7 @@ test("a release laid out as AMD's keeps its quarter, its revenue's scale, an add
     ["eps_diluted", 0.75, 1.2, [0.26, 0.35, -0.16]],
   ]);
   const [quarter] = nonGaapHistory([{ document_id: "d", source_id: "s", accession: null, form: "8-K", filed_on: AMD_SHAPED_FILED_ON, ...read }]).quarters;
-  assert.deepEqual(quarter!.operating_margin, { revenue: 9_246, gaap_pct: 13.7, non_gaap_pct: 24.4, spread_pp: 10.7 });
+  assert.deepEqual(quarter!.operating_margin, { revenue: 9_246, gaap_pct: 13.7, non_gaap_pct: 24.4, spread: { value: 10.7, unit: { kind: "percentage_points" } } });
 });
 
 test("a release's revenue is the first revenue row with a figure in its quarter, past a heading row", () => {
@@ -208,7 +208,7 @@ test("the history reads the last 8 quarters: spreads, each category's quarters, 
   assert.equal(history.undated, 1);
   const latest = history.quarters[0]!;
   assert.deepEqual(latest.eps, { gaap: 1.3, non_gaap: 1.45, spread: 0.15 });
-  assert.deepEqual(latest.operating_margin, { revenue: 1_000, gaap_pct: 20, non_gaap_pct: 25, spread_pp: 5 });
+  assert.deepEqual(latest.operating_margin, { revenue: 1_000, gaap_pct: 20, non_gaap_pct: 25, spread: { value: 5, unit: { kind: "percentage_points" } } });
   assert.deepEqual(latest.sbc, { value: 40, basis: "operating_income", scale: "millions", non_gaap_net_income: 200, share_pct: 20 });
   assert.equal(latest.document_id, rows[8]!.document_id);
   assert.deepEqual(history.categories.map((category) => [category.key, category.quarters, category.of, category.recurring]), [
@@ -337,7 +337,7 @@ test("a stored release is read once from its bytes, and the history reads it at 
   assert.equal(quarter.accession, EXAMPLE_ACCESSION);
   assert.equal(quarter.filed_on, EXAMPLE_FILED_ON);
   assert.deepEqual(quarter.eps, { gaap: 1.3, non_gaap: 1.36, spread: 0.06 });
-  assert.deepEqual(quarter.operating_margin, { revenue: 57_006, gaap_pct: 63.2, non_gaap_pct: 66.3, spread_pp: 3.2 });
+  assert.deepEqual(quarter.operating_margin, { revenue: 57_006, gaap_pct: 63.2, non_gaap_pct: 66.3, spread: { value: 3.2, unit: { kind: "percentage_points" } } });
   // No SBC line in net or operating income: the gross profit and operating expense lines together.
   assert.deepEqual(quarter.sbc, { value: 1_652, basis: "gross_profit_and_operating_expenses", scale: "millions", non_gaap_net_income: 33_366, share_pct: 5 });
   // Before the release was filed, nothing.
