@@ -60,4 +60,10 @@ test("a prior period is found by its end date, so a fiscal-year-end change is no
   // #479: Q4 FY2025 and Q1 FY2026 end nine months apart.
   assert.equal(endsStepsApart("2025-10-26", "2025-01-26", 3), false);
   assert.equal(endsStepsApart("2023-12-31", "2024-12-31", 12), false);
+  // A step count that is not a positive whole number never pairs.
+  assert.equal(endsStepsApart("2023-12-31", "2024-12-31", -12), false);
+  assert.equal(endsStepsApart("2024-12-31", "2025-01-05", 0), false);
+  // Month ends step to month ends: Oracle-style quarters ending May 31 and Feb 28.
+  assert.equal(endsStepsApart("2023-05-31", "2023-02-15", 3), true);
+  assert.equal(endsStepsApart("2023-05-31", "2023-03-17", 3), false);
 });

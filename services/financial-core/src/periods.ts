@@ -44,8 +44,11 @@ const STEP_TOLERANCE_DAYS = 14;
 
 /** `olderEnd` falls `months` calendar months before `newerEnd`, give or take STEP_TOLERANCE_DAYS. */
 export function endsStepsApart(newerEnd: IsoDate, olderEnd: IsoDate, months: number): boolean {
+  if (!Number.isInteger(months) || months <= 0) return false;
   const [year, month, day] = newerEnd.split("-").map(Number);
-  const target = Date.UTC(year!, month! - 1 - months, day!) / DAY_MS;
+  // A month-end date steps to that month's end: May 31 three months back is Feb 28, not Mar 3.
+  const lastDay = new Date(Date.UTC(year!, month! - months, 0)).getUTCDate();
+  const target = Date.UTC(year!, month! - 1 - months, Math.min(day!, lastDay)) / DAY_MS;
   return Math.abs(dayNumber(olderEnd) - target) <= STEP_TOLERANCE_DAYS;
 }
 

@@ -162,6 +162,7 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
   );
   return rows.map((row) => Object.freeze({
     ...row,
+    period_end: row.period_end ?? null,
     value_num: finiteOrNull(row.value_num),
     // Non-finite scales are excluded in SQL; scale is non-null in the schema.
     scale: finiteOrNull(row.scale) ?? 1,
