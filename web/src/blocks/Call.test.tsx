@@ -14,6 +14,8 @@ import type { CallBlock } from './types.ts'
 const [RULE_ONE, RULE_ZERO, UNANCHORED] = JSON.parse(readFileSync(new URL('./call.fixture.json', import.meta.url), 'utf8')) as CallBlock[]
 // main's fixture at de724754: Calls saved before the exit multiple was anchored (#605).
 const [SAVED_V1] = JSON.parse(readFileSync(new URL('./call.v1.fixture.json', import.meta.url), 'utf8')) as CallBlock[]
+// main's fixture at 72a64ec6: Calls saved before the base rate.
+const [SAVED_V2] = JSON.parse(readFileSync(new URL('./call.v2.fixture.json', import.meta.url), 'utf8')) as CallBlock[]
 // The words ADVICE_WORDS forbids (services/financial-core/src/call.ts) and "hold", which ADR 0005 also forbids; "required return", the owner setting it names, is set aside.
 const ADVICE = /\b(?:upside|downside|targets?|expected|returns?|undervalued|overvalued|fair|worth|buy|sell|hold|forecasts?|recommend\w*|cheap|expensive|potential)\b/iu
 
@@ -61,6 +63,7 @@ test('rows read in ADR 0005 order, each with its kind and basis, and the decline
     ['stock_based_compensation', 'USD 13,789,000,000', 'Reported fact', true],
     ['shares_outstanding', '14,532,182,000 shares', 'Reported fact', true],
     ['share_price', 'USD 342.37 per share', 'Market observation', true],
+    ['revenue', 'USD 478,834,000,000', 'Reported fact', true],
     ['required_return', '10%', 'Owner policy', true],
     ['exit_multiple', '36.15x', 'Deterministic result', true],
     ['anchored_exit_multiple', '17.33x', 'Agent assumption', true],
@@ -68,6 +71,7 @@ test('rows read in ADR 0005 order, each with its kind and basis, and the decline
     ['bear_case', 'Not anchored', 'Agent assumption', true],
     ['required_growth', '7.3% a year', 'Deterministic result', true],
     ['required_growth_anchored', '22.5% a year', 'Deterministic result', true],
+    ['base_rate', 'Of 377 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 183 (48.5%) delivered free cash flow per share growth of at least 7.3% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%).', 'Deterministic result', true],
     ['consensus', '8.18%', 'Attributed consensus', true],
   ])
   assert.match(document.querySelector('[data-row="anchored_exit_multiple"]')?.textContent ?? '', /FY2017: 17\.48x, \(close 38\.53 on 2017-09-29 × 21,006,768,000 shares/)
@@ -106,4 +110,12 @@ test('a Call saved before #605 still passes the schema and shows its own rows an
   ])
   assert.equal(document.querySelector('[data-row="exit_multiple"] dt')?.textContent, "Exit multiple (X): today's multiple")
   assert.equal(document.querySelector('[data-reason]')?.getAttribute('data-reason'), 'exit_multiple')
+})
+
+test('a Call saved before its base rate still passes the schema and shows its own rows', () => {
+  const result = validateBlock(SAVED_V2!)
+  assert.ok(result.valid, JSON.stringify(!result.valid && result.errors))
+  const rows = [...render(SAVED_V2!).querySelectorAll('[data-row]')].map((row) => row.getAttribute('data-row'))
+  assert.equal(rows.includes('revenue') || rows.includes('base_rate'), false)
+  assert.equal(rows.length, 13)
 })

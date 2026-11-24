@@ -4,14 +4,17 @@
 // each carry their kind and basis; the stance cites the rows it rests on.
 //
 // The exit multiple is anchored against the issuer's own last ten fiscal
-// years of EV/FCF (#605), but no bear case is anchored yet, so ADR 0005's
-// rule 1 still matches every Call that rule 0 does not. The stance has only
+// years of EV/FCF (#605), and the growth the price requires is set against
+// how often comparable companies delivered it (growth-base-rates.ts), but no
+// bear case is anchored yet, so ADR 0005's rule 1 still matches every Call
+// that rule 0 does not. The stance has only
 // its declined variant, and nothing here computes a hurdle price, a stability
 // move or a scenario. The Call reads facts by identity and never feeds the
 // fact layer.
 
 import { inferenceNote, type ContinuingOperationsOcfV1, type DecimalString, type GapDisposition, type IsoDate, type IsoDateTime, type LocalId, type ProductiveAssetsCapexV1, type ReasonCode, type Sha256Hex, type UUID } from "./contracts.ts";
 import { balanceComponents } from "./definitions.ts";
+import { growthBaseRate, MIN_BASE_RATE_WINDOWS, type BaseRateBucket, type GrowthBaseRates } from "./growth-base-rates.ts";
 import { canonicalDecimalString, parseFinancialDecimal, type ExactDecimal } from "./exact-decimal.ts";
 import { localDateOf } from "./public-time.ts";
 import type { RecordedSplit } from "./split-adjustment.ts";
@@ -29,7 +32,7 @@ import {
   type ValuationOutcomeResult,
 } from "./valuation-model.ts";
 
-export const CALL_VERSION = "call.v2";
+export const CALL_VERSION = "call.v3";
 
 /** Advice and valuation words: a price comparison ask with one is declined (#224), and neither a comparison nor a Call says one. */
 export const ADVICE_WORDS = /\b(?:upside|downside|targets?|hold|expected|returns?|undervalued|overvalued|fair|worth|buy|sell|forecasts?|recommend\w*|cheap|expensive|potential)\b/iu;
@@ -96,10 +99,11 @@ export function callModelOperations(slot: LocalId): ReadonlyArray<PlanNode> {
 /**
  * The engine plan's nodes for one subject's Call inputs: the model's, and for
  * the exit multiple's anchor each of the last ten fiscal years' free cash
- * flow, net cash and diluted weighted-average shares. A cover count binds
+ * flow, net cash and diluted weighted-average shares, and the latest fiscal
+ * year's revenue, which picks the base rate's size bucket. A cover count binds
  * only from the latest filing (select-inputs.ts rule 9), so a year's EV reads
  * its 10-K's diluted count. The seal regenerates a Call only from a run whose
- * plan has exactly these.
+ * plan has exactly these, or exactly those of an earlier version.
  */
 export function callInputOperations(slot: LocalId): ReadonlyArray<PlanNode> {
   const shares = (offset: number) => ({
@@ -110,6 +114,7 @@ export function callInputOperations(slot: LocalId): ReadonlyArray<PlanNode> {
     ...callModelOperations(slot),
     shares(0),
     ...Array.from({ length: ANCHOR_FISCAL_YEARS - 1 }, (_, index) => [...yearOperations(slot, index + 1), shares(index + 1)]).flat(),
+    { node_id: "revenue", operation: "reported_metric", subject_slot: slot, metric_key: "revenue", period: { kind: "latest", period_type: "annual", offset: 0 } },
   ];
 }
 
@@ -121,6 +126,7 @@ export const CALL_FIGURE_NODES: Readonly<Record<CallFactId | "market_cap", Local
   shares_outstanding: "market_cap_shares",
   share_price: "market_cap_px",
   market_cap: "market_cap",
+  revenue: "revenue",
 });
 
 /** The nodes a Call's inputs run publishes: each Call figure's, and each history year's. */
@@ -170,7 +176,7 @@ export function parseCallSettings(value: unknown): CallSettings | null {
 export const CALL_INPUT_KINDS = ["reported_fact", "attributed_consensus", "market_observation", "owner_policy", "agent_assumption", "deterministic_result"] as const;
 export type CallInputKind = (typeof CALL_INPUT_KINDS)[number];
 
-export type CallFactId = "free_cash_flow" | "net_cash" | "stock_based_compensation" | "shares_outstanding" | "share_price";
+export type CallFactId = "free_cash_flow" | "net_cash" | "stock_based_compensation" | "shares_outstanding" | "share_price" | "revenue";
 export type CallRowId =
   | CallFactId
   | "required_return"
@@ -180,6 +186,7 @@ export type CallRowId =
   | "bear_case"
   | "required_growth"
   | "required_growth_anchored"
+  | "base_rate"
   | "consensus";
 
 /** A filing or observation a fact is read from; `date` is the day its publication proof says it was public by, or the close's session day. */
@@ -228,8 +235,17 @@ export type CallContent = Readonly<{
 /** A Call as #604 sealed it, before the exit multiple was anchored (#605): three assumptions and two requires rows. */
 export type CallContentV1 = Omit<CallContent, "version"> & Readonly<{ version: "call.v1" }>;
 
+/** A Call as #605 sealed it, before its base rate: no revenue fact and no base-rate row. */
+export type CallContentV2 = Omit<CallContent, "version"> & Readonly<{ version: "call.v2" }>;
+
+/** What a call.v2 Call was assembled from: no revenue and no base-rate table. */
+export type CallEvidenceV2 = Omit<CallEvidence, "figures" | "citations" | "base_rates"> & Readonly<{
+  figures: Omit<CallEvidence["figures"], "revenue">;
+  citations: Omit<CallEvidence["citations"], "revenue">;
+}>;
+
 /** What a call.v1 Call was assembled from: no anchor history. */
-export type CallEvidenceV1 = Omit<CallEvidence, "history" | "closes" | "splits">;
+export type CallEvidenceV1 = Omit<CallEvidenceV2, "history" | "closes" | "splits">;
 
 /** An engine result: its certified value, or the gap it published. */
 export type CallEngineFigure =
@@ -261,6 +277,8 @@ export type CallEvidence = Readonly<{
   closes: CallCloses | null;
   /** The listing's splits, or null when its split history is unknown. */
   splits: ReadonlyArray<RecordedSplit> | null;
+  /** The committed base-rate table (data/growth-base-rates.json), or null when none is loaded. */
+  base_rates: GrowthBaseRates | null;
 }>;
 
 /** One fiscal year's certified figures, each on the Call date's split basis, and the sources it binds. */
@@ -293,6 +311,7 @@ const FACTS: ReadonlyArray<Readonly<{ id: CallFactId; label: string; kind: CallI
     source: (citation) => `${citation.accession ?? "Filing"}, cover date ${citation.period_end}, public by ${citation.date}`,
   },
   { id: "share_price", label: "Share price", kind: "market_observation", basis: "The latest stored close on or before the Call date", source: (citation) => `Close on ${citation.date}` },
+  { id: "revenue", label: "Revenue", kind: "reported_fact", basis: "Reported in the latest 10-K; it picks the base rate's size bucket and is never a model input", source: tenK },
 ];
 
 // A caller written before #731 or #743 passes no scope, and its OCF is the total and its capex PP&E.
@@ -335,8 +354,9 @@ export function assembleCall(evidence: CallEvidence): CallContent {
     citations: evidence.citations[fact.id].map((citation) => ({ ...citation, text: fact.source(citation) })),
     from: [],
   }));
-  const causes: Cause[] = facts.flatMap((row) => row.figure.kind === "outcome" ? [{ cites: row.id, label: row.label, figure: row.figure }] : []);
-  const { multiple, shareChange, growth, today, growthAt } = modelFigures(evidence, causes);
+  // Revenue is not a model input, so its gap leaves the base rate uncomputed and declines nothing.
+  const causes: Cause[] = facts.flatMap((row) => row.figure.kind === "outcome" && row.id !== "revenue" ? [{ cites: row.id, label: row.label, figure: row.figure }] : []);
+  const { multiple, shareChange, growth, today, growthAt, required } = modelFigures(evidence, causes);
   // Only a Call no input outcome declines is anchored; otherwise both anchored rows name the first cause.
   const anchor = causes.length > 0 ? null : anchorExitMultiple(evidence, today);
   const assumptions: CallRow[] = [
@@ -383,6 +403,7 @@ export function assembleCall(evidence: CallEvidence): CallContent {
         : { kind: "outcome", outcome: "unanchored", reason_code: null, text: "Not computed: the exit multiple is not anchored." },
       citations: [], from: ANCHORED_MODEL_INPUTS,
     },
+    baseRateRow(evidence, causes, growth, required),
     consensus(evidence),
   ];
   return {
@@ -412,13 +433,89 @@ export function assembleCall(evidence: CallEvidence): CallContent {
   };
 }
 
+const BASE_RATE_BASIS = "A frequency of reported history, not a probability. Each window is one 10-K filer's annual growth over five fiscal years "
+  + "in free cash flow per diluted weighted-average share, the count carried across splits through each next 10-K, grouped by starting revenue";
+
+/**
+ * Row 3's base rate: of the five-year windows that began at a similar size,
+ * how many delivered the growth the price requires at today's multiple, in free
+ * cash flow per share, with revenue's shown beside it and never fed in.
+ */
+function baseRateRow(evidence: CallEvidence, causes: ReadonlyArray<Cause>, growth: CallFigure, required: ExactRational | null): CallRow {
+  const table = evidence.base_rates;
+  const revenue = evidence.figures.revenue;
+  const row = (basis: string, figure: CallFigure): CallRow => ({
+    id: "base_rate", label: "How often similar-sized companies delivered it", kind: "deterministic_result", basis, figure, citations: [],
+    from: ["required_growth", "revenue"],
+  });
+  const not = (outcome: string, text: string, reason_code: ReasonCode | null = null): CallFigure => ({ kind: "outcome", outcome, reason_code, text: `Not computed: ${text}` });
+  if (table === null) return row(BASE_RATE_BASIS, not("no_base_rates", "no base-rate table is loaded."));
+  const basis = `${BASE_RATE_BASIS}. Starts FY${table.start_years.first} to FY${table.start_years.last}, from SEC's companyfacts archive of ${table.archive.date} (sha256 ${table.archive.sha256}). Revenue's base rate is shown beside it and is never an input`;
+  if (causes.length > 0) return row(basis, notComputedFigure(causes[0]!));
+  if (required === null) return row(basis, growth.kind === "outcome" ? { ...growth, text: `Not computed: required growth at today's multiple is not. ${growth.text}` } : growth);
+  if (revenue.kind === "gap") return row(basis, not(revenue.disposition, `revenue is not certified (${revenue.disposition}, ${revenue.reason_code}).`, revenue.reason_code));
+  if (revenue.currency !== "USD") return row(basis, not("incompatible_currency", "revenue is not in USD; nothing is converted.", "incompatible_currency"));
+  const start = rational(revenue.value);
+  const perShare = growthBaseRate(table, "fcf_per_share", start, required);
+  if (perShare.kind === "outcome") {
+    return row(basis, perShare.outcome === "no_bucket"
+      ? not("no_bucket", "no size bucket holds a starting revenue that is not positive.")
+      : not("thin_bucket", `only ${perShare.n} windows began in ${bucketText(perShare.bucket!)}, fewer than the ${MIN_BASE_RATE_WINDOWS} a base rate needs.`));
+  }
+  const sales = growthBaseRate(table, "revenue", start, required);
+  const { outcomes } = perShare;
+  const uncounted = [
+    [outcomes.ended_early, "that ended early (the filer stopped filing before year 5)"], [outcomes.missing_end, "with no year-5 figure"],
+    [outcomes.missing_shares, "with no split-chained share count"], [outcomes.incompatible_definition, "whose two ends use different capex or cash flow concepts"],
+    [outcomes.non_positive_base, "that started at zero or negative free cash flow"],
+  ] as const;
+  const rate = `${percent(required, 1)}% a year`;
+  return row(
+    `${basis}. Not among the ${perShare.n}: ${LIST.format(uncounted.map(([count, text]) => `${count} ${text}`))}. ${perShare.non_positive_end} of the ${perShare.n} ended at or below zero and count as -100%`,
+    {
+      kind: "value",
+      text: `Of ${perShare.n} five-year windows that began at a similar size (${bucketText(perShare.bucket)}), ${perShare.at_or_above} (${share(perShare.at_or_above, perShare.n)}) delivered free cash flow per share growth of at least ${rate}. `
+        + (sales.kind === "value"
+          ? `Beside it, revenue grew at least that fast in ${sales.at_or_above} of ${sales.n} (${share(sales.at_or_above, sales.n)}).`
+          : `Beside it, revenue has too few windows in that bucket (${sales.n}).`),
+    },
+  );
+}
+
+const share = (count: number, total: number) => `${fixed(roundRational(divideRationals(rational(String(count * 100)), rational(String(total)))!, 1), 1)}%`;
+
+function bucketText(bucket: BaseRateBucket): string {
+  const usd = (value: ExactRational) => `USD ${fixed(roundRational(divideRationals(value, rational("1000000000"))!, 1), 1)}B`;
+  return bucket.revenue_max === null ? `starting revenue ${usd(bucket.revenue_min)} and up` : `starting revenue ${usd(bucket.revenue_min)} to under ${usd(bucket.revenue_max)}`;
+}
+
+/**
+ * A Call as call.v2 states it (#605): no revenue fact and no base-rate row. A
+ * Call sealed before its base rate regenerates with this, from its own plan's
+ * inputs, so its seal still holds.
+ */
+export function assembleCallV2(evidence: CallEvidenceV2): CallContentV2 {
+  const call = assembleCall({
+    ...evidence,
+    figures: { ...evidence.figures, revenue: { kind: "gap", disposition: "missing", reason_code: "missing_input" } },
+    citations: { ...evidence.citations, revenue: [] },
+    base_rates: null,
+  });
+  return {
+    ...call,
+    version: "call.v2",
+    facts: call.facts.filter((row) => row.id !== "revenue"),
+    requires: call.requires.filter((row) => row.id !== "base_rate"),
+  };
+}
+
 /**
  * A Call as call.v1 states it (#604): today's multiple as the exit multiple,
  * declined under rule 1 for want of an anchor. A Call sealed before #605
  * regenerates with this, from its own plan's inputs, so its seal still holds.
  */
 export function assembleCallV1(evidence: CallEvidenceV1): CallContentV1 {
-  const call = assembleCall({ ...evidence, history: [], closes: null, splits: null });
+  const call = assembleCallV2({ ...evidence, history: [], closes: null, splits: null });
   const row = (id: CallRowId) => [...call.assumptions, ...call.requires].find((entry) => entry.id === id)!;
   return {
     ...call,
@@ -457,6 +554,8 @@ type ModelFigures = Readonly<{
   today: ExactRational | null;
   /** The growth the price requires at another exit multiple. */
   growthAt: (exitMultiple: ExactRational) => CallFigure;
+  /** The growth the price requires at today's multiple, when it has one. */
+  required: ExactRational | null;
 }>;
 
 /**
@@ -492,17 +591,21 @@ function modelFigures(evidence: CallEvidence, causes: Cause[]): ModelFigures {
       const d = divideRationals(value("stock_based_compensation"), rational(cap.value));
       const shareChange: CallFigure = d === null ? outcomeFigure(VALUATION_RESULT("numeric_limit_exceeded")) : { kind: "value", text: `${percent(d, 3)}% a year` };
       const growthAt = (exitMultiple: ExactRational) => d === null ? shareChange : solved(requiredGrowth(inputs, { share_change: d, exit_multiple: exitMultiple }));
-      if (today.kind === "outcome") return { multiple: outcomeFigure(today), shareChange, growth: outcomeFigure(today), today: null, growthAt };
+      if (today.kind === "outcome") return { multiple: outcomeFigure(today), shareChange, growth: outcomeFigure(today), today: null, growthAt, required: null };
       if (d !== null && compareRationals(d, MINUS_ONE) <= 0) {
         causes.push({ cites: "share_change", label: "Annual share change (d)", figure: outcomeFigure(VALUATION_RESULT("share_change_out_of_range")) });
         const notComputed = notComputedFigure(causes[0]!);
-        return { multiple: { kind: "value", text: today.text }, shareChange: causes[0]!.figure, growth: notComputed, today: null, growthAt: () => notComputed };
+        return { multiple: { kind: "value", text: today.text }, shareChange: causes[0]!.figure, growth: notComputed, today: null, growthAt: () => notComputed, required: null };
       }
-      return { multiple: { kind: "value", text: today.text }, shareChange, growth: growthAt(today.value), today: today.value, growthAt };
+      const solve = d === null ? null : requiredGrowth(inputs, { share_change: d, exit_multiple: today.value });
+      return {
+        multiple: { kind: "value", text: today.text }, shareChange, growth: solve === null ? shareChange : solved(solve), today: today.value, growthAt,
+        required: solve?.kind === "value" ? solve.growth : null,
+      };
     }
   }
   const notComputed = notComputedFigure(causes[0]!);
-  return { multiple: notComputed, shareChange: notComputed, growth: notComputed, today: null, growthAt: () => notComputed };
+  return { multiple: notComputed, shareChange: notComputed, growth: notComputed, today: null, growthAt: () => notComputed, required: null };
 }
 
 type Anchor =

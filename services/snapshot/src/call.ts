@@ -8,12 +8,14 @@
 // A Call is an opinion, never evidence: no read awards it a proof
 // (block-proof.ts), and nothing here writes a fact or a source.
 
+import { readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 
 import {
   ANCHOR_FISCAL_YEARS,
   assembleCall,
   assembleCallV1,
+  assembleCallV2,
   balanceComponents,
   CALL_FIGURE_NODES,
   callHistoryNodes,
@@ -24,9 +26,11 @@ import {
   localDateOf,
   parseCallSettings,
   parseFinancialDecimal,
+  parseGrowthBaseRates,
   type CallCloses,
   type CallContent,
   type CallContentV1,
+  type CallContentV2,
   type CallEngineFigure,
   type CallEvidence,
   type CallEvidenceV1,
@@ -48,7 +52,7 @@ export type CallRequest = Readonly<{
   settings: CallSettings;
 }>;
 
-export type GeneratedCall = Readonly<{ content: CallContent | CallContentV1; as_of: string; source_ids: ReadonlyArray<string> }>;
+export type GeneratedCall = Readonly<{ content: CallContent | CallContentV2 | CallContentV1; as_of: string; source_ids: ReadonlyArray<string> }>;
 
 export type CallBlock = Readonly<{
   id: string;
@@ -58,7 +62,7 @@ export type CallBlock = Readonly<{
   source_refs: ReadonlyArray<string>;
   as_of: string;
   subject_refs: ReadonlyArray<Readonly<{ kind: "issuer"; id: string }>>;
-  call: CallContent | CallContentV1;
+  call: CallContent | CallContentV2 | CallContentV1;
 }>;
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -70,14 +74,20 @@ const CITED_SLOTS: Readonly<Record<CallFactId, ReadonlyArray<string>>> = {
   stock_based_compensation: ["stock_based_compensation"],
   shares_outstanding: ["market_cap_shares"],
   share_price: ["market_cap_px"],
+  revenue: ["revenue"],
 };
+
+// The committed base-rate table (growth-base-rates.ts): a file that does not parse is a build error, so it fails here, at load.
+const BASE_RATES = parseGrowthBaseRates(JSON.parse(readFileSync(new URL("../../financial-core/data/growth-base-rates.json", import.meta.url), "utf8")));
+if (BASE_RATES === null) throw new Error("services/financial-core/data/growth-base-rates.json is not a growth_base_rates.v1 table");
 
 type Binding = Readonly<{ input_slot: string; binding_status: string; gap_reason: string | null; payload_hash: string | null; bound_payload: Record<string, unknown> | null; canonical_url: string | null }>;
 
 /**
  * The Call on the certified run a thread's snapshot holds, or null when no
  * certificate of a Call inputs plan in this thread is sealed with it. A run
- * of the plan Calls had before the anchor (#605) regenerates as call.v1.
+ * of the plan Calls had before the anchor (#605) regenerates as call.v1, and
+ * one of the plan before the base rate's revenue node as call.v2.
  */
 export async function generateCall(db: QueryExecutor, request: CallRequest): Promise<GeneratedCall | null> {
   if (!UUID_TEXT.test(request.inputs_snapshot_id) || !UUID_TEXT.test(request.thread_id)) return null;
@@ -93,7 +103,8 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
   const [{ run_id, unit_id, result_ids, plan }] = certificates as [typeof certificates[number]];
   const [member] = plan.subjects.members;
   if (plan.subjects.members.length !== 1 || member?.subject_ref.kind !== "issuer") return null;
-  const anchored = isPlan(plan, callInputOperations(member.slot_id));
+  const current = isPlan(plan, callInputOperations(member.slot_id));
+  const anchored = current || isPlan(plan, callInputOperations(member.slot_id).filter((node) => node.node_id !== "revenue"));
   if (!anchored && !isPlan(plan, callModelOperations(member.slot_id))) return null;
   const issuer = member.subject_ref.id;
   const listing = await subjectListing(db, issuer, plan.time.knowledge_cutoff);
@@ -106,7 +117,8 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     `select result_id::text as result_id, node_id, disposition, payload from financial_results where run_id = $1 and unit_id = $2`,
     [run_id, unit_id],
   )).rows.filter((row) => certified.has(row.result_id)).map((row) => [row.node_id, row]));
-  const figures = Object.fromEntries(Object.entries(CALL_FIGURE_NODES).map(([id, node]) => [id, engineFigure(results.get(node))]));
+  // Only a current plan has a revenue node.
+  const figures = Object.fromEntries(Object.entries(CALL_FIGURE_NODES).filter(([id]) => current || id !== "revenue").map(([id, node]) => [id, engineFigure(results.get(node))]));
   if (Object.values(figures).some((figure) => figure === null)) return null;
   const yearFigures = Array.from({ length: ANCHOR_FISCAL_YEARS }, (_, offset) => {
     const nodes = callHistoryNodes(offset);
@@ -127,7 +139,7 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     const row = bound.get(slot);
     return row === undefined ? [] : [citation(row, localDate)];
   }));
-  const citations = Object.fromEntries(Object.entries(CITED_SLOTS).map(([id, slots]) => [id, cited(slots)])) as Record<CallFactId, CallSource[]>;
+  const citations = Object.fromEntries(Object.entries(CITED_SLOTS).filter(([id]) => current || id !== "revenue").map(([id, slots]) => [id, cited(slots)])) as Record<CallFactId, CallSource[]>;
   const period = (slot: string) => {
     const payload = bound.get(slot)?.bound_payload;
     return isRecord(payload?.period) && typeof payload.period.end === "string" ? payload.period.end : null;
@@ -160,7 +172,7 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     ocf_scope: ocfScope("operating_cash_flow"),
     consensus: await consensusCaptures(db, issuer, callDate, plan.time.knowledge_cutoff),
   };
-  const generated = (content: CallContent | CallContentV1): GeneratedCall => {
+  const generated = (content: CallContent | CallContentV2 | CallContentV1): GeneratedCall => {
     const sources = [...content.facts, ...content.assumptions, ...content.requires].flatMap((row) => row.citations.map((entry) => entry.source_id));
     return { content, as_of: new Date(plan.time.knowledge_cutoff).toISOString(), source_ids: [...new Set(sources)] };
   };
@@ -186,13 +198,16 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     : null;
   const closes = splitHistory.status === "ok" ? await closeCapture(db, splitHistory.listing_id, plan.time.knowledge_cutoff) : null;
 
-  return generated(assembleCall({
+  const evidence = {
     ...evidenceV1,
     inputs: { ...evidenceV1.inputs, fingerprint: hashCanonical("call_inputs", { bindings: bindingsHashed, closes, splits }) },
     history,
     closes,
     splits,
-  }));
+  };
+  return generated(current
+    ? assembleCall({ ...evidence, figures: figures as CallEvidence["figures"], citations, base_rates: BASE_RATES })
+    : assembleCallV2(evidence));
 }
 
 // Whether a plan's operations are exactly these.

@@ -1,0 +1,967 @@
+[
+  {
+    "id": "call-1",
+    "kind": "call",
+    "snapshot_id": "22222222-2222-4222-9222-222222222222",
+    "data_ref": {
+      "kind": "call",
+      "id": "call-1"
+    },
+    "source_refs": [
+      "00000000-0000-4000-8000-0000000000a1",
+      "00000000-0000-4000-8000-0000000000b1"
+    ],
+    "as_of": "2026-11-09T15:00:00.000Z",
+    "subject_refs": [
+      {
+        "kind": "issuer",
+        "id": "00000000-0000-4000-8000-0000000000d1"
+      }
+    ],
+    "call": {
+      "version": "call.v2",
+      "call_date": "2026-11-09",
+      "subject": {
+        "issuer_id": "00000000-0000-4000-8000-0000000000d1",
+        "label": "AAPL"
+      },
+      "settings": {
+        "required_return": "0.1",
+        "margin_of_safety": "1.25",
+        "bear_loss_limit": "0.25",
+        "near_band": "0.1"
+      },
+      "inputs": {
+        "snapshot_id": "00000000-0000-4000-8000-0000000000e1",
+        "run_id": "00000000-0000-4000-8000-0000000000e2",
+        "unit_id": "call",
+        "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "facts": [
+        {
+          "id": "free_cash_flow",
+          "label": "Free cash flow",
+          "kind": "deterministic_result",
+          "basis": "free_cash_flow.v1: operating cash flow less PP&E capex, as reported in the latest 10-K",
+          "figure": {
+            "kind": "value",
+            "text": "USD 136,056,000,000"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-09-26",
+              "date": "2026-11-03",
+              "text": "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03"
+            }
+          ],
+          "from": []
+        },
+        {
+          "id": "net_cash",
+          "label": "Net cash",
+          "kind": "deterministic_result",
+          "basis": "net_cash.v1: cash and securities less debt, from the same 10-K's balance sheet",
+          "figure": {
+            "kind": "value",
+            "text": "USD 56,824,000,000"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-09-26",
+              "date": "2026-11-03",
+              "text": "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03"
+            }
+          ],
+          "from": []
+        },
+        {
+          "id": "stock_based_compensation",
+          "label": "Stock-based compensation",
+          "kind": "reported_fact",
+          "basis": "Reported in the latest 10-K's cash flow statement",
+          "figure": {
+            "kind": "value",
+            "text": "USD 13,789,000,000"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-09-26",
+              "date": "2026-11-03",
+              "text": "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03"
+            }
+          ],
+          "from": []
+        },
+        {
+          "id": "shares_outstanding",
+          "label": "Shares outstanding",
+          "kind": "reported_fact",
+          "basis": "The newest cover-page count, under the engine's age and split rules",
+          "figure": {
+            "kind": "value",
+            "text": "14,532,182,000 shares"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-10-23",
+              "date": "2026-11-03",
+              "text": "0000320193-26-000026, cover date 2026-10-23, public by 2026-11-03"
+            }
+          ],
+          "from": []
+        },
+        {
+          "id": "share_price",
+          "label": "Share price",
+          "kind": "market_observation",
+          "basis": "The latest stored close on or before the Call date",
+          "figure": {
+            "kind": "value",
+            "text": "USD 342.37 per share"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000b1",
+              "accession": null,
+              "period_end": null,
+              "date": "2026-11-06",
+              "text": "Close on 2026-11-06"
+            }
+          ],
+          "from": []
+        }
+      ],
+      "assumptions": [
+        {
+          "id": "required_return",
+          "label": "Required return (r)",
+          "kind": "owner_policy",
+          "basis": "Your hurdle settings",
+          "figure": {
+            "kind": "value",
+            "text": "10%"
+          },
+          "citations": [],
+          "from": []
+        },
+        {
+          "id": "exit_multiple",
+          "label": "Today's multiple",
+          "kind": "deterministic_result",
+          "basis": "(P × S0 − N) ÷ F0 at the Call date",
+          "figure": {
+            "kind": "value",
+            "text": "36.15x"
+          },
+          "citations": [],
+          "from": [
+            "share_price",
+            "shares_outstanding",
+            "net_cash",
+            "free_cash_flow"
+          ]
+        },
+        {
+          "id": "anchored_exit_multiple",
+          "label": "Exit multiple (X), anchored",
+          "kind": "agent_assumption",
+          "basis": "anchored: the lowest of today's multiple 36.15x, the FY2017 to FY2026 median EV/FCF 25.85x (range 15.61x to 38.47x) and 17.33x, the multiple whose implied perpetual growth at your 10% required return is 4%. Each year's EV is its last close on or before its fiscal year end times its diluted weighted-average shares on the closes' split basis, less its net cash. A past 10-K's cover count never binds, while today's multiple uses the latest one. FY2026's diluted average is 1.29% above it, so the years' multiples read high against today's.",
+          "figure": {
+            "kind": "value",
+            "text": "17.33x"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2017-09-30",
+              "date": "2026-11-03",
+              "text": "FY2017: 17.48x, (close 38.53 on 2017-09-29 × 21,006,768,000 shares − net cash USD -95,391,000,000) ÷ free cash flow USD 51,774,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2017-09-30, public by 2026-11-03"
+            },
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2018-09-29",
+              "date": "2026-11-03",
+              "text": "FY2018: 18.98x, (close 56.44 on 2018-09-28 × 20,000,436,000 shares − net cash USD -88,570,000,000) ÷ free cash flow USD 64,121,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2018-09-29, public by 2026-11-03"
+            },
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2019-09-28",
+              "date": "2026-11-03",
+              "text": "FY2019: 15.61x, (close 54.71 on 2019-09-27 × 18,595,652,000 shares − net cash USD 97,851,000,000) ÷ free cash flow USD 58,896,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2019-09-28, public by 2026-11-03"
+            },
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2020-09-26",
+              "date": "2026-11-03",
+              "text": "FY2020: 25.74x, (close 112.28 on 2020-09-25 × 17,528,214,000 shares − net cash USD 79,394,000,000) ÷ free cash flow USD 73,365,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2020-09-26, public by 2026-11-03"
+            },
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2021-09-25",
+              "date": "2026-11-03",
+              "text": "FY2021: 25.95x, (close 146.92 on 2021-09-24 × 16,864,919,000 shares − net cash USD 65,797,000,000) ÷ free cash flow USD 92,953,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2021-09-25, public by 2026-11-03"
+            },
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2022-09-24",
+              "date": "2026-11-03",
+              "text": "FY2022: 21.60x, (close 150.43 on 2022-09-23 × 16,325,819,000 shares − net cash USD 49,040,000,000) ÷ free cash flow USD 111,443,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2022-09-24, public by 2026-11-03"
+            },
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2023-09-30",
+              "date": "2026-11-03",
+              "text": "FY2023: 26.67x, (close 171.21 on 2023-09-29 × 15,812,547,000 shares − net cash USD 51,011,000,000) ÷ free cash flow USD 99,584,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2023-09-30, public by 2026-11-03"
+            },
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2024-09-28",
+              "date": "2026-11-03",
+              "text": "FY2024: 31.80x, (close 227.79 on 2024-09-27 × 15,408,095,000 shares − net cash USD 50,021,000,000) ÷ free cash flow USD 108,807,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2024-09-28, public by 2026-11-03"
+            },
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2025-09-27",
+              "date": "2026-11-03",
+              "text": "FY2025: 38.47x, (close 255.46 on 2025-09-26 × 15,004,697,000 shares − net cash USD 33,763,000,000) ÷ free cash flow USD 98,767,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2025-09-27, public by 2026-11-03"
+            },
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-09-26",
+              "date": "2026-11-03",
+              "text": "FY2026: 36.48x, (close 341.07 on 2026-09-25 × 14,720,306,000 shares − net cash USD 56,824,000,000) ÷ free cash flow USD 136,056,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03"
+            },
+            {
+              "source_id": "00000000-0000-4000-8000-00000000000b",
+              "accession": null,
+              "period_end": null,
+              "date": "2026-11-07",
+              "text": "yfinance split-adjusted daily closes, captured 2026-11-07; dev only, never certified"
+            }
+          ],
+          "from": [
+            "exit_multiple",
+            "required_return"
+          ]
+        },
+        {
+          "id": "share_change",
+          "label": "Annual share change (d)",
+          "kind": "agent_assumption",
+          "basis": "judgment: last fiscal year's stock-based compensation ÷ market cap at the Call date, used as the future rate",
+          "figure": {
+            "kind": "value",
+            "text": "0.277% a year"
+          },
+          "citations": [],
+          "from": [
+            "stock_based_compensation",
+            "share_price",
+            "shares_outstanding"
+          ]
+        },
+        {
+          "id": "bear_case",
+          "label": "Bear case",
+          "kind": "agent_assumption",
+          "basis": "None is assumed: rule 1 needs an anchored bear case before a bear value per share, a hurdle price or a stance is stated",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "unanchored",
+            "reason_code": null,
+            "text": "Not anchored"
+          },
+          "citations": [],
+          "from": []
+        }
+      ],
+      "requires": [
+        {
+          "id": "required_growth",
+          "label": "Required growth at today's multiple",
+          "kind": "deterministic_result",
+          "basis": "The annual growth of free cash flow per share at which five years of discounted cash flow, the exit at today's multiple and net cash per share equal the price",
+          "figure": {
+            "kind": "value",
+            "text": "7.3% a year"
+          },
+          "citations": [],
+          "from": [
+            "free_cash_flow",
+            "net_cash",
+            "shares_outstanding",
+            "share_price",
+            "required_return",
+            "exit_multiple",
+            "share_change"
+          ]
+        },
+        {
+          "id": "required_growth_anchored",
+          "label": "Required growth at the anchored exit multiple",
+          "kind": "deterministic_result",
+          "basis": "The annual growth of free cash flow per share at which five years of discounted cash flow, the exit at the anchored exit multiple and net cash per share equal the price",
+          "figure": {
+            "kind": "value",
+            "text": "22.5% a year"
+          },
+          "citations": [],
+          "from": [
+            "free_cash_flow",
+            "net_cash",
+            "shares_outstanding",
+            "share_price",
+            "required_return",
+            "anchored_exit_multiple",
+            "share_change"
+          ]
+        },
+        {
+          "id": "consensus",
+          "label": "Attributed consensus: Finviz EPS growth, next 5 years",
+          "kind": "attributed_consensus",
+          "from": [],
+          "basis": "Finviz eps_growth_next_5y, captured 2026-11-09. It is EPS growth, not free cash flow growth, shown beside the result and never an input",
+          "figure": {
+            "kind": "value",
+            "text": "8.18%"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000c1",
+              "accession": null,
+              "period_end": null,
+              "date": "2026-11-09",
+              "text": "Captured 2026-11-09"
+            }
+          ]
+        }
+      ],
+      "stance": {
+        "kind": "declined",
+        "rule": 1,
+        "text": "Declined under rule 1: the exit multiple is anchored, but the bear case is not, so no stance is stated.",
+        "reasons": [
+          {
+            "cites": "bear_case",
+            "text": "No bear case is anchored yet, so the bear value per share is not computed."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "call-2",
+    "kind": "call",
+    "snapshot_id": "22222222-2222-4222-9222-222222222222",
+    "data_ref": {
+      "kind": "call",
+      "id": "call-2"
+    },
+    "source_refs": [
+      "00000000-0000-4000-8000-0000000000a1",
+      "00000000-0000-4000-8000-0000000000b1"
+    ],
+    "as_of": "2026-11-09T15:00:00.000Z",
+    "subject_refs": [
+      {
+        "kind": "issuer",
+        "id": "00000000-0000-4000-8000-0000000000d1"
+      }
+    ],
+    "call": {
+      "version": "call.v2",
+      "call_date": "2026-11-09",
+      "subject": {
+        "issuer_id": "00000000-0000-4000-8000-0000000000d1",
+        "label": "NVDA"
+      },
+      "settings": {
+        "required_return": "0.1",
+        "margin_of_safety": "1.25",
+        "bear_loss_limit": "0.25",
+        "near_band": "0.1"
+      },
+      "inputs": {
+        "snapshot_id": "00000000-0000-4000-8000-0000000000e1",
+        "run_id": "00000000-0000-4000-8000-0000000000e2",
+        "unit_id": "call",
+        "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "facts": [
+        {
+          "id": "free_cash_flow",
+          "label": "Free cash flow",
+          "kind": "deterministic_result",
+          "basis": "free_cash_flow.v1: operating cash flow less PP&E capex, as reported in the latest 10-K",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "blocked_dependency",
+            "reason_code": "blocked_by_dependency",
+            "text": "Not certified: blocked_dependency (blocked_by_dependency)"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-09-26",
+              "date": "2026-11-03",
+              "text": "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03"
+            }
+          ],
+          "from": []
+        },
+        {
+          "id": "net_cash",
+          "label": "Net cash",
+          "kind": "deterministic_result",
+          "basis": "net_cash.v1: cash and securities less debt, from the same 10-K's balance sheet",
+          "figure": {
+            "kind": "value",
+            "text": "USD 56,824,000,000"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-09-26",
+              "date": "2026-11-03",
+              "text": "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03"
+            }
+          ],
+          "from": []
+        },
+        {
+          "id": "stock_based_compensation",
+          "label": "Stock-based compensation",
+          "kind": "reported_fact",
+          "basis": "Reported in the latest 10-K's cash flow statement",
+          "figure": {
+            "kind": "value",
+            "text": "USD 13,789,000,000"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-09-26",
+              "date": "2026-11-03",
+              "text": "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03"
+            }
+          ],
+          "from": []
+        },
+        {
+          "id": "shares_outstanding",
+          "label": "Shares outstanding",
+          "kind": "reported_fact",
+          "basis": "The newest cover-page count, under the engine's age and split rules",
+          "figure": {
+            "kind": "value",
+            "text": "14,532,182,000 shares"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-10-23",
+              "date": "2026-11-03",
+              "text": "0000320193-26-000026, cover date 2026-10-23, public by 2026-11-03"
+            }
+          ],
+          "from": []
+        },
+        {
+          "id": "share_price",
+          "label": "Share price",
+          "kind": "market_observation",
+          "basis": "The latest stored close on or before the Call date",
+          "figure": {
+            "kind": "value",
+            "text": "USD 342.37 per share"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000b1",
+              "accession": null,
+              "period_end": null,
+              "date": "2026-11-06",
+              "text": "Close on 2026-11-06"
+            }
+          ],
+          "from": []
+        }
+      ],
+      "assumptions": [
+        {
+          "id": "required_return",
+          "label": "Required return (r)",
+          "kind": "owner_policy",
+          "basis": "Your hurdle settings",
+          "figure": {
+            "kind": "value",
+            "text": "10%"
+          },
+          "citations": [],
+          "from": []
+        },
+        {
+          "id": "exit_multiple",
+          "label": "Today's multiple",
+          "kind": "deterministic_result",
+          "basis": "(P × S0 − N) ÷ F0 at the Call date",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "blocked_dependency",
+            "reason_code": "blocked_by_dependency",
+            "text": "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)"
+          },
+          "citations": [],
+          "from": [
+            "share_price",
+            "shares_outstanding",
+            "net_cash",
+            "free_cash_flow"
+          ]
+        },
+        {
+          "id": "anchored_exit_multiple",
+          "label": "Exit multiple (X), anchored",
+          "kind": "agent_assumption",
+          "basis": "The lowest of today's multiple, the median EV/FCF of the last 10 fiscal years and the multiple whose implied perpetual growth at your required return is 4%, when each of those years has a multiple",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "blocked_dependency",
+            "reason_code": "blocked_by_dependency",
+            "text": "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)"
+          },
+          "citations": [],
+          "from": [
+            "exit_multiple",
+            "required_return"
+          ]
+        },
+        {
+          "id": "share_change",
+          "label": "Annual share change (d)",
+          "kind": "agent_assumption",
+          "basis": "judgment: last fiscal year's stock-based compensation ÷ market cap at the Call date, used as the future rate",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "blocked_dependency",
+            "reason_code": "blocked_by_dependency",
+            "text": "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)"
+          },
+          "citations": [],
+          "from": [
+            "stock_based_compensation",
+            "share_price",
+            "shares_outstanding"
+          ]
+        },
+        {
+          "id": "bear_case",
+          "label": "Bear case",
+          "kind": "agent_assumption",
+          "basis": "None is assumed: rule 1 needs an anchored bear case before a bear value per share, a hurdle price or a stance is stated",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "unanchored",
+            "reason_code": null,
+            "text": "Not anchored"
+          },
+          "citations": [],
+          "from": []
+        }
+      ],
+      "requires": [
+        {
+          "id": "required_growth",
+          "label": "Required growth at today's multiple",
+          "kind": "deterministic_result",
+          "basis": "The annual growth of free cash flow per share at which five years of discounted cash flow, the exit at today's multiple and net cash per share equal the price",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "blocked_dependency",
+            "reason_code": "blocked_by_dependency",
+            "text": "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)"
+          },
+          "citations": [],
+          "from": [
+            "free_cash_flow",
+            "net_cash",
+            "shares_outstanding",
+            "share_price",
+            "required_return",
+            "exit_multiple",
+            "share_change"
+          ]
+        },
+        {
+          "id": "required_growth_anchored",
+          "label": "Required growth at the anchored exit multiple",
+          "kind": "deterministic_result",
+          "basis": "The annual growth of free cash flow per share at which five years of discounted cash flow, the exit at the anchored exit multiple and net cash per share equal the price",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "blocked_dependency",
+            "reason_code": "blocked_by_dependency",
+            "text": "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)"
+          },
+          "citations": [],
+          "from": [
+            "free_cash_flow",
+            "net_cash",
+            "shares_outstanding",
+            "share_price",
+            "required_return",
+            "anchored_exit_multiple",
+            "share_change"
+          ]
+        },
+        {
+          "id": "consensus",
+          "label": "Attributed consensus: Finviz EPS growth, next 5 years",
+          "kind": "attributed_consensus",
+          "from": [],
+          "basis": "Finviz consensus as captured; none on or within 7 days before the Call date",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "no_consensus",
+            "reason_code": null,
+            "text": "no consensus within 7 days"
+          },
+          "citations": []
+        }
+      ],
+      "stance": {
+        "kind": "declined",
+        "rule": 0,
+        "text": "Declined under rule 0: an input has no certified value, so no stance is stated.",
+        "reasons": [
+          {
+            "cites": "free_cash_flow",
+            "text": "Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "call-3",
+    "kind": "call",
+    "snapshot_id": "22222222-2222-4222-9222-222222222222",
+    "data_ref": {
+      "kind": "call",
+      "id": "call-3"
+    },
+    "source_refs": [
+      "00000000-0000-4000-8000-0000000000a1",
+      "00000000-0000-4000-8000-0000000000b1"
+    ],
+    "as_of": "2026-11-09T15:00:00.000Z",
+    "subject_refs": [
+      {
+        "kind": "issuer",
+        "id": "00000000-0000-4000-8000-0000000000d1"
+      }
+    ],
+    "call": {
+      "version": "call.v2",
+      "call_date": "2026-11-09",
+      "subject": {
+        "issuer_id": "00000000-0000-4000-8000-0000000000d1",
+        "label": "COST"
+      },
+      "settings": {
+        "required_return": "0.1",
+        "margin_of_safety": "1.25",
+        "bear_loss_limit": "0.25",
+        "near_band": "0.1"
+      },
+      "inputs": {
+        "snapshot_id": "00000000-0000-4000-8000-0000000000e1",
+        "run_id": "00000000-0000-4000-8000-0000000000e2",
+        "unit_id": "call",
+        "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "facts": [
+        {
+          "id": "free_cash_flow",
+          "label": "Free cash flow",
+          "kind": "deterministic_result",
+          "basis": "free_cash_flow.v1: operating cash flow less PP&E capex, as reported in the latest 10-K",
+          "figure": {
+            "kind": "value",
+            "text": "USD 136,056,000,000"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-09-26",
+              "date": "2026-11-03",
+              "text": "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03"
+            }
+          ],
+          "from": []
+        },
+        {
+          "id": "net_cash",
+          "label": "Net cash",
+          "kind": "deterministic_result",
+          "basis": "net_cash.v1: cash and securities less debt, from the same 10-K's balance sheet",
+          "figure": {
+            "kind": "value",
+            "text": "USD 56,824,000,000"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-09-26",
+              "date": "2026-11-03",
+              "text": "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03"
+            }
+          ],
+          "from": []
+        },
+        {
+          "id": "stock_based_compensation",
+          "label": "Stock-based compensation",
+          "kind": "reported_fact",
+          "basis": "Reported in the latest 10-K's cash flow statement",
+          "figure": {
+            "kind": "value",
+            "text": "USD 13,789,000,000"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-09-26",
+              "date": "2026-11-03",
+              "text": "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03"
+            }
+          ],
+          "from": []
+        },
+        {
+          "id": "shares_outstanding",
+          "label": "Shares outstanding",
+          "kind": "reported_fact",
+          "basis": "The newest cover-page count, under the engine's age and split rules",
+          "figure": {
+            "kind": "value",
+            "text": "14,532,182,000 shares"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-10-23",
+              "date": "2026-11-03",
+              "text": "0000320193-26-000026, cover date 2026-10-23, public by 2026-11-03"
+            }
+          ],
+          "from": []
+        },
+        {
+          "id": "share_price",
+          "label": "Share price",
+          "kind": "market_observation",
+          "basis": "The latest stored close on or before the Call date",
+          "figure": {
+            "kind": "value",
+            "text": "USD 342.37 per share"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000b1",
+              "accession": null,
+              "period_end": null,
+              "date": "2026-11-06",
+              "text": "Close on 2026-11-06"
+            }
+          ],
+          "from": []
+        }
+      ],
+      "assumptions": [
+        {
+          "id": "required_return",
+          "label": "Required return (r)",
+          "kind": "owner_policy",
+          "basis": "Your hurdle settings",
+          "figure": {
+            "kind": "value",
+            "text": "10%"
+          },
+          "citations": [],
+          "from": []
+        },
+        {
+          "id": "exit_multiple",
+          "label": "Today's multiple",
+          "kind": "deterministic_result",
+          "basis": "(P × S0 − N) ÷ F0 at the Call date",
+          "figure": {
+            "kind": "value",
+            "text": "36.15x"
+          },
+          "citations": [],
+          "from": [
+            "share_price",
+            "shares_outstanding",
+            "net_cash",
+            "free_cash_flow"
+          ]
+        },
+        {
+          "id": "anchored_exit_multiple",
+          "label": "Exit multiple (X), anchored",
+          "kind": "agent_assumption",
+          "basis": "The lowest of today's multiple, the median EV/FCF of the last 10 fiscal years and the multiple whose implied perpetual growth at your required return is 4%, when each of those years has a multiple",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "unanchored",
+            "reason_code": null,
+            "text": "Not anchored: no closes are captured for the listing by the Call's cutoff."
+          },
+          "citations": [],
+          "from": [
+            "exit_multiple",
+            "required_return"
+          ]
+        },
+        {
+          "id": "share_change",
+          "label": "Annual share change (d)",
+          "kind": "agent_assumption",
+          "basis": "judgment: last fiscal year's stock-based compensation ÷ market cap at the Call date, used as the future rate",
+          "figure": {
+            "kind": "value",
+            "text": "0.277% a year"
+          },
+          "citations": [],
+          "from": [
+            "stock_based_compensation",
+            "share_price",
+            "shares_outstanding"
+          ]
+        },
+        {
+          "id": "bear_case",
+          "label": "Bear case",
+          "kind": "agent_assumption",
+          "basis": "None is assumed: rule 1 needs an anchored bear case before a bear value per share, a hurdle price or a stance is stated",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "unanchored",
+            "reason_code": null,
+            "text": "Not anchored"
+          },
+          "citations": [],
+          "from": []
+        }
+      ],
+      "requires": [
+        {
+          "id": "required_growth",
+          "label": "Required growth at today's multiple",
+          "kind": "deterministic_result",
+          "basis": "The annual growth of free cash flow per share at which five years of discounted cash flow, the exit at today's multiple and net cash per share equal the price",
+          "figure": {
+            "kind": "value",
+            "text": "7.3% a year"
+          },
+          "citations": [],
+          "from": [
+            "free_cash_flow",
+            "net_cash",
+            "shares_outstanding",
+            "share_price",
+            "required_return",
+            "exit_multiple",
+            "share_change"
+          ]
+        },
+        {
+          "id": "required_growth_anchored",
+          "label": "Required growth at the anchored exit multiple",
+          "kind": "deterministic_result",
+          "basis": "The annual growth of free cash flow per share at which five years of discounted cash flow, the exit at the anchored exit multiple and net cash per share equal the price",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "unanchored",
+            "reason_code": null,
+            "text": "Not computed: the exit multiple is not anchored."
+          },
+          "citations": [],
+          "from": [
+            "free_cash_flow",
+            "net_cash",
+            "shares_outstanding",
+            "share_price",
+            "required_return",
+            "anchored_exit_multiple",
+            "share_change"
+          ]
+        },
+        {
+          "id": "consensus",
+          "label": "Attributed consensus: Finviz EPS growth, next 5 years",
+          "kind": "attributed_consensus",
+          "from": [],
+          "basis": "Finviz eps_growth_next_5y, captured 2026-11-09. It is EPS growth, not free cash flow growth, shown beside the result and never an input",
+          "figure": {
+            "kind": "value",
+            "text": "8.18%"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000c1",
+              "accession": null,
+              "period_end": null,
+              "date": "2026-11-09",
+              "text": "Captured 2026-11-09"
+            }
+          ]
+        }
+      ],
+      "stance": {
+        "kind": "declined",
+        "rule": 1,
+        "text": "Declined under rule 1: neither the exit multiple nor the bear case is anchored, so no stance is stated.",
+        "reasons": [
+          {
+            "cites": "anchored_exit_multiple",
+            "text": "No closes are captured for the listing by the Call's cutoff."
+          },
+          {
+            "cites": "bear_case",
+            "text": "No bear case is anchored yet, so the bear value per share is not computed."
+          }
+        ]
+      }
+    }
+  }
+]

@@ -11,7 +11,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
-import { ADVICE_WORDS, callModelOperations, DEFAULT_CALL_SETTINGS, STANCE_WORDS, type CallContent, type CallContentV1 } from "../../financial-core/src/index.ts";
+import { ADVICE_WORDS, CALL_OUTPUT_NODES, callInputOperations, callModelOperations, DEFAULT_CALL_SETTINGS, STANCE_WORDS, type CallContent, type CallContentV1, type CallContentV2 } from "../../financial-core/src/index.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { buildDeterministicPlan, type PlanningModel } from "../../financial-engine/src/planner.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
@@ -28,6 +28,9 @@ import { chatAuthority } from "../src/financial-runtime.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { chatDatabase, chatHarness, completed, resolveMention } from "./financial-fixtures.ts";
+
+// AAPL's FY2026 revenue puts it in the top bucket of data/growth-base-rates.json.
+const BASE_RATE = "Of 377 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 183 (48.5%) delivered free cash flow per share growth of at least 7.3% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%).";
 
 // Monday 10:00 in New York: Friday 2026-11-06's close is the latest.
 const CUTOFF = "2026-11-09T15:00:00.000Z";
@@ -152,7 +155,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     const message = (await listChatMessagesForThread(pool, { thread_id: threadId, user_id: IDS.owner }))!.messages.find((candidate) => candidate.message_id === done.message_id)!;
     return { threadId, message, block: (message.blocks as unknown as CallBlock[])[0]! };
   };
-  const rows = (call: CallContent | CallContentV1) => [...call.facts, ...call.assumptions, ...call.requires].map((row) => [row.id, row.kind, row.basis.length > 0, row.figure.text]);
+  const rows = (call: CallContent | CallContentV2 | CallContentV1) => [...call.facts, ...call.assumptions, ...call.requires].map((row) => [row.id, row.kind, row.basis.length > 0, row.figure.text]);
 
   await t.test("AAPL: a sealed Call shows 36.15x and 7.3% a year, labels every row, and declines under rule 1", async () => {
     const { threadId, message, block } = await ask("Make a Call on AAPL");
@@ -166,6 +169,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
       ["stock_based_compensation", "reported_fact", true, "USD 13,789,000,000"],
       ["shares_outstanding", "reported_fact", true, "14,532,182,000 shares"],
       ["share_price", "market_observation", true, "USD 342.37 per share"],
+      ["revenue", "reported_fact", true, "USD 478,834,000,000"],
       ["required_return", "owner_policy", true, "10%"],
       ["exit_multiple", "deterministic_result", true, "36.15x"],
       // No closes are captured here; financial-call-anchor.test.ts anchors AAPL's ten fiscal years.
@@ -174,6 +178,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
       ["bear_case", "agent_assumption", true, "Not anchored"],
       ["required_growth", "deterministic_result", true, "7.3% a year"],
       ["required_growth_anchored", "deterministic_result", true, "Not computed: the exit multiple is not anchored."],
+      ["base_rate", "deterministic_result", true, BASE_RATE],
       ["consensus", "attributed_consensus", true, "8.18%"],
     ]);
     assert.deepEqual(call.facts.map((row) => row.citations.map((citation) => citation.text)), [
@@ -182,6 +187,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
       ["10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-09"],
       ["0000320193-26-000026, cover date 2026-10-23, public by 2026-11-09"],
       ["Close on 2026-11-06"],
+      ["10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-09"],
     ]);
     assert.deepEqual([call.stance.kind, call.stance.rule, call.stance.reasons.map((reason) => reason.cites)], ["declined", 1, ["anchored_exit_multiple", "bear_case"]]);
     const stored = (await db.query(`select call_date::text, settings, inputs_fingerprint, content_hash from calls where snapshot_id = $1`, [block.snapshot_id])).rows;
@@ -200,8 +206,8 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     assert.deepEqual(await verifyCalls([block], randomUUID(), pool), [{ block_id: block.id, reason: "inputs" }], "another thread's certificate");
   });
 
-  await t.test("a Call saved before #605 (call.v1) regenerates as it was saved, so its seal still holds", async () => {
-    // Its inputs as chat published them then (de724754): the model's nodes alone, and their six outputs.
+  // A Call on the inputs an earlier version's plan published, saved now: the seal must regenerate it as that version.
+  const publishEarlier = async (operations: ReturnType<typeof callModelOperations>, outputs: ReadonlyArray<string>) => {
     const threadId = randomUUID();
     await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [threadId, IDS.owner]);
     const turnId = randomUUID();
@@ -223,8 +229,8 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
         publication_unit_kind: "chat_section",
       }, {
         subjects: [{ slot_id: "a", mention: "AAPL" }],
-        operations: callModelOperations("a"),
-        outputs: ["free_cash_flow", "net_cash", "stock_based_compensation", "market_cap", "market_cap_px", "market_cap_shares"].map((node) => ({ output_id: `out_${node}`, node_id: node })),
+        operations,
+        outputs: outputs.map((node) => ({ output_id: `out_${node}`, node_id: node })),
         thresholds: [],
       }),
       evidence: createEvidenceFinancialPort,
@@ -235,7 +241,12 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     const messageId = randomUUID();
     assert.equal(await publishCall(pool, { thread_id: threadId, user_id: IDS.owner, message_id: messageId, inputs_snapshot_id: unit.snapshot_id, settings: DEFAULT_CALL_SETTINGS }), "saved");
     const message = (await listChatMessagesForThread(pool, { thread_id: threadId, user_id: IDS.owner }))!.messages.find((candidate) => candidate.message_id === messageId)!;
-    const block = (message.blocks as unknown as CallBlock[])[0]!;
+    return { threadId, block: (message.blocks as unknown as CallBlock[])[0]! };
+  };
+
+  await t.test("a Call saved before #605 (call.v1) regenerates as it was saved, so its seal still holds", async () => {
+    // Its inputs as chat published them then (de724754): the model's nodes alone, and their six outputs.
+    const { threadId, block } = await publishEarlier(callModelOperations("a"), ["free_cash_flow", "net_cash", "stock_based_compensation", "market_cap", "market_cap_px", "market_cap_shares"]);
     // What main's test asserted of this Call.
     assert.equal(block.call.version, "call.v1");
     assert.deepEqual(rows(block.call), [
@@ -252,6 +263,15 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     ]);
     assert.deepEqual([block.call.stance.rule, block.call.stance.reasons.map((reason) => reason.cites)], [1, ["exit_multiple"]]);
     assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the call.v1 block");
+  });
+
+  await t.test("a Call on the plan before its base rate (call.v2) regenerates without the revenue fact or the base rate", async () => {
+    // Its inputs as chat published them then (72a64ec6): every node but revenue.
+    const { threadId, block } = await publishEarlier(callInputOperations("a").filter((node) => node.node_id !== "revenue"), CALL_OUTPUT_NODES.filter((node) => node !== "revenue"));
+    assert.equal(block.call.version, "call.v2");
+    const ids = rows(block.call).map(([id]) => id);
+    assert.deepEqual([ids.includes("revenue"), ids.includes("base_rate"), ids.length], [false, false, 13]);
+    assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the call.v2 block");
   });
 
   await t.test("a retry of a Call turn returns the saved Call and seals nothing more", async () => {
@@ -273,7 +293,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
       call.facts[0]!.basis,
       "free_cash_flow.v1: operating cash flow less capex, as reported in the latest 10-K. Capex is filed as PaymentsToAcquireProductiveAssets, which may include purchased intangibles as well as PP&E.",
     );
-    assert.deepEqual(call.requires.map((row) => row.figure.text), ["7.3% a year", "Not computed: the exit multiple is not anchored.", "8.18%"]);
+    assert.deepEqual(call.requires.map((row) => row.figure.text), ["7.3% a year", "Not computed: the exit multiple is not anchored.", BASE_RATE, "8.18%"]);
     assert.equal(call.stance.rule, 1);
     assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the scoped basis");
   });
@@ -286,7 +306,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
       call.facts[0]!.basis,
       "free_cash_flow.v1: operating cash flow less PP&E capex, as reported in the latest 10-K. Operating cash flow is filed as NetCashProvidedByUsedInOperatingActivitiesContinuingOperations, which excludes discontinued operations.",
     );
-    assert.deepEqual(call.requires.map((row) => row.figure.text), ["7.3% a year", "Not computed: the exit multiple is not anchored.", "8.18%"]);
+    assert.deepEqual(call.requires.map((row) => row.figure.text), ["7.3% a year", "Not computed: the exit multiple is not anchored.", BASE_RATE, "8.18%"]);
     assert.equal(call.stance.rule, 1);
     assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the scoped basis");
   });
@@ -305,7 +325,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
 
   await t.test("with no consensus within 7 days the row says so, and the Call is otherwise AAPL's", async () => {
     const { call } = (await ask("Make a Call on NOCN")).block;
-    assert.deepEqual(call.requires.map((row) => row.figure.text), ["7.3% a year", "Not computed: the exit multiple is not anchored.", "no consensus within 7 days"]);
+    assert.deepEqual(call.requires.map((row) => row.figure.text), ["7.3% a year", "Not computed: the exit multiple is not anchored.", BASE_RATE, "no consensus within 7 days"]);
     assert.equal(call.stance.rule, 1);
   });
 
@@ -362,7 +382,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     const { block } = await ask("Make a Call on AAPL", { clock: "2026-11-10T02:00:00.000Z" });
     const call = block.call;
     assert.deepEqual([call.call_date, call.facts[4]!.figure.text, call.facts[4]!.citations.map((citation) => citation.text)], ["2026-11-09", "USD 343.1 per share", ["Close on 2026-11-09"]]);
-    assert.deepEqual([call.stance.rule, call.requires[2]!.figure.text], [1, "8.18%"]);
+    assert.deepEqual([call.stance.rule, call.requires[3]!.figure.text], [1, "8.18%"]);
     const stored = (await db.query(`select call_date::text from calls where snapshot_id = $1`, [block.snapshot_id])).rows;
     assert.deepEqual(stored, [{ call_date: "2026-11-09" }]);
   });

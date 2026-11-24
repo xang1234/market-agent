@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { assembleCall, DEFAULT_CALL_SETTINGS, parseCallSettings, type CallContent, type CallEvidence } from "../src/index.ts";
 
-import { AAPL, AAPL_HISTORY, filing, PRICE_SOURCE } from "./call-fixtures.ts";
+import { AAPL, AAPL_HISTORY, BASE_RATES, filing, PRICE_SOURCE } from "./call-fixtures.ts";
 
 const figures = (rows: CallContent["facts"]) => rows.map((row) => [row.id, row.kind, row.figure.text]);
 
@@ -52,6 +52,7 @@ test("AAPL: today's multiple is 36.15x, the anchored exit multiple 17.33x, and t
     ["stock_based_compensation", "reported_fact", "USD 13,789,000,000"],
     ["shares_outstanding", "reported_fact", "14,532,182,000 shares"],
     ["share_price", "market_observation", "USD 342.37 per share"],
+    ["revenue", "reported_fact", "USD 478,834,000,000"],
   ]);
   assert.deepEqual(figures(call.assumptions), [
     ["required_return", "owner_policy", "10%"],
@@ -63,6 +64,7 @@ test("AAPL: today's multiple is 36.15x, the anchored exit multiple 17.33x, and t
   assert.deepEqual(figures(call.requires), [
     ["required_growth", "deterministic_result", "7.3% a year"],
     ["required_growth_anchored", "deterministic_result", "22.5% a year"],
+    ["base_rate", "deterministic_result", "Of 377 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 183 (48.5%) delivered free cash flow per share growth of at least 7.3% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%)."],
     ["consensus", "attributed_consensus", "8.18%"],
   ]);
   assert.equal(call.assumptions[3]!.basis.startsWith("judgment:"), true, "d is the agent's judgment");
@@ -75,7 +77,7 @@ test("AAPL: today's multiple is 36.15x, the anchored exit multiple 17.33x, and t
   assert.equal(call.assumptions[2]!.citations[2]!.text, "FY2019: 15.61x, (close 54.71 on 2019-09-27 × 18,595,652,000 shares − net cash USD 97,851,000,000) ÷ free cash flow USD 58,896,000,000; free cash flow, net cash and diluted shares from 10-K 0000320193-26-000026, period ended 2019-09-28, public by 2026-11-03");
   // Retrieved at 20:00 on 2026-11-07 in New York: the capture is dated on the listing's calendar, as split dates are.
   assert.equal(call.assumptions[2]!.citations.at(-1)!.text, "yfinance split-adjusted daily closes, captured 2026-11-07; dev only, never certified");
-  assert.equal(call.requires[2]!.label, "Attributed consensus: Finviz EPS growth, next 5 years");
+  assert.equal(call.requires[3]!.label, "Attributed consensus: Finviz EPS growth, next 5 years");
   assert.equal(call.facts[0]!.citations[0]!.text, "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03");
   assert.equal(call.facts[4]!.citations[0]!.text, "Close on 2026-11-06");
   assert.deepEqual(call.stance, {
@@ -194,10 +196,10 @@ test("net cash from another filing than free cash flow's 10-K is incompatible_pe
 
 test("no consensus captured within 7 days reads so, and the Call is otherwise unchanged", () => {
   const call = assembleCall({ ...AAPL, consensus: [{ ...AAPL.consensus[0]!, captured_on: "2026-11-01" }] });
-  assert.deepEqual(call.requires[2]!.figure, { kind: "outcome", outcome: "no_consensus", reason_code: null, text: "no consensus within 7 days" });
-  assert.deepEqual(call.requires[2]!.citations, []);
+  assert.deepEqual(call.requires[3]!.figure, { kind: "outcome", outcome: "no_consensus", reason_code: null, text: "no consensus within 7 days" });
+  assert.deepEqual(call.requires[3]!.citations, []);
   const fresh = assembleCall(AAPL);
-  assert.deepEqual({ ...call, requires: call.requires.slice(0, 2) }, { ...fresh, requires: fresh.requires.slice(0, 2) });
+  assert.deepEqual({ ...call, requires: call.requires.slice(0, 3) }, { ...fresh, requires: fresh.requires.slice(0, 3) });
 });
 
 test("owner settings save only inside ADR 0005's ranges, as canonical decimals", () => {
@@ -224,4 +226,25 @@ test("a non-USD filer declines under rule 0 citing free cash flow, not the USD p
 test("a share change at or below -100% declines under rule 0 citing the share change", () => {
   const call = assembleCall({ ...AAPL, figures: { ...AAPL.figures, stock_based_compensation: { kind: "value", value: "-6000000000000", currency: "USD" } } });
   assert.deepEqual([call.stance.rule, call.stance.reasons.map((r) => r.cites)], [0, ["share_change"]]);
+});
+
+const baseRate = (evidence: CallEvidence) => assembleCall(evidence).requires.find((row) => row.id === "base_rate")!;
+
+test("the base rate cites the dataset and what it left out, and is a frequency, never a probability", () => {
+  const row = baseRate(AAPL);
+  assert.deepEqual(row.from, ["required_growth", "revenue"]);
+  assert.match(row.basis, /^A frequency of reported history, not a probability\./u);
+  assert.match(row.basis, /companyfacts archive of 2026-11-24 \(sha256 72bc1c52670fe57a3d701f13cbab55763c122388b314d1eaca921bb18ddfbacd\)/u);
+  assert.match(row.basis, /Not among the 377: 38 that ended early \(the filer stopped filing before year 5\), 6 with no year-5 figure, 54 with no split-chained share count, 95 whose two ends use different capex or cash flow concepts and 45 that started at zero or negative free cash flow\. 34 of the 377 ended at or below zero and count as -100%$/u);
+});
+
+test("revenue the engine did not certify leaves the base rate uncomputed and declines nothing; a thin bucket says how thin", () => {
+  const gapped = assembleCall({ ...AAPL, figures: { ...AAPL.figures, revenue: { kind: "gap", disposition: "missing", reason_code: "missing_input" } } });
+  assert.deepEqual(gapped.requires.find((row) => row.id === "base_rate")!.figure, {
+    kind: "outcome", outcome: "missing", reason_code: "missing_input", text: "Not computed: revenue is not certified (missing, missing_input).",
+  });
+  assert.deepEqual(gapped.stance, assembleCall(AAPL).stance);
+  const thin = { ...BASE_RATES, buckets: BASE_RATES.buckets.map((bucket) => ({ ...bucket, metrics: { ...bucket.metrics, fcf_per_share: { ...bucket.metrics.fcf_per_share, points: bucket.metrics.fcf_per_share.points.slice(0, 12) } } })) };
+  assert.equal(baseRate({ ...AAPL, base_rates: thin }).figure.text, "Not computed: only 12 windows began in starting revenue USD 50.0B and up, fewer than the 100 a base rate needs.");
+  assert.match(baseRate({ ...AAPL, figures: { ...AAPL.figures, free_cash_flow: { kind: "gap", disposition: "blocked_dependency", reason_code: "blocked_by_dependency" } } }).figure.text, /^Not computed\. Free cash flow: Not certified/u);
 });

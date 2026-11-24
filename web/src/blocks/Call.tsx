@@ -4,8 +4,8 @@ import type { CallBlock, CallContent, CallInputKind, CallRow } from './types.ts'
 
 type CallProps = { block: CallBlock }
 
-// A call.v1, saved before the exit multiple was anchored (#605), shows its own rows the same way.
-const CALL_VERSIONS: ReadonlySet<string> = new Set<CallContent['version']>(['call.v1', 'call.v2'])
+// A call.v1, saved before the exit multiple was anchored (#605), and a call.v2, before the base rate, show their own rows the same way.
+const CALL_VERSIONS: ReadonlySet<string> = new Set<CallContent['version']>(['call.v1', 'call.v2', 'call.v3'])
 
 const KIND_LABEL: Readonly<Record<CallInputKind, string>> = {
   reported_fact: 'Reported fact',

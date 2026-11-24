@@ -2882,6 +2882,7 @@
             "stock_based_compensation",
             "shares_outstanding",
             "share_price",
+            "revenue",
             "required_return",
             "exit_multiple",
             "anchored_exit_multiple",
@@ -2889,6 +2890,7 @@
             "bear_case",
             "required_growth",
             "required_growth_anchored",
+            "base_rate",
             "consensus"
           ]
         },
@@ -2928,6 +2930,7 @@
               "stock_based_compensation",
               "shares_outstanding",
               "share_price",
+              "revenue",
               "required_return",
               "exit_multiple",
               "anchored_exit_multiple",
@@ -2935,6 +2938,7 @@
               "bear_case",
               "required_growth",
               "required_growth_anchored",
+              "base_rate",
               "consensus"
             ]
           }
@@ -2960,7 +2964,8 @@
         "version": {
           "enum": [
             "call.v1",
-            "call.v2"
+            "call.v2",
+            "call.v3"
           ]
         },
         "call_date": {
@@ -3044,7 +3049,7 @@
             "$ref": "#/$defs/CallRow"
           },
           "minItems": 5,
-          "maxItems": 5
+          "maxItems": 6
         },
         "assumptions": {
           "type": "array",
@@ -3097,6 +3102,7 @@
                       "stock_based_compensation",
                       "shares_outstanding",
                       "share_price",
+                      "revenue",
                       "required_return",
                       "exit_multiple",
                       "anchored_exit_multiple",
@@ -3104,6 +3110,7 @@
                       "bear_case",
                       "required_growth",
                       "required_growth_anchored",
+                      "base_rate",
                       "consensus"
                     ]
                   },
@@ -3139,6 +3146,10 @@
             "requires": {
               "minItems": 2,
               "maxItems": 2
+            },
+            "facts": {
+              "minItems": 5,
+              "maxItems": 5
             }
           }
         }
@@ -3162,6 +3173,37 @@
             "requires": {
               "minItems": 3,
               "maxItems": 3
+            },
+            "facts": {
+              "minItems": 5,
+              "maxItems": 5
+            }
+          }
+        }
+      ]
+    },
+    "CallContentV3": {
+      "description": "A Call whose required growth is set against a base rate: how often 10-K filers that began at a similar revenue delivered it over five years, from SEC's bulk company facts. The base rate is a frequency of reported history, never a probability, and never certified. It adds the revenue fact that picks the size bucket.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/CallContent"
+        },
+        {
+          "properties": {
+            "version": {
+              "const": "call.v3"
+            },
+            "facts": {
+              "minItems": 6,
+              "maxItems": 6
+            },
+            "assumptions": {
+              "minItems": 5,
+              "maxItems": 5
+            },
+            "requires": {
+              "minItems": 4,
+              "maxItems": 4
             }
           }
         }
@@ -3192,6 +3234,9 @@
                 },
                 {
                   "$ref": "#/$defs/CallContentV2"
+                },
+                {
+                  "$ref": "#/$defs/CallContentV3"
                 }
               ]
             }

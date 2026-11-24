@@ -7,16 +7,18 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
-import { assembleCall, assembleCallV1, type CallContent, type CallContentV1 } from "../src/index.ts";
+import { assembleCall, assembleCallV1, assembleCallV2, type CallContent, type CallContentV1, type CallContentV2, type CallEvidenceV2 } from "../src/index.ts";
 
 const SCHEMA = JSON.parse(readFileSync(new URL("../../../spec/finance_research_block_schema.json", import.meta.url), "utf8"));
 const WEB_FIXTURE = new URL("../../../web/src/blocks/call.fixture.json", import.meta.url);
 // main's web fixture at de724754, byte for byte: the two Calls #604 generated before the exit multiple was anchored (#605).
 const V1_FIXTURE = new URL("../../../web/src/blocks/call.v1.fixture.json", import.meta.url);
+// main's web fixture at 72a64ec6, byte for byte: the three Calls #605 generated before the base rate.
+const V2_FIXTURE = new URL("../../../web/src/blocks/call.v2.fixture.json", import.meta.url);
 
 import { AAPL, PRICE_SOURCE, TEN_K } from "./call-fixtures.ts";
 
-function block(id: string, call: CallContent | CallContentV1) {
+function block(id: string, call: CallContent | CallContentV2 | CallContentV1) {
   return {
     id,
     kind: "call",
@@ -29,7 +31,7 @@ function block(id: string, call: CallContent | CallContentV1) {
   };
 }
 
-test("a Call declined under rule 1 with its exit multiple anchored, one with it unanchored, and one under rule 0 satisfy the canonical block schema, and are the web's fixture", () => {
+test("a Call declined under rule 1 with its exit multiple anchored and its base rate, one with it unanchored, and one under rule 0 satisfy the canonical block schema, and are the web's fixture", () => {
   const ajv = new Ajv2020({ allErrors: true, strict: false });
   ajv.addSchema(SCHEMA);
   const validate = ajv.getSchema(`${SCHEMA.$id}#/$defs/Block`)!;
@@ -61,4 +63,22 @@ test("a Call saved before #605 still meets the canonical block schema as call.v1
   const current = block("call-1", assembleCall(AAPL));
   assert.equal(validate({ ...saved[0], call: { ...saved[0]!.call, version: "call.v2" } }), false, "a call.v2 has the anchor's rows");
   assert.equal(validate({ ...current, call: { ...current.call, version: "call.v1" } }), false, "a call.v1 has only the rows it had");
+});
+
+test("a Call saved before its base rate still meets the canonical block schema as call.v2, and its inputs regenerate it exactly", () => {
+  const ajv = new Ajv2020({ allErrors: true, strict: false });
+  ajv.addSchema(SCHEMA);
+  const validate = ajv.getSchema(`${SCHEMA.$id}#/$defs/Block`)!;
+  const saved = JSON.parse(readFileSync(V2_FIXTURE, "utf8")) as ReadonlyArray<ReturnType<typeof block>>;
+  for (const candidate of saved) assert.ok(validate(candidate), JSON.stringify(validate.errors));
+  const { base_rates: _rates, figures: { revenue: _revenue, ...figures }, citations: { revenue: _cited, ...citations }, ...rest } = AAPL;
+  const before: CallEvidenceV2 = { ...rest, figures, citations };
+  assert.deepEqual(saved, [
+    block("call-1", assembleCallV2(before)),
+    block("call-2", assembleCallV2({ ...before, subject: { ...before.subject, label: "NVDA" }, figures: { ...before.figures, free_cash_flow: { kind: "gap", disposition: "blocked_dependency", reason_code: "blocked_by_dependency" } }, consensus: [] })),
+    block("call-3", assembleCallV2({ ...before, subject: { ...before.subject, label: "COST" }, closes: null })),
+  ]);
+  const current = block("call-1", assembleCall(AAPL));
+  assert.equal(validate({ ...saved[0], call: { ...saved[0]!.call, version: "call.v3" } }), false, "a call.v3 has the revenue fact and the base rate");
+  assert.equal(validate({ ...current, call: { ...current.call, version: "call.v2" } }), false, "a call.v2 has only the rows it had");
 });

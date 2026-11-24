@@ -14,7 +14,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
-import type { CallContent, CallContentV1 } from "../../financial-core/src/index.ts";
+import type { CallContent, CallContentV1, CallContentV2 } from "../../financial-core/src/index.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
 import { IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { backfillSecStatements } from "../../fundamentals/src/sec-statements-backfill-cli.ts";
@@ -129,7 +129,7 @@ async function seedIssuer(db: Client, pool: FinancialPool, company: Issuer, fact
   );
 }
 
-const row = (call: CallContent | CallContentV1, id: string) => [...call.facts, ...call.assumptions, ...call.requires].find((entry) => entry.id === id)!;
+const row = (call: CallContent | CallContentV2 | CallContentV1, id: string) => [...call.facts, ...call.assumptions, ...call.requires].find((entry) => entry.id === id)!;
 
 test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -236,7 +236,7 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
 
   await t.test("closes captured at 01:00 UTC on a split's day are dated the evening before in New York, so the split puts the counts back on their basis", async () => {
     // The engine states SPLT's counts after the split, twice AAPL's; the closes are before it, as AAPL's are.
-    const computed = (call: CallContent | CallContentV1) => row(call, "anchored_exit_multiple").citations.flatMap((citation) => /^FY\d{4}: [\d.]+x, /u.test(citation.text) ? [citation.text.split("; ")[0]] : []);
+    const computed = (call: CallContent | CallContentV2 | CallContentV1) => row(call, "anchored_exit_multiple").citations.flatMap((citation) => /^FY\d{4}: [\d.]+x, /u.test(citation.text) ? [citation.text.split("; ")[0]] : []);
     const [split, aapl] = [(await ask("Make a Call on SPLT")).block.call, (await ask("Make a Call on AAPL")).block.call];
     assert.equal(computed(split).length, 10);
     assert.deepEqual([computed(split), row(split, "anchored_exit_multiple").basis], [computed(aapl), row(aapl, "anchored_exit_multiple").basis]);
