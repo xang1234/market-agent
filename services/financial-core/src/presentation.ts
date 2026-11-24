@@ -29,7 +29,6 @@ import type {
   PlanAssumption,
   RankingPayload,
   ReasonCode,
-  ReportedMetricNode,
   Scenario,
   ScenarioEpsMultipleNode,
   Sha256Hex,
@@ -69,7 +68,8 @@ export type ScenarioRow = Readonly<{
 
 export type PresentationLabel = Readonly<
   | { kind: "subject"; text: string; slot_id: LocalId }
-  | { kind: "measure"; text: string }
+  /** A measure in a concept scope (#731, #743) names its scopes, so a reader never has to find them in its text (#744). */
+  | { kind: "measure"; text: string; concept_scopes?: ReadonlyArray<ConceptScopeV1["kind"]> }
   | { kind: "period"; text: string }
 >;
 
@@ -159,8 +159,10 @@ export function presentFinancialUnit(input: {
   concept_scopes: BoundScopes;
 }): FinancialAnswerContent {
   const { plan } = input;
-  const read = dependencyClosure(plan, plan.outputs.filter((output) => output.unit_id === input.unit_id).map((output) => output.node_id));
-  const scoped = scopeReader(plan, input.concept_scopes, read);
+  const outputNodes = plan.outputs.filter((output) => output.unit_id === input.unit_id).map((output) => output.node_id);
+  const read = dependencyClosure(plan, outputNodes);
+  const scoped = scopeReader(plan, input.concept_scopes);
+  const headed = measureScopes(plan, outputNodes, input.concept_scopes, scoped);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const readsOf = periodReader(plan, nodes, input.periods);
   const byOutput = new Map(input.results.map((result) => [result.output_id, result]));
@@ -177,12 +179,13 @@ export function presentFinancialUnit(input: {
     if (!result) throw new RangeError(`no committed result for output ${output.output_id}`);
     const node = nodes.get(output.node_id)!;
     const slot = subjectSlot(plan, node);
+    const scopes = headed(node);
     return {
       result_id: result.result_id,
       output_id: output.output_id,
       disposition: result.disposition === "computed" ? "verified" : result.disposition,
       subject_label_id: slot === null ? null : subjectLabelId(slot),
-      measure_label_id: labels.intern("measure", measureKey(plan, node, scoped), labelText(plan, node, scoped(node))),
+      measure_label_id: labels.measure(measureKey(plan, node, scopes), labelText(plan, node, scopes), scopes),
       period_label_id: labels.intern("period", periodKey(plan, node, readsOf), periodText(plan, node, names, readsOf)),
       presented: presentPayload(plan, node, result.payload, labels, readsOf, scoped),
       result_hash: result.result_hash,
@@ -231,6 +234,13 @@ class LabelTable {
     const id = `${kind}:${kind[0]}${this.counts[kind]++}`;
     this.interned.set(`${kind}|${key}`, id);
     this.entries[id] = { kind, text };
+    return id;
+  }
+
+  measure(key: string, text: string, scopes: ReadonlyArray<ConceptScopeV1["kind"]>): string {
+    const id = this.intern("measure", key, text);
+    // Only a scoped measure carries the field, so content in the reviewed concepts keeps its v2 or v3 shape and hash.
+    if (scopes.length > 0) this.entries[id] = { kind: "measure", text, concept_scopes: scopes };
     return id;
   }
 }
@@ -361,7 +371,7 @@ function lineOf(plan: FinancialPlan, node: OperationNode, measureLabelId: string
 }
 
 // A column is a line and a rank, not a period: ranked from the requested period so a gap keeps its column, and a company missing a newer period shifts left.
-function columnKeyByResult(results: ReadonlyArray<PresentedResult>, lines: ReadonlyMap<string, Line>): ReadonlyMap<string, string> {
+function columnKeyByResult(results: ReadonlyArray<Pick<PresentedResult, "result_id" | "subject_label_id">>, lines: ReadonlyMap<string, Line>): ReadonlyMap<string, string> {
   const groups = new Map<string, Array<{ result_id: string } & Line>>();
   for (const result of results) {
     const line = lines.get(result.result_id)!;
@@ -476,34 +486,51 @@ function subjectSlot(plan: FinancialPlan, node: OperationNode): LocalId | null {
 /** Each bound input's concept scope (#731) by its reported node: null in its metric's reviewed concept. A node not here is unbound. */
 export type BoundScopes = ReadonlyMap<LocalId, ConceptScopeV1 | null>;
 
-type ScopesOf = (node: OperationNode) => ReadonlyArray<ConceptScopeV1["kind"]>;
+type Scopes = ReadonlyArray<ConceptScopeV1["kind"]>;
+type ScopesOf = (node: OperationNode) => Scopes;
 
 // A node's concept scopes are those of the bound inputs it reads (#731), so a label never turns on which member of a
-// ranking or which side of a change comes first. An unbound input reads as the bound inputs of its metric beside it
-// when they share one scope, so a missing member never opens a column or series of the reviewed concept beside
-// scoped figures. Inputs of one metric in two scopes leave it its metric's reviewed concept. A ratio's measure carries
-// no scope (operations.ts ratio), so neither does a node read through one.
-function scopeReader(plan: FinancialPlan, bound: BoundScopes, read: ReadonlySet<LocalId>): ScopesOf {
-  const reported = plan.operations.filter((node): node is ReportedMetricNode => node.operation === "reported_metric" && read.has(node.node_id));
-  const shared = new Map([...new Set(reported.map((node) => node.metric_key))].map((key) => {
-    const kinds = new Set(reported.filter((node) => node.metric_key === key && bound.has(node.node_id)).map((node) => bound.get(node.node_id)?.kind ?? null));
-    return [key, kinds.size === 1 ? [...kinds][0] ?? null : null] as const;
-  }));
-  const scopeOf = (node: ReportedMetricNode) => (bound.has(node.node_id) ? bound.get(node.node_id)?.kind : shared.get(node.metric_key)) ?? null;
-  const kindsOf = (node: OperationNode): ReadonlyArray<ConceptScopeV1["kind"]> => {
+// ranking or which side of a change comes first. A ratio's measure carries no scope (operations.ts ratio), so neither
+// does a node read through one.
+function scopeReader(plan: FinancialPlan, bound: BoundScopes): ScopesOf {
+  const kindsOf = (node: OperationNode): Scopes => {
     if (node.operation === "ratio") return [];
     if (node.operation === "reported_metric") {
-      const kind = scopeOf(node);
-      return kind === null ? [] : [kind];
+      const kind = bound.get(node.node_id)?.kind;
+      return kind ? [kind] : [];
     }
     return operationDependencies(node).flatMap((id) => kindsOf(plan.operations.find((candidate) => candidate.node_id === id)!));
   };
   return (node) => [...new Set(kindsOf(node))].sort();
 }
 
+// A value figure with an unbound input chooses no scope (#744). Its line and column are where the layout puts it if no
+// figure carried a scope. When the present figures on its line share one measure and one sits in its column, it takes
+// their measure, so the layout puts it in their column under their heading. Otherwise it is plain. So a heading names
+// a scope only when a present figure under it carries it.
+function measureScopes(plan: FinancialPlan, outputs: ReadonlyArray<LocalId>, bound: BoundScopes, scoped: ScopesOf): ScopesOf {
+  const nodeOf = (id: LocalId) => plan.operations.find((node) => node.node_id === id)!;
+  const missing = (id: LocalId) => [...dependencyClosure(plan, [id])].some((input) => nodeOf(input).operation === "reported_metric" && !bound.has(input));
+  const placed = outputs.map(nodeOf).flatMap((node) => {
+    const slot = subjectSlot(plan, node);
+    return OPERATION_REGISTRY[node.operation].produces === "value" && slot !== null ? [{ result_id: node.node_id, subject_label_id: slot }] : [];
+  });
+  const lines = new Map(placed.map(({ result_id }) => [result_id, lineOf(plan, nodeOf(result_id), structureKey(plan, nodeOf(result_id)))]));
+  const table = new Set(placed.map((entry) => entry.subject_label_id)).size >= 2;
+  const columns = table ? columnKeyByResult(placed, lines) : new Map([...lines].map(([id, { key, anchor }]) => [id, `${key}|${anchor.calendar}`]));
+  const lineKey = (id: LocalId) => (table ? lines.get(id)?.key : columns.get(id));
+  const present = [...lines.keys()].filter((id) => !missing(id));
+  return (node) => {
+    if (OPERATION_REGISTRY[node.operation].produces !== "value" || !missing(node.node_id)) return scoped(node);
+    const beside = present.filter((id) => lineKey(id) === lineKey(node.node_id));
+    const [measure, ...others] = new Set(beside.map((id) => scoped(nodeOf(id)).join()));
+    return measure !== undefined && others.length === 0 && beside.some((id) => columns.get(id) === columns.get(node.node_id)) ? scoped(nodeOf(beside[0]!)) : [];
+  };
+}
+
 /** What a node measures, as the answer labels its measure ("Revenue"), given each bound input's concept scope. */
 export function measureText(plan: FinancialPlan, node: OperationNode, bound: BoundScopes): string {
-  return labelText(plan, node, scopeReader(plan, bound, dependencyClosure(plan, [node.node_id]))(node));
+  return labelText(plan, node, scopeReader(plan, bound)(node));
 }
 
 /** A node's label in the given concept scopes, which its parts read in too. */
@@ -551,8 +578,8 @@ function labelText(plan: FinancialPlan, node: OperationNode, scopes: ReadonlyArr
 }
 
 /** The identity of a measure: its structure in its concept scopes. Equal keys always render the same text. */
-function measureKey(plan: FinancialPlan, node: OperationNode, scoped: ScopesOf): string {
-  return `${structureKey(plan, node)}@${scoped(node).join(",")}`;
+function measureKey(plan: FinancialPlan, node: OperationNode, scopes: Scopes): string {
+  return `${structureKey(plan, node)}@${scopes.join(",")}`;
 }
 
 function structureKey(plan: FinancialPlan, node: OperationNode): string {
@@ -670,7 +697,7 @@ function periodReader(plan: FinancialPlan, nodes: ReadonlyMap<LocalId, Operation
 // quarters, and naming one as its period would mislead.
 function operandPeriods(plan: FinancialPlan, node: OperationNode, readsOf: ReadsOf, names: (slot: LocalId) => string, scoped: ScopesOf): string {
   const operands = operationDependencies(node).map((id) => plan.operations.find((entry) => entry.node_id === id)!);
-  if (new Set(operands.map((operand) => `${subjectSlot(plan, operand)} ${measureKey(plan, operand, scoped)}`)).size === 1) return "";
+  if (new Set(operands.map((operand) => `${subjectSlot(plan, operand)} ${measureKey(plan, operand, scoped(operand))}`)).size === 1) return "";
   if (operands.some((operand) => readsOf(operand).length !== 1)) return "";
   const bound = operands.flatMap((operand) => {
     const period = readsOf(operand)[0]!.bound;

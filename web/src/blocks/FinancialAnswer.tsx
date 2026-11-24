@@ -11,6 +11,7 @@ import {
   coverageText,
   labelText,
   leadParts,
+  measureLabel,
   resultLabel,
   resultShown,
   resultsById,
@@ -178,7 +179,7 @@ function Leads({ content, names, leads }: { content: FinancialAnswerContent; nam
   const parts = leads.map((result) => leadParts(content, result)!)
   const pairOf = (index: number) => parts[index]!.sides.join(' minus ')
   const measureIds = [...new Set(leads.map((result) => result.measure_label_id))]
-  const headings = columnNames(measureIds.map((id) => parts[leads.findIndex((result) => result.measure_label_id === id)]!.measure))
+  const headings = columnNames(measureIds.map((id) => ({ ...measureLabel(content, id), text: parts[leads.findIndex((result) => result.measure_label_id === id)]!.measure })))
   const heading = (result: FinancialPresentedResult) => headings[measureIds.indexOf(result.measure_label_id)]
   const count = (keys: ReadonlyArray<string>) => new Set(keys).size
   // A period label names its pair, so a pair reads one period exactly when the two counts match.

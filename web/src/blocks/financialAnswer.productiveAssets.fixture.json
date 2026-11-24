@@ -10,7 +10,7 @@
     "44444444-4444-4444-9444-444444444444"
   ],
   "as_of": "2024-01-16T04:59:59.999Z",
-  "presentation_hash": "abe312358b3d2a50ce5375b19720dfdcee1e88b34758ab17fc8e18f8e5dad7d3",
+  "presentation_hash": "c9b4f91137ab44dad6feaa592163e34e68bd0e3cd37f504d39bf88563685f7d8",
   "financial": {
     "presentation_version": "financial-presentation.v4",
     "template_version": "financial-answer.v1",
@@ -40,7 +40,10 @@
       },
       "measure:m0": {
         "kind": "measure",
-        "text": "Free cash flow (OCF less productive-asset capex)"
+        "text": "Free cash flow (OCF less productive-asset capex)",
+        "concept_scopes": [
+          "productive_assets_capex"
+        ]
       },
       "period:p0": {
         "kind": "period",
@@ -48,7 +51,10 @@
       },
       "measure:m1": {
         "kind": "measure",
-        "text": "Free cash flow (OCF less productive-asset capex) ranking"
+        "text": "Free cash flow (OCF less productive-asset capex) ranking",
+        "concept_scopes": [
+          "productive_assets_capex"
+        ]
       }
     },
     "results": [

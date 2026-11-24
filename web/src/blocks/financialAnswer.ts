@@ -9,13 +9,13 @@ import {
   SUPPORTED_FINANCIAL_PRESENTATION_VERSION,
   type FinancialAnswerBlock,
   type FinancialAnswerContent,
+  type FinancialMeasureLabel,
   type FinancialPresentedResult,
   type FinancialSeriesPresentation,
   type FinancialTablePresentation,
   type FinancialUnit,
 } from './types.ts'
 import type { FinancialResultShown } from './financialInspection.ts'
-import { namesConceptScope } from '../../../services/financial-core/src/definitions.ts'
 
 export function supportedFinancialContent(block: FinancialAnswerBlock): FinancialAnswerContent | null {
   const version = block.financial.presentation_version
@@ -32,6 +32,14 @@ export function labelText(content: FinancialAnswerContent, labelId: string): str
   return content.labels[labelId]?.text ?? ''
 }
 
+/** A measure label as columnNames reads it: its text and any scopes it names. */
+export type MeasureLabel = Readonly<Pick<FinancialMeasureLabel, 'text' | 'concept_scopes'>>
+
+export function measureLabel(content: FinancialAnswerContent, labelId: string): MeasureLabel {
+  const label = content.labels[labelId]
+  return label?.kind === 'measure' ? label : { text: label?.text ?? '' }
+}
+
 /** "Subject, measure, period" for a result; the subject is omitted for cross-subject results. */
 export function resultLabel(content: FinancialAnswerContent, result: FinancialPresentedResult): string {
   const ids = [result.subject_label_id, result.measure_label_id, result.period_label_id]
@@ -44,8 +52,8 @@ export function resultShown(content: FinancialAnswerContent, result: FinancialPr
   const subject = result.subject_label_id === null ? null : labelText(content, result.subject_label_id)
   const lead = subject === null ? leadParts(content, result) : null
   const measure = lead !== null
-    ? `${columnNames([lead.measure])[0]}, ${lead.sides.join(' minus ')}`
-    : subject === null ? resultLabel(content, result) : columnNames([labelText(content, result.measure_label_id)])[0]!
+    ? `${columnNames([{ ...measureLabel(content, result.measure_label_id), text: lead.measure }])[0]}, ${lead.sides.join(' minus ')}`
+    : subject === null ? resultLabel(content, result) : columnNames([measureLabel(content, result.measure_label_id)])[0]!
   return { subject, measure, period: shortPeriod(labelText(content, result.period_label_id)) || null, value: result.presented.text }
 }
 
@@ -103,9 +111,21 @@ function columnName(measure: string): string {
   return `${HORIZON[horizon]} ${subject}${kind === 'change' ? ' change' : ''}`
 }
 
-/** Each measure's column heading, unless two columns would then read alike, or the measure names a concept scope (#731), which a heading never drops. */
-export function columnNames(measures: ReadonlyArray<string>): string[] {
-  return distinct(measures, columnName).map((name, index) => (namesConceptScope(measures[index]!) ? measures[index]! : name))
+// How v4 labels named each concept scope before they carried concept_scopes (#744). Frozen: these match stored blocks,
+// whatever the engine's wording later becomes.
+const STORED_SCOPE_TEXTS = [
+  'Capital expenditures (productive-asset cash payments, may include intangibles)',
+  'productive-asset capex',
+  'Operating cash flow (continuing operations, excludes discontinued operations)',
+  'continuing-operations OCF',
+]
+
+const namesScope = (measure: MeasureLabel) => measure.concept_scopes !== undefined || STORED_SCOPE_TEXTS.some((text) => measure.text.includes(text))
+
+/** Each measure's column heading, unless two columns would then read alike, or the measure is in a concept scope (#731), which a heading never drops. */
+export function columnNames(measures: ReadonlyArray<MeasureLabel>): string[] {
+  const texts = measures.map((measure) => measure.text)
+  return distinct(texts, columnName).map((name, index) => (namesScope(measures[index]!) ? texts[index]! : name))
 }
 
 /** Each company without its legal suffix ("Apple Inc." reads "Apple"), unless two would then read alike. */
@@ -205,7 +225,7 @@ export function statementOf(
   const sharedPeriod = periods.size === 1 ? [...periods][0]! : null
 
   const measures = table.columns.map((column) => labelText(content, column.measure_label_id))
-  const names = columnNames(measures)
+  const names = columnNames(table.columns.map((column) => measureLabel(content, column.measure_label_id)))
   const rows: StatementRow[] = table.columns.map((column, index) => ({
     key: column.column_id,
     label: column.period_label_id === null ? names[index]! : `${names[index]}, ${datedPeriod(labelText(content, column.period_label_id)).fiscal}`,
