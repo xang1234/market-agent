@@ -172,7 +172,7 @@ test("the backfill stores cash flow and balance sheet for income periods already
     clock: () => new Date(Date.parse("2026-05-09T11:00:00.000Z") + 60_000 * ticks++),
   });
 
-  assert.deepEqual(result, { periods: 1 });
+  assert.deepEqual(result, { status: "stored", rows: [{ fiscal_year: 2024, fiscal_period: "FY" }] });
   assert.equal(fetches, 1);
   assert.equal(stored("operating_cash_flow")[0]?.value_num, 300);
   // Every stored family is dated by the download's completion, not by processing time.
@@ -300,8 +300,27 @@ test("the backfill downloads nothing for an issuer with no income periods on fil
     }),
     sourceId: SOURCE_ID,
   });
-  assert.deepEqual(result, { periods: 0 });
+  assert.deepEqual(result, { status: "empty", reason: "no_income_periods" });
   assert.equal(fetches, 0);
+});
+
+test("a backfill whose download stores nothing for the periods on file reports empty, not the periods it planned (#769)", async () => {
+  const db = new FakeFundamentalsDb();
+  await createSecBackedStatementRepository(db, {
+    fetcher: secCompanyFetcher(() => companyFacts()),
+    sourceId: SOURCE_ID,
+    clock: () => new Date("2026-05-08T00:00:00.000Z"),
+  }).find({ issuer_id: ISSUER_ID, family: "income", basis: "as_reported", fiscal_year: 2024, fiscal_period: "FY" });
+  const before = structuredClone(db.facts);
+  const result = await backfillSecCompanionStatements(db, {
+    issuerId: ISSUER_ID,
+    fetcher: secCompanyFetcher(() => ({ ...companyFacts(), facts: { "us-gaap": {} } })),
+    sourceId: SOURCE_ID,
+    clock: () => new Date("2026-05-09T00:00:00.000Z"),
+    logger: { warn() {} },
+  });
+  assert.deepEqual(result, { status: "empty", reason: "missing_coverage" });
+  assert.deepEqual(db.facts, before);
 });
 
 test("SEC-backed statements keep the income statement when another family cannot be extracted", async () => {

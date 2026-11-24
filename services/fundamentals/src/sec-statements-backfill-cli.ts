@@ -55,14 +55,16 @@ export async function backfillSecStatements(
       continue;
     }
     try {
-      const { periods } = await backfillSecCompanionStatements(db, {
+      const outcome = await backfillSecCompanionStatements(db, {
         issuerId: issuer.issuer_id,
         fetcher,
         sourceId: SEC_EDGAR_FILING_SOURCE_ID,
         logger: log,
         annualHistoryYears,
       });
-      log.log(`${issuer.legal_name}: cash flow and balance sheet checked for ${periods} period(s)`);
+      log.log(outcome.status === "stored"
+        ? `${issuer.legal_name}: statements on file for ${outcome.rows.length} period(s)`
+        : `${issuer.legal_name}: nothing stored, ${outcome.reason}`);
     } catch (error) {
       failures += 1;
       log.error(`${issuer.legal_name}: backfill failed —`, error instanceof Error ? error.message : error);

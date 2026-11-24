@@ -234,4 +234,21 @@ test("weekly-reference ETL seeds the universe, mints vendor facts, and is idempo
   // --force bypasses the gate and re-ingests (newest-wins reader bounds correctness).
   const forced = await runWeeklyReferenceEtl(client, MANIFEST, BUNDLE, { clock: FIXED_CLOCK, force: true });
   assert.equal(forced.status, "ingested");
+
+  // A newer bundle with no rows imports nothing: it reports empty, and the ledger
+  // never shows it as the last import (#769).
+  const emptyManifest = { ...MANIFEST, as_of_date: "2026-06-10", sha256: "test-sha-empty" };
+  const empty = await runWeeklyReferenceEtl(
+    client,
+    emptyManifest,
+    { ...BUNDLE, as_of_date: "2026-06-10", snapshot: { rows: [] }, universe: [] },
+    { clock: () => new Date("2026-06-21T12:00:00Z") },
+  );
+  assert.equal(empty.status, "empty");
+  const emptyRun = await client.query(`select status from artifact_ingestion_ledger where sha256 = 'test-sha-empty'`);
+  assert.deepEqual(emptyRun.rows, [{ status: "failed" }]);
+  const lastImport = await client.query(
+    `select sha256 from artifact_ingestion_ledger where market = 'US' and status <> 'failed' order by finished_at desc limit 1`,
+  );
+  assert.deepEqual(lastImport.rows, [{ sha256: "test-sha-abc123" }]);
 });
