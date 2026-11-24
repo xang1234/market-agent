@@ -40,13 +40,15 @@ const EMPTY_COOLDOWN_MS = 6 * 60 * 60_000;
 const NONE: ReadonlySet<string> = new Set();
 
 // One fetch, shared by every key it covers. `outcomes` holds, once it
-// settles, each subject's: the company's for filings, each listing's for prices.
-type Fetch = { at: number; settled: Promise<void>; outcomes?: ReadonlyMap<string, Outcome<unknown>> };
+// settles, each subject's status: the company's for filings, each listing's
+// for prices. Only the status: the process keeps every entry, and the rows a
+// fetch stored are read back from the database, not from here.
+type Fetch = { at: number; settled: Promise<void>; outcomes?: ReadonlyMap<string, Outcome<unknown>["status"]> };
 
 // A settled fetch failed when it failed for any subject: it is retried whole.
 function state(entry: Fetch): "running" | "failed" | "done" {
   if (entry.outcomes === undefined) return "running";
-  return [...entry.outcomes.values()].some((outcome) => outcome.status === "failed") ? "failed" : "done";
+  return [...entry.outcomes.values()].includes("failed") ? "failed" : "done";
 }
 
 export function createTurnHydrator(deps: {
@@ -78,7 +80,7 @@ export function createTurnHydrator(deps: {
     entry.settled = fetch().catch((error: unknown) => new Map(subjects.map((id) => [id, failed(error)] as const))).then((outcomes) => {
       const causes = new Set([...outcomes.values()].flatMap((outcome) => (outcome.status === "failed" ? [outcome.cause] : [])));
       if (causes.size > 0) logger.warn("[chat] a fetch for the turn's companies failed; the answer names the gap", ...causes);
-      entry.outcomes = outcomes;
+      entry.outcomes = new Map([...outcomes].map(([id, outcome]) => [id, outcome.status]));
       entry.at = now();
     });
     for (const key of keys) fetches.set(key, entry);
@@ -118,7 +120,7 @@ export function createTurnHydrator(deps: {
       const entry = current(key);
       if (entry) return [{ company, entry }];
       const last = fetches.get(key);
-      if (last?.outcomes?.get(company.issuer_id)?.status === "empty" && now() - last.at < EMPTY_COOLDOWN_MS) return [];
+      if (last?.outcomes?.get(company.issuer_id) === "empty" && now() - last.at < EMPTY_COOLDOWN_MS) return [];
       return unfiled.has(company.issuer_id) || (last !== undefined && state(last) === "failed")
         ? [{ company, entry: start([key], [company.issuer_id], async () => new Map([[company.issuer_id, await deps.fetchFilings(company.issuer_id)]])) }]
         : [];
@@ -175,7 +177,7 @@ export function createTurnHydrator(deps: {
     for (const { tool_call_id, tool_name, noun, label, fetches: done, subjects } of steps) {
       // A fetch that stored nothing for a company failed for it, and says which
       // (#665, #688); one that failed in part names none, as it is retried whole.
-      const empty = subjects.filter((subject) => done.some((fetch) => state(fetch) === "done" && fetch.outcomes?.get(subject.id)?.status === "empty"));
+      const empty = subjects.filter((subject) => done.some((fetch) => state(fetch) === "done" && fetch.outcomes?.get(subject.id) === "empty"));
       const status = done.some((fetch) => state(fetch) === "running") ? "still_loading" : done.every((fetch) => state(fetch) === "done") && empty.length === 0 ? "ok" : "failed";
       const shown = status !== "still_loading" && empty.length > 0 ? `No ${noun} found for ${labelList(empty.map((subject) => labelOf.get(subject.issuer_id)!))}` : label;
       turn.emit("tool.completed", { tool_call_id, tool_name, label: shown, status });
