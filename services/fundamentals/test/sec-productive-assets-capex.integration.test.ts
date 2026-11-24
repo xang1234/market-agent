@@ -399,10 +399,9 @@ test("capex filed as productive assets certifies with its concept recorded", { t
     }
   });
 
-  // Devin on #755. Either would restate the year as PP&E and they disagree
-  // with each other, so, as two OCF totals filed one day do, they leave it
-  // unverified, though here either order stores the coarser original (#756).
-  await t.test("same-day filings that each repeat the figure as a different PP&E figure within its rounding leave it unverified", async (t) => {
+  // Devin on #755. Each repeats the coarser original within its rounding, so
+  // either order restates the year as PP&E at 30M, though they disagree with each other (#756).
+  await t.test("same-day filings that each repeat the figure as a different PP&E figure within its rounding restate it at the figure that stands", async (t) => {
     for (const accn of ["0000000731-26-000000", "0000000731-26-000002"]) {
       const { download, lookup, relations, picked } = await setUp(t, `fin-capex-productive-same-day-${accn}`);
       const tenKA = (of: number, val: number): Value => ({ ...year(2025, of, val), accn, form: "10-K/A" });
@@ -411,8 +410,60 @@ test("capex filed as productive assets certifies with its concept recorded", { t
         PaymentsToAcquirePropertyPlantAndEquipment: [year(2025, 2024, 30_400_000), year(2025, 2025, 28_123_000), tenKA(2024, 29_800_000), tenKA(2025, 28_123_000)],
       });
       await lookup();
-      assert.deepEqual((await relations()).map(({ relation }) => relation), ["original", "unverified_restatement"]);
-      assert.equal(await picked("as_restated"), "restatement_unverified");
+      assert.deepEqual((await relations()).map(({ value, relation }) => [value, relation]), [["30000000", "original"], ["30000000", "economic_restatement"]]);
+      assert.equal(await picked("as_restated"), "30000000");
+    }
+  });
+
+  // Gemini on #756. Read first, 30.4M switches the derived quarter only within
+  // rounding, which is unverified, and 30.0M switches it at its exact figure.
+  await t.test("same-day PP&E lines for a derived quarter are unverified in either accession order", async (t) => {
+    for (const [exact, rounded] of [["0000000731-25-000102", "0000000731-25-000202"], ["0000000731-25-000202", "0000000731-25-000102"]] as const) {
+      const { download, lookup, relations, picked } = await setUp(t, `fin-capex-derived-same-day-${exact}`);
+      const filed = (accn: string, fp: string, form: string, date: string) => (start: string, end: string, val: number): Value => ({ start, end, val, accn, fy: 2024, fp, form, filed: date });
+      const q1 = filed("0000000731-24-000101", "Q1", "10-Q", "2024-05-01");
+      const q2 = filed("0000000731-24-000102", "Q2", "10-Q", "2024-08-01");
+      const ppe = (accn: string, val: number) => {
+        const line = filed(accn, "Q2", "10-Q/A", "2025-08-01");
+        return [line("2024-04-01", "2024-06-30", val), line("2025-04-01", "2025-06-30", 28_100_000)];
+      };
+      download.text = companyFacts({
+        Revenues: [q1("2024-01-01", "2024-03-31", 100), q2("2024-04-01", "2024-06-30", 100)],
+        PaymentsToAcquireProductiveAssets: [
+          q1("2024-01-01", "2024-03-31", 25_000_000), q1("2023-01-01", "2023-03-31", 20_000_000),
+          q2("2024-01-01", "2024-06-30", 55_000_000), q2("2023-01-01", "2023-06-30", 47_000_000),
+        ],
+        PaymentsToAcquirePropertyPlantAndEquipment: [...ppe(exact, 30_000_000), ...ppe(rounded, 30_400_000)],
+      });
+      await lookup("Q2");
+      assert.deepEqual((await relations()).map(({ relation }) => relation), ["original", "unverified_restatement"], `exact line ${exact}`);
+      assert.equal(await picked("as_restated", "Q2"), "restatement_unverified", `exact line ${exact}`);
+    }
+  });
+
+  // Devin on #762. A filing that stands on the derived quarter does not end the
+  // need to model its inputs: B moves the six-month input as it switches back.
+  await t.test("same-day filings for a derived quarter a filing stands on are unverified in either accession order", async (t) => {
+    for (const [a, b] of [["0000000731-25-000301", "0000000731-25-000302"], ["0000000731-25-000302", "0000000731-25-000301"]] as const) {
+      const { download, lookup, picked } = await setUp(t, `fin-capex-derived-stands-${a}`);
+      const filed = (accn: string, fp: string, form: string, date: string) => (start: string, end: string, val: number): Value => ({ start, end, val, accn, fy: 2024, fp, form, filed: date });
+      const q1 = filed("0000000731-24-000101", "Q1", "10-Q", "2024-05-01");
+      const q2 = filed("0000000731-24-000102", "Q2", "10-Q", "2024-08-01");
+      const later = filed("0000000731-25-000200", "Q2", "10-Q/A", "2025-02-01");
+      const lineA = filed(a, "Q2", "10-Q/A", "2025-08-01");
+      const lineB = filed(b, "Q2", "10-Q/A", "2025-08-01");
+      download.text = companyFacts({
+        Revenues: [q1("2024-01-01", "2024-03-31", 100), q2("2024-04-01", "2024-06-30", 100)],
+        PaymentsToAcquireProductiveAssets: [
+          q1("2024-01-01", "2024-03-31", 25_000_000), q1("2023-01-01", "2023-03-31", 20_000_000),
+          q2("2024-01-01", "2024-06-30", 55_000_000), q2("2023-01-01", "2023-06-30", 47_000_000),
+          later("2024-01-01", "2024-06-30", 56_000_000), later("2024-04-01", "2024-06-30", 31_000_000),
+          lineB("2024-01-01", "2024-06-30", 57_000_000), lineB("2024-04-01", "2024-06-30", 31_000_000),
+        ],
+        PaymentsToAcquirePropertyPlantAndEquipment: [lineA("2024-04-01", "2024-06-30", 31_400_000), lineB("2024-04-01", "2024-06-30", 30_700_000)],
+      });
+      await lookup("Q2");
+      assert.equal(await picked("as_restated", "Q2"), "restatement_unverified", `A is ${a}`);
     }
   });
 

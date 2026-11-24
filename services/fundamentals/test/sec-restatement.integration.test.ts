@@ -317,6 +317,28 @@ test("SEC restatements", { timeout: 300_000 }, async (t) => {
     assert.equal(await issuer.pick("Q2", AFTER, "as_reported", "operating_cash_flow"), "70");
   });
 
+  // Gemini on #756. The quarter is in the reviewed concept, so no scope can
+  // switch, and a second filing repeating the first changes nothing. A line of
+  // one figure cannot show its rounding, which its inputs' millions cover.
+  await t.test("a derived quarter's line filed twice one day reads as filed once", async () => {
+    for (const repeats of [1, 2]) {
+      const issuer = await quarterIssuer();
+      const q1 = issuer.filed(1, "10-Q", "2024-04-23", 2024, "Q1");
+      const q2 = issuer.filed(2, "10-Q", "2024-07-23", 2024, "Q2");
+      const lines = [3, 4].slice(0, repeats).map((serial) => issuer.filed(serial, "10-Q/A", "2025-07-23", 2024, "Q2")(...Q2_2024, "300000000"));
+      await issuer.ingest({
+        Revenues: concept("USD", [q1(...Q1_2024, "100"), q2(...Q2_2024, "100")]),
+        NetCashProvidedByUsedInOperatingActivities: concept("USD", [
+          q1(...Q1_2024, "100000000"), q1(...Q1_2023, "90000000"),
+          q2("2024-01-01", "2024-06-30", "400400000"), q2("2023-01-01", "2023-06-30", "350200000"),
+          ...lines,
+        ]),
+      }, ["Q1", "Q2"]);
+      assert.deepEqual(await issuer.laterStatements(), [], `${repeats} filing(s)`);
+      assert.equal(await issuer.pick("Q2", AFTER, "as_restated", "operating_cash_flow"), "300400000", `${repeats} filing(s)`);
+    }
+  });
+
   await t.test("GE without the 10-K's fourth-quarter line: the first quarter restates, and the stale fourth quarter is a gap", async () => {
     const issuerId = "33000000-0000-4000-8000-0000000005a2";
     await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'GE Aerospace', '40546')`, [issuerId]);

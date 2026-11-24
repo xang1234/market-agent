@@ -1555,7 +1555,8 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     // capex (operator 2026-11-23, #758). Equal is within rounding, so the
     // restatement keeps the figure that stands, from the filing it stands on.
     const unordered = unorderedDates([statements, ...(derivation?.terms ?? []).map((term) => termStatements(values, term))], roundings);
-    for (const date of opposedDates(statements, rescoped, roundings, { accession: originalAccession!, filed: originalFiled })) unordered.add(date);
+    // Only a figure whose scope can switch is read in every order (#756).
+    const sameDay = rescoped.length > 0 ? scopedFiguresByDate(statements, rescoped, roundings, originalFiled) : new Map<string, ScopedFigures[]>();
     let standing: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on, rounding: roundings.get(originalAccession!) ?? null };
     const inputs: RoundedFigure[] = derivation?.terms.map((term) => ({ value: term.raw_token, rounding: roundings.get(term.source.accession) ?? null })) ?? [];
     // A derived figure stands on its unmoved inputs, whose rounding a line may fall within.
@@ -1570,6 +1571,12 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
       : standsOn === null && derivation !== null ? [later, "unverified_restatement"]
       : [{ ...later, stands: standsOn ?? "original" }, "economic_restatement"];
     for (const filing of filingsInOrder(statements, derivation, values, rescoped)) {
+      // Decided once a date, from where the year stands before that day's first filing.
+      // `read` does not model a derivation's inputs, which a later filing may move
+      // even after one stands on the figure, so a derived figure is opposed by any two.
+      const day = sameDay.get(filing.filed);
+      sameDay.delete(filing.filed);
+      if (day !== undefined && (derivation !== null ? day.length > 1 : opposed(day, { figure: standing, reviewed: asReviewed }))) unordered.add(filing.filed);
       // A line in another scope only ever repeats the figure that stands, or leaves it unverified (#731).
       const changed = unordered.has(filing.filed) && filing.rescoped.length > 0
         ? filing.rescoped[0]
@@ -1695,42 +1702,50 @@ function unorderedDates(statementLists: ReadonlyArray<ReadonlyArray<PeriodStatem
 }
 
 /** One filing's statement of a scoped figure's period, in the scoped and the reviewed concept (#752, #758). */
-type ScopedFigures = { accession: string; filed: string; scoped?: RoundedFigure; reviewed?: RoundedFigure };
+type ScopedFigures = { filed: string; scoped?: RoundedFigure; reviewed?: RoundedFigure };
 
-/**
- * The dates on which the original or a later filing states a scoped figure's
- * period, by scope, differently from another filing that day, so that which
- * stands depends on their unknown order (#752, #758). Filings stating the same
- * figures in the same scopes agree. So do a filing stating both scopes at one
- * figure and a filing stating that figure only in the reviewed concept, or the
- * original, in either order. One filing's two scopes are its own to reconcile
- * (#731, #743).
- */
-function opposedDates(
+/** The figure a period stands at, and whether in the reviewed concept, or null once unverified. */
+type Standing = Readonly<{ figure: RoundedFigure; reviewed: boolean }> | null;
+
+/** Each date's filings of a period from the original's date on, the original included, by scope. One filing's two scopes are its own to reconcile (#731, #743). */
+function scopedFiguresByDate(
   statements: ReadonlyArray<PeriodStatement>,
   lines: ReadonlyArray<RescopedLine>,
   roundings: FilingRoundings,
-  original: Readonly<{ accession: string; filed: string }>,
-): Set<string> {
+  originalFiled: string,
+): Map<string, ScopedFigures[]> {
   const byFiling = new Map<string, ScopedFigures>();
-  const of = ({ accession, filed }: PeriodStatement) => byFiling.get(accession) ?? byFiling.set(accession, { accession, filed }).get(accession)!;
+  const of = ({ accession, filed }: PeriodStatement) => byFiling.get(accession) ?? byFiling.set(accession, { filed }).get(accession)!;
   for (const statement of statements) {
-    if (statement.filed >= original.filed) of(statement).scoped = { value: statement.token, rounding: roundings.get(statement.accession) ?? null };
+    if (statement.filed >= originalFiled) of(statement).scoped = { value: statement.token, rounding: roundings.get(statement.accession) ?? null };
   }
   for (const line of lines) if (line.term === null) of(line).reviewed = { value: line.token, rounding: line.rounding };
-  const same = (one: RoundedFigure | undefined, other: RoundedFigure | undefined) => one === undefined ? other === undefined : other !== undefined && sameRoundedFigure(one, other) === true;
-  const agree = (one: ScopedFigures, other: ScopedFigures) => {
-    if ((one.scoped === undefined) === (other.scoped === undefined) && (one.reviewed === undefined) === (other.reviewed === undefined)) {
-      return same(one.scoped, other.scoped) && same(one.reviewed, other.reviewed);
-    }
-    const [both, single] = one.scoped && one.reviewed ? [one, other] : [other, one];
-    const figure = single.reviewed ?? (single.accession === original.accession ? single.scoped : undefined);
-    return figure !== undefined && same(both.scoped, figure) && same(both.reviewed, figure);
-  };
-  const filings = [...byFiling.values()];
-  return new Set(filings
-    .filter((one, index) => filings.slice(index + 1).some((other) => other.filed === one.filed && !agree(one, other)))
-    .map(({ filed }) => filed));
+  return Map.groupBy(byFiling.values(), ({ filed }) => filed);
+}
+
+/** How recordSecRestatements' walk reads one filing of a stated period from where it stands. */
+function read(stands: Standing, { scoped, reviewed }: ScopedFigures): Standing {
+  if (stands === null || (reviewed !== undefined && sameRoundedFigure(stands.figure, reviewed) !== true)) return null;
+  if (scoped === undefined || (stands.reviewed && reviewed !== undefined)) return { figure: stands.figure, reviewed: true };
+  const same = sameRoundedFigure(stands.figure, scoped);
+  return same === true ? { figure: stands.figure, reviewed: false } : same === false && !stands.reviewed ? { figure: scoped, reviewed: false } : null;
+}
+
+/**
+ * Whether one date's filings fail to leave a period standing at one figure in
+ * one scope in every order. Accession order is not filing order, so nothing
+ * tells which stands (#752, #756). An order that leaves it unverified stands
+ * nowhere, and the walk would store that day's filings before it as if read first.
+ */
+function opposed(filings: ReadonlyArray<ScopedFigures>, stands: Standing): boolean {
+  if (filings.length < 2) return false;
+  const [first, ...others] = orders(filings).map((order) => order.reduce(read, stands));
+  return first === null || others.some((other) => other === null || other.reviewed !== first!.reviewed || sameRoundedFigure(other.figure, first!.figure) !== true);
+}
+
+// ponytail: every order, n! of a day's filings of one period, which are two or three.
+function orders<T>(items: ReadonlyArray<T>): T[][] {
+  return items.length <= 1 ? [[...items]] : items.flatMap((item, index) => orders(items.toSpliced(index, 1)).map((rest) => [item, ...rest]));
 }
 
 /** A later filing's statement of one of a derived quarter's inputs, by its place among the terms. */
