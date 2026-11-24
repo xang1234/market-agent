@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "node --experimental-strip-types src/dev.ts",
+    "corpus:update": "UPDATE_READER_CORPUS=1 node --experimental-strip-types --test test/reader-corpus.test.ts",
     "test": "node --experimental-strip-types --test \"test/**/*.test.ts\"",
     "backfill:sec-filings": "node --experimental-strip-types src/sec-filings-backfill-cli.ts",
     "backfill:sec-form4": "node --experimental-strip-types src/sec-form4-backfill-cli.ts",
