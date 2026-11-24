@@ -34,7 +34,7 @@ export function SubjectNewsRail({ issuerId }: SubjectNewsRailProps) {
         <Skeleton label="Loading recent documents" className="h-32" />
       ) : news.status === 'unavailable' ? (
         <FailureNotice message="Couldn't load the news." detail={news.reason} onRetry={news.retry} />
-      ) : news.data.length === 0 ? (
+      ) : news.status === 'not_on_file' || news.data.length === 0 ? (
         <RailStatus>No recent news or filings for this issuer.</RailStatus>
       ) : (
         <ul className="flex flex-col">

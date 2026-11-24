@@ -3,15 +3,26 @@ import { useCallback, useSyncExternalStore } from 'react'
 export type Json = string | number | boolean | null | readonly Json[] | { readonly [k: string]: Json }
 
 // An incomplete result (a batch with failed legs) is shown but stays stale,
-// so the next subscribe retries it.
+// so the next subscribe retries it. not_on_file is the server saying it holds
+// no such data: a settled answer, cached like ready, with nothing to retry.
 export type FetchedResult<T> =
   | { kind: 'ready'; data: T; incomplete?: true }
   | { kind: 'unavailable'; reason: string }
+  | { kind: 'not_on_file'; reason: string }
+
+// A loader throws this to settle as not_on_file.
+export class NotOnFileError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'NotOnFileError'
+  }
+}
 
 export type VisibleFetchState<T> =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'unavailable'; reason: string; retry: () => void }
+  | { status: 'not_on_file'; reason: string }
   | { status: 'ready'; data: T; refreshing: boolean; refreshError: string | null }
 
 const FRESH_FOR_MS = {
@@ -110,6 +121,7 @@ function nextSnapshot(
     return LOADING
   }
   const { result } = event
+  if (result.kind === 'not_on_file') return { status: 'not_on_file', reason: result.reason }
   if (result.kind === 'ready') {
     return { status: 'ready', data: result.data, refreshing: false, refreshError: null }
   }
@@ -179,7 +191,7 @@ function evictIdle(): void {
 function ensureFresh(entry: Entry): void {
   if (entry.inflight !== null) return
   const fresh =
-    entry.snapshot.status === 'ready' &&
+    (entry.snapshot.status === 'ready' || entry.snapshot.status === 'not_on_file') &&
     entry.readyAt !== null &&
     Date.now() - entry.readyAt < entry.def.freshForMs
   if (fresh) return
@@ -196,12 +208,16 @@ async function runLoad(entry: Entry, controller: AbortController): Promise<void>
   try {
     result = await entry.def.load(JSON.parse(entry.key) as Json, controller.signal)
   } catch (err) {
-    result = { kind: 'unavailable', reason: err instanceof Error ? err.message : 'fetch failed' }
+    result = err instanceof NotOnFileError
+      ? { kind: 'not_on_file', reason: err.message }
+      : { kind: 'unavailable', reason: err instanceof Error ? err.message : 'fetch failed' }
   }
   // Evicted, forgotten, reset or superseded: the result belongs to no one.
   if (entries.get(entry.id) !== entry || entry.inflight !== controller) return
   entry.inflight = null
-  if (result.kind === 'ready' && result.incomplete !== true) entry.readyAt = Date.now()
+  if ((result.kind === 'ready' && result.incomplete !== true) || result.kind === 'not_on_file') {
+    entry.readyAt = Date.now()
+  }
   publish(entry, nextSnapshot(entry, { type: 'settled', result }))
 }
 

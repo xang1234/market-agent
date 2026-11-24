@@ -1,5 +1,6 @@
 import type { SubjectRef } from './search.ts'
 import { defineResource, type FetchedResult } from '../fetch/resource.ts'
+import { notOnFileError } from './fundamentalsNotOnFile.ts'
 
 export const HOLDER_KINDS = ['institutional', 'insider'] as const
 export type HolderKind = (typeof HOLDER_KINDS)[number]
@@ -84,7 +85,7 @@ export async function fetchHolders(
     `&kind=${encodeURIComponent(kind)}`
   const res = await fetchFn(url, { signal: init.signal })
   if (!res.ok) {
-    throw new HoldersFetchError(res.status, `fundamentals holders fetch failed: HTTP ${res.status}`)
+    throw (await notOnFileError(res)) ?? new HoldersFetchError(res.status, `fundamentals holders fetch failed: HTTP ${res.status}`)
   }
   const body = (await res.json()) as WireGetHoldersResponse
   return body.holders
