@@ -1,0 +1,355 @@
+{
+  "pairing": "2026-11-24T171811",
+  "pairs": {
+    "single-latest-quarter": {
+      "A": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 1,
+        "counterarguments": 1,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "B": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "A: prose shows only net income; claims margins above full year unshown. B: full quarter, annual cash conversion weakest as counterpoint."
+    },
+    "fiscal-year-trap": {
+      "A": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 1,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "B": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 1,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Both state the year-end mismatch."
+    },
+    "follow-up-memory": {
+      "A": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 1,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "B": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "A turn 3 one-sided, price-only caveats earlier. B turn 3 AMD net-above-operating counterpoint."
+    },
+    "ticker-page-compare": {
+      "A": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 1,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "B": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "A: close returns caveat. B: AAPL scale offsets the margin deficit."
+    },
+    "missing-cash-flow": {
+      "A": {
+        "correct_companies": null,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 2,
+        "decision_useful": "n/a"
+      },
+      "B": {
+        "correct_companies": null,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 2,
+        "decision_useful": "n/a"
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Both engine gaps."
+    },
+    "what-changed-gross-margin": {
+      "A": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 1,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "B": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "A never states the margin levels. B states 60.52 vs 73.03 and the lower gross profit dollars."
+    },
+    "peer-two": {
+      "A": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 0,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "B": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 0,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Both one-sided."
+    },
+    "peer-three": {
+      "A": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 1,
+        "counterarguments": 0,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "B": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 0,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "A: AAPL not computed, NVDA quarter beside AMD year, no inference. B: full ranking, no counterpoint."
+    },
+    "standout-annual": {
+      "A": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "B": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 1,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "A: cash conversion lowest of 10 years, tempered by OCF scale. B: single year, durability caveat only."
+    },
+    "cause-in-evidence": {
+      "A": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 1,
+        "counterarguments": 0,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "B": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 1,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Both miss AMD's filed cause. A no counterpoint. B: net income offsets operating loss."
+    },
+    "segment-drill-down": {
+      "A": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1,
+        "decision_useful": null
+      },
+      "B": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1,
+        "decision_useful": null
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Both show only total revenue; seeded segments not shown, gap unstated."
+    },
+    "margin-trend-loss-quarter": {
+      "A": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1,
+        "decision_useful": null
+      },
+      "B": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1,
+        "decision_useful": null
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Both: one value and two gaps, no commentary."
+    },
+    "missing-segments": {
+      "A": {
+        "correct_companies": null,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 1,
+        "decision_useful": "n/a"
+      },
+      "B": {
+        "correct_companies": null,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 1,
+        "decision_useful": "n/a"
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Both show AMD total revenue without saying segments are unavailable."
+    },
+    "history-analysis": {
+      "A": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "B": {
+        "correct_companies": null,
+        "comparable_periods": null,
+        "figures_match_sources": null,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": null
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "A: op margin not peak, cash conversion lowest of 10 years. B: FY2023-26, margins slipped from peak."
+    }
+  }
+}
