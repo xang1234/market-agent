@@ -98,15 +98,18 @@ export type Finding = Readonly<{
   salience: Readonly<{ direction: Direction; rank: 1; of: number }>;
 }>;
 
-export type DeclineReason = "incomplete_history" | "tag_change" | "non_positive_base" | "engine_gap" | "within_range";
+export type DeclineReason = "incomplete_history" | "uncertified_input" | "tag_change" | "non_positive_base" | "engine_gap" | "within_range";
 
 export type Decline = Readonly<{ detector_id: string; reason: DeclineReason; detail: string }>;
 
 export type DetectorOutcome = Finding | Decline;
 
+// A blocked result names no root cause: a missing year, a conflicting or
+// unverified figure and a failed read all block alike, so it claims only that
+// an input was not certified.
 const REASONS: Partial<Record<ReasonCode, DeclineReason>> = {
   missing_input: "incomplete_history",
-  blocked_by_dependency: "incomplete_history",
+  blocked_by_dependency: "uncertified_input",
   incompatible_definition: "tag_change",
   non_positive_base: "non_positive_base",
   non_positive_denominator: "non_positive_base",
@@ -121,7 +124,8 @@ export function runDetectors(content: FinancialAnswerContent, company: string): 
     const decline = (reason: DeclineReason, detail: string): Decline => ({ detector_id: detector.id, reason, detail });
     const gap = (result: PresentedResult | undefined) => {
       if (result?.presented.kind !== "gap") return decline("engine_gap", "the engine published no result");
-      return decline(REASONS[result.presented.reason_code] ?? "engine_gap", `${result.presented.reason_code}: ${result.presented.text}`);
+      const reason = result.disposition === "execution_error" ? "engine_gap" : REASONS[result.presented.reason_code] ?? "engine_gap";
+      return decline(reason, `${result.presented.reason_code}: ${result.presented.text}`);
     };
     const latest = byOutput.get(`out_${measureOf(detector, 0)}`);
     if (latest?.presented.kind !== "value") return gap(latest);
@@ -152,6 +156,7 @@ export const isFinding = (outcome: DetectorOutcome): outcome is Finding => "stat
 
 const DECLINE_WORDS: Readonly<Record<DeclineReason, string>> = {
   incomplete_history: "a year in its window has no value",
+  uncertified_input: "an input to its latest year was not certified",
   tag_change: "a figure in its window filed under another concept",
   non_positive_base: "a zero or negative base",
   engine_gap: "not computed",
