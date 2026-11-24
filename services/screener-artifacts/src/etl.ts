@@ -25,7 +25,8 @@ const VENDOR_FRESHNESS = "stale";
 const ERROR_SAMPLE_CAP = 5;
 
 export type EtlReport = {
-  status: "ingested" | "skipped";
+  // "empty": the bundle had no rows, so nothing was imported and its ledger row is failed (#769).
+  status: "ingested" | "empty" | "skipped";
   market: string;
   sha256: string;
   rowsTotal: number;
@@ -125,7 +126,7 @@ export async function runWeeklyReferenceEtl(
     }
   }
 
-  const status = runStatus(rowsIngested, rowsTotal, rowsSkipped);
+  const status = runStatus(rowsIngested, rowsSkipped);
   await writeLedgerEntry(db, {
     provider: ARTIFACT_PROVIDER,
     releaseTag: WEEKLY_RELEASE_TAG,
@@ -145,7 +146,7 @@ export async function runWeeklyReferenceEtl(
   });
 
   return {
-    status: "ingested",
+    status: rowsTotal === 0 ? "empty" : "ingested",
     market,
     sha256,
     rowsTotal,
@@ -157,8 +158,9 @@ export async function runWeeklyReferenceEtl(
   };
 }
 
-function runStatus(rowsIngested: number, rowsTotal: number, rowsSkipped: number): LedgerStatus {
-  if (rowsIngested === 0 && rowsTotal > 0) return "failed";
+function runStatus(rowsIngested: number, rowsSkipped: number): LedgerStatus {
+  // No row imported, an empty bundle included: retried next run, never the last import.
+  if (rowsIngested === 0) return "failed";
   if (rowsSkipped > 0) return "partial";
   return "succeeded";
 }
