@@ -13,6 +13,7 @@
 // answers from seeded bars, and live bars must not mix into it.
 
 import { completedSessionsEnd, isCurrentEnd, selectYtdWindow, type DailyClose } from "../../market/src/ytd-window.ts";
+import { isNonEmpty, type NonEmpty, type Outcome } from "../../shared/src/outcome.ts";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 // The bases the chart can use, in its order of preference (perf-block.ts).
@@ -55,35 +56,33 @@ function selfHost(bindHost: string): string {
   return host.includes(":") ? `[${host}]` : host;
 }
 
-// A hydration the market failed for some listing in, carrying the listings it
-// did answer have no bars, so their hold is kept though the step reads failed.
-export class MarketFailure extends Error {
-  readonly noBars: ReadonlyArray<string>;
-  constructor(message: string, noBars: ReadonlyArray<string>) {
-    super(message);
-    this.noBars = noBars;
-  }
-}
-
-// Resolves to the listings the market has no bars for on any basis (#665):
-// their split-adjusted request was answered with none, or with no coverage.
-// That request alone says so, as the dividend-adjusted one is a fallback some
-// providers never serve (Polygon answers it with no coverage, and may refuse
-// it outright). It rejects with a MarketFailure when a listing has no bars
-// because the market failed for its split-adjusted request (a rate limit, an
-// outage, a refused request), so the step reads failed, not empty.
+// Resolves to each listing's outcome (#665): stored with its bars, or empty
+// when it has none on any basis because its split-adjusted request was
+// answered with none, or with no coverage. That request alone says so, as the
+// dividend-adjusted one is a fallback some providers never serve (Polygon
+// answers it with no coverage, and may refuse it outright). A listing with no
+// bars because the market failed for its split-adjusted request (a rate limit,
+// an outage, a refused request) is failed with that cause, so the step reads
+// failed, not empty. A market that never answers rejects.
 export async function hydrateYtdBars(input: {
   origin: string;
   listings: ReadonlyArray<HydrationListing>;
   now: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
-}): Promise<ReadonlyArray<string>> {
-  if (input.listings.length === 0) return [];
+}): Promise<ReadonlyMap<string, Outcome<DailyClose>>> {
+  if (input.listings.length === 0) return new Map();
   const fetchImpl = input.fetchImpl ?? fetch;
   const signal = AbortSignal.timeout(input.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  const priced = new Set<string>();
+  const priced = new Map<string, NonEmpty<DailyClose>>();
   let failures = new Map<string, string>();
+  const outcomes = () => new Map(input.listings.map(({ id }): [string, Outcome<DailyClose>] => {
+    const bars = priced.get(id);
+    const failure = failures.get(id);
+    return [id, bars ? { status: "stored", rows: bars }
+      : failure === undefined ? { status: "empty", reason: "no_bars" }
+      : { status: "failed", cause: new Error(`the market could not answer for ${id} (${failure}) just now`) }];
+  }));
   // Every company on one basis, or the chart cannot compare them. A basis is
   // enough only when what came back makes a full YTD window (an "available"
   // answer can still hold no bars) that reaches the last completed session
@@ -91,23 +90,15 @@ export async function hydrateYtdBars(input: {
   // the next.
   for (const [index, basis] of BASES.entries()) {
     const { bars, failed } = await fetchWindows(fetchImpl, input.origin, input.listings, input.now, basis, signal);
-    for (const [id, stored] of bars) if (stored.length > 0) priced.add(id);
+    for (const [id, stored] of bars) if (isNonEmpty(stored)) priced.set(id, stored);
     if (index === 0) failures = failed;
     const window = selectYtdWindow(
       input.listings.map((listing) => ({ label: listing.id, timeZone: listing.timeZone, bars: bars.get(listing.id) ?? [] })),
       input.now,
     );
-    if (window.ok && input.listings.every((listing) => isCurrentEnd(window.endDate, input.now, listing.timeZone))) return [];
+    if (window.ok && input.listings.every((listing) => isCurrentEnd(window.endDate, input.now, listing.timeZone))) return outcomes();
   }
-  const unpriced = input.listings.map((listing) => listing.id).filter((id) => !priced.has(id));
-  const failed = unpriced.filter((id) => failures.has(id));
-  if (failed.length > 0) {
-    throw new MarketFailure(
-      `the market could not answer for ${failed.map((id) => `${id} (${failures.get(id)})`).join(", ")} just now`,
-      unpriced.filter((id) => !failures.has(id)),
-    );
-  }
-  return unpriced;
+  return outcomes();
 }
 
 // The range a listing's window is requested over: from Dec 20 of the prior

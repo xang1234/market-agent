@@ -9,10 +9,11 @@
 // fetched only with a user agent.
 
 import type { QueryExecutor } from "../../shared/src/http.ts";
+import { failed, type Outcome } from "../../shared/src/outcome.ts";
 import { labelList, MAX_TURN_SUBJECTS, type ChatTurnEmit } from "./coordinator.ts";
 import { issuersWithoutFilings } from "./financial-runtime.ts";
 import { companyListings, listingsForComparison, listingTimeZones } from "./perf-block.ts";
-import { frozenDataMode, MarketFailure, marketHydrationOrigin, ytdRequestRange, type HydrationListing } from "./ytd-hydration.ts";
+import { frozenDataMode, marketHydrationOrigin, ytdRequestRange, type HydrationListing } from "./ytd-hydration.ts";
 
 // `listing_id` is the listing the turn named the company by, when it named
 // one. A company with no label (an auto-selected peer) is named by its listing.
@@ -38,17 +39,22 @@ const COOLDOWN_MS = 60_000;
 const EMPTY_COOLDOWN_MS = 6 * 60 * 60_000;
 const NONE: ReadonlySet<string> = new Set();
 
-// One fetch, shared by every key it covers. `outcome` is unset while it runs;
-// `empty` holds what a done fetch found nothing for, the listings a price
-// fetch found no bars for or the company a filings fetch left with none.
-type Fetch = { at: number; settled: Promise<void>; outcome?: "done" | "failed"; empty?: ReadonlySet<string> };
+// One fetch, shared by every key it covers. `outcomes` holds, once it
+// settles, each subject's: the company's for filings, each listing's for prices.
+type Fetch = { at: number; settled: Promise<void>; outcomes?: ReadonlyMap<string, Outcome<unknown>> };
+
+// A settled fetch failed when it failed for any subject: it is retried whole.
+function state(entry: Fetch): "running" | "failed" | "done" {
+  if (entry.outcomes === undefined) return "running";
+  return [...entry.outcomes.values()].some((outcome) => outcome.status === "failed") ? "failed" : "done";
+}
 
 export function createTurnHydrator(deps: {
   db: QueryExecutor;
   env: NodeJS.ProcessEnv;
-  fetchFilings(issuerId: string): Promise<void>;
-  // Resolves to the listings the market has no bars for.
-  fetchBars(origin: string, listings: ReadonlyArray<HydrationListing>, cutoff: string): Promise<ReadonlyArray<string>>;
+  fetchFilings(issuerId: string): Promise<Outcome<unknown>>;
+  // Each listing's outcome.
+  fetchBars(origin: string, listings: ReadonlyArray<HydrationListing>, cutoff: string): Promise<ReadonlyMap<string, Outcome<unknown>>>;
   budgetMs?: number;
   now?: () => number;
   logger?: Pick<Console, "warn">;
@@ -65,16 +71,14 @@ export function createTurnHydrator(deps: {
   // came: it is not asked for that range again for EMPTY_COOLDOWN_MS (#665).
   // ponytail: per process and never pruned, as `fetches` is.
   const noBarsAt = new Map<string, number>();
-  const start = (keys: ReadonlyArray<string>, fetch: () => Promise<ReadonlyArray<string>>): Fetch => {
+  // A fetch that rejects failed for each of its subjects.
+  const start = (keys: ReadonlyArray<string>, subjects: ReadonlyArray<string>, fetch: () => Promise<ReadonlyMap<string, Outcome<unknown>>>): Fetch => {
     const entry: Fetch = { at: now(), settled: Promise.resolve() };
     // The minute runs from when a fetch settles, so one that fails late still cools down.
-    entry.settled = fetch().then((empty) => {
-      entry.outcome = "done";
-      entry.at = now();
-      entry.empty = new Set(empty);
-    }, (error: unknown) => {
-      logger.warn("[chat] a fetch for the turn's companies failed; the answer names the gap", error);
-      entry.outcome = "failed";
+    entry.settled = fetch().catch((error: unknown) => new Map(subjects.map((id) => [id, failed(error)] as const))).then((outcomes) => {
+      const causes = new Set([...outcomes.values()].flatMap((outcome) => (outcome.status === "failed" ? [outcome.cause] : [])));
+      if (causes.size > 0) logger.warn("[chat] a fetch for the turn's companies failed; the answer names the gap", ...causes);
+      entry.outcomes = outcomes;
       entry.at = now();
     });
     for (const key of keys) fetches.set(key, entry);
@@ -83,7 +87,7 @@ export function createTurnHydrator(deps: {
   // The fetch a turn reads for a key: one running, or one a minute ago.
   const current = (key: string): Fetch | undefined => {
     const entry = fetches.get(key);
-    return entry && (entry.outcome === undefined || now() - entry.at < COOLDOWN_MS) ? entry : undefined;
+    return entry && (state(entry) === "running" || now() - entry.at < COOLDOWN_MS) ? entry : undefined;
   };
 
   return async (companies, turn) => {
@@ -114,12 +118,9 @@ export function createTurnHydrator(deps: {
       const entry = current(key);
       if (entry) return [{ company, entry }];
       const last = fetches.get(key);
-      if (last?.empty?.size && now() - last.at < EMPTY_COOLDOWN_MS) return [];
-      return unfiled.has(company.issuer_id) || last?.outcome === "failed"
-        ? [{ company, entry: start([key], async () => {
-          await deps.fetchFilings(company.issuer_id);
-          return [...await issuersWithoutFilings(deps.db, [company.issuer_id])];
-        }) }]
+      if (last?.outcomes?.get(company.issuer_id)?.status === "empty" && now() - last.at < EMPTY_COOLDOWN_MS) return [];
+      return unfiled.has(company.issuer_id) || (last !== undefined && state(last) === "failed")
+        ? [{ company, entry: start([key], [company.issuer_id], async () => new Map([[company.issuer_id, await deps.fetchFilings(company.issuer_id)]])) }]
         : [];
     });
     // A charted YTD window is one fetch of the whole comparison, keyed by the
@@ -131,30 +132,29 @@ export function createTurnHydrator(deps: {
       : unpriced.length === 0 ? [] : [{ key: ytdKey(unpriced), listings: unpriced }];
     const priced = units.flatMap((unit) => {
       const entry = current(unit.key);
-      return entry?.outcome === undefined ? [{ ...unit, entry }] : [];
+      return entry === undefined || state(entry) === "running" ? [{ ...unit, entry }] : [];
     });
     const due = priced.filter(({ entry }) => !entry);
-    const batch = due.length === 0 ? [] : [start(due.map(({ key }) => key), async () => {
-      const listings = due.flatMap((unit) => unit.listings);
-      const noBars = await deps.fetchBars(origin!, listings.map(({ id, timeZone }) => ({ id, timeZone })), cutoff).catch((error: unknown) => {
-        if (!(error instanceof MarketFailure)) throw error;
-        // The listings answered empty are held though another failed. The
-        // comparison's next turn leaves them out, so it is the failed rest's
-        // key that must still cool down for the minute.
-        for (const listing of listings) if (error.noBars.includes(listing.id)) noBarsAt.set(rangeKey(listing), now());
-        const rest = listings.filter((listing) => !error.noBars.includes(listing.id));
-        if (turn.ytdCutoff !== undefined && rest.length < listings.length) fetches.set(ytdKey(rest), fetches.get(due[0]!.key)!);
-        throw error;
-      });
-      for (const listing of listings) {
-        if (noBars.includes(listing.id)) noBarsAt.set(rangeKey(listing), now());
-        else noBarsAt.delete(rangeKey(listing));
+    const dueListings = due.flatMap((unit) => unit.listings);
+    const batch = due.length === 0 ? [] : [start(due.map(({ key }) => key), dueListings.map((listing) => listing.id), async () => {
+      const outcomes = await deps.fetchBars(origin!, dueListings.map(({ id, timeZone }) => ({ id, timeZone })), cutoff);
+      const noBars = dueListings.filter((listing) => outcomes.get(listing.id)?.status === "empty");
+      const anyFailed = [...outcomes.values()].some((outcome) => outcome.status === "failed");
+      // The listings answered empty are held though another failed. The
+      // comparison's next turn leaves them out, so it is the failed rest's
+      // key that must still cool down for the minute.
+      for (const listing of dueListings) {
+        if (noBars.includes(listing)) noBarsAt.set(rangeKey(listing), now());
+        else if (!anyFailed) noBarsAt.delete(rangeKey(listing));
       }
-      return noBars;
+      if (anyFailed && turn.ytdCutoff !== undefined && noBars.length > 0) {
+        fetches.set(ytdKey(dueListings.filter((listing) => !noBars.includes(listing))), fetches.get(due[0]!.key)!);
+      }
+      return outcomes;
     })];
     const listingLabel = new Map(unpriced.map((listing) => [listing.issuer_id, listing.label]));
     const labelOf = new Map(capped.map((company) => [company.issuer_id, company.label ?? listingLabel.get(company.issuer_id) ?? company.issuer_id]));
-    const running = filings.filter(({ entry }) => entry.outcome === undefined);
+    const running = filings.filter(({ entry }) => state(entry) === "running");
 
     const pricedListings = priced.flatMap(({ listings }) => listings);
     const steps = [
@@ -173,16 +173,17 @@ export function createTurnHydrator(deps: {
     }
 
     for (const { tool_call_id, tool_name, noun, label, fetches: done, subjects } of steps) {
-      // A fetch that stored nothing for a company failed for it, and says which (#665, #688).
-      const empty = subjects.filter((subject) => done.some((fetch) => fetch.empty?.has(subject.id)));
-      const status = done.some((fetch) => fetch.outcome === undefined) ? "still_loading" : done.every((fetch) => fetch.outcome === "done") && empty.length === 0 ? "ok" : "failed";
+      // A fetch that stored nothing for a company failed for it, and says which
+      // (#665, #688); one that failed in part names none, as it is retried whole.
+      const empty = subjects.filter((subject) => done.some((fetch) => state(fetch) === "done" && fetch.outcomes?.get(subject.id)?.status === "empty"));
+      const status = done.some((fetch) => state(fetch) === "running") ? "still_loading" : done.every((fetch) => state(fetch) === "done") && empty.length === 0 ? "ok" : "failed";
       const shown = status !== "still_loading" && empty.length > 0 ? `No ${noun} found for ${labelList(empty.map((subject) => labelOf.get(subject.issuer_id)!))}` : label;
       turn.emit("tool.completed", { tool_call_id, tool_name, label: shown, status });
     }
     if (turn.pricesOnly) {
-      return new Set(units.filter(({ key }) => fetches.has(key) && fetches.get(key)!.outcome !== "done").flatMap(({ listings }) => listings.map((listing) => listing.issuer_id)));
+      return new Set(units.filter(({ key }) => fetches.has(key) && state(fetches.get(key)!) !== "done").flatMap(({ listings }) => listings.map((listing) => listing.issuer_id)));
     }
-    return new Set(filings.filter(({ entry }) => entry.outcome !== "done").map(({ company }) => company.issuer_id));
+    return new Set(filings.filter(({ entry }) => state(entry) !== "done").map(({ company }) => company.issuer_id));
   };
 }
 
