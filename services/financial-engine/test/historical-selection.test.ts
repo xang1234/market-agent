@@ -498,3 +498,30 @@ test("a margin's numerator and denominator land on one fiscal quarter, or each i
     "gap precision_unverified",
   ], "revenue's Q4 is the latest quarter, so neither falls back to Q3");
 });
+
+const dated = (year: number, period: Quarter | "FY", start: string, end: string) => candidate({ year, period, start, end, publishedLocalDate: "2025-11-20" });
+const latestYear = (offset: number): ReportedMetricNode => ({ ...FY2023, period: { kind: "latest", period_type: "annual", offset } });
+const lateIn2025 = policy({ knowledge_cutoff: "2025-12-01T00:00:00Z" });
+
+test("a latest offset never lands on a period that does not end that many quarters or years before the newest (#769, #479)", () => {
+  // #479: the period labelled Q1 FY2026 ends nine months after Q4 FY2025.
+  const mislabelled = [dated(2025, "Q4", "2024-10-28", "2025-01-26"), dated(2026, "Q1", "2025-07-28", "2025-10-26")];
+  assert.deepEqual([0, 1].map((offset) => landed(selectInput(latestQuarter(offset), mislabelled, lateIn2025))), ["Q1 FY2026", "gap incompatible_period"]);
+  // The year end moved from June to December, so FY2023 ends 18 months before FY2024.
+  const moved = [dated(2023, "FY", "2022-07-01", "2023-06-30"), dated(2024, "FY", "2024-01-01", "2024-12-31")];
+  assert.deepEqual([0, 1].map((offset) => landed(selectInput(latestYear(offset), moved, lateIn2025))), ["FY2024", "gap incompatible_period"]);
+});
+
+test("52/53-week calendars land where their labels say, 14- to 17-week quarters included (#769)", () => {
+  // Costco's 16-week Q4 FY2024 and 17-week Q4 FY2023, Kroger's 16-week Q1 and Apple's 14-week Q1 FY2023, each after the quarter before.
+  const costco2024 = [dated(2024, "Q3", "2024-02-19", "2024-05-12"), dated(2024, "Q4", "2024-05-13", "2024-09-01")];
+  const costco2023 = [dated(2023, "Q3", "2023-02-13", "2023-05-07"), dated(2023, "Q4", "2023-05-08", "2023-09-03")];
+  const kroger = [dated(2023, "Q4", "2022-11-06", "2023-01-28"), dated(2024, "Q1", "2023-01-29", "2023-05-20")];
+  const apple = [dated(2022, "Q4", "2022-06-26", "2022-09-24"), dated(2023, "Q1", "2022-09-25", "2022-12-31")];
+  assert.deepEqual([costco2024, costco2023, kroger, apple].map((pair) => landed(selectInput(latestQuarter(1), pair, lateIn2025))), ["Q3 FY2024", "Q3 FY2023", "Q4 FY2023", "Q4 FY2022"]);
+  const costco = [...costco2023, dated(2024, "Q1", "2023-09-04", "2023-11-26"), dated(2024, "Q2", "2023-11-27", "2024-02-18"), ...costco2024];
+  assert.deepEqual([1, 2, 3, 4, 5].map((offset) => landed(selectInput(latestQuarter(offset), costco, lateIn2025))), ["Q3 FY2024", "Q2 FY2024", "Q1 FY2024", "Q4 FY2023", "Q3 FY2023"]);
+  // NVIDIA's 53-week FY2021 after FY2020.
+  const nvidia = [dated(2020, "FY", "2019-01-28", "2020-01-26"), dated(2021, "FY", "2020-01-27", "2021-01-31")];
+  assert.equal(landed(selectInput(latestYear(1), nvidia, lateIn2025)), "FY2020");
+});
