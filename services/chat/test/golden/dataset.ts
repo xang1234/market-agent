@@ -2,9 +2,11 @@
 //
 // Three issuers (NVDA, AMD, AAPL) with identity, eight fiscal quarters and two
 // fiscal years of income-statement facts, a cached quote, and a short run of
-// daily bars. Facts are written through the evidence repo's createFact — the
+// daily bars. NVDA instead has ten fiscal years of annual statements with cash
+// flow, as filed in its original 10-Ks, so standout findings have a history to
+// rank. Facts are written through the evidence repo's createFact — the
 // same validation path live ingestion uses — so the golden test exercises real
-// provenance, not a bypass. Values are approximate, illustrative figures for tests and offline
+// provenance, not a bypass. Other values are approximate, illustrative figures for tests and offline
 // development; they are not a data source.
 //
 // NVDA also has business-segment revenue for its latest quarter (#157): each
@@ -52,6 +54,10 @@ type Quarter = {
   net_income: number;
 };
 
+// A year's cash flow as its 10-K files it, USD millions. Capex is absent where the
+// filing tags none, and is filed as PaymentsToAcquireProductiveAssets.
+type CashFlow = Readonly<{ operating_cash_flow: number; stock_based_compensation: number; capex?: number }>;
+
 export type GoldenCompany = {
   ticker: string;
   legal_name: string;
@@ -65,10 +71,10 @@ export type GoldenCompany = {
   listing_id: string;
   quote: { price: number; prev_close: number };
   quarters: ReadonlyArray<Quarter>;
-  // Two fiscal years of annual statements, for the comparison's margins and
-  // year-over-year growth: [fiscal_year, start, end, revenue, gross_profit,
-  // operating_income, net_income] in USD millions.
-  years: ReadonlyArray<readonly [number, string, string, number, number, number, number]>;
+  // Annual statements, for the comparison's margins and year-over-year growth:
+  // [fiscal_year, start, end, revenue, gross_profit, operating_income,
+  // net_income, cash flow?] in USD millions.
+  years: ReadonlyArray<readonly [number, string, string, number, number, number, number, CashFlow?]>;
   // Business-segment revenue for one quarter, USD millions, summing to that
   // quarter's revenue.
   segments?: Readonly<{
@@ -115,9 +121,21 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
       [2026, "Q3", "2025-07-28", "2025-10-26", 57006, 41849, 36010, 31910],
       [2026, "Q4", "2025-10-27", "2026-01-25", 62100, 46200, 40300, 35400],
     ]),
+    // Each fiscal year from its own original 10-K (SEC companyfacts for CIK 1045810,
+    // fetched 2026-11-24, sha256 19ef503a...). Revenue is Revenues, or
+    // RevenueFromContractWithCustomerExcludingAssessedTax for FY2019-FY2021.
+    // FY2026 is the filed year, so it differs from the sum of the quarters above.
     years: [
-      [2025, "2024-01-29", "2025-01-26", 130497, 97859, 81454, 72880],
-      [2026, "2025-01-27", "2026-01-25", 209911, 148570, 126388, 112507],
+      [2017, "2016-02-01", "2017-01-29", 6910, 4063, 1934, 1666, { operating_cash_flow: 1672, stock_based_compensation: 247 }],
+      [2018, "2017-01-30", "2018-01-28", 9714, 5822, 3210, 3047, { operating_cash_flow: 3502, stock_based_compensation: 391 }],
+      [2019, "2018-01-29", "2019-01-27", 11716, 7171, 3804, 4141, { operating_cash_flow: 3743, stock_based_compensation: 557 }],
+      [2020, "2019-01-28", "2020-01-26", 10918, 6768, 2846, 2796, { operating_cash_flow: 4761, stock_based_compensation: 844 }],
+      [2021, "2020-01-27", "2021-01-31", 16675, 10396, 4532, 4332, { operating_cash_flow: 5822, stock_based_compensation: 1397 }],
+      [2022, "2021-02-01", "2022-01-30", 26914, 17475, 10041, 9752, { operating_cash_flow: 9108, stock_based_compensation: 2004 }],
+      [2023, "2022-01-31", "2023-01-29", 26974, 15356, 4224, 4368, { operating_cash_flow: 5641, stock_based_compensation: 2709 }],
+      [2024, "2023-01-30", "2024-01-28", 60922, 44301, 32972, 29760, { operating_cash_flow: 28090, stock_based_compensation: 3549, capex: 1069 }],
+      [2025, "2024-01-29", "2025-01-26", 130497, 97858, 81453, 72880, { operating_cash_flow: 64089, stock_based_compensation: 4737, capex: 3236 }],
+      [2026, "2025-01-27", "2026-01-25", 215938, 153463, 130387, 120067, { operating_cash_flow: 102718, stock_based_compensation: 6386, capex: 6042 }],
     ],
     segments: {
       fiscal_year: 2026,
@@ -184,11 +202,18 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
 ]);
 
 const INCOME_METRICS = ["revenue", "gross_profit", "operating_income", "net_income"] as const;
+const CASH_FLOW_METRICS = ["operating_cash_flow", "stock_based_compensation", "capex", "net_income_consolidated"] as const;
+const GOLDEN_METRICS = [...INCOME_METRICS, ...CASH_FLOW_METRICS];
+type GoldenMetric = (typeof GOLDEN_METRICS)[number];
+
+// The concept scope SEC ingestion stores on capex filed under this concept (sec-facts-repository.ts secConceptScope).
+const PRODUCTIVE_ASSETS_CAPEX = { kind: "productive_assets_capex", concept: "PaymentsToAcquireProductiveAssets" } as const;
 
 type GoldenIssuerFact = Readonly<{
   key: string;
   issuer_id: string;
-  metric_key: (typeof INCOME_METRICS)[number];
+  metric_key: GoldenMetric;
+  quality_flags: ReadonlyArray<unknown>;
   period_kind: "fiscal_q" | "fiscal_y";
   period_start: string;
   period_end: string;
@@ -203,29 +228,38 @@ const GOLDEN_ISSUER_FACTS: ReadonlyArray<GoldenIssuerFact> = Object.freeze(
       ...company.quarters.map((quarter) => ({
         ...quarter,
         period_kind: "fiscal_q" as const,
-        values: INCOME_METRICS.map((metricKey) => quarter[metricKey]),
+        values: Object.fromEntries(INCOME_METRICS.map((metricKey) => [metricKey, quarter[metricKey]])) as Partial<Record<GoldenMetric, number>>,
       })),
-      ...company.years.map(([fiscal_year, period_start, period_end, ...values]) => ({
+      ...company.years.map(([fiscal_year, period_start, period_end, revenue, gross_profit, operating_income, net_income, cash]) => ({
         fiscal_year,
         fiscal_period: "FY" as const,
         period_start,
         period_end,
         period_kind: "fiscal_y" as const,
-        values: values.map((value) => value * 1e6),
+        values: {
+          revenue, gross_profit, operating_income, net_income,
+          // NVDA files no noncontrolling-interest concept, so its consolidated net income is its net income.
+          ...(cash && { ...cash, net_income_consolidated: net_income }),
+        } as Partial<Record<GoldenMetric, number>>,
       })),
     ];
     return periods.flatMap(({ period_kind, period_start, period_end, fiscal_year, fiscal_period, values }) =>
-      INCOME_METRICS.map((metric_key, index) => ({
-        key: `${company.ticker}.${fiscal_year}.${fiscal_period}.${metric_key}`,
-        issuer_id: company.issuer_id,
-        metric_key,
-        period_kind,
-        period_start,
-        period_end,
-        fiscal_year,
-        fiscal_period,
-        value_usd: values[index]!,
-      })),
+      GOLDEN_METRICS.flatMap((metric_key) => {
+        const value = values[metric_key];
+        if (value === undefined) return [];
+        return [{
+          key: `${company.ticker}.${fiscal_year}.${fiscal_period}.${metric_key}`,
+          issuer_id: company.issuer_id,
+          metric_key,
+          quality_flags: metric_key === "capex" ? [PRODUCTIVE_ASSETS_CAPEX] : [],
+          period_kind,
+          period_start,
+          period_end,
+          fiscal_year,
+          fiscal_period,
+          value_usd: period_kind === "fiscal_y" ? value * 1e6 : value,
+        }];
+      }),
     );
   }),
 );
@@ -309,6 +343,7 @@ export async function seedGoldenDataset(client: Client): Promise<void> {
         coverage_level: "full",
         entitlement_channels: ["app"],
         confidence: 1,
+        quality_flags: fact.quality_flags,
       });
     }
 
@@ -522,10 +557,10 @@ async function seedSegments(client: Client, company: GoldenCompany, revenueMetri
 async function loadMetricIds(client: Client): Promise<Map<string, string>> {
   const { rows } = await client.query<{ metric_key: string; metric_id: string }>(
     `select metric_key, metric_id::text as metric_id from metrics where metric_key = any($1::text[])`,
-    [INCOME_METRICS],
+    [GOLDEN_METRICS],
   );
   const ids = new Map(rows.map((row) => [row.metric_key, row.metric_id]));
-  for (const key of INCOME_METRICS) {
+  for (const key of GOLDEN_METRICS) {
     if (!ids.has(key)) throw new Error(`golden dataset: metric '${key}' missing from db/seed/metrics.sql`);
   }
   return ids;

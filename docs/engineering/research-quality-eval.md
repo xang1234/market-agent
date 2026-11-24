@@ -1,11 +1,12 @@
 # Research-quality eval (#124)
 
-Tests prove the plumbing works. They don't show whether an answer helps an analyst. This eval is twelve questions that
+Tests prove the plumbing works. They don't show whether an answer helps an analyst. This eval is fourteen questions that
 the owner scores by hand, so answer quality can be compared from one run to the next.
 
 - **Questions and rubric:** `scripts/research-quality-questions.ts`. Every question runs on the frozen golden dataset:
   NVDA, AMD and AAPL, with quarterly and annual income metrics, quotes and ten daily price bars, plus NVDA's
-  business-segment revenue for its latest quarter, and one filed claim: AMD's explanation of its Q2 2025 margin drop,
+  ten fiscal years of annual statements with cash flow (FY2017-FY2026, from its 10-Ks), which the two standout
+  questions rank against, and NVDA's business-segment revenue for its latest quarter, and one filed claim: AMD's explanation of its Q2 2025 margin drop,
   quoted from its earnings release (8-K exhibit 99.1, #282). Nothing else is seeded, so the missing-data questions have
   one honest answer: "not available", and only AMD's Q2 2025 has a cause in evidence.
 - **Rubric:** seven criteria, each scored 0–2, with fixed meanings for 0, 1 and 2:

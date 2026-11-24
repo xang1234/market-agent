@@ -5,9 +5,11 @@
 // (services/chat/test/golden/dataset.ts): NVDA, AMD and AAPL with eight
 // quarters and two fiscal years of revenue, gross profit, operating income and
 // net income, a quote, and ten daily bars, plus NVDA's business-segment revenue
-// for its latest quarter (#157). Nothing else is seeded (no AMD/AAPL segments,
-// cash flow, guidance or filings text), which several questions rely on: the
-// honest answer there is "not available", never a number.
+// for its latest quarter (#157). NVDA instead has ten fiscal years of annual
+// statements with cash flow (FY2017-FY2026, from its 10-Ks). Nothing else is
+// seeded (no AMD/AAPL segments or cash flow, no guidance or filings text),
+// which several questions rely on: the honest answer there is "not available",
+// never a number.
 //
 // scripts/research-quality-eval.ts runs them through analyst mode and writes the
 // dated report; scoring is manual (docs/engineering/research-quality-eval.md).
@@ -168,7 +170,7 @@ export const QUESTIONS: ReadonlyArray<EvalQuestion> = [
     id: "missing-cash-flow",
     kind: "missing data",
     turns: [{ message: "What is AMD's free cash flow?" }],
-    expect: "Cash flow is not seeded. Must say so; net income is not free cash flow and must not be passed off as it.",
+    expect: "AMD's cash flow is not seeded. Must say so; net income is not free cash flow and must not be passed off as it.",
     notApplicable: MISSING_DATA_NA,
   },
   {
@@ -181,6 +183,18 @@ export const QUESTIONS: ReadonlyArray<EvalQuestion> = [
       { message: "Explain the differences and show the evidence." },
     ],
     expect: "Turn 2 keeps NVDA, adds AMD, and charts the year to date (2025-12-31 close to 2026-08-31 close, split-adjusted); turn 3 keeps both and cites facts from each. Scored on the last turn, with companies and periods judged across all three.",
+  },
+  {
+    id: "standout-annual",
+    kind: "standout in own history",
+    turns: [{ message: "What stands out in NVIDIA's latest annual results?" }],
+    expect: "FY2026 (ended 2026-01-25): revenue $215.9B, up about 65%; operating margin 60.4%, a little below FY2025's 62.4%. What stands out against NVDA's own ten fiscal years on file (FY2017-FY2026): cash conversion (operating cash flow / net income) was 0.86x ($102.7B / $120.1B), the lowest of the ten. A good answer names it as the lowest of those years and says the data does not show why. Traps: a ten-year claim about another measure the data does not rank, a stated cause, or a free cash flow presented as PP&E capex (NVDA files capex as productive-asset payments, FY2024-FY2026 only).",
+  },
+  {
+    id: "history-analysis",
+    kind: "analysis against history",
+    turns: [{ message: "How does NVIDIA's latest fiscal year compare with its own history?" }],
+    expect: "FY2026 against FY2017-FY2025: record revenue and operating income, operating margin 60.4% second only to FY2025's 62.4%, and cash conversion 0.86x, the lowest of the ten years (FY2025 0.88x, the high was FY2020 at 1.70x). A good answer uses the ten-year history, names the cash-conversion low as what cuts against the growth story, and does not invent a cause. Comparing only with FY2025 misses the question.",
   },
   {
     id: "ticker-page-compare",
