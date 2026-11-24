@@ -654,7 +654,6 @@ up_ui() {
   configure_runtime_env
   STARTED_SERVICES=()
   COMPOSE_STARTED=0
-  ensure_install "$ROOT/lint"
   ensure_install "$ROOT/web"
   stop_parked_processes "app"
   assert_port_available app "$(service_port app)"
