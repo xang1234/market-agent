@@ -5,6 +5,7 @@
 // "recurring" flag is a count: in 5 or more of the quarters read, never a
 // judgment of what the item is.
 
+import type { FinancialUnit } from "../../financial-core/src/contracts.ts";
 import type { RowQueryExecutor } from "./types.ts";
 
 export type TableScale = "thousands" | "millions" | "billions";
@@ -45,8 +46,8 @@ export type NonGaapQuarter = Pick<StoredRelease, "document_id" | "source_id" | "
   eps: { gaap: number; non_gaap: number; spread: number } | null;
   // Each amount in the scale of the table that reconciles it.
   operating_income: { gaap: number; non_gaap: number; scale: TableScale | null } | null;
-  // Percent of the release's own revenue, the spread in percentage points.
-  operating_margin: { revenue: number; gaap_pct: number; non_gaap_pct: number; spread_pp: number } | null;
+  // Percent of the release's own revenue. The spread is a change of a percent, so it carries the points unit (#539).
+  operating_margin: { revenue: number; gaap_pct: number; non_gaap_pct: number; spread: { value: number; unit: FinancialUnit & { kind: "percentage_points" } } } | null;
   sbc: { value: number; basis: SbcBasis; scale: TableScale | null; non_gaap_net_income: number | null; share_pct: number | null } | null;
   // The categories of the quarter's add-backs, in any of its reconciliations.
   categories: ReadonlyArray<string>;
@@ -156,7 +157,7 @@ function quarterOf(release: StoredRelease): Omit<NonGaapQuarter, "superseded"> {
         revenue: revenue.value_num,
         gaap_pct: round((operating.gaap.value_num / revenue.value_num) * 100, 1),
         non_gaap_pct: round((operating.non_gaap.value_num / revenue.value_num) * 100, 1),
-        spread_pp: round(((operating.non_gaap.value_num - operating.gaap.value_num) / revenue.value_num) * 100, 1),
+        spread: { value: round(((operating.non_gaap.value_num - operating.gaap.value_num) / revenue.value_num) * 100, 1), unit: { kind: "percentage_points" } },
       }
       : null,
     sbc: sbcOf(release, net),

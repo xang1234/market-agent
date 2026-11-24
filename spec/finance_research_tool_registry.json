@@ -2112,15 +2112,37 @@
                     "non_gaap_pct": {
                       "type": "number"
                     },
-                    "spread_pp": {
-                      "type": "number"
+                    "spread": {
+                      "type": "object",
+                      "properties": {
+                        "value": {
+                          "type": "number"
+                        },
+                        "unit": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "const": "percentage_points"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "value",
+                        "unit"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "revenue",
                     "gaap_pct",
                     "non_gaap_pct",
-                    "spread_pp"
+                    "spread"
                   ],
                   "additionalProperties": false
                 },
