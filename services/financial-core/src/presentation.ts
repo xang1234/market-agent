@@ -69,7 +69,8 @@ export type ScenarioRow = Readonly<{
 
 export type PresentationLabel = Readonly<
   | { kind: "subject"; text: string; slot_id: LocalId }
-  | { kind: "measure"; text: string }
+  /** A measure in a concept scope (#731, #743) names its scopes, so a reader never has to find them in its text (#744). */
+  | { kind: "measure"; text: string; concept_scopes?: ReadonlyArray<ConceptScopeV1["kind"]> }
   | { kind: "period"; text: string }
 >;
 
@@ -159,8 +160,9 @@ export function presentFinancialUnit(input: {
   concept_scopes: BoundScopes;
 }): FinancialAnswerContent {
   const { plan } = input;
-  const read = dependencyClosure(plan, plan.outputs.filter((output) => output.unit_id === input.unit_id).map((output) => output.node_id));
-  const scoped = scopeReader(plan, input.concept_scopes, read);
+  const outputNodes = plan.outputs.filter((output) => output.unit_id === input.unit_id).map((output) => output.node_id);
+  const read = dependencyClosure(plan, outputNodes);
+  const scoped = scopeReader(plan, input.concept_scopes, outputNodes);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const readsOf = periodReader(plan, nodes, input.periods);
   const byOutput = new Map(input.results.map((result) => [result.output_id, result]));
@@ -182,7 +184,7 @@ export function presentFinancialUnit(input: {
       output_id: output.output_id,
       disposition: result.disposition === "computed" ? "verified" : result.disposition,
       subject_label_id: slot === null ? null : subjectLabelId(slot),
-      measure_label_id: labels.intern("measure", measureKey(plan, node, scoped), labelText(plan, node, scoped(node))),
+      measure_label_id: labels.measure(measureKey(plan, node, scoped), labelText(plan, node, scoped(node)), scoped(node)),
       period_label_id: labels.intern("period", periodKey(plan, node, readsOf), periodText(plan, node, names, readsOf)),
       presented: presentPayload(plan, node, result.payload, labels, readsOf, scoped),
       result_hash: result.result_hash,
@@ -231,6 +233,13 @@ class LabelTable {
     const id = `${kind}:${kind[0]}${this.counts[kind]++}`;
     this.interned.set(`${kind}|${key}`, id);
     this.entries[id] = { kind, text };
+    return id;
+  }
+
+  measure(key: string, text: string, scopes: ReadonlyArray<ConceptScopeV1["kind"]>): string {
+    const id = this.intern("measure", key, text);
+    // Only a scoped measure carries the field, so content in the reviewed concepts keeps its v2 or v3 shape and hash.
+    if (scopes.length > 0) this.entries[id] = { kind: "measure", text, concept_scopes: scopes };
     return id;
   }
 }
@@ -481,29 +490,35 @@ type ScopesOf = (node: OperationNode) => ReadonlyArray<ConceptScopeV1["kind"]>;
 // A node's concept scopes are those of the bound inputs it reads (#731), so a label never turns on which member of a
 // ranking or which side of a change comes first. An unbound input reads as the bound inputs of its metric beside it
 // when they share one scope, so a missing member never opens a column or series of the reviewed concept beside
-// scoped figures. Inputs of one metric in two scopes leave it its metric's reviewed concept. A ratio's measure carries
-// no scope (operations.ts ratio), so neither does a node read through one.
-function scopeReader(plan: FinancialPlan, bound: BoundScopes, read: ReadonlySet<LocalId>): ScopesOf {
-  const reported = plan.operations.filter((node): node is ReportedMetricNode => node.operation === "reported_metric" && read.has(node.node_id));
-  const shared = new Map([...new Set(reported.map((node) => node.metric_key))].map((key) => {
-    const kinds = new Set(reported.filter((node) => node.metric_key === key && bound.has(node.node_id)).map((node) => bound.get(node.node_id)?.kind ?? null));
-    return [key, kinds.size === 1 ? [...kinds][0] ?? null : null] as const;
-  }));
-  const scopeOf = (node: ReportedMetricNode) => (bound.has(node.node_id) ? bound.get(node.node_id)?.kind : shared.get(node.metric_key)) ?? null;
+// scoped figures. Beside it means the same company's, or those read by outputs of its own structure, which are one
+// table column or ranking (#744). Inputs of one metric in two scopes leave it its metric's reviewed concept. A ratio's
+// measure carries no scope (operations.ts ratio), so neither does a node read through one.
+function scopeReader(plan: FinancialPlan, bound: BoundScopes, outputs: ReadonlyArray<LocalId>): ScopesOf {
+  const nodeOf = (id: LocalId) => plan.operations.find((candidate) => candidate.node_id === id)!;
+  const structures = Map.groupBy(outputs, (id) => structureKey(plan, nodeOf(id)));
+  const groups = [...structures.values()].map((ids) => dependencyClosure(plan, ids));
+  const reported = plan.operations.filter((node): node is ReportedMetricNode => node.operation === "reported_metric" && groups.some((group) => group.has(node.node_id)));
+  const beside = (node: ReportedMetricNode, other: ReportedMetricNode) =>
+    other.subject_slot === node.subject_slot || groups.some((group) => group.has(node.node_id) && group.has(other.node_id));
+  const inherited = (node: ReportedMetricNode) => {
+    const kinds = new Set(reported.filter((other) => other.metric_key === node.metric_key && bound.has(other.node_id) && beside(node, other)).map((other) => bound.get(other.node_id)?.kind ?? null));
+    return kinds.size === 1 ? [...kinds][0] ?? null : null;
+  };
+  const scopeOf = (node: ReportedMetricNode) => (bound.has(node.node_id) ? bound.get(node.node_id)?.kind ?? null : inherited(node));
   const kindsOf = (node: OperationNode): ReadonlyArray<ConceptScopeV1["kind"]> => {
     if (node.operation === "ratio") return [];
     if (node.operation === "reported_metric") {
       const kind = scopeOf(node);
       return kind === null ? [] : [kind];
     }
-    return operationDependencies(node).flatMap((id) => kindsOf(plan.operations.find((candidate) => candidate.node_id === id)!));
+    return operationDependencies(node).flatMap((id) => kindsOf(nodeOf(id)));
   };
   return (node) => [...new Set(kindsOf(node))].sort();
 }
 
 /** What a node measures, as the answer labels its measure ("Revenue"), given each bound input's concept scope. */
 export function measureText(plan: FinancialPlan, node: OperationNode, bound: BoundScopes): string {
-  return labelText(plan, node, scopeReader(plan, bound, dependencyClosure(plan, [node.node_id]))(node));
+  return labelText(plan, node, scopeReader(plan, bound, [node.node_id])(node));
 }
 
 /** A node's label in the given concept scopes, which its parts read in too. */

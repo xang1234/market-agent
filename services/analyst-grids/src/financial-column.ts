@@ -17,7 +17,6 @@ import { randomUUID } from "node:crypto";
 import {
   createRuntimeAuthority,
   DEFAULT_EXECUTION_LIMITS,
-  namesConceptScope,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
 } from "../../financial-core/src/index.ts";
@@ -291,8 +290,8 @@ function certifiedCell(block: FinancialAnswerBlock): CellWrite {
   const [result] = block.financial.results;
   const verified = result?.disposition === "verified";
   // A figure in a concept scope (#743) sits under its column's reviewed-concept heading, so the cell names its measure.
-  const measure = result === undefined ? null : block.financial.labels[result.measure_label_id]?.text ?? null;
-  const scoped = measure !== null && namesConceptScope(measure) ? ` · ${measure}` : "";
+  const measure = result === undefined ? undefined : block.financial.labels[result.measure_label_id];
+  const scoped = measure?.kind === "measure" && measure.concept_scopes ? ` · ${measure.text}` : "";
   return {
     status: verified ? "ok" : "missing_data",
     display: { value: verified ? `${result!.presented.text}${scoped}` : EMPTY_DISPLAY.value, tone: null },

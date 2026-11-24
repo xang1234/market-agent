@@ -376,9 +376,13 @@ export type FinancialUnit =
   | { kind: 'currency' | 'currency_per_share'; currency: string }
   | { kind: 'ratio' | 'percent' | 'percentage_points' | 'basis_points' | 'shares' | 'count' }
 
+/** A measure in a concept scope names its scopes (#744); one stored before then names them only in its text. */
+export type FinancialMeasureLabel = { kind: 'measure'; text: string; concept_scopes?: ReadonlyArray<'continuing_operations_ocf' | 'productive_assets_capex'> }
+
 export type FinancialPresentationLabel =
   | { kind: 'subject'; text: string; slot_id: string }
-  | { kind: 'measure' | 'period'; text: string }
+  | FinancialMeasureLabel
+  | { kind: 'period'; text: string }
 
 export type FinancialPresentedPayload =
   | { kind: 'value'; text: string; full_text: string; value: string; unit: FinancialUnit; exact: boolean }

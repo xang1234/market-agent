@@ -1361,10 +1361,36 @@
           ],
           "properties": {
             "kind": {
-              "enum": [
-                "measure",
-                "period"
-              ]
+              "const": "measure"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1
+            },
+            "concept_scopes": {
+              "description": "The concept scopes a measure is taken in (#731, #743), present only when it has one. Measures stored before #744 name theirs only in their text.",
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "continuing_operations_ocf",
+                  "productive_assets_capex"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "text"
+          ],
+          "properties": {
+            "kind": {
+              "const": "period"
             },
             "text": {
               "type": "string",

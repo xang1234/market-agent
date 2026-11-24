@@ -420,6 +420,38 @@ test("a peer ranking across OCF scopes is the engine's named gap under one label
   assert.deepEqual([...labels], [`${BOTH_SCOPES_FCF} ranking`]);
 });
 
+test("a scoped measure label names its scopes as data, and no other label carries any (#744)", () => {
+  const content = engineAnswer(freeCashFlowRanking(["a_fcf", "b_fcf", "c_fcf"]), { ...FREE_CASH_FLOW_FACTS, b_ocf: fiscalYearFact("b", "operating_cash_flow", 2023, "900", CONTINUING_OPERATIONS) }, THREE);
+  const measure = (output: string) => content.labels[result(content, output).measure_label_id];
+  assert.deepEqual(measure("o_b_fcf"), { kind: "measure", text: BOTH_SCOPES_FCF, concept_scopes: ["continuing_operations_ocf", "productive_assets_capex"] });
+  assert.deepEqual(measure("o_c_fcf"), { kind: "measure", text: PRODUCTIVE_ASSETS_FCF, concept_scopes: ["productive_assets_capex"] });
+  assert.deepEqual(measure("o_rank"), { kind: "measure", text: `${BOTH_SCOPES_FCF} ranking`, concept_scopes: ["continuing_operations_ocf", "productive_assets_capex"] });
+  const reviewed = engineAnswer(freeCashFlowRanking(["a_fcf", "b_fcf", "c_fcf"]), { ...FREE_CASH_FLOW_FACTS, b_capex: fiscalYearFact("b", "capex", 2023, "100"), c_capex: fiscalYearFact("c", "capex", 2023, "200") }, THREE);
+  assert.equal(reviewed.presentation_version, "financial-presentation.v2");
+  assert.ok(Object.values(reviewed.labels).every((label) => !("concept_scopes" in label)), "content in the reviewed concepts keeps its v2 shape and hash");
+});
+
+// Apple's OCF and capex have no filing here; NVIDIA files its OCF for continuing operations and its capex as productive assets.
+test("a missing input reads in no scope of another company's figures outside its own table column or ranking (#744)", () => {
+  const plan = comparisonPlan([
+    ...["a", "b"].flatMap((slot) => [reportedAt(`${slot}_ocf`, slot, "operating_cash_flow", FY(2023)), reportedAt(`${slot}_capex`, slot, "capex", FY(2023))]),
+    { node_id: "a_fcf", operation: "free_cash_flow", operation_version: "free_cash_flow.v1", operating_cash_flow: "a_ocf", capex: "a_capex" },
+  ], ["a_fcf", "b_ocf", "b_capex"]);
+  const facts = { b_ocf: fiscalYearFact("b", "operating_cash_flow", 2023, "900", CONTINUING_OPERATIONS), b_capex: fiscalYearFact("b", "capex", 2023, "100", PRODUCTIVE_ASSETS) };
+  const content = engineAnswer(plan, facts, { a: "Apple Inc.", b: "NVIDIA Corp" });
+  assert.equal(result(content, "o_a_fcf").disposition, "blocked_dependency");
+  assert.deepEqual(["o_a_fcf", "o_b_ocf", "o_b_capex"].map((output) => labelTexts(content, output)[1]), ["Free cash flow (OCF less PP&E cash capex)", CONTINUING_OCF, PRODUCTIVE_ASSETS_CAPEX]);
+
+  // A missing company in a table column of free cash flow, with no ranking, still reads as the column's companies.
+  const table = freeCashFlowRanking(["a_fcf", "b_fcf", "c_fcf"]);
+  table.outputs = table.outputs.filter((output) => output.node_id !== "rank");
+  assert.equal(labelTexts(engineAnswer(table, FREE_CASH_FLOW_FACTS, THREE), "o_a_fcf")[1], PRODUCTIVE_ASSETS_FCF);
+
+  // A missing year reads as the same company's other years, ranked or not.
+  const years = { c2020: fiscalYearFact("a", "capex", 2020, "1000000000", PRODUCTIVE_ASSETS), c2021: fiscalYearFact("a", "capex", 2021, "2000000000", PRODUCTIVE_ASSETS) };
+  assert.equal(labelTexts(engineAnswer(capexWindow(["c2019", "c2020", "c2021"], ["c2019", "c2020", "c2021"]), years, { a: "Caterpillar Inc." }), "o_c2019")[1], PRODUCTIVE_ASSETS_CAPEX);
+});
+
 // Cash conversion over a continuing-operations OCF is the engine's incompatible_definition gap (operations.ts ratio), so
 // its measure, and with it its label and its key, carries no scope.
 const cashConversion = (slot: string, year: number) => [

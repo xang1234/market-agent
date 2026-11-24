@@ -219,8 +219,3 @@ export function figureLabel(metricKey: MetricKey, scope: ReadonlyArray<string> |
   if (metricKey === "free_cash_flow") return `Free cash flow (${part("operating_cash_flow")?.in_free_cash_flow ?? "OCF"} less ${part("capex")?.in_free_cash_flow ?? "PP&E cash capex"})`;
   return part(metricKey)?.label ?? resolveMetricDefinition(metricKey)?.label ?? null;
 }
-
-/** Whether a label figureLabel wrote, or one built on it, names a concept scope, which no shorter form of it may drop. */
-export function namesConceptScope(label: string): boolean {
-  return Object.values(SCOPE_LABELS).some((entry) => label.includes(entry.label) || label.includes(entry.in_free_cash_flow));
-}

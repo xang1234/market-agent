@@ -398,8 +398,11 @@ test('leads of two measures that shorten alike each keep a row under the whole m
   ])
 })
 
+/** Column headings for measure labels with these texts and no structured scope, as a stored block or an unscoped measure has them. */
+const headings = (texts: ReadonlyArray<string>) => columnNames(texts.map((text) => ({ text })))
+
 test('a column heading drops the formula and abbreviates a quarter or year change, unless two headings would then read alike', () => {
-  assert.deepEqual(columnNames([
+  assert.deepEqual(headings([
     'Gross margin (gross profit / revenue)',
     'Quarter-over-quarter percent change in Revenue',
     'Year-over-year percent change in Gross margin (gross profit / revenue)',
@@ -407,16 +410,18 @@ test('a column heading drops the formula and abbreviates a quarter or year chang
     'Quarter-over-quarter percent change in EPS',
     'Percent change in Revenue over 2 quarters',
   ]), ['Gross margin', 'QoQ revenue', 'YoY gross margin', 'YoY revenue change', 'QoQ EPS', 'Percent change in Revenue over 2 quarters'])
-  assert.deepEqual(columnNames(['Net margin (net income / revenue)', 'Net margin (net income / sales)']), ['Net margin (net income / revenue)', 'Net margin (net income / sales)'])
+  assert.deepEqual(headings(['Net margin (net income / revenue)', 'Net margin (net income / sales)']), ['Net margin (net income / revenue)', 'Net margin (net income / sales)'])
   assert.deepEqual(
-    columnNames(['Net margin (net income / revenue)', 'Net margin (net income / sales)', 'Net margin (net income / revenue) (GAAP)']),
+    headings(['Net margin (net income / revenue)', 'Net margin (net income / sales)', 'Net margin (net income / revenue) (GAAP)']),
     ['Net margin (net income / revenue)', 'Net margin (net income / sales)', 'Net margin (net income / revenue) (GAAP)'],
     'a heading that reads as another column\'s kept heading is kept whole too',
   )
   const scopes = ['Free cash flow (OCF less PP&E cash capex)', 'Free cash flow (OCF less productive-asset capex)']
-  assert.deepEqual(columnNames(scopes), scopes, 'free cash flow over either capex scope keeps its scope (#731)')
+  assert.deepEqual(headings(scopes), scopes, 'a stored block\'s free cash flow over either capex scope keeps its scope (#731)')
   const continuing = ['Operating cash flow (continuing operations, excludes discontinued operations)', 'Free cash flow (continuing-operations OCF less PP&E cash capex)', 'Free cash flow (continuing-operations OCF less productive-asset capex)']
-  assert.deepEqual(columnNames(continuing), continuing, 'OCF filed for continuing operations, and free cash flow over it, keeps its scope (#743)')
+  assert.deepEqual(headings(continuing), continuing, 'a stored block\'s OCF filed for continuing operations, and free cash flow over it, keeps its scope (#743)')
+  const reworded = { text: 'Free cash flow (OCF less capex, productive assets)', concept_scopes: ['productive_assets_capex'] } as const
+  assert.deepEqual(columnNames([reworded, { text: 'Revenue (GAAP)' }]), [reworded.text, 'Revenue'], 'a measure naming its scope keeps it whatever its text (#744)')
 })
 
 // Alpha's capex has no filing; Beta and Gamma file theirs as productive assets (#731).
@@ -433,8 +438,15 @@ test('a v4 answer keeps its scoped measure whole in every heading and in the ins
   })
   const beta = block.financial.results.find((result) => result.output_id === 'out_b_fcf')!
   assert.deepEqual(resultShown(block.financial, beta), { subject: 'Beta Inc.', measure: FCF, period: 'FY2023', value: '$800.0M' })
-  assert.deepEqual(columnNames([FCF, 'Revenue']), [FCF, 'Revenue'])
-  assert.deepEqual(columnNames(['Free cash flow (OCF less PP&E cash capex)', 'Capital expenditures (PP&E cash payments)']), ['Free cash flow', 'Capital expenditures'], 'PP&E headings shorten as before')
+  assert.deepEqual(headings([FCF, 'Revenue']), [FCF, 'Revenue'])
+  assert.deepEqual(headings(['Free cash flow (OCF less PP&E cash capex)', 'Capital expenditures (PP&E cash payments)']), ['Free cash flow', 'Capital expenditures'], 'PP&E headings shorten as before')
+
+  // The same answer as stored before its measure labels named their scopes (#744).
+  assert.ok(Object.values(block.financial.labels).some((label) => label.kind === 'measure' && label.concept_scopes !== undefined))
+  const stored = structuredClone(block)
+  stored.financial.labels = Object.fromEntries(Object.entries(stored.financial.labels).map(([id, label]) => [id, { kind: label.kind, text: label.text, ...(label.kind === 'subject' ? { slot_id: label.slot_id } : {}) }])) as Editable['financial']['labels']
+  assert.ok(validateBlock(stored).valid)
+  assert.deepEqual(statement(render(stored, true)).rows, [[`${FCF}, FY2023`, '—', '$800.0M', '$500.0M']])
 })
 
 test('a company reads without its legal suffix, unless two companies would then read alike', () => {
