@@ -39,6 +39,8 @@ export type PlanChoice =
   | Readonly<{ kind: "scenario"; ask: ScenarioAsk }>
   // The fixed annual cash-resilience view (financial-runtime.ts planCashResilience).
   | Readonly<{ kind: "cash_resilience" }>
+  // The standout-finding detectors' plan for one company (standout-findings.ts); only the analyst agent's get_findings asks it.
+  | Readonly<{ kind: "findings" }>
   | Readonly<{ kind: "planner" }>;
 
 const PLANNER: PlanChoice = { kind: "planner" };

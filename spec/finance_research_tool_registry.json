@@ -1921,6 +1921,140 @@
       ]
     },
     {
+      "name": "get_findings",
+      "audience": "analyst",
+      "bundles": [
+        "analyst_agent"
+      ],
+      "description": "Standout findings in one company's own history, each checked by the financial engine over its latest fiscal years: operating margin at the highest or lowest of its last 10, cash conversion (operating cash flow / net income) at the lowest of its last 10, and stock-based compensation as a multiple of free cash flow at the highest of its last 5. A finding is a sentence filled from certified figures, which the answer cites. A check that cannot be sure is declined with its reason: incomplete_history (a year without a value), tag_change (a year filed under another concept), non_positive_base (a zero or negative denominator), engine_gap (another engine gap), or within_range (the latest year is not at the extreme). Statuses as for certified_financials.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "annual",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_ref": {
+            "type": "object",
+            "description": "A company the turn names, as its prompt lists it.",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "query": {
+            "type": "string",
+            "description": "The question this read serves."
+          }
+        },
+        "required": [
+          "subject_ref"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "const": "get_findings"
+          },
+          "status": {
+            "enum": [
+              "published",
+              "existing",
+              "clarification",
+              "declined",
+              "gap",
+              "invalid_arguments"
+            ]
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "company": {
+            "type": "string"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "detector": {
+                  "type": "string"
+                },
+                "statement": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "detector",
+                "statement"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "declined": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "detector": {
+                  "type": "string"
+                },
+                "reason": {
+                  "enum": [
+                    "incomplete_history",
+                    "tag_change",
+                    "non_positive_base",
+                    "engine_gap",
+                    "within_range"
+                  ]
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "detector",
+                "reason",
+                "detail"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
       "name": "get_non_gaap_history",
       "audience": "analyst",
       "bundles": [
