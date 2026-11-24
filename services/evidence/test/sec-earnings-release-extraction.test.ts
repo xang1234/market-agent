@@ -63,6 +63,14 @@ test("an 8-K's EX-99 exhibits are read as plain text; the 8-K and XBRL documents
   assert.equal(canonicalText("a&nbsp;&nbsp;b &#x2014; c&rsquo;s"), "a b - c's");
 });
 
+test("a short form with a full stop inside a sentence does not end it, so the quote is the whole sentence", () => {
+  const sentence = "Operating income (exc. Corp. items) was $2.2 billion, see Ex. 99.1 for details.";
+  const exhibits = releaseExhibits(["<DOCUMENT>\n<TYPE>EX-99.1\n<TEXT>", `Results were strong. ${sentence} Revenue rose.`, "</TEXT>\n</DOCUMENT>"].join("\n"));
+  assert.equal(verifyStatement({ quote: sentence }, exhibits)?.quote, sentence);
+  assert.equal(verifyStatement({ quote: "Corp. items) was $2.2 billion, see Ex. 99.1 for details." }, exhibits), null, "after exc.");
+  assert.equal(verifyStatement({ quote: "99.1 for details. Revenue rose." }, exhibits), null, "after Ex.");
+});
+
 test("a plain-text exhibit's headings and paragraphs are blocks, so the sentence under a heading verifies", () => {
   const exhibits = releaseExhibits([
     "<DOCUMENT>\n<TYPE>EX-99.1\n<TEXT>",

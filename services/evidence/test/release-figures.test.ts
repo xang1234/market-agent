@@ -411,19 +411,92 @@ const VERIFIER_R4: ReadonlyArray<[id: string, kind: "guidance" | "result", metri
   ["S42", "result", "revenue", "Non-GAAP revenue was $7.7 billion, gross margin was 54%, and diluted EPS was $1.09.", [at("non_gaap", 7700000000)]],
 ];
 
+// Every figure a sentence stores over every phrase pick and both basis tags.
+function storedOverPicks(kind: "guidance" | "result", metric: Parameters<typeof readFigure>[0]["metric"], quote: string): string[] {
+  const phrases = [...new Set([...quote.matchAll(PHRASE)].map((found) => found[0].trim()))];
+  const raws = kind === "result"
+    ? phrases.map((value) => ({ value }))
+    : [...phrases.flatMap((value) => [{ value }, ...phrases.map((plus_minus) => ({ value, plus_minus }))]), ...phrases.flatMap((low) => phrases.map((high) => ({ low, high })))];
+  const got = new Set<string>();
+  for (const raw of raws) {
+    for (const basis of ["gaap", "non_gaap"]) {
+      const figure = readFigure({ kind, metric, quote }, { basis, ...raw });
+      if (!reviewed(figure)) got.add(JSON.stringify(figure));
+    }
+  }
+  return [...got].sort();
+}
+
 test("the verifier's round-4 sentences store exactly the figures their stated bases allow, over every pick", () => {
   for (const [id, kind, metric, quote, stored] of VERIFIER_R4) {
-    const phrases = [...new Set([...quote.matchAll(PHRASE)].map((found) => found[0].trim()))];
-    const raws = kind === "result"
-      ? phrases.map((value) => ({ value }))
-      : [...phrases.flatMap((value) => [{ value }, ...phrases.map((plus_minus) => ({ value, plus_minus }))]), ...phrases.flatMap((low) => phrases.map((high) => ({ low, high })))];
-    const got = new Set<string>();
-    for (const raw of raws) {
-      for (const basis of ["gaap", "non_gaap"]) {
-        const figure = readFigure({ kind, metric, quote }, { basis, ...raw });
-        if (!reviewed(figure)) got.add(JSON.stringify(figure));
-      }
-    }
-    assert.deepEqual([...got].sort(), stored.map((want) => JSON.stringify(want)).sort(), `${id}: ${quote}`);
+    assert.deepEqual(storedOverPicks(kind, metric, quote), stored.map((want) => JSON.stringify(want)).sort(), `${id}: ${quote}`);
   }
+});
+
+// The #750 round-1 review's sentences. Each stores what main stores, or less:
+// a qualifier anywhere in the sentence sends every figure to review.
+const REVIEW_750: ReadonlyArray<[kind: "guidance" | "result", metric: Parameters<typeof readFigure>[0]["metric"], quote: string, stored: ReadonlyArray<Want>]> = [
+  ["guidance", "gross_margin", "Gross margin guidance is 71.0 to 72.0% GAAP.", []],
+  ["guidance", "gross_margin", "We expect non-GAAP gross margin to be 71.0 to 72.0%.", []],
+  ["result", "revenue", "Core first-quarter total revenue was $1.9 billion.", []],
+  ["result", "gross_margin", "Gross margin was 61.5% (normalized).", []],
+  ["result", "eps", "Diluted EPS was $1.85 (core).", []],
+  ["result", "revenue", "Revenue was $3.8 billion like-for-like.", []],
+  ["result", "capex", "Normalized capex was $500 million.", []],
+  ["result", "eps", "Core operating income was $2.0 billion, and diluted EPS was $1.50.", []],
+  ["result", "revenue", "Revenue was $65.6 billion (in constant currency, up 10% year over year).", []],
+  ["result", "revenue", "Revenue was $65.6 billion (normalized for $100 million of divestitures).", []],
+  ["result", "revenue", "On a non-GAAP basis, gross margin was 54%, up 200 basis points, and revenue was $7.7 billion.", []],
+  ["result", "revenue", "On a non-GAAP basis, net income was $1.8 billion, or $1.09 per diluted share, and revenue was $7.7 billion.", [at("non_gaap", 1.09), at("non_gaap", 1.8e9)]],
+  ["result", "operating_cash_flow", "On a non-GAAP basis, gross margin was 54%, operating income was $1.7 billion, and cash flow from operations was $2.1 billion.", [at("non_gaap", 1.7e9)]],
+  ["result", "free_cash_flow", "Cash flow from operating activities was $15.2 billion.", [at("gaap", 15.2e9)]],
+  ["result", "operating_income", "Operating income (exc Corp. items) was $2.2 billion.", []],
+  ["result", "operating_income", "Operating income before amortization was $2.2 billion.", []],
+  ["result", "net_income", "Net income without one-time tax benefits was $1.2 billion.", []],
+  ["result", "operating_expenses", "Operating expenses, which exclude stock-based compensation, were $1.0 billion.", []],
+  ["result", "revenue", "Revenue ex-53rd week was $7.7 billion.", []],
+];
+
+test("the #750 review's sentences store no figure main sends to review, over every pick", () => {
+  for (const [kind, metric, quote, stored] of REVIEW_750) {
+    assert.deepEqual(storedOverPicks(kind, metric, quote), stored.map((want) => JSON.stringify(want)).sort(), quote);
+  }
+});
+
+test("an exclusion spelled short, with or without its full stop, qualifies the measure, ex-dividend included", () => {
+  for (const quote of [
+    "Operating income (excl. Corp. items) was $2.2 billion.",
+    "Operating income (excl Corp. items) was $2.2 billion.",
+    "Operating income (exc. Corp. items) was $2.2 billion.",
+    "Operating income (ex. Corp. items) was $2.2 billion.",
+    "Operating income (w/o Corp. items) was $2.2 billion.",
+    "Non-GAAP operating income (exc. Corp. items) was $2.2 billion.",
+  ]) {
+    for (const basis of ["gaap", "non_gaap"] as const) assert.ok(reviewed(read("result", "operating_income", quote, { basis, value: "$2.2 billion" })), `${basis}: ${quote}`);
+  }
+  for (const quote of [
+    "Revenue was $7.7 billion before the shares went ex-dividend.",
+    "Net income ex-dividends was $2.0 billion.",
+    "Operating cash flow ex dividends was $4.5 billion.",
+    "Net income ex-dividend income was $2.0 billion.",
+  ]) {
+    for (const basis of ["gaap", "non_gaap"] as const) assert.ok(reviewed(read("result", "revenue", quote, { basis, value: quote.match(/\$[\d.]+ billion/)![0] })), `${basis}: ${quote}`);
+  }
+});
+
+test("\"on an unadjusted basis\" states a GAAP figure, and never one its sentence qualifies", () => {
+  const quote = "Gross margin was 70.0% on an unadjusted basis.";
+  assert.deepEqual(read("result", "gross_margin", quote, { basis: "gaap", value: "70.0%" }), { basis: "gaap", low: 70, high: 70 });
+  assert.ok(reviewed(read("result", "gross_margin", quote, { basis: "non_gaap", value: "70.0%" })));
+  for (const basis of ["gaap", "non_gaap"] as const) {
+    assert.ok(reviewed(read("result", "gross_margin", "Gross margin was 70.0% on an unadjusted constant currency basis.", { basis, value: "70.0%" })), basis);
+    // "unadjusted" beside another basis word names that basis, not GAAP.
+    assert.ok(reviewed(read("result", "revenue", "Revenue was $8.5 billion on an unadjusted cash basis.", { basis, value: "$8.5 billion" })), `cash ${basis}`);
+  }
+});
+
+test("a bare amount is a range's low, never a change stated after the guide", () => {
+  assert.ok(reviewed(read("guidance", "gross_margin", "We expect non-GAAP gross margin to be 71.0 to 72.0%.", { basis: "non_gaap", value: "72.0%" })));
+  const change = "We expect non-GAAP gross margin of 72% - 2 percentage points higher than last quarter.";
+  assert.deepEqual(read("guidance", "gross_margin", change, { basis: "non_gaap", value: "72%" }), { basis: "non_gaap", low: 72, high: 72 });
 });

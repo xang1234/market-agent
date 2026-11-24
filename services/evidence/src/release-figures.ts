@@ -130,15 +130,19 @@ function fits(amount: Amount, unit: FigureUnit): boolean {
 // figure's sentence sends it there, whatever basis markers the sentence also
 // has ("on a non-GAAP constant currency basis"). The words of an entry may be
 // joined by a space, a hyphen or nothing ("pro forma", "pro-forma",
-// "proforma"), and "ex" counts before a hyphen or a word ("ex-China", "ex SBC").
+// "proforma"), an entry with no full stop also matches with one ("excl",
+// "excl."), and "ex" counts before a hyphen or a word ("ex-China", "ex SBC",
+// "ex-53rd week"). That includes "ex-dividend", as on main: a sentence
+// that names one goes to review rather than risk a dividend exclusion.
 const QUALIFIERS = [
   "pro forma", "constant currency", "core", "underlying", "organic", "comparable", "normalized", "like for like",
-  "as adjusted", "adjusted for", "excluding", "excludes", "excluded", "exclusive of", "excl.",
+  "as adjusted", "adjusted for", "exclude", "excluding", "excludes", "excluded", "exclusive of", "excl", "exc", "ex.", "w/o",
+  "without", "before amortization",
 ] as const;
 const QUALIFIED = new RegExp(
   [
     ...QUALIFIERS.map((entry) => String.raw`\b${entry.split(" ").map((word) => word.replace(".", String.raw`\.`)).join("[- ]?")}${entry.endsWith(".") ? "" : String.raw`\b`}`),
-    String.raw`\bex[- ](?=[a-z])`,
+    String.raw`\bex[- ](?=[a-z0-9])`,
   ].join("|"),
   "i",
 );
@@ -158,8 +162,10 @@ function markerAt(found: RegExpMatchArray, offset: number): Marker {
   const [word, inner] = found;
   const span = { start: offset + found.index!, end: offset + found.index! + word.length };
   if (inner !== undefined) {
-    const nonGaap = /non-? ?gaap|adjusted/i.test(inner);
-    const gaap = /\bgaap\b/i.test(inner.replace(/non-? ?gaap/gi, ""));
+    const nonGaap = /non-? ?gaap|\badjusted/i.test(inner);
+    // "unadjusted" is GAAP only alone ("on an unadjusted basis"), not beside
+    // a word naming another basis ("on an unadjusted cash basis").
+    const gaap = /\bgaap\b/i.test(inner.replace(/non-? ?gaap/gi, "")) || /^unadjusted $/i.test(inner);
     return { ...span, basis: nonGaap === gaap ? "other" : nonGaap ? "non_gaap" : "gaap", reach: "before" };
   }
   return { ...span, basis: /^gaap$/i.test(word) ? "gaap" : "non_gaap", reach: "after" };
@@ -352,8 +358,11 @@ export function readFigure(
   let to: number;
   if (value !== null) {
     const point = found.get(value)!;
-    const ends = amounts.filter((other) => other.dollars === point.dollars && other.mark === point.mark);
-    if (kind === "guidance" && ends.some((other) => statedAsRange(quote, other, point) || statedAsRange(quote, point, other))) {
+    // A bare amount may be a range's low ("71.0 to 72.0%"), never its high:
+    // "72% - 2 percentage points higher" states a change, not a range.
+    const ends = amounts.filter((other) => isFigure(other) && other.dollars === point.dollars && other.mark === point.mark);
+    const bareLow = amounts.some((other) => !isFigure(other) && statedAsRange(quote, other, point));
+    if (kind === "guidance" && (bareLow || ends.some((other) => statedAsRange(quote, other, point) || statedAsRange(quote, point, other)))) {
       return { review: `"${value}" is one end of a range its sentence states` };
     }
     const center = level(value);
