@@ -5,7 +5,7 @@
 // removed from the generic filings backfill (they need this typed event
 // extraction, not a plain document ingest).
 import type { FilingIndexEntry } from "./sec-daily-index.ts";
-import type { FormHandlerDeps } from "./sec-daily-crawl.ts";
+import type { FormHandlerDeps, HandlerResult } from "./sec-daily-crawl.ts";
 import { withTransaction } from "./transaction.ts";
 import { createSource } from "./source-repo.ts";
 import { ingestDocumentInTransaction, type IngestDocumentTransactionDeps } from "./ingest.ts";
@@ -17,7 +17,6 @@ import { resolveIssuerIdByCik } from "./sec-issuer-resolve.ts";
 import { issuerHoldsCik } from "../../shared/src/identifiers.ts";
 import { classify8kHeader, type Item8kClassification } from "./sec-8k-item-taxonomy.ts";
 import type { FetchFilingResult } from "./sec-edgar.ts";
-import type { Outcome } from "../../shared/src/outcome.ts";
 
 // handle8k reads only these fields — the filer CIK (= issuer for an 8-K), the
 // accession to fetch/dedup, and form/filing date for the document + event rows.
@@ -119,7 +118,7 @@ export async function persist8kFiling(
   return true;
 }
 
-export const handle8k = async (entry: Form8kFilingRef, deps: FormHandlerDeps): Promise<Outcome<string>> => {
+export const handle8k = async (entry: Form8kFilingRef, deps: FormHandlerDeps): Promise<HandlerResult> => {
   // For an 8-K the filer IS the issuer, and the filer CIK is known from the index
   // entry — so resolve BEFORE the network fetch and skip untracked filers without
   // downloading the filing. (Form 4 can't: its issuer CIK is inside the parsed

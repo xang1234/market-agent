@@ -14,6 +14,9 @@ export type DailyCrawlClient = { fetchDailyIndex(date: Date): Promise<FilingInde
 // Handlers fetch the filing they're dispatched (the submission .txt), so the
 // capability they need is fetchFiling — not the index fetch the orchestrator uses.
 export type FormHandlerDeps = { db: QueryExecutor; objectStore: ObjectStore; client: SecFilingFetcher };
+// What a handler returns: it throws on failure, so it never returns `failed`;
+// the crawl turns a throw into one.
+export type HandlerResult = Exclude<Outcome<string>, { status: "failed" }>;
 // CONTRACT: a handler MUST persist the filing's `documents` row and all derived
 // rows (events/claims/facts/mentions) in a SINGLE database transaction. The
 // orchestrator skips any accession that already has a live `documents` row, so a
@@ -91,7 +94,7 @@ export async function crawlDailyFilings(
       // A handler failure counts the filing as skipped (keeps total = ingested
       // + skipped), keeps and logs its cause, and the crawl continues.
       outcome.skipped += 1;
-      outcome.failures.push({ accession: entry.accession, cause: result.cause.message });
+      outcome.failures.push({ accession: entry.accession, cause: result.cause.message || result.cause.name });
       console.error(
         `[sec-daily-crawl] handler failed for form=${entry.form} accession=${entry.accession}`,
         result.cause,

@@ -4,7 +4,7 @@
 // claims/events are written in one transaction. Holdings whose CUSIP doesn't
 // resolve to a tracked issuer are skipped + logged (coverage grows via fra-ajvd.7).
 import type { FilingIndexEntry } from "./sec-daily-index.ts";
-import type { FormHandlerDeps } from "./sec-daily-crawl.ts";
+import type { FormHandlerDeps, HandlerResult } from "./sec-daily-crawl.ts";
 import { withTransaction } from "./transaction.ts";
 import { createSource } from "./source-repo.ts";
 import { ingestDocumentInTransaction } from "./ingest.ts";
@@ -14,7 +14,6 @@ import { createClaimArgument } from "./claim-argument-repo.ts";
 import { parse13fInfoTable, classify13fAmendment } from "./sec-13f-extractor.ts";
 import { isSuperinvestorFiler, superinvestorName } from "./superinvestor-filers.ts";
 import { resolveHoldingsByIssuer } from "./sec-13f-resolve.ts";
-import type { Outcome } from "../../shared/src/outcome.ts";
 import { insertHolding, holdingsByFiler, priorPeriodForFiler, supersede13fFiling, findFilerIssuerHolding, recordFilingPeriod, periodRestatedBy } from "./institutional-holdings-repo.ts";
 
 export type Form13fFilingRef = Pick<FilingIndexEntry, "cik" | "accession" | "form" | "filedDate">;
@@ -40,7 +39,7 @@ function changeVerb(kind: ChangeKind): string {
   }[kind];
 }
 
-export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps): Promise<Outcome<string>> => {
+export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps): Promise<HandlerResult> => {
   // Q8: process only the seeded superinvestor filers.
   if (!isSuperinvestorFiler(entry.cik)) {
     return { status: "empty", reason: "not_superinvestor" };

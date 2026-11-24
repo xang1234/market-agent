@@ -4,7 +4,7 @@
 // write can never strand a filing (the daily crawl skips accessions that already
 // have a documents row).
 import type { FilingIndexEntry } from "./sec-daily-index.ts";
-import type { FormHandlerDeps } from "./sec-daily-crawl.ts";
+import type { FormHandlerDeps, HandlerResult } from "./sec-daily-crawl.ts";
 import { withTransaction } from "./transaction.ts";
 import { createSource } from "./source-repo.ts";
 import { ingestDocumentInTransaction } from "./ingest.ts";
@@ -15,7 +15,6 @@ import { insertInsiderTransaction, supersedeInsiderFiling } from "./insider-tran
 import { parseForm4, type Form4Transaction, type Form4ReportingOwner } from "./sec-form4-extractor.ts";
 import { resolveIssuerIdByCik } from "./sec-issuer-resolve.ts";
 import { issuerHoldsCik } from "../../shared/src/identifiers.ts";
-import type { Outcome } from "../../shared/src/outcome.ts";
 
 // handleForm4 reads only these fields of a filing — the CIK to resolve the
 // issuer, the accession to fetch/dedup, and form/filing date for the document
@@ -67,7 +66,7 @@ function claimText(owner: Form4ReportingOwner, txn: Form4Transaction, type: stri
   return `${owner.name} (${insiderRole(owner)}) ${action} ${txn.shares} shares${price}.`;
 }
 
-export const handleForm4 = async (entry: Form4FilingRef, deps: FormHandlerDeps): Promise<Outcome<string>> => {
+export const handleForm4 = async (entry: Form4FilingRef, deps: FormHandlerDeps): Promise<HandlerResult> => {
   // Fetch + parse + resolve the issuer outside the transaction (network/reads).
   const fetched = await deps.client.fetchFiling({
     cik: entry.cik,
@@ -94,7 +93,7 @@ export const handleForm4 = async (entry: Form4FilingRef, deps: FormHandlerDeps):
 
   const filedAt = `${entry.filedDate}T00:00:00Z`;
 
-  return withTransaction(deps.db, async (tx): Promise<Outcome<string>> => {
+  return withTransaction(deps.db, async (tx): Promise<HandlerResult> => {
     if (!(await issuerHoldsCik(tx.db, issuerId, filing.issuerCik))) {
       console.warn(`[sec-form4] skip ${entry.accession}: issuer ${issuerId} no longer holds CIK ${filing.issuerCik}`);
       return { status: "empty", reason: "cik_moved" };
