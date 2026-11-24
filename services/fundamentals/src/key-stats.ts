@@ -1,3 +1,4 @@
+import { endsStepsApart } from "../../financial-core/src/periods.ts";
 import type {
   MappedStatement,
   MappedStatementLine,
@@ -670,6 +671,12 @@ function priorConsistencyWarnings(
     warnings.push({
       code: "input_mismatch",
       message: `revenue_growth_yoy prior fiscal_year ${prior.fiscal_year} must be current fiscal_year - 1 (${current.fiscal_year - 1}).`,
+    });
+  }
+  if (!endsStepsApart(current.period_end, prior.period_end, 12)) {
+    warnings.push({
+      code: "input_mismatch",
+      message: `revenue_growth_yoy prior period ending ${prior.period_end} does not end a year before the current period ending ${current.period_end}.`,
     });
   }
   return warnings;

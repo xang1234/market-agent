@@ -54,6 +54,7 @@ export type UsableFact = {
   period_kind: string;
   fiscal_year: number | null;
   fiscal_period: string | null;
+  period_end: string | null;
   as_of: string;
   source_id: string;
   coverage_level: string;
@@ -130,6 +131,7 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
               f.period_kind,
               f.fiscal_year,
               f.fiscal_period,
+              f.period_end::text as period_end,
               f.as_of,
               f.source_id::text as source_id,
               f.coverage_level::text as coverage_level

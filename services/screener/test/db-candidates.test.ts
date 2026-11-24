@@ -39,7 +39,7 @@ function certified(valuation: "market_cap" | "pe_ratio", value: string, override
   return { issuer_id: ISSUER, valuation, value, currency: valuation === "market_cap" ? "USD" : null, session_date: "2024-06-07", timezone: "America/New_York", ...overrides };
 }
 
-function fact(metric_key: string, fiscal_year: number, value_num: number): Row {
+function fact(metric_key: string, fiscal_year: number, value_num: number, period_end = `${fiscal_year}-12-31`): Row {
   return {
     fact_id: `f-${metric_key}-${fiscal_year}`,
     metric_key,
@@ -50,6 +50,7 @@ function fact(metric_key: string, fiscal_year: number, value_num: number): Row {
     currency: "USD",
     fiscal_year,
     fiscal_period: "FY",
+    period_end,
     as_of: "2024-06-01T00:00:00.000Z",
     source_id: "33333333-3333-4333-8333-333333333333",
   };
@@ -71,17 +72,19 @@ class FakeScreenerDb {
   readonly queries: string[] = [];
   listings: Row[];
   readonly valuations: Row[];
+  readonly facts: Row[];
 
-  constructor(listings: Row[], valuations: Row[] = []) {
+  constructor(listings: Row[], valuations: Row[] = [], facts: Row[] = REPORTED_FACTS) {
     this.listings = listings;
     this.valuations = valuations;
+    this.facts = facts;
   }
 
   async query<R extends Record<string, unknown> = Record<string, unknown>>(text: string): Promise<{ rows: R[] }> {
     this.queries.push(text);
     if (text.includes("from listings l")) return { rows: fakeRows<R>(this.listings) };
     if (text.includes("from screener_certified_valuations")) return { rows: fakeRows<R>(this.valuations) };
-    if (text.includes("f.entitlement_channels")) return { rows: fakeRows<R>(REPORTED_FACTS) };
+    if (text.includes("f.entitlement_channels")) return { rows: fakeRows<R>(this.facts) };
     if (text.includes("from insider_transactions")) return { rows: fakeRows<R>([{ net_shares: "5000" }]) };
     throw new Error(`unhandled query: ${text}`);
   }
@@ -181,4 +184,15 @@ test("a screen reads the certified figures once, however many candidates it has"
 
   assert.deepEqual(candidates.map((candidate) => candidate.fundamentals.market_cap), [2_956_800_000_000, 2_956_800_000_000, 2_956_800_000_000]);
   assert.equal(db.queries.filter((text) => text.includes("screener_certified_valuations")).length, 1);
+});
+
+test("revenue growth compares fiscal years whose ends are a year apart, and is null when the year end moved", async () => {
+  const growth = async (facts: Row[]) =>
+    (await createPostgresCandidateRepository(new FakeScreenerDb([listing()], [], facts), () => MONDAY_MORNING).list())[0]?.fundamentals;
+  // Apple's 53-week FY2023 ends six days later in the calendar than FY2022.
+  const fiftyThreeWeeks = await growth([fact("revenue", 2023, 100, "2023-09-30"), fact("revenue", 2022, 80, "2022-09-24")]);
+  assert.equal(fiftyThreeWeeks?.revenue_growth_yoy, 0.25);
+  // The year end moved from June to December: FY2023 and FY2024 end 18 months apart.
+  const moved = await growth([fact("revenue", 2024, 100, "2024-12-31"), fact("gross_profit", 2024, 40, "2024-12-31"), fact("revenue", 2023, 80, "2023-06-30")]);
+  assert.deepEqual([moved?.revenue_growth_yoy, moved?.gross_margin], [null, 0.4]);
 });

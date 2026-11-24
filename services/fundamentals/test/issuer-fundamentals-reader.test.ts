@@ -69,6 +69,7 @@ test("loadRecentIssuerFundamentals coerces numeric/Date columns and preserves pr
       period_kind: "fiscal_y",
       fiscal_year: 2021,
       fiscal_period: "FY",
+      period_end: "2021-09-25",
       as_of: new Date("2026-05-08T16:57:05.951Z"),
       source_id: "00000000-0000-4000-a000-000000000001",
     },
@@ -79,6 +80,7 @@ test("loadRecentIssuerFundamentals coerces numeric/Date columns and preserves pr
   assert.equal(fact.as_of, "2026-05-08T16:57:05.951Z");
   assert.equal(fact.display_name, "Revenue");
   assert.equal(fact.period_kind, "fiscal_y");
+  assert.equal(fact.period_end, "2021-09-25");
   assert.equal(fact.source_id, "00000000-0000-4000-a000-000000000001");
 });
 
