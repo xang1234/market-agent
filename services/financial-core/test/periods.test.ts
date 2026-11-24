@@ -66,4 +66,7 @@ test("a prior period is found by its end date, so a fiscal-year-end change is no
   // Month ends step to month ends: Oracle-style quarters ending May 31 and Feb 28.
   assert.equal(endsStepsApart("2023-05-31", "2023-02-15", 3), true);
   assert.equal(endsStepsApart("2023-05-31", "2023-03-17", 3), false);
+  // Feb 28, 2025 steps a year back to Feb 29, 2024: 14 days before that pairs, 15 does not.
+  assert.equal(endsStepsApart("2025-02-28", "2024-02-15", 12), true);
+  assert.equal(endsStepsApart("2025-02-28", "2024-02-14", 12), false);
 });
