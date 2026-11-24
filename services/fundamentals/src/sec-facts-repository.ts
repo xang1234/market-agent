@@ -463,7 +463,8 @@ function extractFiling(input: IngestInput): ExtractedFiling {
 // extract) or "repair" (a backfill: stored income facts that differ from the
 // filing are replaced; a period it cannot extract is left as it is). Returns
 // the income statement, or null without it, the accession filing it stored
-// facts on, and whether it stored any. Every period of one download is dated
+// facts on, and whether its statements are on file (stored now, or already
+// stored as filed). Every period of one download is dated
 // by that download's completion, never by when it was processed.
 async function storeFiling(
   db: FundamentalsTransactionalQueryExecutor,
