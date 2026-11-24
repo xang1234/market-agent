@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -147,14 +147,21 @@ test("ci workflow lints every service with the shared typed config", async () =>
 });
 
 test("the lint script fails when any one service fails, even if later ones pass", async () => {
-  // A stand-in eslint fails its first call only, so a loop that kept only the
-  // last exit status would pass.
+  // A stand-in eslint logs each call and fails only the first, so a loop that
+  // kept only the last exit status would pass.
   const bin = await mkdtemp(join(tmpdir(), "lint-exit-"));
-  await writeFile(join(bin, "eslint"), `#!/bin/sh\n[ -e "${bin}/called" ] && exit 0\ntouch "${bin}/called"\nexit 1\n`);
-  await chmod(join(bin, "eslint"), 0o755);
-  const script = (await readPackageJson("lint")).scripts?.lint ?? "";
-  const run = spawnSync("sh", ["-c", script], { cwd: join(REPO_ROOT, "lint"), env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
-  assert.equal(run.status, 1);
+  try {
+    await writeFile(join(bin, "eslint"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${bin}/calls"\n[ "$(wc -l < "${bin}/calls")" -gt 1 ] && exit 0\nexit 1\n`);
+    await chmod(join(bin, "eslint"), 0o755);
+    const script = (await readPackageJson("lint")).scripts?.lint ?? "";
+    const run = spawnSync("sh", ["-c", script], { cwd: join(REPO_ROOT, "lint"), env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+    const calls = (await readFile(join(bin, "calls"), "utf8")).split("\n").filter(Boolean);
+    assert.equal(run.stderr.toString(), "");
+    assert.ok(calls.length >= 2, "the stand-in ran for the failing service and a later passing one");
+    assert.equal(run.status, 1);
+  } finally {
+    await rm(bin, { recursive: true, force: true });
+  }
 });
 
 async function testedPackageDirs(): Promise<string[]> {
