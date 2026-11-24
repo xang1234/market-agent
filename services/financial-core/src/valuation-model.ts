@@ -162,6 +162,82 @@ export function hurdlePrice(base: ExactRational, bear: ExactRational, settings: 
   return { kind: "value", value: hurdle, text: fixed(roundRational(hurdle, 2), 2) };
 }
 
+/** One case's assumption set (ADR 0006): its growth, share change and exit multiple. */
+export type ValuationCase = ValuationAssumptions & Readonly<{ growth: ExactRational }>;
+export type StanceSettings = HurdleSettings & Readonly<{ near_band: ExactRational }>;
+
+/** ADR 0005's stance wording, by the rule that states it. */
+export const STANCE_TEXT = { 4: "Clears your hurdle.", 5: "Near your hurdle.", 6: "Falls short of your hurdle." } as const;
+
+export type StanceMove = Readonly<{ input: "growth" | "share_change" | "required_return" | "exit_multiple"; direction: "up" | "down" }>;
+/** The financial tests at one set of inputs: V, B, the hurdle price, and the rule 4 to 6 the price meets. */
+export type StanceTests = Readonly<{ rule: 4 | 5 | 6; base: ExactRational; bear: ExactRational; hurdle: ExactRational }>;
+/** V or B has no value: an input outcome (ADR 0006's rule 0). */
+type InputOutcome = Readonly<{ kind: "declined"; rule: 0; outcome: ValuationOutcomeResult }>;
+type NoHurdle = Readonly<{ kind: "declined"; rule: 2; base: ExactRational; bear: ExactRational }>;
+
+export type StanceResult =
+  | InputOutcome
+  | NoHurdle
+  | Readonly<{ kind: "declined"; rule: 3; tests: StanceTests; flips: ReadonlyArray<StanceMove>; untested: ReadonlyArray<StanceMove> }>
+  | (StanceTests & Readonly<{ kind: "stated"; text: (typeof STANCE_TEXT)[4 | 5 | 6]; untested: ReadonlyArray<StanceMove> }>);
+
+const POINT = ratio(1n, 100n);
+
+/**
+ * ADR 0005's stance rules 2 to 6 for a Call whose deciding inputs are
+ * anchored (rule 1 is the caller's): V and B under the base and bear cases,
+ * the hurdle price H = min(V / margin_of_safety, B / (1 − bear_loss_limit)),
+ * and the stance P ≤ H, P ≤ H·(1 + near_band) or above. Rule 3 moves growth,
+ * share change and required return one point and the exit multiple 1x, each
+ * up and down and in both cases at once; a stance any move changes is
+ * declined, and a move that leaves its valid range is listed as untested.
+ */
+export function callStance(inputs: ValuationInputs, base: ValuationCase, bear: ValuationCase, settings: StanceSettings): StanceResult {
+  const first = tests(inputs, base, bear, settings);
+  if ("kind" in first) return first;
+  const step = (value: ExactRational, by: ExactRational, up: boolean) => (up ? addRationals : subtractRationals)(value, by);
+  const moves: ReadonlyArray<readonly [StanceMove, () => Parameters<typeof tests>]> = (["up", "down"] as const).flatMap((direction) => {
+    const up = direction === "up";
+    const moved = (one: ValuationCase, key: "growth" | "share_change" | "exit_multiple", by: ExactRational) => ({ ...one, [key]: step(one[key], by, up)! });
+    return [
+      [{ input: "growth", direction }, () => [inputs, moved(base, "growth", POINT), moved(bear, "growth", POINT), settings]],
+      [{ input: "share_change", direction }, () => [inputs, moved(base, "share_change", POINT), moved(bear, "share_change", POINT), settings]],
+      [{ input: "required_return", direction }, () => [{ ...inputs, required_return: step(inputs.required_return, POINT, up)! }, base, bear, settings]],
+      [{ input: "exit_multiple", direction }, () => [inputs, moved(base, "exit_multiple", ONE), moved(bear, "exit_multiple", ONE), settings]],
+    ] as const;
+  });
+  const flips: StanceMove[] = [];
+  const untested: StanceMove[] = [];
+  for (const [move, argumentsOf] of moves) {
+    const [movedInputs, movedBase, movedBear] = argumentsOf();
+    // A growth or share change at or below -100%, a required return at or below 0, or an exit multiple at or below 0 leaves its range.
+    const outOfRange = [movedBase.growth, movedBear.growth, movedBase.share_change, movedBear.share_change].some((value) => compareRationals(value, MINUS_ONE) <= 0)
+      || rationalSign(movedInputs.required_return) <= 0 || rationalSign(movedBase.exit_multiple) <= 0 || rationalSign(movedBear.exit_multiple) <= 0;
+    if (outOfRange) { untested.push(move); continue; }
+    if (tests(movedInputs, movedBase, movedBear, settings).rule !== first.rule) flips.push(move);
+  }
+  return flips.length > 0
+    ? { kind: "declined", rule: 3, tests: first, flips, untested }
+    : { kind: "stated", ...first, text: STANCE_TEXT[first.rule], untested };
+}
+
+// Rules 2 and 4 to 6 at one set of inputs, or the outcome that leaves V or B without a value.
+function tests(inputs: ValuationInputs, base: ValuationCase, bear: ValuationCase, settings: StanceSettings): StanceTests | InputOutcome | NoHurdle {
+  const v = valuePerShare(inputs, base, base.growth);
+  if (v.kind === "outcome") return { kind: "declined", rule: 0, outcome: v };
+  const b = valuePerShare(inputs, bear, bear.growth);
+  if (b.kind === "outcome") return { kind: "declined", rule: 0, outcome: b };
+  const hurdle = hurdlePrice(v.value, b.value, settings);
+  if (hurdle.kind === "outcome") {
+    return hurdle.outcome === "no_positive_hurdle_price" ? { kind: "declined", rule: 2, base: v.value, bear: b.value } : { kind: "declined", rule: 0, outcome: hurdle };
+  }
+  const near = mul(hurdle.value, add(ONE, settings.near_band));
+  if (near === null) return { kind: "declined", rule: 0, outcome: outcome("numeric_limit_exceeded") };
+  const rule = compareRationals(inputs.price, hurdle.value) <= 0 ? 4 : compareRationals(inputs.price, near) <= 0 ? 5 : 6;
+  return { rule, base: v.value, bear: b.value, hurdle: hurdle.value };
+}
+
 /** The consensus row shown beside required growth: never a model input. */
 export function consensusRow(captures: ReadonlyArray<ConsensusCapture>, callDate: IsoDate): Readonly<{ kind: "value"; capture: ConsensusCapture; text: string }> | ValuationOutcomeResult {
   const newest = captures

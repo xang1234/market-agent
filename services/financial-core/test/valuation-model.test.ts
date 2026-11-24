@@ -4,6 +4,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  callStance,
+  fixed,
+  roundRational,
   compareRationals,
   consensusRow,
   hurdlePrice,
@@ -13,6 +16,7 @@ import {
   todaysMultiple,
   valuePerShare,
   type ExactRational,
+  type StanceResult,
   type ValuationAssumptions,
   type ValuationInputs,
 } from "../src/index.ts";
@@ -226,4 +230,46 @@ test("growth at or below -100% declines V instead of valuing a negative cash flo
 test("when several inputs fail, the first in ADR 0006's table is the one shown", () => {
   const result = valuePerShare(at({ shares: q("0"), free_cash_flow: q("0"), currency: { reporting: "EUR", price: "USD" } }), ASSUMED, q("0.1"));
   assert.deepEqual([result.kind, "outcome" in result ? result.outcome : null], ["outcome", "non_positive_free_cash_flow"]);
+});
+
+// ADR 0006's hurdle example: base g 10% (V = 205.00), bear g 0% (B = 136.05), so H = min(164.00, 181.39) = 164.00.
+const BASE = { growth: q("0.1"), share_change: q("0"), exit_multiple: q("15") };
+const BEAR = { growth: q("0"), share_change: q("0"), exit_multiple: q("15") };
+const HURDLE = { margin_of_safety: q("1.25"), bear_loss_limit: q("0.25"), near_band: q("0.1") };
+const stance = (price: string, overrides: Partial<Parameters<typeof callStance>[3]> = {}, bear = BEAR, inputs: Partial<ValuationInputs> = {}) =>
+  callStance(at({ price: q(price), ...inputs }), BASE, bear, { ...HURDLE, ...overrides });
+const said = (result: StanceResult) => result.kind === "stated" ? [result.rule, result.text, fixed2(result.hurdle)] : [result.rule];
+const fixed2 = (value: ExactRational) => fixed(roundRational(value, 2), 2);
+
+test("a price at or under H clears your hurdle, one within the near band is near it, and one above falls short", () => {
+  assert.deepEqual(said(stance("140")), [4, "Clears your hurdle.", "164.00"]);
+  // A one-point move shifts H by more than a 10% band, so near is stable only under a wider band.
+  assert.deepEqual(said(stance("200", { near_band: q("0.5") })), [5, "Near your hurdle.", "164.00"]);
+  assert.deepEqual(said(stance("300")), [6, "Falls short of your hurdle.", "164.00"]);
+  const stated = stance("140");
+  assert.ok(stated.kind === "stated");
+  assert.deepEqual([fixed2(stated.base), fixed2(stated.bear), stated.untested], ["205.00", "136.05", []]);
+});
+
+test("rule 2: a bear value at or below zero leaves no positive hurdle price", () => {
+  // Net debt of 2,000 is -200 a share, more than the bear case's cash flows are worth.
+  const result = stance("140", {}, BEAR, { net_cash: q("-2000") });
+  assert.equal(result.kind === "declined" && result.rule, 2);
+  assert.ok(result.kind === "declined" && result.rule === 2 && compareRationals(result.bear, q("0")) <= 0);
+});
+
+test("rule 3: a price at H declines, naming each move that flips it; a move out of range is untested, not a flip", () => {
+  const result = stance("164");
+  assert.ok(result.kind === "declined" && result.rule === 3);
+  assert.deepEqual(result.flips.map((move) => `${move.input} ${move.direction}`), ["share_change up", "required_return up", "growth down", "exit_multiple down"]);
+  assert.deepEqual(result.untested, []);
+  // A bear growth of -99.5% cannot move down a point, nor a required return of 0.5%.
+  const edge = callStance(at({ price: q("1"), required_return: q("0.005") }), BASE, { ...BEAR, growth: q("-0.995") }, HURDLE);
+  assert.ok(edge.kind === "stated");
+  assert.deepEqual(edge.untested.map((move) => `${move.input} ${move.direction}`), ["growth down", "required_return down"]);
+});
+
+test("rule 0: a bear growth at the -100% floor leaves B without a value", () => {
+  const result = stance("140", {}, { ...BEAR, growth: q("-1") });
+  assert.deepEqual(result.kind === "declined" && result.rule === 0 && result.outcome.outcome, "growth_out_of_range");
 });
