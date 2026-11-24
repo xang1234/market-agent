@@ -62,7 +62,7 @@ test("handle8k records one event per item + a material claim only for claimable 
 
   const deps = { db, objectStore: new MemoryObjectStore(), client: fakeClient() } as unknown as FormHandlerDeps;
   const result = await handle8k(entry(), deps);
-  assert.equal(result.ingested, true);
+  assert.equal(result.status, "stored");
 
   const docs = await client.query(`select count(*)::int as n from documents`);
   assert.equal(docs.rows[0]!.n, 1, "one document for the filing");
@@ -102,7 +102,7 @@ test("handle8k stores nothing when the filer's CIK moves to another issuer after
   )).rows.map((row) => row.issuer_id);
   const db = cikMovesAfterRead(client as unknown as QueryExecutor, { cik: "0000320193", from: from!, to: to! });
   const result = await handle8k(entry(), { db, objectStore: new MemoryObjectStore(), client: fakeClient() } as unknown as FormHandlerDeps);
-  assert.equal(result.ingested, false);
+  assert.deepEqual(result, { status: "empty", reason: "cik_moved" });
   const docs = await client.query(`select count(*)::int as n from documents`);
   assert.equal(docs.rows[0]!.n, 0, "nothing written for the issuer that lost the CIK");
 });
@@ -116,7 +116,7 @@ test("handle8k skips an untracked filer CIK without writing", async (t) => {
   const client = await connectedClient(t, databaseUrl);
   const db = client as unknown as QueryExecutor;
   const result = await handle8k(entry(), { db, objectStore: new MemoryObjectStore(), client: fakeClient() } as unknown as FormHandlerDeps);
-  assert.equal(result.ingested, false);
+  assert.deepEqual(result, { status: "empty", reason: "issuer_not_tracked" });
   const docs = await client.query(`select count(*)::int as n from documents`);
   assert.equal(docs.rows[0]!.n, 0, "nothing written for an untracked issuer");
 });
@@ -135,7 +135,7 @@ test("handle8k skips a header with no ITEM INFORMATION without persisting a docu
 CONFORMED SUBMISSION TYPE:	8-K
 </SEC-HEADER></SEC-DOCUMENT>`;
   const result = await handle8k(entry(), { db, objectStore: new MemoryObjectStore(), client: fakeClient(noItems) } as unknown as FormHandlerDeps);
-  assert.equal(result.ingested, false);
+  assert.deepEqual(result, { status: "empty", reason: "no_items" });
   const docs = await client.query(`select count(*)::int as n from documents`);
   assert.equal(docs.rows[0]!.n, 0, "no orphan document — the filing can be reprocessed later");
 });
@@ -156,7 +156,7 @@ test("handle8k stores the submission without its uuencoded bodies, under SEC's c
   const stripped = withGraphic.replace(body, "");
   const objectStore = new MemoryObjectStore();
   const deps = { db: client as unknown as QueryExecutor, objectStore, client: fakeClient(withGraphic) } as unknown as FormHandlerDeps;
-  assert.equal((await handle8k(entry(), deps)).ingested, true);
+  assert.equal((await handle8k(entry(), deps)).status, "stored");
 
   const { rows: [document] } = await client.query<{ content_hash: string; raw_blob_id: string; raw_blob_transform: string | null }>(
     `select content_hash, raw_blob_id, raw_blob_transform from documents`,
@@ -171,7 +171,7 @@ test("handle8k stores the submission without its uuencoded bodies, under SEC's c
 
   // A submission with nothing to strip is stored as SEC sent it.
   await client.query(`delete from documents`);
-  assert.equal((await handle8k(entry(), { ...deps, client: fakeClient() } as unknown as FormHandlerDeps)).ingested, true);
+  assert.equal((await handle8k(entry(), { ...deps, client: fakeClient() } as unknown as FormHandlerDeps)).status, "stored");
   const { rows: [verbatim] } = await client.query(`select content_hash = raw_blob_id as same, raw_blob_transform from documents`);
   assert.deepEqual(verbatim, { same: true, raw_blob_transform: null });
 });
