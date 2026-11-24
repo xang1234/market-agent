@@ -463,7 +463,7 @@ test("the #750 review's sentences store no figure main sends to review, over eve
   }
 });
 
-test("an exclusion spelled short, with or without its full stop, qualifies the measure; ex-dividend does not", () => {
+test("an exclusion spelled short, with or without its full stop, qualifies the measure, ex-dividend included", () => {
   for (const quote of [
     "Operating income (excl. Corp. items) was $2.2 billion.",
     "Operating income (excl Corp. items) was $2.2 billion.",
@@ -474,8 +474,14 @@ test("an exclusion spelled short, with or without its full stop, qualifies the m
   ]) {
     for (const basis of ["gaap", "non_gaap"] as const) assert.ok(reviewed(read("result", "operating_income", quote, { basis, value: "$2.2 billion" })), `${basis}: ${quote}`);
   }
-  const dividend = "Revenue was $7.7 billion before the shares went ex-dividend.";
-  assert.deepEqual(read("result", "revenue", dividend, { basis: "gaap", value: "$7.7 billion" }), { basis: "gaap", low: 7.7e9, high: 7.7e9 });
+  for (const quote of [
+    "Revenue was $7.7 billion before the shares went ex-dividend.",
+    "Net income ex-dividends was $2.0 billion.",
+    "Operating cash flow ex dividends was $4.5 billion.",
+    "Net income ex-dividend income was $2.0 billion.",
+  ]) {
+    for (const basis of ["gaap", "non_gaap"] as const) assert.ok(reviewed(read("result", "revenue", quote, { basis, value: quote.match(/\$[\d.]+ billion/)![0] })), `${basis}: ${quote}`);
+  }
 });
 
 test("\"on an unadjusted basis\" states a GAAP figure, and never one its sentence qualifies", () => {

@@ -132,7 +132,8 @@ function fits(amount: Amount, unit: FigureUnit): boolean {
 // joined by a space, a hyphen or nothing ("pro forma", "pro-forma",
 // "proforma"), an entry with no full stop also matches with one ("excl",
 // "excl."), and "ex" counts before a hyphen or a word ("ex-China", "ex SBC",
-// "ex-53rd week"), not in "ex-dividend".
+// "ex-53rd week"). That includes "ex-dividend", as on main: a sentence
+// that names one goes to review rather than risk a dividend exclusion.
 const QUALIFIERS = [
   "pro forma", "constant currency", "core", "underlying", "organic", "comparable", "normalized", "like for like",
   "as adjusted", "adjusted for", "exclude", "excluding", "excludes", "excluded", "exclusive of", "excl", "exc", "ex.", "w/o",
@@ -141,7 +142,7 @@ const QUALIFIERS = [
 const QUALIFIED = new RegExp(
   [
     ...QUALIFIERS.map((entry) => String.raw`\b${entry.split(" ").map((word) => word.replace(".", String.raw`\.`)).join("[- ]?")}${entry.endsWith(".") ? "" : String.raw`\b`}`),
-    String.raw`\bex[- ](?!dividends?\b)(?=[a-z0-9])`,
+    String.raw`\bex[- ](?=[a-z0-9])`,
   ].join("|"),
   "i",
 );
