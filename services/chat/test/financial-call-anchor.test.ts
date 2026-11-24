@@ -1,7 +1,7 @@
 // The exit multiple's anchor in chat (#605): AAPL's FY2017 to FY2026 10-Ks,
 // trimmed from a real companyfacts download, and yfinance's split-adjusted
-// closes give an anchored exit multiple, sealed with the Call. The Call still
-// declines under rule 1, now for the bear case alone. A year whose capex is
+// closes give an anchored exit multiple, sealed with the Call, and with the
+// base and bear cases anchored the Call states its stance. A year whose capex is
 // filed as productive assets (#731), or whose operating cash flow is filed for
 // continuing operations (#743), still anchors, so a ten-year window across a
 // change of scope is anchored (operator, 2026-11-21); a year with no capex, or
@@ -163,7 +163,7 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
     return { threadId, block: (message.blocks as unknown as CallBlock[])[0]! };
   };
 
-  await t.test("AAPL: FY2017 to FY2026 EV/FCF anchors the exit multiple at the 17.33x cap, and rule 1 now names only the bear case", async () => {
+  await t.test("AAPL: FY2017 to FY2026 EV/FCF anchors the exit multiple at the 17.33x cap, and the Call falls short of your hurdle", async () => {
     const { threadId, block } = await ask("Make a Call on AAPL");
     const call = block.call;
     const anchored = row(call, "anchored_exit_multiple");
@@ -193,14 +193,13 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
     ]);
     // A separate float bisection of ADR 0006's V(g) at X = 52/3 and d = 0.277% gives 22.46%.
     assert.deepEqual([row(call, "exit_multiple").figure.text, row(call, "required_growth").figure.text, row(call, "required_growth_anchored").figure.text], ["36.15x", "7.3% a year", "22.5% a year"]);
-    // The bear case: FY2026 revenue puts AAPL in the top bucket, whose 25th percentile is -3.2% a year.
-    assert.deepEqual(row(call, "bear_case").figure, { kind: "value", text: "Growth -3.2% a year at 17.33x: bear value USD 120.50 per share" });
-    assert.deepEqual(call.stance, {
-      kind: "declined",
-      rule: 1,
-      text: "Declined under rule 1: the exit multiple and the bear case are anchored, but no base case is defined, so no stance is stated.",
-      reasons: [{ cites: "base_case", text: "ADR 0005 and ADR 0006 define no base-case growth, so no base value per share, hurdle price or stance is computed." }],
-    });
+    // The cases: FY2026 revenue puts AAPL in the top bucket, whose total free cash flow growth has a median of 4.2% and a 25th percentile of -5.2% a year.
+    assert.deepEqual(row(call, "base_case").figure, { kind: "value", text: "Growth 4.2% a year at 17.33x: base value USD 165.86 per share" });
+    assert.deepEqual(row(call, "bear_case").figure, { kind: "value", text: "Growth -5.2% a year at 17.33x: bear value USD 110.55 per share" });
+    assert.ok(call.stance.kind === "stated");
+    assert.deepEqual([call.stance.rule, call.stance.text, call.stance.reasons[2]!.text], [
+      6, "Falls short of your hurdle.", "The hurdle price H is USD 132.68, the lower of the two. The price, USD 342.37, is above H × (1 + your 10% near band) = USD 145.95.",
+    ]);
     assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the anchor");
     // A split known only after the Call, executing after its date, is not one the Call could have read.
     await db.query(`insert into listing_splits (listing_id, execution_date, split_from, split_to, source_id) values ($1, '2027-01-15', 1, 2, $2)`, [AAPL.listing, POLYGON_MARKET_SOURCE_ID]);
@@ -267,13 +266,13 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
     });
     assert.equal(row(call, "required_growth_anchored").figure.text, "Not computed: the exit multiple is not anchored.");
     assert.deepEqual([call.stance.rule, call.stance.text, call.stance.reasons.map((reason) => reason.cites)], [
-      1, "Declined under rule 1: neither the exit multiple nor the bear case is anchored, and no base case is defined, so no stance is stated.", ["anchored_exit_multiple", "bear_case", "base_case"],
+      1, "Declined under rule 1: neither the exit multiple nor the bear case is anchored, so no stance is stated.", ["anchored_exit_multiple", "bear_case"],
     ]);
   });
 
   await t.test("with no closes captured the exit multiple is unanchored", async () => {
     const { call } = (await ask("Make a Call on NOCL")).block;
     assert.equal(row(call, "anchored_exit_multiple").figure.text, "Not anchored: no closes are captured for the listing by the Call's cutoff.");
-    assert.deepEqual(call.stance.reasons.map((reason) => reason.cites), ["anchored_exit_multiple", "bear_case", "base_case"]);
+    assert.deepEqual(call.stance.reasons.map((reason) => reason.cites), ["anchored_exit_multiple", "bear_case"]);
   });
 });

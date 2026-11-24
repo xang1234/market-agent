@@ -11,7 +11,7 @@ import { Call } from './Call.tsx'
 import type { CallBlock } from './types.ts'
 
 // The server's own output (services/financial-core/test/call-contract.test.ts).
-const [RULE_ONE, RULE_ZERO, UNANCHORED] = JSON.parse(readFileSync(new URL('./call.fixture.json', import.meta.url), 'utf8')) as CallBlock[]
+const [STATED, RULE_ZERO, UNANCHORED] = JSON.parse(readFileSync(new URL('./call.fixture.json', import.meta.url), 'utf8')) as CallBlock[]
 // main's fixture at de724754: Calls saved before the exit multiple was anchored (#605).
 const [SAVED_V1] = JSON.parse(readFileSync(new URL('./call.v1.fixture.json', import.meta.url), 'utf8')) as CallBlock[]
 // main's fixture at 72a64ec6: Calls saved before the base rate.
@@ -29,27 +29,27 @@ function render(block: CallBlock): Document {
 }
 
 test('the server-generated Calls pass the canonical block schema; a title does not', () => {
-  for (const block of [RULE_ONE!, RULE_ZERO!, UNANCHORED!]) {
+  for (const block of [STATED!, RULE_ZERO!, UNANCHORED!]) {
     const result = validateBlock(block)
     assert.ok(result.valid, JSON.stringify(!result.valid && result.errors))
   }
-  assert.equal(validateBlock({ ...RULE_ONE!, title: 'Buy' }).valid, false)
+  assert.equal(validateBlock({ ...STATED!, title: 'Buy' }).valid, false)
 })
 
 test('a Call is headed "Agent opinion", dated, and carries no verified badge', () => {
-  const document = render(RULE_ONE!)
+  const document = render(STATED!)
   assert.equal(document.querySelector('figcaption')?.textContent, 'Agent opinion: AAPL, 2026-11-09')
   assert.deepEqual([...document.querySelectorAll('[data-verification]')], [])
   assert.deepEqual(proofLabels(UNPROVEN, 'call'), [], 'no outer proof label either')
 })
 
-test('rows read in ADR 0005 order, each with its kind and basis, and the decline cites the row it rests on', () => {
-  const document = render(RULE_ONE!)
+test('rows read in ADR 0005 order, each with its kind and basis, and the stance cites the rows it rests on and names what it does not show', () => {
+  const document = render(STATED!)
   assert.deepEqual([...document.querySelectorAll('h3')].map((heading) => heading.textContent), [
     'Facts used',
     'Assumptions',
     'What the price requires',
-    'Declined (rule 1)',
+    'Stance (rule 6)',
   ])
   const rows = [...document.querySelectorAll('[data-row]')].map((row) => [
     row.getAttribute('data-row'),
@@ -68,16 +68,21 @@ test('rows read in ADR 0005 order, each with its kind and basis, and the decline
     ['exit_multiple', '36.15x', 'Deterministic result', true],
     ['anchored_exit_multiple', '17.33x', 'Agent assumption', true],
     ['share_change', '0.277% a year', 'Agent assumption', true],
-    ['base_case', 'Not defined', 'Agent assumption', true],
-    ['bear_case', 'Growth -3.2% a year at 17.33x: bear value USD 120.50 per share', 'Agent assumption', true],
+    ['base_case', 'Growth 4.2% a year at 17.33x: base value USD 165.86 per share', 'Agent assumption', true],
+    ['bear_case', 'Growth -5.2% a year at 17.33x: bear value USD 110.55 per share', 'Agent assumption', true],
     ['required_growth', '7.3% a year', 'Deterministic result', true],
     ['required_growth_anchored', '22.5% a year', 'Deterministic result', true],
-    ['base_rate', 'Of 377 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 183 (48.5%) delivered free cash flow per share growth of at least 7.3% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%).', 'Deterministic result', true],
+    ['base_rate', 'Of 431 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 168 (39.0%) delivered free cash flow growth of at least 7.3% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%).', 'Deterministic result', true],
     ['consensus', '8.18%', 'Attributed consensus', true],
   ])
   assert.match(document.querySelector('[data-row="anchored_exit_multiple"]')?.textContent ?? '', /FY2017: 17\.48x, \(close 38\.53 on 2017-09-29 × 21,006,768,000 shares/)
   assert.match(document.querySelector('[data-row="free_cash_flow"]')?.textContent ?? '', /10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03/)
-  assert.equal(document.querySelector('[data-reason]')?.textContent, 'Base case: ADR 0005 and ADR 0006 define no base-case growth, so no base value per share, hurdle price or stance is computed.')
+  assert.equal(document.querySelector('[data-part="stance"]')?.textContent, 'Falls short of your hurdle.')
+  assert.equal(document.querySelector('[data-reason]')?.textContent, 'Base case: The base value V is USD 165.86 per share. The value test holds up to V ÷ your margin of safety 1.25 = USD 132.68.')
+  assert.deepEqual([...document.querySelectorAll('[data-reason]')].map((reason) => reason.getAttribute('data-reason')), [
+    'base_case', 'bear_case', 'share_price', 'base_case', 'share_change', 'required_return', 'anchored_exit_multiple',
+  ])
+  assert.deepEqual([...document.querySelectorAll('[data-not-shown]')].map((entry) => entry.getAttribute('data-not-shown')), ['skew', 'falsifiers'])
   assert.match(document.body.textContent ?? '', /Your settings: required return 10%, margin of safety 1\.25, bear-loss limit 25%, near band 10%/)
 })
 
@@ -89,14 +94,15 @@ test('a rule 0 Call names the outcome in the row and in row 3', () => {
   assert.equal([...document.querySelectorAll('h3')].at(-1)?.textContent, 'Declined (rule 0)')
 })
 
-test('an unanchored exit multiple says why, and the decline names both missing anchors and the undefined base case', () => {
+test('an unanchored exit multiple says why, and the decline names both missing anchors', () => {
   const document = render(UNANCHORED!)
   assert.equal(document.querySelector('[data-row="anchored_exit_multiple"] [data-part="figure"]')?.textContent, "Not anchored: no closes are captured for the listing by the Call's cutoff.")
-  assert.deepEqual([...document.querySelectorAll('[data-reason]')].map((reason) => reason.getAttribute('data-reason')), ['anchored_exit_multiple', 'bear_case', 'base_case'])
+  assert.deepEqual([...document.querySelectorAll('[data-reason]')].map((reason) => reason.getAttribute('data-reason')), ['anchored_exit_multiple', 'bear_case'])
+  assert.deepEqual([...document.querySelectorAll('[data-not-shown]')], [], 'a declined Call names no unshown part')
 })
 
 test('nothing a Call shows is advice wording', () => {
-  for (const block of [RULE_ONE!, RULE_ZERO!, UNANCHORED!]) {
+  for (const block of [STATED!, RULE_ZERO!, UNANCHORED!]) {
     const text = (render(block).body.textContent ?? '').replaceAll(/required return/giu, '')
     assert.equal(ADVICE.exec(text)?.[0], undefined)
   }

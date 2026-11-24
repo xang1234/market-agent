@@ -558,8 +558,21 @@ export type CallContent = {
   facts: ReadonlyArray<CallRow>
   assumptions: ReadonlyArray<CallRow>
   requires: ReadonlyArray<CallRow>
-  stance: { kind: 'declined'; rule: 0 | 1; text: string; reasons: ReadonlyArray<{ cites: CallRowId; text: string }> }
+  stance: CallStance
 }
+
+type CallReason = { cites: CallRowId; text: string }
+
+/** Declined under rules 0 to 3, or stated under 4 to 6 in ADR 0005's wording, naming the parts neither ADR defines. Only a call.v3 states one. */
+export type CallStance =
+  | { kind: 'declined'; rule: 0 | 1 | 2 | 3; text: string; reasons: ReadonlyArray<CallReason> }
+  | {
+    kind: 'stated'
+    rule: 4 | 5 | 6
+    text: 'Clears your hurdle.' | 'Near your hurdle.' | 'Falls short of your hurdle.'
+    reasons: ReadonlyArray<CallReason>
+    not_shown: ReadonlyArray<{ part: 'skew' | 'falsifiers'; text: string }>
+  }
 
 export type CallBlock = Omit<BaseBlock, 'title'> & {
   kind: 'call'

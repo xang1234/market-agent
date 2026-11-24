@@ -16,6 +16,7 @@ import {
   todaysMultiple,
   valuePerShare,
   type ExactRational,
+  type StanceMoveResult,
   type StanceResult,
   type ValuationAssumptions,
   type ValuationInputs,
@@ -240,6 +241,9 @@ const stance = (price: string, overrides: Partial<Parameters<typeof callStance>[
   callStance(at({ price: q(price), ...inputs }), BASE, bear, { ...HURDLE, ...overrides });
 const said = (result: StanceResult) => result.kind === "stated" ? [result.rule, result.text, fixed2(result.hurdle)] : [result.rule];
 const fixed2 = (value: ExactRational) => fixed(roundRational(value, 2), 2);
+const named = (moves: StanceMoveResult["move"][]) => moves.map((move) => `${move.input} ${move.direction}`);
+const untested = (result: Extract<StanceResult, { moves: unknown }>) => named(result.moves.filter((entry) => entry.result === null).map((entry) => entry.move));
+const flips = (result: Extract<StanceResult, { moves: unknown }>, rule: number) => named(result.moves.filter((entry) => entry.result !== null && entry.result.rule !== rule).map((entry) => entry.move));
 
 test("a price at or under H clears your hurdle, one within the near band is near it, and one above falls short", () => {
   assert.deepEqual(said(stance("140")), [4, "Clears your hurdle.", "164.00"]);
@@ -248,7 +252,11 @@ test("a price at or under H clears your hurdle, one within the near band is near
   assert.deepEqual(said(stance("300")), [6, "Falls short of your hurdle.", "164.00"]);
   const stated = stance("140");
   assert.ok(stated.kind === "stated");
-  assert.deepEqual([fixed2(stated.base), fixed2(stated.bear), stated.untested], ["205.00", "136.05", []]);
+  assert.deepEqual([fixed2(stated.base), fixed2(stated.bear), untested(stated), flips(stated, 4)], ["205.00", "136.05", [], []]);
+  // Each move's tests come back: growth one point up in both cases raises H.
+  const up = stated.moves.find((entry) => entry.move.input === "growth" && entry.move.direction === "up")!.result;
+  assert.ok(up !== null && !("kind" in up));
+  assert.deepEqual([up.rule, compareRationals(up.hurdle, stated.hurdle)], [4, 1]);
 });
 
 test("rule 2: a bear value at or below zero leaves no positive hurdle price", () => {
@@ -261,12 +269,12 @@ test("rule 2: a bear value at or below zero leaves no positive hurdle price", ()
 test("rule 3: a price at H declines, naming each move that flips it; a move out of range is untested, not a flip", () => {
   const result = stance("164");
   assert.ok(result.kind === "declined" && result.rule === 3);
-  assert.deepEqual(result.flips.map((move) => `${move.input} ${move.direction}`), ["share_change up", "required_return up", "growth down", "exit_multiple down"]);
-  assert.deepEqual(result.untested, []);
+  assert.deepEqual(flips(result, result.tests.rule), ["share_change up", "required_return up", "growth down", "exit_multiple down"]);
+  assert.deepEqual(untested(result), []);
   // A bear growth of -99.5% cannot move down a point, nor a required return of 0.5%.
   const edge = callStance(at({ price: q("1"), required_return: q("0.005") }), BASE, { ...BEAR, growth: q("-0.995") }, HURDLE);
   assert.ok(edge.kind === "stated");
-  assert.deepEqual(edge.untested.map((move) => `${move.input} ${move.direction}`), ["growth down", "required_return down"]);
+  assert.deepEqual(untested(edge), ["growth down", "required_return down"]);
 });
 
 test("rule 0: a bear growth at the -100% floor leaves B without a value", () => {

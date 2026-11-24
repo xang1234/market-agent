@@ -31,7 +31,7 @@ function block(id: string, call: CallContent | CallContentV2 | CallContentV1) {
   };
 }
 
-test("a Call declined under rule 1 with its exit multiple anchored and its base rate, one with it unanchored, and one under rule 0 satisfy the canonical block schema, and are the web's fixture", () => {
+test("a Call that falls short of your hurdle, one declined under rule 0 and one under rule 1 with its exit multiple unanchored satisfy the canonical block schema, and are the web's fixture", () => {
   const ajv = new Ajv2020({ allErrors: true, strict: false });
   ajv.addSchema(SCHEMA);
   const validate = ajv.getSchema(`${SCHEMA.$id}#/$defs/Block`)!;
@@ -43,7 +43,13 @@ test("a Call declined under rule 1 with its exit multiple anchored and its base 
   for (const candidate of blocks) assert.ok(validate(candidate), JSON.stringify(validate.errors));
   assert.equal(validate({ ...blocks[0], title: "Buy" }), false, "no title field");
   assert.equal(validate({ ...blocks[0], call: { ...blocks[0]!.call, verified: true } }), false, "no field beyond the contract");
-  assert.equal(validate({ ...blocks[0], call: { ...blocks[0]!.call, stance: { ...blocks[0]!.call.stance, kind: "stated" } } }), false, "only a declined stance");
+  const stance = blocks[0]!.call.stance;
+  assert.equal(stance.kind, "stated", "AAPL states a stance");
+  const withStance = (change: Record<string, unknown>) => validate({ ...blocks[0], call: { ...blocks[0]!.call, stance: { ...stance, ...change } } });
+  assert.equal(withStance({ rule: 1 }), false, "a stated stance has rule 4, 5 or 6");
+  assert.equal(withStance({ text: "Buy." }), false, "a stated stance says only ADR 0005's wording");
+  assert.equal(withStance({ not_shown: undefined }), false, "a stated stance names what it does not show");
+  assert.equal(withStance({ kind: "declined" }), false, "a declined stance has rule 0 to 3 and no not_shown");
   const text = `${JSON.stringify(blocks, null, 2)}\n`;
   if (process.env.UPDATE_FIXTURES === "1") writeFileSync(WEB_FIXTURE, text);
   assert.equal(readFileSync(WEB_FIXTURE, "utf8"), text);
@@ -62,6 +68,7 @@ test("a Call saved before #605 still meets the canonical block schema as call.v1
   ]);
   const current = block("call-1", assembleCall(AAPL));
   assert.equal(validate({ ...saved[0], call: { ...saved[0]!.call, version: "call.v2" } }), false, "a call.v2 has the anchor's rows");
+  assert.equal(validate({ ...saved[0], call: { ...saved[0]!.call, stance: current.call.stance } }), false, "a call.v1 states no stance");
   assert.equal(validate({ ...current, call: { ...current.call, version: "call.v1" } }), false, "a call.v1 has only the rows it had");
 });
 
@@ -80,5 +87,6 @@ test("a Call saved before its base rate still meets the canonical block schema a
   ]);
   const current = block("call-1", assembleCall(AAPL));
   assert.equal(validate({ ...saved[0], call: { ...saved[0]!.call, version: "call.v3" } }), false, "a call.v3 has the revenue fact and the base rate");
+  assert.equal(validate({ ...saved[0], call: { ...saved[0]!.call, stance: current.call.stance } }), false, "a call.v2 states no stance");
   assert.equal(validate({ ...current, call: { ...current.call, version: "call.v2" } }), false, "a call.v2 has only the rows it had");
 });

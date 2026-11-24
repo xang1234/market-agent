@@ -173,14 +173,16 @@ export type StanceMove = Readonly<{ input: "growth" | "share_change" | "required
 /** The financial tests at one set of inputs: V, B, the hurdle price, and the rule 4 to 6 the price meets. */
 export type StanceTests = Readonly<{ rule: 4 | 5 | 6; base: ExactRational; bear: ExactRational; hurdle: ExactRational }>;
 /** V or B has no value: an input outcome (ADR 0006's rule 0). */
-type InputOutcome = Readonly<{ kind: "declined"; rule: 0; outcome: ValuationOutcomeResult }>;
-type NoHurdle = Readonly<{ kind: "declined"; rule: 2; base: ExactRational; bear: ExactRational }>;
+export type InputOutcome = Readonly<{ kind: "declined"; rule: 0; outcome: ValuationOutcomeResult }>;
+export type NoHurdle = Readonly<{ kind: "declined"; rule: 2; base: ExactRational; bear: ExactRational }>;
+/** One stability move and the tests at its inputs: null when the move leaves its valid range, so it is untested. A result whose rule differs from the unmoved one flips the stance. */
+export type StanceMoveResult = Readonly<{ move: StanceMove; result: StanceTests | InputOutcome | NoHurdle | null }>;
 
 export type StanceResult =
   | InputOutcome
   | NoHurdle
-  | Readonly<{ kind: "declined"; rule: 3; tests: StanceTests; flips: ReadonlyArray<StanceMove>; untested: ReadonlyArray<StanceMove> }>
-  | (StanceTests & Readonly<{ kind: "stated"; text: (typeof STANCE_TEXT)[4 | 5 | 6]; untested: ReadonlyArray<StanceMove> }>);
+  | Readonly<{ kind: "declined"; rule: 3; tests: StanceTests; moves: ReadonlyArray<StanceMoveResult> }>
+  | (StanceTests & Readonly<{ kind: "stated"; text: (typeof STANCE_TEXT)[4 | 5 | 6]; moves: ReadonlyArray<StanceMoveResult> }>);
 
 const POINT = ratio(1n, 100n);
 
@@ -191,7 +193,8 @@ const POINT = ratio(1n, 100n);
  * and the stance P ≤ H, P ≤ H·(1 + near_band) or above. Rule 3 moves growth,
  * share change and required return one point and the exit multiple 1x, each
  * up and down and in both cases at once; a stance any move changes is
- * declined, and a move that leaves its valid range is listed as untested.
+ * declined. Each move's tests are returned, and a move that leaves its valid
+ * range has none: it is untested.
  */
 export function callStance(inputs: ValuationInputs, base: ValuationCase, bear: ValuationCase, settings: StanceSettings): StanceResult {
   const first = tests(inputs, base, bear, settings);
@@ -207,19 +210,16 @@ export function callStance(inputs: ValuationInputs, base: ValuationCase, bear: V
       [{ input: "exit_multiple", direction }, () => [inputs, moved(base, "exit_multiple", ONE), moved(bear, "exit_multiple", ONE), settings]],
     ] as const;
   });
-  const flips: StanceMove[] = [];
-  const untested: StanceMove[] = [];
-  for (const [move, argumentsOf] of moves) {
+  const results = moves.map(([move, argumentsOf]): StanceMoveResult => {
     const [movedInputs, movedBase, movedBear] = argumentsOf();
     // A growth or share change at or below -100%, a required return at or below 0, or an exit multiple at or below 0 leaves its range.
     const outOfRange = [movedBase.growth, movedBear.growth, movedBase.share_change, movedBear.share_change].some((value) => compareRationals(value, MINUS_ONE) <= 0)
       || rationalSign(movedInputs.required_return) <= 0 || rationalSign(movedBase.exit_multiple) <= 0 || rationalSign(movedBear.exit_multiple) <= 0;
-    if (outOfRange) { untested.push(move); continue; }
-    if (tests(movedInputs, movedBase, movedBear, settings).rule !== first.rule) flips.push(move);
-  }
-  return flips.length > 0
-    ? { kind: "declined", rule: 3, tests: first, flips, untested }
-    : { kind: "stated", ...first, text: STANCE_TEXT[first.rule], untested };
+    return { move, result: outOfRange ? null : tests(movedInputs, movedBase, movedBear, settings) };
+  });
+  return results.some(({ result }) => result !== null && result.rule !== first.rule)
+    ? { kind: "declined", rule: 3, tests: first, moves: results }
+    : { kind: "stated", ...first, text: STANCE_TEXT[first.rule], moves: results };
 }
 
 // Rules 2 and 4 to 6 at one set of inputs, or the outcome that leaves V or B without a value.

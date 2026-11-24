@@ -5,10 +5,11 @@
 //   - every input row is labelled with its kind and basis, and an assumption
 //     that carries a value says whether it is judgment or anchored;
 //   - the Call declines when the rules say it must (rule 0 on each input
-//     outcome, rule 1 otherwise, naming the missing anchors, until a bear case
-//     is anchored);
-//   - it says no advice wording, and no stance wording leaks into a factual
-//     answer.
+//     outcome, rule 1 naming each missing anchor, rule 2 on a value at or
+//     below zero, rule 3 on a move that changes the stance), and otherwise
+//     states the stance rules 4 to 6 give, citing the rows it rests on;
+//   - it says no advice wording, stance wording only as a stated stance's own
+//     text, and no stance wording leaks into a factual answer.
 //
 // Deterministic: each case is assembled from fixed inputs with the function
 // chat and the seal generate Calls with. The factual answers checked for
@@ -26,6 +27,8 @@ import {
   assembleCall,
   CALL_INPUT_KINDS,
   SCENARIO_DISCLOSURE,
+  DEFAULT_CALL_SETTINGS,
+  STANCE_TEXT,
   STANCE_WORDS,
   type CallContent,
   type CallEngineFigure,
@@ -35,7 +38,11 @@ import {
 } from "../services/financial-core/src/index.ts";
 import { AAPL, AAPL_HISTORY, filing } from "../services/financial-core/test/call-fixtures.ts";
 
-export type CallCase = Readonly<{ id: string; evidence: CallEvidence; rule: 0 | 1; cites: ReadonlyArray<CallRowId> }>;
+export type CallCase = Readonly<{ id: string; evidence: CallEvidence; rule: CallContent["stance"]["rule"]; cites: ReadonlyArray<CallRowId> }>;
+
+// A stated stance's reasons: V, B and the hurdle price, then each stability move's row.
+const STATED: ReadonlyArray<CallRowId> = ["base_case", "bear_case", "share_price", "base_case", "share_change", "required_return", "anchored_exit_multiple"];
+const UNANCHORED: ReadonlyArray<CallRowId> = ["anchored_exit_multiple", "bear_case"];
 
 // ADR 0006's AAPL probe with its last ten fiscal years' EV/FCF (#605).
 export { AAPL };
@@ -52,14 +59,18 @@ const ENGINE_OUTCOMES: ReadonlyArray<Extract<CallEngineFigure, { kind: "gap" }>>
 
 /** AAPL as a full declined Call, NVDA's blocked free cash flow, each engine outcome on each input, and each input outcome the model finds. */
 export const CALL_CASES: ReadonlyArray<CallCase> = [
-  { id: "aapl", evidence: AAPL, rule: 1, cites: ["base_case"] },
-  { id: "aapl-no-consensus", evidence: { ...AAPL, consensus: [] }, rule: 1, cites: ["base_case"] },
-  { id: "aapl-no-closes", evidence: { ...AAPL, closes: null }, rule: 1, cites: ["anchored_exit_multiple", "bear_case", "base_case"] },
+  { id: "aapl", evidence: AAPL, rule: 6, cites: STATED },
+  { id: "aapl-no-consensus", evidence: { ...AAPL, consensus: [] }, rule: 6, cites: STATED },
+  { id: "aapl-at-50", evidence: priced("50"), rule: 4, cites: STATED },
+  { id: "aapl-at-150-wide-near-band", evidence: { ...priced("150"), settings: { ...DEFAULT_CALL_SETTINGS, near_band: "0.5" } }, rule: 5, cites: STATED },
+  { id: "aapl-at-100", evidence: priced("100"), rule: 3, cites: ["base_case", "share_change", "required_return", "anchored_exit_multiple"] },
+  { id: "aapl-net-debt", evidence: { ...AAPL, figures: { ...AAPL.figures, net_cash: { kind: "value", value: "-2000000000000", currency: "USD" } } }, rule: 2, cites: ["bear_case"] },
+  { id: "aapl-no-closes", evidence: { ...AAPL, closes: null }, rule: 1, cites: UNANCHORED },
   {
     id: "aapl-fy2019-free-cash-flow-blocked",
     evidence: { ...AAPL, history: AAPL_HISTORY.map((year) => year.fiscal_year === 2019 ? { ...year, figures: { ...year.figures, free_cash_flow: ENGINE_OUTCOMES[2]! } } : year) },
     rule: 1,
-    cites: ["anchored_exit_multiple", "bear_case", "base_case"],
+    cites: UNANCHORED,
   },
   { id: "nvda-free-cash-flow-blocked", evidence: with_("free_cash_flow", ENGINE_OUTCOMES[2]!), rule: 0, cites: ["free_cash_flow"] },
   ...FACTS.flatMap((fact) => ENGINE_OUTCOMES.map((outcome): CallCase => ({
@@ -74,15 +85,19 @@ export const CALL_CASES: ReadonlyArray<CallCase> = [
   { id: "stale-price", evidence: { ...AAPL, price_date: "2026-10-30" }, rule: 0, cites: ["share_price"] },
   { id: "non-positive-free-cash-flow", evidence: { ...AAPL, figures: { ...AAPL.figures, free_cash_flow: { kind: "value", value: "-1", currency: "USD" } } }, rule: 0, cites: ["free_cash_flow"] },
   { id: "non-usd-price", evidence: { ...AAPL, figures: { ...AAPL.figures, share_price: { kind: "value", value: "342.37", currency: "EUR" } } }, rule: 0, cites: ["share_price"] },
-  { id: "no-multiple-today", evidence: { ...AAPL, figures: { ...AAPL.figures, net_cash: { kind: "value", value: "5000000000000", currency: "USD" } } }, rule: 1, cites: ["anchored_exit_multiple", "bear_case", "base_case"] },
+  { id: "no-multiple-today", evidence: { ...AAPL, figures: { ...AAPL.figures, net_cash: { kind: "value", value: "5000000000000", currency: "USD" } } }, rule: 1, cites: UNANCHORED },
 ];
 
 function with_(fact: CallFactId, figure: CallEngineFigure): CallEvidence {
   return { ...AAPL, figures: { ...AAPL.figures, [fact]: figure } };
 }
 
+function priced(price: string): CallEvidence {
+  return with_("share_price", { kind: "value", value: price, currency: "USD" });
+}
+
 /** What a Call fails of the rubric, each as "<check>: <detail>". */
-export function scoreCall(call: CallContent, expected: Readonly<{ rule: 0 | 1; cites: ReadonlyArray<CallRowId> }>): string[] {
+export function scoreCall(call: CallContent, expected: Readonly<{ rule: CallContent["stance"]["rule"]; cites: ReadonlyArray<CallRowId> }>): string[] {
   const failures: string[] = [];
   const rows = [...call.facts, ...call.assumptions, ...call.requires];
   const ids = new Set(rows.map((row) => row.id));
@@ -103,7 +118,10 @@ export function scoreCall(call: CallContent, expected: Readonly<{ rule: 0 | 1; c
   if (call.stance.rule !== expected.rule || cites.join() !== expected.cites.join()) {
     failures.push(`declines_when_required: rule ${call.stance.rule} citing ${cites.join(", ")}; expected rule ${expected.rule} citing ${expected.cites.join(", ")}`);
   }
-  const text = JSON.stringify(call).replaceAll(/required return/giu, "");
+  // A stated stance may say ADR 0005's wording for its own rule, and only as its text.
+  const { stance } = call;
+  const own = stance.kind === "stated" && stance.text === STANCE_TEXT[stance.rule];
+  const text = JSON.stringify(own ? { ...call, stance: { ...stance, text: "" } } : call).replaceAll(/required return/giu, "");
   const advice = ADVICE_WORDS.exec(text) ?? STANCE_WORDS.exec(text);
   if (advice !== null) failures.push(`no_advice_wording: ${advice[0]}`);
   return failures;
@@ -124,7 +142,7 @@ export function factualAnswers(): Record<string, string> {
 
 export type CallEvalReport = Readonly<{
   passed: boolean;
-  cases: ReadonlyArray<Readonly<{ id: string; rule: 0 | 1; failures: ReadonlyArray<string> }>>;
+  cases: ReadonlyArray<Readonly<{ id: string; rule: CallContent["stance"]["rule"]; failures: ReadonlyArray<string> }>>;
   factual_answers: number;
   stance_leaks: ReadonlyArray<string>;
 }>;

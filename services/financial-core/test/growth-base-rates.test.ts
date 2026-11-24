@@ -1,5 +1,5 @@
 // The base-rate lookup a Call reads: the bucket a starting revenue falls in,
-// how many of its windows delivered a growth, and its 25th percentile.
+// how many of its windows delivered a growth, and its 25th and 50th percentiles.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -40,12 +40,12 @@ test("a revenue on a bucket's lower edge is in that bucket, one just below is in
   assert.equal(below.kind === "value" && below.bucket.id, "small");
 });
 
-test("at or above counts a point equal to the growth, and the 25th percentile is the point at rank ceil(n / 4)", () => {
+test("at or above counts a point equal to the growth, the 25th percentile is the point at rank ceil(n / 4) and the median the one at ceil(n / 2)", () => {
   const result = growthBaseRate(TABLE, "fcf_per_share", exact("5000000000"), exact("0.05"));
   assert.equal(result.kind, "value");
   if (result.kind !== "value") return;
   // 0.050 is the 51st of 100 points, so it and the 49 above it: 50.
-  assert.deepEqual([result.n, result.at_or_above, text(result.p25)], [100, 50, "0.024"]);
+  assert.deepEqual([result.n, result.at_or_above, text(result.p25), text(result.p50)], [100, 50, "0.024", "0.049"]);
   assert.deepEqual([result.non_positive_end, result.outcomes], [1, outcomes]);
   const between = growthBaseRate(TABLE, "fcf_per_share", exact("5000000000"), exact("0.05001"));
   assert.equal(between.kind === "value" && between.at_or_above, 49);
