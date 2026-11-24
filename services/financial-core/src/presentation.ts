@@ -162,10 +162,12 @@ export function presentFinancialUnit(input: {
   const outputNodes = plan.outputs.filter((output) => output.unit_id === input.unit_id).map((output) => output.node_id);
   const read = dependencyClosure(plan, outputNodes);
   const scoped = scopeReader(plan, input.concept_scopes);
-  const headed = measureScopes(plan, outputNodes, input.concept_scopes, scoped);
+  const byOutput = new Map(input.results.map((result) => [result.output_id, result]));
+  // Only a figure that has a value lends its heading: a calculation over bound inputs can still be a gap.
+  const valued = new Set(plan.outputs.filter((output) => (byOutput.get(output.output_id)?.payload as { kind?: string } | undefined)?.kind === "value").map((output) => output.node_id));
+  const headed = measureScopes(plan, outputNodes, input.concept_scopes, scoped, valued);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const readsOf = periodReader(plan, nodes, input.periods);
-  const byOutput = new Map(input.results.map((result) => [result.output_id, result]));
   const labels = new LabelTable();
   for (const member of plan.subjects.members) {
     const name = input.subject_names[member.slot_id];
@@ -505,10 +507,10 @@ function scopeReader(plan: FinancialPlan, bound: BoundScopes): ScopesOf {
 }
 
 // A value figure with an unbound input chooses no scope (#744). Its line and column are where the layout puts it if no
-// figure carried a scope. When the present figures on its line share one measure and one sits in its column, it takes
+// figure carried a scope. When the present figures (bound and with a value) on its line share one measure and one sits in its column, it takes
 // their measure, so the layout puts it in their column under their heading. Otherwise it is plain. So a heading names
 // a scope only when a present figure under it carries it.
-function measureScopes(plan: FinancialPlan, outputs: ReadonlyArray<LocalId>, bound: BoundScopes, scoped: ScopesOf): ScopesOf {
+function measureScopes(plan: FinancialPlan, outputs: ReadonlyArray<LocalId>, bound: BoundScopes, scoped: ScopesOf, valued: ReadonlySet<LocalId>): ScopesOf {
   const nodeOf = (id: LocalId) => plan.operations.find((node) => node.node_id === id)!;
   const missing = (id: LocalId) => [...dependencyClosure(plan, [id])].some((input) => nodeOf(input).operation === "reported_metric" && !bound.has(input));
   const placed = outputs.map(nodeOf).flatMap((node) => {
@@ -519,7 +521,7 @@ function measureScopes(plan: FinancialPlan, outputs: ReadonlyArray<LocalId>, bou
   const table = new Set(placed.map((entry) => entry.subject_label_id)).size >= 2;
   const columns = table ? columnKeyByResult(placed, lines) : new Map([...lines].map(([id, { key, anchor }]) => [id, `${key}|${anchor.calendar}`]));
   const lineKey = (id: LocalId) => (table ? lines.get(id)?.key : columns.get(id));
-  const present = [...lines.keys()].filter((id) => !missing(id));
+  const present = [...lines.keys()].filter((id) => !missing(id) && valued.has(id));
   return (node) => {
     if (OPERATION_REGISTRY[node.operation].produces !== "value" || !missing(node.node_id)) return scoped(node);
     const beside = present.filter((id) => lineKey(id) === lineKey(node.node_id));

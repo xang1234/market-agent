@@ -490,6 +490,23 @@ test("a missing figure takes the heading of the present figure in its column, wh
   assert.deepEqual(table.rows.map((row) => row.cells), [["r-o_a_fcf"], ["r-o_b_fcf"]], "one column, Apple's gap in its own row");
 });
 
+// Devin on #763. NVIDIA's inputs are bound but cover different dates, so its free cash flow is a gap.
+test("a calculation that is a gap over bound inputs lends no heading to a missing figure beside it (#744)", () => {
+  const plan = comparisonPlan(["a", "b"].flatMap((slot) => [
+    reportedAt(`${slot}_ocf`, slot, "operating_cash_flow", FY(2023)),
+    reportedAt(`${slot}_capex`, slot, "capex", FY(2023)),
+    { node_id: `${slot}_fcf`, operation: "free_cash_flow" as const, operation_version: "free_cash_flow.v1", operating_cash_flow: `${slot}_ocf`, capex: `${slot}_capex` },
+  ]), ["a_fcf", "b_fcf"]);
+  const facts = {
+    a_ocf: fiscalYearFact("a", "operating_cash_flow", 2023, "500"),
+    b_ocf: fiscalYearFact("b", "operating_cash_flow", 2023, "900", CONTINUING_OPERATIONS),
+    b_capex: boundInput({ slot: "b", metric: "capex", value: "100", start: "2023-02-01", end: "2023-12-31", fiscal_year: 2023, inference: PRODUCTIVE_ASSETS }),
+  };
+  const content = engineAnswer(plan, facts, { a: "Apple Inc.", b: "NVIDIA Corp" });
+  assert.equal(labelTexts(content, "o_a_fcf")[1], "Free cash flow (OCF less PP&E cash capex)");
+  assert.equal(labelTexts(content, "o_b_fcf")[1], BOTH_SCOPES_FCF);
+});
+
 // Apple's Q1 FY2024 capex has no filing here; NVIDIA files its FY2023 capex as productive assets.
 test("a missing quarter reads in no scope of a fiscal year beside it, which is another column (#744)", () => {
   const plan = comparisonPlan([
