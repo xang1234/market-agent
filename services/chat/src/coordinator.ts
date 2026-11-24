@@ -500,7 +500,7 @@ export function createChatCoordinator(
       const handle = new MutableChatTurnHandle(normalizedInput, runner);
       const record: TurnRecord = { handle, completedAt: null };
       turns.set(key, record);
-      handle.completed.then(() => {
+      void handle.completed.then(() => {
         record.completedAt = now();
         pruneCompletedTurns();
       });
