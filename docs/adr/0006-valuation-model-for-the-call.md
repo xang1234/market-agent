@@ -4,6 +4,8 @@
 
 Accepted by the owner on 2026-11-10 for #226, every definition below as written. Implementation is tracked under #205 in #602 (`total_debt.v1` and `net_cash.v1`), #603 (the model and solver), #604 (the Call block) and #605 (the exit-multiple anchor).
 
+Amended on 2026-11-24: the bear case's `g` is anchored on a base rate (ADR 0005, "Bear case anchor"), and required growth is shown beside the same base rate.
+
 ## Context
 
 ADR 0005 accepted the Call: the agent's opinion, kept apart from facts, with a stance relative to the owner's hurdle. It left the valuation model to #226. #226 asks for one bounded model with every input classified, two issuer probes, worked examples, and named outcomes for every failure.
@@ -200,6 +202,16 @@ These figures were computed with a 20-line script during drafting (not committed
   4. #605: an exit-multiple anchor from the ten years of closes #601 captures and FY free cash flow.
 - **Until item 4 ships**, every Call shows required growth at today's multiple and declines its stance under ADR 0005 rule 1.
 - **NVDA-style capex tagging.** The operator reviewed `PaymentsToAcquireProductiveAssets` as capex on 2026-11-21 (#731). It certifies for a filer that tags it instead of `PaymentsToAcquirePropertyPlantAndEquipment`, and the Call's free cash flow basis names it, since it may include purchased intangibles.
+
+## Base rate of required growth (owner, 2026-11-24)
+
+A Call sets required growth at today's multiple against a base rate, a `deterministic_result` row: "Of N five-year windows that began at a similar size, K delivered at least that growth." The bear case's `g` is that bucket's 25th percentile (ADR 0005).
+
+- **Measured quantity**: annual growth of free cash flow per share over five fiscal years, each year as its own 10-K reports it. Free cash flow uses `free_cash_flow.v1`'s concepts and scopes (#731, #743). A window whose two ends use different concepts is `incompatible_definition`. The share count is diluted weighted-average shares, carried across splits through each next 10-K's restated comparative.
+- **Buckets**: starting revenue under USD 100M, 100M to 1B, 1B to 10B, 10B to 50B, and 50B and up. Each bucket holds at least 377 windows (`docs/eval-runs/growth-base-rates/2026-11-24.md`).
+- **Revenue growth** is shown beside the result and never enters `V`.
+- **Never certified.** The archive is a dev-only copy, so the row and the bear case are labelled with the archive's date and sha256.
+- **Not the same quantity as `g`, measured.** `g` is free cash flow growth before dilution, with share change `d` apart and buybacks left out. Historical growth per share includes buybacks. Over FY2003 to FY2020 starts, the 50B-and-up bucket's median is 6.7% per share against 4.2% in total. The fcf-backtest run of 2026-11-21 shows the same gap: 5.47% against 4.03%. The table holds total free cash flow growth as well (`fcf`), so changing the measured quantity is one word in `call.ts`. Per share is the owner's decision.
 
 ## Owner decision
 

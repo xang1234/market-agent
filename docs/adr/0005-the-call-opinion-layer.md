@@ -4,6 +4,8 @@
 
 Accepted by the owner on 2026-11-09 for the separation rules, the stance wording, the hurdle settings and the trigger. This ADR authorizes no code. The valuation model a Call runs on is #226's to define and approve. Implementation issues follow once both are approved.
 
+Amended on 2026-11-24 with the bear case's anchor (see "Bear case anchor" below). A base case is still undefined, so every Call still declines its stance.
+
 ## Context
 
 The app answers with facts: reported figures, stored prices and verified arithmetic over them. #201 and #224 forbid it from turning those into a view. A scenario result is "a mechanical scenario, not a price target", and a difference from the price is "never expected return, upside, target, forecast, or recommendation". The research-quality rubric scores factual answers against advice wording (`scripts/research-quality-questions.ts`, `decision_useful`).
@@ -123,6 +125,25 @@ The research-quality rubric keeps scoring factual answers and keeps forbidding a
 - **Attributed consensus depends on #592.** Once merged, `consensus_captures` records Finviz consensus each time its capture runs, so a Call can cite consensus as of a day and later Calls can be compared with what consensus did. Running it daily is a separate step: #592 documents a crontab line and schedules nothing.
 - **Single user.** The app has one user, the owner. Opinions about specific stocks shown to anyone else would need a separate review. This ADR covers only the owner's own use.
 - **No change to existing answers.** Factual answers, scenarios (#201) and scenario price comparisons (#224) keep their wording rules.
+
+## Bear case anchor (owner, 2026-11-24)
+
+The owner decided the bear case's anchor on 2026-11-24:
+
+- **Bear growth.** The 25th percentile of five-year growth in free cash flow per share, among windows that began at a comparable size (by starting revenue). The bear exit multiple is the anchored exit multiple (#605), and the share change is `d`.
+- **Measured quantity.** Free cash flow per share, the quantity ADR 0006 solves for. Revenue growth is shown beside it and never fed into the model.
+- **Source.** One download of SEC's bulk `companyfacts.zip`, cached with its sha256 and never fetched again. `services/fundamentals/src/growth-base-rates.ts` builds `services/financial-core/data/growth-base-rates.json` from it, offline.
+
+**What a base rate is.** It is a frequency of reported history: of N five-year windows that began at a similar size, K delivered at least a given growth. It is not an assigned probability, and a Call never calls it one. A window whose filer stopped filing before year 5 is a named outcome beside N (`ended_early`), never dropped. A window that ended at or below zero counts at −100%.
+
+**What it decides.** Rule 1's bear-case half is met when the exit multiple is anchored and the Call's bucket holds at least 100 windows. Rule 0 matches when the 25th percentile is the −100% floor, since `g` must stay above −100% (ADR 0006).
+
+**Gaps this ADR leaves.** A stated stance also needs these, and the ADRs define none of them:
+
+- **A base case.** `V` is `V(g)` under a base assumption set (ADR 0006), and no rule gives its `g`. Taking the solved required growth as base `g` makes `V = P`, so `V ≥ P · margin_of_safety` fails at any margin above 1 and every Call would fall short. Until the owner defines a base `g`, rule 1 matches every Call that rule 0 does not, and the Call names the undefined base case. The rules from 2 to 6 and the stability rule are implemented (`callStance`, `services/financial-core/src/valuation-model.ts`) and wait on it.
+- **A bull case**, for the skew row.
+- **Falsifiers**, for "what would change it".
+- **Which growth a stability move moves.** The implementation moves base and bear growth together, and both exit multiples together.
 
 ## Not decided here
 
