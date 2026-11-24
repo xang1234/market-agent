@@ -93,8 +93,9 @@ const ROW = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
 // Inline XBRL closes an empty cell in its tag: <td colspan="3"/>.
 const CELL = /<t[dh]\b([^>]*?)(?:\/>|>([\s\S]*?)<\/t[dh]>)/gi;
 const SCALE = /\bin\s+(thousands|millions|billions)\b/i;
-// A note in parentheses can open with its scale, as AMD's "(Millions)"; a sentence cannot.
-const NOTE_SCALE = /(?:\bin\s+|^\s*)(thousands|millions|billions)\b/i;
+// A note in parentheses can open with its scale, as AMD's "(Millions)"; a sentence cannot, and
+// "(billions of devices)" or "(thousands of employees)" counts something else.
+const NOTE_SCALE = /\bin\s+(thousands|millions|billions)\b|^\s*(thousands|millions|billions)\b(?!\s+of\b)/i;
 
 export function extractNonGaapReconciliations(
   input: ExtractNonGaapReconciliationsInput,
@@ -301,7 +302,7 @@ function slotsOf(rows: ReadonlyArray<ReadonlyArray<Figure>>): { slots: Array<[fi
 function scalesIn(text: string): TableScale[] {
   return [...text.replace(/\bexcept\b(?:[^().]|\([^()]*\))*/gi, "").matchAll(/\(([^()]*)\)|[^()]+/g)].flatMap(([prose, note]) => {
     const notes = note === undefined ? prose.split(/\.\s/).map((sentence) => SCALE.exec(sentence)) : [NOTE_SCALE.exec(note)];
-    return notes.flatMap((match) => (match ? [match[1]!.toLowerCase() as TableScale] : []));
+    return notes.flatMap((match) => (match ? [(match[1] ?? match[2])!.toLowerCase() as TableScale] : []));
   });
 }
 
@@ -380,7 +381,7 @@ function measureKeyFromLabel(label: string, head: boolean): string {
     .replace(/^\s*total\b/i, "")
     .trim()
     .toLowerCase();
-  const named = head ? normalized.split(/\s(?:of|to|on|in|from|for)\s/)[0]! : normalized;
+  const named = head ? normalized.split(/\s(?:of|to|on|in|from|for|before|after|excluding|without|including|less)\s/)[0]! : normalized;
   const key = normalized.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   if (head && /\badjustments?\b/.test(named)) return key;
 

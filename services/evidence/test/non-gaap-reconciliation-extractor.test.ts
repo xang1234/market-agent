@@ -509,6 +509,10 @@ test("a bare scale word is a note only in parentheses, so prose that opens with 
   assert.equal(readTables(`<p>Condensed Statements (in millions). Billions of devices run our platform.</p>${table}`)[0]!.scale, "millions");
   assert.equal(readTables(`<p>Billions of people use our products.</p>${table}`)[0]!.scale, undefined);
   assert.equal(readTables(`<p>(Billions)</p>${table}`)[0]!.scale, "billions");
+  // A parenthetical that counts something else names no scale (#749 review r2).
+  assert.equal(readTables(`<p>Condensed Statements (in millions). Growth across our ecosystem (billions of devices).</p>${table}`)[0]!.scale, "millions");
+  assert.equal(readTables(`<p>Headcount summary (thousands of employees).</p>${table}`)[0]!.scale, undefined);
+  assert.equal(readTables(`<p>(in thousands of dollars)</p>${table}`)[0]!.scale, "thousands");
 });
 
 test("a non-GAAP row closes another measure only while that measure is still open", () => {
@@ -535,6 +539,25 @@ test("a row of a measure's adjustments is a line of it, not its non-GAAP figure"
     <tr><td>Non-GAAP operating income</td><td>$120</td></tr>
   </table>`;
   assert.deepEqual(lines(html), [["operating_income", "Q3 2025", 100, 120, [["Non-GAAP operating income adjustments", 20]]]]);
+});
+
+test("a measure named before or after its adjustments is still that measure (#749 review r2)", () => {
+  const before = `<table>
+    <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th></tr>
+    <tr><td>GAAP operating income before adjustments</td><td>$100</td></tr>
+    <tr><td>Stock-based compensation</td><td>10</td></tr>
+    <tr><td>Non-GAAP operating income</td><td>$110</td></tr>
+  </table>`;
+  assert.deepEqual(lines(before), [["operating_income", "Q3 2025", 100, 110, [["Stock-based compensation", 10]]]]);
+  for (const closing of ["Non-GAAP net income after adjustments", "Non-GAAP net income excluding adjustments"]) {
+    const after = `<table>
+      <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th></tr>
+      <tr><td>GAAP net income</td><td>$100</td></tr>
+      <tr><td>Stock-based compensation</td><td>10</td></tr>
+      <tr><td>${closing}</td><td>$110</td></tr>
+    </table>`;
+    assert.deepEqual(lines(after), [["net_income", "Q3 2025", 100, 110, [["Stock-based compensation", 10]]]], closing);
+  }
 });
 
 test("a total restates one line only when equal to it, and rounds to its printed decimals", () => {
