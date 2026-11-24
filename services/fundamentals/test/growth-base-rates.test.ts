@@ -16,7 +16,7 @@ function companyfacts(rows: ReadonlyArray<Row>): Companyfacts {
     const units = (usGaap[concept] ??= { units: {} }).units;
     (units[unit] ??= []).push({ start: `${year}-01-01`, end: `${year}-12-31`, val: value, accn: `a-${filedIn}`, form: "10-K", filed: `${filedIn + 1}-02-15` });
   }
-  return { cik: 7, facts: { "us-gaap": usGaap } };
+  return { cik: 7, facts: { "us-gaap": usGaap } } as Companyfacts;
 }
 
 // FY2015 to FY2020: free cash flow doubles, revenue grows 10% a year, and a 2-for-1 split in 2017 doubles the share count,
