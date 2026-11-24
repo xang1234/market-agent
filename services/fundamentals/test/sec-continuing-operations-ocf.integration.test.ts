@@ -403,12 +403,15 @@ test("operating cash flow filed for continuing operations certifies with its con
         ["both tags twice", { [CONTINUING]: [year(2024, 2024, 120), year(2025, 2024, 120), later(2024, 120)], [TOTAL]: [year(2025, 2024, 120), later(2024, 120)] }, []],
         ["both tags with the original", { [CONTINUING]: [year(2024, 2024, 120), year(2024, 2023, 100), withOriginal(2024, 120)], [TOTAL]: [withOriginal(2024, 120)] }, []],
         ["both tags with the total", { [CONTINUING]: [year(2024, 2024, 120), later(2024, 120)], [TOTAL]: [year(2025, 2024, 120), later(2024, 120)] }, [[[], "economic_restatement"]]],
+        // Codex on #755 (#756): either order leaves 120 standing for continuing operations.
+        ["both tags with continuing operations alone", { [CONTINUING]: [year(2024, 2024, 120), year(2025, 2024, 120), later(2024, 120)], [TOTAL]: [later(2024, 120)] }, []],
       ];
       for (const [name, facts, rows] of cases) {
-        const { download, lookup, relations } = await setUp(t, `fin-ocf-continuing-same-day-${name.replaceAll(" ", "-")}-${amendment}`);
+        const { download, lookup, relations, picked } = await setUp(t, `fin-ocf-continuing-same-day-${name.replaceAll(" ", "-")}-${amendment}`);
         download.text = companyFacts(facts);
         await lookup();
         assert.deepEqual((await relations()).map(({ flags, relation }) => [flags, relation]), [[[SCOPE], "original"], ...rows], `${name}, 10-K/A ${amendment}`);
+        assert.equal(await picked("as_restated"), "120", `${name}, 10-K/A ${amendment}`);
       }
     }
   });

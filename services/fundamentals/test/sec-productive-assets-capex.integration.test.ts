@@ -399,10 +399,9 @@ test("capex filed as productive assets certifies with its concept recorded", { t
     }
   });
 
-  // Devin on #755. Either would restate the year as PP&E and they disagree
-  // with each other, so, as two OCF totals filed one day do, they leave it
-  // unverified, though here either order stores the coarser original (#756).
-  await t.test("same-day filings that each repeat the figure as a different PP&E figure within its rounding leave it unverified", async (t) => {
+  // Devin on #755. Each repeats the coarser original within its rounding, so
+  // either order restates the year as PP&E at 30M, though they disagree with each other (#756).
+  await t.test("same-day filings that each repeat the figure as a different PP&E figure within its rounding restate it at the figure that stands", async (t) => {
     for (const accn of ["0000000731-26-000000", "0000000731-26-000002"]) {
       const { download, lookup, relations, picked } = await setUp(t, `fin-capex-productive-same-day-${accn}`);
       const tenKA = (of: number, val: number): Value => ({ ...year(2025, of, val), accn, form: "10-K/A" });
@@ -411,8 +410,8 @@ test("capex filed as productive assets certifies with its concept recorded", { t
         PaymentsToAcquirePropertyPlantAndEquipment: [year(2025, 2024, 30_400_000), year(2025, 2025, 28_123_000), tenKA(2024, 29_800_000), tenKA(2025, 28_123_000)],
       });
       await lookup();
-      assert.deepEqual((await relations()).map(({ relation }) => relation), ["original", "unverified_restatement"]);
-      assert.equal(await picked("as_restated"), "restatement_unverified");
+      assert.deepEqual((await relations()).map(({ value, relation }) => [value, relation]), [["30000000", "original"], ["30000000", "economic_restatement"]]);
+      assert.equal(await picked("as_restated"), "30000000");
     }
   });
 
