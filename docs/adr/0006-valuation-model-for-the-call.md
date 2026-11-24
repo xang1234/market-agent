@@ -4,7 +4,7 @@
 
 Accepted by the owner on 2026-11-10 for #226, every definition below as written. Implementation is tracked under #205 in #602 (`total_debt.v1` and `net_cash.v1`), #603 (the model and solver), #604 (the Call block) and #605 (the exit-multiple anchor).
 
-Amended on 2026-11-24: the bear case's `g` is anchored on a base rate (ADR 0005, "Bear case anchor"), and required growth is shown beside the same base rate.
+Amended on 2026-11-24: the bear case's `g` is anchored on a base rate (ADR 0005, "Bear case anchor"), and required growth is shown beside the same base rate. Amended on 2026-11-25: the base case's `g` is that base rate's median, and both cases and the base rate read total free cash flow growth (ADR 0005, "Base case").
 
 ## Context
 
@@ -205,13 +205,13 @@ These figures were computed with a 20-line script during drafting (not committed
 
 ## Base rate of required growth (owner, 2026-11-24)
 
-A Call sets required growth at today's multiple against a base rate, a `deterministic_result` row: "Of N five-year windows that began at a similar size, K delivered at least that growth." The bear case's `g` is that bucket's 25th percentile (ADR 0005).
+A Call sets required growth at today's multiple against a base rate, a `deterministic_result` row: "Of N five-year windows that began at a similar size, K delivered at least that growth." The bear case's `g` is that bucket's 25th percentile, and the base case's its median, each at the anchored exit multiple and `d` (ADR 0005).
 
-- **Measured quantity**: annual growth of free cash flow per share over five fiscal years, each year as its own 10-K reports it. Free cash flow uses `free_cash_flow.v1`'s concepts and scopes (#731, #743). A window whose two ends use different concepts is `incompatible_definition`. The share count is diluted weighted-average shares, carried across splits through each next 10-K's restated comparative.
-- **Buckets**: starting revenue under USD 100M, 100M to 1B, 1B to 10B, 10B to 50B, and 50B and up. Each bucket holds at least 377 windows (`docs/eval-runs/growth-base-rates/2026-11-24.md`).
+- **Measured quantity** (owner, 2026-11-25): annual growth of total free cash flow over five fiscal years, each year as its own 10-K reports it. Free cash flow uses `free_cash_flow.v1`'s concepts and scopes (#731, #743). A window whose two ends use different concepts is `incompatible_definition`. The table also holds growth per diluted weighted-average share, carried across splits through each next 10-K's restated comparative, and revenue growth. Neither enters `V`.
+- **Buckets**: starting revenue under USD 100M, 100M to 1B, 1B to 10B, 10B to 50B, and 50B and up. Each bucket holds at least 431 windows of total free cash flow growth (`docs/eval-runs/growth-base-rates/2026-11-24.md`).
 - **Revenue growth** is shown beside the result and never enters `V`.
-- **Never certified.** The archive is a dev-only copy, so the row and the bear case are labelled with the archive's date and sha256.
-- **Not the same quantity as `g`, measured.** `g` is free cash flow growth before dilution, with share change `d` apart and buybacks left out. Historical growth per share includes buybacks. Over FY2003 to FY2020 starts, the 50B-and-up bucket's median is 6.7% per share against 4.2% in total. The fcf-backtest run of 2026-11-21 shows the same gap: 5.47% against 4.03%. The table holds total free cash flow growth as well (`fcf`), so changing the measured quantity is one word in `call.ts`. Per share is the owner's decision.
+- **Never certified.** The archive is a dev-only copy, so the row and both cases are labelled with the archive's date and sha256.
+- **Why total, not per share.** `g` is free cash flow growth before dilution, with share change `d` apart and buybacks left out. Historical growth per share includes buybacks, so as `g` it would count them twice. Over FY2003 to FY2020 starts, the 50B-and-up bucket's median is 6.7% per share against 4.2% in total. The fcf-backtest run of 2026-11-21 shows the same gap: 5.47% against 4.03%. The owner chose per share on 2026-11-24 and total free cash flow on 2026-11-25.
 
 ## Owner decision
 
