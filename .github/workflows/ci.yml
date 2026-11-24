@@ -1134,6 +1134,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The reader corpus check diffs against the merge's first parent.
+          fetch-depth: 2
 
       - uses: actions/setup-node@v4
         with:
@@ -1159,6 +1162,12 @@ jobs:
 
       - name: Run repository contract tests
         run: node --experimental-strip-types --test "scripts/*.test.ts"
+
+      # A regex reader's change ships with its corpus expectations (#767). On a
+      # pull_request the checkout is the PR's merge commit, so HEAD^1 is its base.
+      - name: A changed text reader updates its corpus expectations
+        if: github.event_name == 'pull_request'
+        run: node --experimental-strip-types scripts/reader-corpus-check.ts HEAD^1
 
   lint:
     name: services lint (typed ESLint)
