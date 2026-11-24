@@ -224,6 +224,8 @@ export async function hydrateAnalyzeIssuers(
       case "stored":
         return;
       case "empty":
+        // A frozen golden issuer is seeded, not hydrated, so it has no gap to explain.
+        if (outcome.reason === "frozen_issuer") return;
         logger.warn("analyze SEC hydration stored nothing; the engine reports the gap", { issuer_id: issuerId, reason: outcome.reason });
         return;
       case "failed":

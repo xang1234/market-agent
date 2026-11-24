@@ -61,6 +61,8 @@ test("the frozen golden issuers are never repaired from live SEC", async () => {
   const touched: string[] = [];
   const db = { query: async (text: string) => { touched.push(text); return { rows: [] }; } } as unknown as Pool;
   const fetcher = async (path: string) => { touched.push(path); throw new Error("no fetch expected"); };
-  await hydrateAnalyzeIssuers(db, fetcher, new Map(Object.values(GOLDEN_ISSUER_IDS).map((id) => [id, new Map([["revenue", 2]])])), { warn() {} });
+  const warnings: unknown[][] = [];
+  await hydrateAnalyzeIssuers(db, fetcher, new Map(Object.values(GOLDEN_ISSUER_IDS).map((id) => [id, new Map([["revenue", 2]])])), { warn: (...args: unknown[]) => warnings.push(args) });
   assert.deepEqual(touched, []);
+  assert.deepEqual(warnings, [], "a seeded issuer has no gap to log");
 });
