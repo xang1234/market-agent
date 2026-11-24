@@ -9,8 +9,9 @@ export function callInputsCompanyFacts(): Record<string, unknown> {
 /**
  * AAPL's companyfacts as downloaded for ADR 0006's hand audit on 2026-11-09, trimmed to the FY2017 to FY2026
  * 10-Ks' entries of the Call's input tags (#605): ten fiscal years of operating cash flow, PP&E capex, cash,
- * marketable securities, debt, diluted weighted-average shares, stock-based compensation and cover counts, and
- * net income, without which no income statement, and so no diluted count, extracts.
+ * marketable securities, debt, diluted weighted-average shares, stock-based compensation and cover counts,
+ * net income, without which no income statement, and so no diluted count, extracts, and revenue, from SEC's bulk
+ * companyfacts of 2026-11-24, which puts the Call in its base rate's size bucket.
  */
 export function aaplHistoryCompanyFacts(): unknown {
   return parseFinancialJson(readFileSync(new URL("./aapl-history.companyfacts.json", import.meta.url), "utf8"));

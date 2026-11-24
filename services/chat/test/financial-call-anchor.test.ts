@@ -193,12 +193,13 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
     ]);
     // A separate float bisection of ADR 0006's V(g) at X = 52/3 and d = 0.277% gives 22.46%.
     assert.deepEqual([row(call, "exit_multiple").figure.text, row(call, "required_growth").figure.text, row(call, "required_growth_anchored").figure.text], ["36.15x", "7.3% a year", "22.5% a year"]);
-    assert.deepEqual(row(call, "bear_case").figure, { kind: "outcome", outcome: "unanchored", reason_code: null, text: "Not anchored" });
+    // The bear case: FY2026 revenue puts AAPL in the top bucket, whose 25th percentile is -3.2% a year.
+    assert.deepEqual(row(call, "bear_case").figure, { kind: "value", text: "Growth -3.2% a year at 17.33x: bear value USD 120.50 per share" });
     assert.deepEqual(call.stance, {
       kind: "declined",
       rule: 1,
-      text: "Declined under rule 1: the exit multiple is anchored, but the bear case is not, so no stance is stated.",
-      reasons: [{ cites: "bear_case", text: "No bear case is anchored yet, so the bear value per share is not computed." }],
+      text: "Declined under rule 1: the exit multiple and the bear case are anchored, but no base case is defined, so no stance is stated.",
+      reasons: [{ cites: "base_case", text: "ADR 0005 and ADR 0006 define no base-case growth, so no base value per share, hurdle price or stance is computed." }],
     });
     assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the anchor");
     // A split known only after the Call, executing after its date, is not one the Call could have read.
@@ -266,13 +267,13 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
     });
     assert.equal(row(call, "required_growth_anchored").figure.text, "Not computed: the exit multiple is not anchored.");
     assert.deepEqual([call.stance.rule, call.stance.text, call.stance.reasons.map((reason) => reason.cites)], [
-      1, "Declined under rule 1: neither the exit multiple nor the bear case is anchored, so no stance is stated.", ["anchored_exit_multiple", "bear_case"],
+      1, "Declined under rule 1: neither the exit multiple nor the bear case is anchored, and no base case is defined, so no stance is stated.", ["anchored_exit_multiple", "bear_case", "base_case"],
     ]);
   });
 
   await t.test("with no closes captured the exit multiple is unanchored", async () => {
     const { call } = (await ask("Make a Call on NOCL")).block;
     assert.equal(row(call, "anchored_exit_multiple").figure.text, "Not anchored: no closes are captured for the listing by the Call's cutoff.");
-    assert.deepEqual(call.stance.reasons.map((reason) => reason.cites), ["anchored_exit_multiple", "bear_case"]);
+    assert.deepEqual(call.stance.reasons.map((reason) => reason.cites), ["anchored_exit_multiple", "bear_case", "base_case"]);
   });
 });

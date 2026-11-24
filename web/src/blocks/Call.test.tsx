@@ -68,7 +68,8 @@ test('rows read in ADR 0005 order, each with its kind and basis, and the decline
     ['exit_multiple', '36.15x', 'Deterministic result', true],
     ['anchored_exit_multiple', '17.33x', 'Agent assumption', true],
     ['share_change', '0.277% a year', 'Agent assumption', true],
-    ['bear_case', 'Not anchored', 'Agent assumption', true],
+    ['base_case', 'Not defined', 'Agent assumption', true],
+    ['bear_case', 'Growth -3.2% a year at 17.33x: bear value USD 120.50 per share', 'Agent assumption', true],
     ['required_growth', '7.3% a year', 'Deterministic result', true],
     ['required_growth_anchored', '22.5% a year', 'Deterministic result', true],
     ['base_rate', 'Of 377 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 183 (48.5%) delivered free cash flow per share growth of at least 7.3% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%).', 'Deterministic result', true],
@@ -76,7 +77,7 @@ test('rows read in ADR 0005 order, each with its kind and basis, and the decline
   ])
   assert.match(document.querySelector('[data-row="anchored_exit_multiple"]')?.textContent ?? '', /FY2017: 17\.48x, \(close 38\.53 on 2017-09-29 × 21,006,768,000 shares/)
   assert.match(document.querySelector('[data-row="free_cash_flow"]')?.textContent ?? '', /10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03/)
-  assert.equal(document.querySelector('[data-reason]')?.textContent, 'Bear case: No bear case is anchored yet, so the bear value per share is not computed.')
+  assert.equal(document.querySelector('[data-reason]')?.textContent, 'Base case: ADR 0005 and ADR 0006 define no base-case growth, so no base value per share, hurdle price or stance is computed.')
   assert.match(document.body.textContent ?? '', /Your settings: required return 10%, margin of safety 1\.25, bear-loss limit 25%, near band 10%/)
 })
 
@@ -88,10 +89,10 @@ test('a rule 0 Call names the outcome in the row and in row 3', () => {
   assert.equal([...document.querySelectorAll('h3')].at(-1)?.textContent, 'Declined (rule 0)')
 })
 
-test('an unanchored exit multiple says why, and the decline names both missing anchors', () => {
+test('an unanchored exit multiple says why, and the decline names both missing anchors and the undefined base case', () => {
   const document = render(UNANCHORED!)
   assert.equal(document.querySelector('[data-row="anchored_exit_multiple"] [data-part="figure"]')?.textContent, "Not anchored: no closes are captured for the listing by the Call's cutoff.")
-  assert.deepEqual([...document.querySelectorAll('[data-reason]')].map((reason) => reason.getAttribute('data-reason')), ['anchored_exit_multiple', 'bear_case'])
+  assert.deepEqual([...document.querySelectorAll('[data-reason]')].map((reason) => reason.getAttribute('data-reason')), ['anchored_exit_multiple', 'bear_case', 'base_case'])
 })
 
 test('nothing a Call shows is advice wording', () => {

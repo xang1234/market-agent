@@ -529,6 +529,7 @@ export type CallRowId =
   | 'exit_multiple'
   | 'anchored_exit_multiple'
   | 'share_change'
+  | 'base_case'
   | 'bear_case'
   | 'required_growth'
   | 'required_growth_anchored'

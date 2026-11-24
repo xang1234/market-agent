@@ -4,12 +4,13 @@
 // each carry their kind and basis; the stance cites the rows it rests on.
 //
 // The exit multiple is anchored against the issuer's own last ten fiscal
-// years of EV/FCF (#605), and the growth the price requires is set against
-// how often comparable companies delivered it (growth-base-rates.ts), but no
-// bear case is anchored yet, so ADR 0005's rule 1 still matches every Call
-// that rule 0 does not. The stance has only
-// its declined variant, and nothing here computes a hurdle price, a stability
-// move or a scenario. The Call reads facts by identity and never feeds the
+// years of EV/FCF (#605), the growth the price requires is set against how
+// often comparable companies delivered it (growth-base-rates.ts), and the bear
+// case is anchored on the 25th percentile of that history. ADR 0005 and ADR
+// 0006 define no base-case growth, so no base value per share exists, and rule
+// 1 still matches every Call that rule 0 does not. The stance has only its
+// declined variant here; callStance (valuation-model.ts) holds rules 2 to 6
+// for the day a base case is defined. The Call reads facts by identity and never feeds the
 // fact layer.
 
 import { inferenceNote, type ContinuingOperationsOcfV1, type DecimalString, type GapDisposition, type IsoDate, type IsoDateTime, type LocalId, type ProductiveAssetsCapexV1, type ReasonCode, type Sha256Hex, type UUID } from "./contracts.ts";
@@ -25,11 +26,13 @@ import {
   requiredGrowth,
   sessionsAfter,
   todaysMultiple,
+  valuePerShare,
   VALUATION_OUTCOMES,
   type ConsensusCapture,
   type ValuationInputs,
   type ValuationOutcome,
   type ValuationOutcomeResult,
+  type ValuationValue,
 } from "./valuation-model.ts";
 
 export const CALL_VERSION = "call.v3";
@@ -183,6 +186,7 @@ export type CallRowId =
   | "exit_multiple"
   | "anchored_exit_multiple"
   | "share_change"
+  | "base_case"
   | "bear_case"
   | "required_growth"
   | "required_growth_anchored"
@@ -340,7 +344,7 @@ const MODEL_INPUTS: ReadonlyArray<CallRowId> = ["free_cash_flow", "net_cash", "s
 const ANCHORED_MODEL_INPUTS = MODEL_INPUTS.map((id) => id === "exit_multiple" ? "anchored_exit_multiple" : id);
 
 const ANCHOR_RULE = `The lowest of today's multiple, the median EV/FCF of the last ${ANCHOR_FISCAL_YEARS} fiscal years and the multiple whose implied perpetual growth at your required return is 4%, when each of those years has a multiple`;
-const BEAR_CASE_REASON = "No bear case is anchored yet, so the bear value per share is not computed.";
+const BASE_CASE_REASON = "ADR 0005 and ADR 0006 define no base-case growth, so no base value per share, hurdle price or stance is computed.";
 
 /** The Call its evidence gives: rows 1 to 3 and the stance, declined under rule 0 or rule 1. */
 export function assembleCall(evidence: CallEvidence): CallContent {
@@ -356,9 +360,12 @@ export function assembleCall(evidence: CallEvidence): CallContent {
   }));
   // Revenue is not a model input, so its gap leaves the base rate uncomputed and declines nothing.
   const causes: Cause[] = facts.flatMap((row) => row.figure.kind === "outcome" && row.id !== "revenue" ? [{ cites: row.id, label: row.label, figure: row.figure }] : []);
-  const { multiple, shareChange, growth, today, growthAt, required } = modelFigures(evidence, causes);
+  const { multiple, shareChange, growth, today, growthAt, required, valueAt } = modelFigures(evidence, causes);
   // Only a Call no input outcome declines is anchored; otherwise both anchored rows name the first cause.
   const anchor = causes.length > 0 ? null : anchorExitMultiple(evidence, today);
+  const bear = anchor === null ? null : bearCase(evidence, anchor, valueAt);
+  // A bear growth the model's range excludes (the -100% floor) leaves B without a value: an input range outcome, rule 0.
+  if (bear?.kind === "outcome") causes.push({ cites: "bear_case", label: "Bear case", figure: outcomeFigure(bear.result) });
   const assumptions: CallRow[] = [
     {
       id: "required_return", label: "Required return (r)", kind: "owner_policy", basis: "Your hurdle settings",
@@ -384,9 +391,18 @@ export function assembleCall(evidence: CallEvidence): CallContent {
       from: ["stock_based_compensation", "share_price", "shares_outstanding"],
     },
     {
+      id: "base_case", label: "Base case", kind: "agent_assumption",
+      basis: `None is assumed: ${lowerFirst(BASE_CASE_REASON)}`,
+      figure: { kind: "outcome", outcome: "undefined", reason_code: null, text: "Not defined" }, citations: [], from: [],
+    },
+    {
       id: "bear_case", label: "Bear case", kind: "agent_assumption",
-      basis: "None is assumed: rule 1 needs an anchored bear case before a bear value per share, a hurdle price or a stance is stated",
-      figure: { kind: "outcome", outcome: "unanchored", reason_code: null, text: "Not anchored" }, citations: [], from: [],
+      basis: bear?.kind === "anchored" ? bear.basis : BEAR_RULE,
+      figure: bear === null ? notComputedFigure(causes[0]!)
+        : bear.kind === "anchored" ? { kind: "value", text: bear.text }
+        : bear.kind === "outcome" ? outcomeFigure(bear.result)
+        : { kind: "outcome", outcome: "unanchored", reason_code: null, text: `Not anchored: ${lowerFirst(bear.text)}` },
+      citations: [], from: ["revenue", "anchored_exit_multiple", "share_change"],
     },
   ];
   const requires: CallRow[] = [
@@ -415,21 +431,57 @@ export function assembleCall(evidence: CallEvidence): CallContent {
     facts,
     assumptions,
     requires,
-    stance: anchor === null
+    stance: anchor === null || bear?.kind === "outcome"
       ? { kind: "declined", rule: 0, text: "Declined under rule 0: an input has no certified value, so no stance is stated.", reasons: causes.map(reason) }
-      : anchor.kind === "anchored"
-        ? {
-          kind: "declined",
-          rule: 1,
-          text: "Declined under rule 1: the exit multiple is anchored, but the bear case is not, so no stance is stated.",
-          reasons: [{ cites: "bear_case", text: BEAR_CASE_REASON }],
-        }
-        : {
-          kind: "declined",
-          rule: 1,
-          text: "Declined under rule 1: neither the exit multiple nor the bear case is anchored, so no stance is stated.",
-          reasons: [{ cites: "anchored_exit_multiple", text: anchor.text }, { cites: "bear_case", text: BEAR_CASE_REASON }],
-        },
+      : {
+        kind: "declined",
+        rule: 1,
+        text: `Declined under rule 1: ${anchor.kind === "unanchored" ? "neither the exit multiple nor the bear case is anchored, and"
+          : bear!.kind === "unanchored" ? "the exit multiple is anchored, but the bear case is not, and"
+          : "the exit multiple and the bear case are anchored, but"} no base case is defined, so no stance is stated.`,
+        reasons: [
+          ...(anchor.kind === "unanchored" ? [{ cites: "anchored_exit_multiple" as const, text: anchor.text }] : []),
+          ...(bear!.kind === "unanchored" ? [{ cites: "bear_case" as const, text: bear!.text }] : []),
+          { cites: "base_case", text: BASE_CASE_REASON },
+        ],
+      },
+  };
+}
+
+const BEAR_RULE = "Growth at the 25th percentile of free cash flow per share growth among five-year windows that began at a similar size, at the anchored exit multiple and the share change d";
+
+type Bear =
+  | Readonly<{ kind: "anchored"; basis: string; text: string }>
+  | Readonly<{ kind: "unanchored"; text: string }>
+  | Readonly<{ kind: "outcome"; result: ValuationOutcomeResult }>;
+
+/**
+ * The bear case (owner decision, 2026-11-24): growth at the nearest-rank 25th
+ * percentile of five-year free cash flow per share growth among windows that
+ * began at the Call's size bucket, at the anchored exit multiple and the share
+ * change d. B is V at those assumptions.
+ */
+function bearCase(evidence: CallEvidence, anchor: Anchor, valueAt: ModelFigures["valueAt"]): Bear {
+  const unanchored = (text: string): Bear => ({ kind: "unanchored", text });
+  if (anchor.kind === "unanchored") return unanchored("The bear exit multiple is the anchored exit multiple, which is not anchored.");
+  const table = evidence.base_rates;
+  const revenue = evidence.figures.revenue;
+  if (table === null) return unanchored("No base-rate table is loaded.");
+  if (revenue.kind === "gap") return unanchored(`Revenue is not certified (${revenue.disposition}, ${revenue.reason_code}), so no size bucket holds the Call.`);
+  if (revenue.currency !== "USD") return unanchored("Revenue is not in USD; nothing is converted.");
+  // The 25th percentile does not depend on the growth set against it.
+  const rates = growthBaseRate(table, "fcf_per_share", rational(revenue.value), ZERO);
+  if (rates.kind === "outcome") {
+    return unanchored(rates.outcome === "no_bucket" ? "No size bucket holds a starting revenue that is not positive."
+      : `Only ${rates.n} windows began in ${bucketText(rates.bucket!)}, fewer than the ${MIN_BASE_RATE_WINDOWS} a base rate needs.`);
+  }
+  const value = valueAt(rates.p25, anchor.value);
+  if (value.kind === "outcome") return { kind: "outcome", result: value };
+  return {
+    kind: "anchored",
+    text: `Growth ${percent(rates.p25, 1)}% a year at ${multipleText(anchor.value)}x: bear value USD ${value.text} per share`,
+    basis: `anchored: growth is the 25th percentile, at rank ${Math.ceil(rates.n / 4)} of ${rates.n}, of free cash flow per share growth over five-year windows that began at ${bucketText(rates.bucket)}, `
+      + `from SEC's companyfacts archive of ${table.archive.date}. It is a frequency of reported history, not a probability. The exit multiple is the anchored exit multiple and the share change is d`,
   };
 }
 
@@ -501,11 +553,26 @@ export function assembleCallV2(evidence: CallEvidenceV2): CallContentV2 {
     citations: { ...evidence.citations, revenue: [] },
     base_rates: null,
   });
+  const exitReason = call.stance.reasons.find((entry) => entry.cites === "anchored_exit_multiple");
+  const bearReason = { cites: "bear_case" as const, text: "No bear case is anchored yet, so the bear value per share is not computed." };
   return {
     ...call,
     version: "call.v2",
     facts: call.facts.filter((row) => row.id !== "revenue"),
+    assumptions: call.assumptions.filter((row) => row.id !== "base_case").map((row) => row.id !== "bear_case" ? row : {
+      id: "bear_case", label: "Bear case", kind: "agent_assumption",
+      basis: "None is assumed: rule 1 needs an anchored bear case before a bear value per share, a hurdle price or a stance is stated",
+      figure: { kind: "outcome", outcome: "unanchored", reason_code: null, text: "Not anchored" }, citations: [], from: [],
+    }),
     requires: call.requires.filter((row) => row.id !== "base_rate"),
+    stance: call.stance.rule === 0 ? call.stance : {
+      kind: "declined",
+      rule: 1,
+      text: exitReason === undefined
+        ? "Declined under rule 1: the exit multiple is anchored, but the bear case is not, so no stance is stated."
+        : "Declined under rule 1: neither the exit multiple nor the bear case is anchored, so no stance is stated.",
+      reasons: [...(exitReason === undefined ? [] : [exitReason]), bearReason],
+    },
   };
 }
 
@@ -556,6 +623,8 @@ type ModelFigures = Readonly<{
   growthAt: (exitMultiple: ExactRational) => CallFigure;
   /** The growth the price requires at today's multiple, when it has one. */
   required: ExactRational | null;
+  /** V(g) at an exit multiple, with the share change d. */
+  valueAt: (growth: ExactRational, exitMultiple: ExactRational) => ValuationValue | ValuationOutcomeResult;
 }>;
 
 /**
@@ -591,21 +660,22 @@ function modelFigures(evidence: CallEvidence, causes: Cause[]): ModelFigures {
       const d = divideRationals(value("stock_based_compensation"), rational(cap.value));
       const shareChange: CallFigure = d === null ? outcomeFigure(VALUATION_RESULT("numeric_limit_exceeded")) : { kind: "value", text: `${percent(d, 3)}% a year` };
       const growthAt = (exitMultiple: ExactRational) => d === null ? shareChange : solved(requiredGrowth(inputs, { share_change: d, exit_multiple: exitMultiple }));
-      if (today.kind === "outcome") return { multiple: outcomeFigure(today), shareChange, growth: outcomeFigure(today), today: null, growthAt, required: null };
+      const valueAt = (g: ExactRational, exitMultiple: ExactRational) => d === null ? VALUATION_RESULT("numeric_limit_exceeded") : valuePerShare(inputs, { share_change: d, exit_multiple: exitMultiple }, g);
+      if (today.kind === "outcome") return { multiple: outcomeFigure(today), shareChange, growth: outcomeFigure(today), today: null, growthAt, required: null, valueAt };
       if (d !== null && compareRationals(d, MINUS_ONE) <= 0) {
         causes.push({ cites: "share_change", label: "Annual share change (d)", figure: outcomeFigure(VALUATION_RESULT("share_change_out_of_range")) });
         const notComputed = notComputedFigure(causes[0]!);
-        return { multiple: { kind: "value", text: today.text }, shareChange: causes[0]!.figure, growth: notComputed, today: null, growthAt: () => notComputed, required: null };
+        return { multiple: { kind: "value", text: today.text }, shareChange: causes[0]!.figure, growth: notComputed, today: null, growthAt: () => notComputed, required: null, valueAt };
       }
       const solve = d === null ? null : requiredGrowth(inputs, { share_change: d, exit_multiple: today.value });
       return {
         multiple: { kind: "value", text: today.text }, shareChange, growth: solve === null ? shareChange : solved(solve), today: today.value, growthAt,
-        required: solve?.kind === "value" ? solve.growth : null,
+        required: solve?.kind === "value" ? solve.growth : null, valueAt,
       };
     }
   }
   const notComputed = notComputedFigure(causes[0]!);
-  return { multiple: notComputed, shareChange: notComputed, growth: notComputed, today: null, growthAt: () => notComputed, required: null };
+  return { multiple: notComputed, shareChange: notComputed, growth: notComputed, today: null, growthAt: () => notComputed, required: null, valueAt: () => VALUATION_RESULT("numeric_limit_exceeded") };
 }
 
 type Anchor =
@@ -794,6 +864,7 @@ function rational(text: DecimalString): ExactRational {
 }
 
 const MINUS_ONE = rationalFromDecimal({ coefficient: -1n, scale: 0 })!;
+const ZERO = rationalFromDecimal({ coefficient: 0n, scale: 0 })!;
 const HUNDRED = rationalFromDecimal({ coefficient: 100n, scale: 0 })!;
 
 function percent(value: ExactRational, places: number): string {

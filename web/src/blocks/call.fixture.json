@@ -299,18 +299,34 @@
           ]
         },
         {
-          "id": "bear_case",
-          "label": "Bear case",
+          "id": "base_case",
+          "label": "Base case",
           "kind": "agent_assumption",
-          "basis": "None is assumed: rule 1 needs an anchored bear case before a bear value per share, a hurdle price or a stance is stated",
+          "basis": "None is assumed: aDR 0005 and ADR 0006 define no base-case growth, so no base value per share, hurdle price or stance is computed.",
           "figure": {
             "kind": "outcome",
-            "outcome": "unanchored",
+            "outcome": "undefined",
             "reason_code": null,
-            "text": "Not anchored"
+            "text": "Not defined"
           },
           "citations": [],
           "from": []
+        },
+        {
+          "id": "bear_case",
+          "label": "Bear case",
+          "kind": "agent_assumption",
+          "basis": "anchored: growth is the 25th percentile, at rank 95 of 377, of free cash flow per share growth over five-year windows that began at starting revenue USD 50.0B and up, from SEC's companyfacts archive of 2026-11-24. It is a frequency of reported history, not a probability. The exit multiple is the anchored exit multiple and the share change is d",
+          "figure": {
+            "kind": "value",
+            "text": "Growth -3.2% a year at 17.33x: bear value USD 120.50 per share"
+          },
+          "citations": [],
+          "from": [
+            "revenue",
+            "anchored_exit_multiple",
+            "share_change"
+          ]
         }
       ],
       "requires": [
@@ -393,11 +409,11 @@
       "stance": {
         "kind": "declined",
         "rule": 1,
-        "text": "Declined under rule 1: the exit multiple is anchored, but the bear case is not, so no stance is stated.",
+        "text": "Declined under rule 1: the exit multiple and the bear case are anchored, but no base case is defined, so no stance is stated.",
         "reasons": [
           {
-            "cites": "bear_case",
-            "text": "No bear case is anchored yet, so the bear value per share is not computed."
+            "cites": "base_case",
+            "text": "ADR 0005 and ADR 0006 define no base-case growth, so no base value per share, hurdle price or stance is computed."
           }
         ]
       }
@@ -633,18 +649,36 @@
           ]
         },
         {
-          "id": "bear_case",
-          "label": "Bear case",
+          "id": "base_case",
+          "label": "Base case",
           "kind": "agent_assumption",
-          "basis": "None is assumed: rule 1 needs an anchored bear case before a bear value per share, a hurdle price or a stance is stated",
+          "basis": "None is assumed: aDR 0005 and ADR 0006 define no base-case growth, so no base value per share, hurdle price or stance is computed.",
           "figure": {
             "kind": "outcome",
-            "outcome": "unanchored",
+            "outcome": "undefined",
             "reason_code": null,
-            "text": "Not anchored"
+            "text": "Not defined"
           },
           "citations": [],
           "from": []
+        },
+        {
+          "id": "bear_case",
+          "label": "Bear case",
+          "kind": "agent_assumption",
+          "basis": "Growth at the 25th percentile of free cash flow per share growth among five-year windows that began at a similar size, at the anchored exit multiple and the share change d",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "blocked_dependency",
+            "reason_code": "blocked_by_dependency",
+            "text": "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)"
+          },
+          "citations": [],
+          "from": [
+            "revenue",
+            "anchored_exit_multiple",
+            "share_change"
+          ]
         }
       ],
       "requires": [
@@ -961,18 +995,36 @@
           ]
         },
         {
+          "id": "base_case",
+          "label": "Base case",
+          "kind": "agent_assumption",
+          "basis": "None is assumed: aDR 0005 and ADR 0006 define no base-case growth, so no base value per share, hurdle price or stance is computed.",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "undefined",
+            "reason_code": null,
+            "text": "Not defined"
+          },
+          "citations": [],
+          "from": []
+        },
+        {
           "id": "bear_case",
           "label": "Bear case",
           "kind": "agent_assumption",
-          "basis": "None is assumed: rule 1 needs an anchored bear case before a bear value per share, a hurdle price or a stance is stated",
+          "basis": "Growth at the 25th percentile of free cash flow per share growth among five-year windows that began at a similar size, at the anchored exit multiple and the share change d",
           "figure": {
             "kind": "outcome",
             "outcome": "unanchored",
             "reason_code": null,
-            "text": "Not anchored"
+            "text": "Not anchored: the bear exit multiple is the anchored exit multiple, which is not anchored."
           },
           "citations": [],
-          "from": []
+          "from": [
+            "revenue",
+            "anchored_exit_multiple",
+            "share_change"
+          ]
         }
       ],
       "requires": [
@@ -1057,7 +1109,7 @@
       "stance": {
         "kind": "declined",
         "rule": 1,
-        "text": "Declined under rule 1: neither the exit multiple nor the bear case is anchored, so no stance is stated.",
+        "text": "Declined under rule 1: neither the exit multiple nor the bear case is anchored, and no base case is defined, so no stance is stated.",
         "reasons": [
           {
             "cites": "anchored_exit_multiple",
@@ -1065,7 +1117,11 @@
           },
           {
             "cites": "bear_case",
-            "text": "No bear case is anchored yet, so the bear value per share is not computed."
+            "text": "The bear exit multiple is the anchored exit multiple, which is not anchored."
+          },
+          {
+            "cites": "base_case",
+            "text": "ADR 0005 and ADR 0006 define no base-case growth, so no base value per share, hurdle price or stance is computed."
           }
         ]
       }
