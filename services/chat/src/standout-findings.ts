@@ -152,7 +152,7 @@ export const isFinding = (outcome: DetectorOutcome): outcome is Finding => "stat
 
 const DECLINE_WORDS: Readonly<Record<DeclineReason, string>> = {
   incomplete_history: "a year in its window has no value",
-  tag_change: "a year filed under another concept",
+  tag_change: "a figure in its window filed under another concept",
   non_positive_base: "a zero or negative base",
   engine_gap: "not computed",
   within_range: "the latest year is not at the extreme",

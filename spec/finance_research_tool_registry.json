@@ -1926,7 +1926,7 @@
       "bundles": [
         "analyst_agent"
       ],
-      "description": "Standout findings in one company's own history, each checked by the financial engine over its latest fiscal years: operating margin at the highest or lowest of its last 10, cash conversion (operating cash flow / net income) at the lowest of its last 10, and stock-based compensation as a multiple of free cash flow at the highest of its last 5. A finding is a sentence filled from certified figures, which the answer cites. A check that cannot be sure is declined with its reason: incomplete_history (a year without a value), tag_change (a year filed under another concept), non_positive_base (a zero or negative denominator), engine_gap (another engine gap), or within_range (the latest year is not at the extreme). Statuses as for certified_financials.",
+      "description": "Standout findings in one company's own history, each checked by the financial engine over its latest fiscal years: operating margin at the highest or lowest of its last 10, cash conversion (operating cash flow / net income) at the lowest of its last 10, and stock-based compensation as a multiple of free cash flow at the highest of its last 5. A finding is a sentence filled from certified figures, which the answer cites. A check that cannot be sure is declined with its reason: incomplete_history (a year without a value), tag_change (a figure in its window filed under another concept), non_positive_base (a zero or negative denominator), engine_gap (another engine gap), or within_range (the latest year is not at the extreme). Statuses as for certified_financials.",
       "read_only": true,
       "approval_required": false,
       "cost_class": "medium",
