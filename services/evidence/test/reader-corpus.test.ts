@@ -34,7 +34,8 @@ function releaseFigureReadings(): string[] {
   const lines: string[] = [];
   for (const row of rows) {
     const [kind, metric, , quote] = row.split("\t") as ["guidance" | "result", ReleaseMetric, string, string];
-    const phrases = [...new Set([...quote.matchAll(PHRASE)].map((found) => found[0].trim()))];
+    // "+/- 50 bps" matches as "- 50 bps"; the unsigned "50 bps" is a pick too.
+    const phrases = [...new Set([...quote.matchAll(PHRASE)].flatMap((found) => [found[0].trim(), found[0].trim().replace(/^-\s*/u, "")]))];
     const picks = kind === "result"
       ? phrases.map((value) => ({ value }))
       : [

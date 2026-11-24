@@ -141,6 +141,7 @@ Non-GAAP gross margin 43% $7.7 billion | result gross_margin non_gaap {"value":"
 Non-GAAP gross margin for Q1 vs. Q2 was 72.0%. | result gross_margin non_gaap {"value":"72.0%"} -> non_gaap 72..72
 Non-GAAP gross margin is estimated to be 43% inclusive of approximately $800 million in charges for inventory and related reserves due to the new export controls as previously disclosed in AMD's Current Report on Form 8-K filed on April 16, 2025. | guidance gross_margin non_gaap {"value":"43%"} -> non_gaap 43..43
 Non-GAAP gross margin is expected to be 54.0% +/- 50 bps. | guidance gross_margin non_gaap {"value":"54.0%","plus_minus":"- 50 bps"} -> non_gaap 53.5..54.5
+Non-GAAP gross margin is expected to be 54.0% +/- 50 bps. | guidance gross_margin non_gaap {"value":"54.0%","plus_minus":"50 bps"} -> non_gaap 53.5..54.5
 Non-GAAP gross margin is expected to be 54.0% +/- 50 bps. | guidance gross_margin non_gaap {"value":"54.0%"} -> non_gaap 54..54
 Non-GAAP gross margin is expected to be approximately 53.5%. | guidance gross_margin non_gaap {"value":"approximately 53.5%"} -> non_gaap 53.5..53.5
 Non-GAAP gross margin is expected to be approximately 54%. | guidance gross_margin non_gaap {"value":"approximately 54%"} -> non_gaap 54..54
