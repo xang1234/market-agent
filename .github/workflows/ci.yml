@@ -1160,3 +1160,32 @@ jobs:
       - name: Run repository contract tests
         run: node --experimental-strip-types --test "scripts/*.test.ts"
 
+  lint:
+    name: services lint (typed ESLint)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            lint/package-lock.json
+            db/package-lock.json
+            services/*/package-lock.json
+
+      # Typed rules read each service's types, which follow imports into sibling
+      # services and db/test, so every package's dependencies are installed.
+      - name: Install lint, db and service dependencies
+        run: |
+          npm --prefix lint ci
+          npm --prefix db ci
+          for lock in services/*/package-lock.json; do npm --prefix "${lock%/package-lock.json}" ci; done
+
+      # Warnings report rules that still have hits on main (#768); errors fail.
+      - name: Lint services
+        run: npm --prefix lint run lint

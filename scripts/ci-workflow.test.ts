@@ -135,6 +135,15 @@ test("ci workflow installs db deps for services that import the shared db test h
   }
 });
 
+test("ci workflow lints every service with the shared typed config", async () => {
+  const workflow = await readFile(CI_WORKFLOW, "utf8");
+  const section = workflow.slice(workflow.indexOf("\n  lint:"));
+
+  assert.match(section, /for lock in services\/\*\/package-lock\.json; do npm --prefix "\$\{lock%\/package-lock\.json\}" ci; done/);
+  assert.match(section, /run:\s*npm --prefix lint run lint/);
+  assert.match((await readPackageJson("lint")).scripts?.lint ?? "", /for t in services\/\*\/tsconfig\.json/);
+});
+
 async function testedPackageDirs(): Promise<string[]> {
   const candidates = await nodePackageDirs();
   const tested: string[] = [];
@@ -148,6 +157,7 @@ async function testedPackageDirs(): Promise<string[]> {
 async function nodePackageDirs(): Promise<string[]> {
   return [
     "db",
+    "lint",
     "web",
     ...(await servicePackageDirs()).map((service) => `services/${service}`),
   ].sort();
