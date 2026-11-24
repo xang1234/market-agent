@@ -83,6 +83,16 @@ An identical current packet is reused without duplicate findings. An earlier pac
 recurs after a different assessment receives a new assessment. A version changed during
 assessment invalidates that run before its side effects commit.
 
+## Standout Findings
+
+**Standout finding** is one certified observation about a company and how unusual it is in
+the company's own history, such as its operating margin at the highest of its last 10
+fiscal years. A detector runs approved engine operations over the company's annual series
+and ranks the latest year; its sentence is filled only from those results. A detector that
+cannot be sure (a year missing, a year filed under another concept, a zero or negative
+base, the latest year inside its range) declines by name. Unlike a thesis change's
+finding, it is not stored or shown on Home: the analyst agent reads it for one answer.
+
 ## Discovery Campaigns
 
 **Discovery campaign** is a user-owned, versioned research question and its approved
