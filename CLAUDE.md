@@ -20,7 +20,7 @@ Each class has come back in several modules (closed issues cited). Check the dif
 - After fixing a round, look for sibling cases of the same bug elsewhere in the diff before pushing, so the next review round doesn't flag the gap.
 - After pushing, request re-review (`@codex review`) and poll CI and reviews. If gh returns a transient 401 or connection error, retry once before reporting failure.
 - When Codex is at its usage limit, Devin's PR review is the bot gate. Devin reviews a PR once and does not re-review fix pushes, so commits pushed after its review get an independent review of those commits before merge.
-- Stop rule: when a review round finds only synthetic edge cases with no real input, file them in an issue and merge. When rounds keep reopening the same rule, the design is brittle; redesign instead of adding a rule.
+- Stop rule: when a review round finds only synthetic edge cases with no real input, file them in an issue and stop the review loop. The merge gate still holds: CI green, and any commit pushed after the bot review has its independent review. When rounds keep reopening the same rule, the design is brittle; redesign instead of adding a rule.
 
 
 ## Environment & Conventions
