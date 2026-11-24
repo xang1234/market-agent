@@ -502,3 +502,70 @@ test("NVIDIA's real reconciliation: the non-GAAP cost of revenue closes its own 
     ["net_income", "Three Months Ended October 26, 2025", 31_910, 31_767, [["Total pre-tax impact of non-GAAP adjustments", 389], ["Income tax impact of non-GAAP adjustments (C)", -532]]],
   ]);
 });
+
+test("a bare scale word is a note only in parentheses, so prose that opens with \"Billions\" sets no scale", () => {
+  const table = `<table><tr><td></td><td>Q3 2025</td></tr><tr><td>Revenue</td><td>$100</td></tr></table>`;
+  // AMD's EX-99.1 has "...what is possible. Billions of people..." in its prose.
+  assert.equal(readTables(`<p>Condensed Statements (in millions). Billions of devices run our platform.</p>${table}`)[0]!.scale, "millions");
+  assert.equal(readTables(`<p>Billions of people use our products.</p>${table}`)[0]!.scale, undefined);
+  assert.equal(readTables(`<p>(Billions)</p>${table}`)[0]!.scale, "billions");
+});
+
+test("a non-GAAP row closes another measure only while that measure is still open", () => {
+  const html = `<table>
+    <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th></tr>
+    <tr><td>GAAP operating income</td><td>$100</td></tr>
+    <tr><td>Stock-based compensation</td><td>10</td></tr>
+    <tr><td>Non-GAAP operating income</td><td>$110</td></tr>
+    <tr><td>GAAP net income</td><td>$80</td></tr>
+    <tr><td>Non-GAAP operating income adjustments</td><td>20</td></tr>
+    <tr><td>Non-GAAP net income</td><td>$100</td></tr>
+  </table>`;
+  assert.deepEqual(lines(html), [
+    ["operating_income", "Q3 2025", 100, 110, [["Stock-based compensation", 10]]],
+    ["net_income", "Q3 2025", 80, 100, [["Non-GAAP operating income adjustments", 20]]],
+  ]);
+});
+
+test("a row of a measure's adjustments is a line of it, not its non-GAAP figure", () => {
+  const html = `<table>
+    <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th></tr>
+    <tr><td>GAAP operating income</td><td>$100</td></tr>
+    <tr><td>Non-GAAP operating income adjustments</td><td>20</td></tr>
+    <tr><td>Non-GAAP operating income</td><td>$120</td></tr>
+  </table>`;
+  assert.deepEqual(lines(html), [["operating_income", "Q3 2025", 100, 120, [["Non-GAAP operating income adjustments", 20]]]]);
+});
+
+test("a total restates one line only when equal to it, and rounds to its printed decimals", () => {
+  const html = `<table>
+    <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th></tr>
+    <tr><td>GAAP net income</td><td>$100</td></tr>
+    <tr><td>Interest expense</td><td>1</td></tr>
+    <tr><td>Total pre-tax impact of non-GAAP adjustments</td><td>2</td></tr>
+    <tr><td>Non-GAAP net income</td><td>$103</td></tr>
+    <tr><td>GAAP diluted EPS</td><td>$1.00</td></tr>
+    <tr><td>Stock-based compensation</td><td>0.10</td></tr>
+    <tr><td>Amortization of intangibles</td><td>0.20</td></tr>
+    <tr><td>Total other adjustments</td><td>0.40</td></tr>
+    <tr><td>Non-GAAP diluted EPS</td><td>$1.70</td></tr>
+  </table>`;
+  assert.deepEqual(lines(html), [
+    ["net_income", "Q3 2025", 100, 103, [["Interest expense", 1], ["Total pre-tax impact of non-GAAP adjustments", 2]]],
+    ["eps_diluted", "Q3 2025", 1, 1.7, [["Stock-based compensation", 0.1], ["Amortization of intangibles", 0.2], ["Total other adjustments", 0.4]]],
+  ]);
+});
+
+test("a row of bare years under a banner dating several columns heads its columns", () => {
+  const html = `<table>
+    <tr><td></td><td colspan="2">Years Ended December 31, 2025 and 2024</td></tr>
+    <tr><td>(In millions)</td><td>2025</td><td>2024</td></tr>
+    <tr><td>GAAP net income</td><td>2000</td><td>1,900</td></tr>
+    <tr><td>Stock-based compensation</td><td>10</td><td>9</td></tr>
+    <tr><td>Non-GAAP net income</td><td>2,010</td><td>1,909</td></tr>
+  </table>`;
+  assert.deepEqual(lines(html), [
+    ["net_income", "Years Ended December 31, 2025 and 2024 2025", 2_000, 2_010, [["Stock-based compensation", 10]]],
+    ["net_income", "Years Ended December 31, 2025 and 2024 2024", 1_900, 1_909, [["Stock-based compensation", 9]]],
+  ]);
+});

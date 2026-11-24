@@ -78,8 +78,9 @@ const CATEGORIES: ReadonlyArray<readonly [key: string, label: string, pattern: R
 ];
 
 // A total of the adjustments, as NVIDIA prints "Total impact of non-GAAP
-// adjustments to operating income" in place of its lines: an add-back, but of no one kind.
-const ROLLUP = /^total\b.*\bnon[\s\u00a0-]*gaap\s+adjustments\b/i;
+// adjustments to operating income" in place of its lines: an add-back, but of
+// no one kind unless it names one, as "Total income tax impact of ...".
+const ROLLUP = /^total\b.*\bnon(?:[\s\u00a0]|[-\u2010-\u2015])*gaap\s+adjustments\b/i;
 
 // How a line is stated, so "stock-based compensation, net of tax" is that add-back, no tax effect.
 const TAX_BASIS = /\bnet\s+of\s+(?:income\s+)?tax(?:es)?\b|\b(?:after|pre)[\s-]?tax\b/gi;
@@ -159,9 +160,10 @@ function quarterOf(release: StoredRelease): Omit<NonGaapQuarter, "superseded"> {
       }
       : null,
     sbc: sbcOf(release, net),
-    categories: [...new Set(release.reconciliations.flatMap((reconciliation) => reconciliation.adjustments)
-      .filter((line) => line.value_num !== 0 && !ROLLUP.test(line.label))
-      .map((line) => addBackCategory(line.label).key))],
+    categories: [...new Set(release.reconciliations.flatMap((reconciliation) => reconciliation.adjustments).flatMap((line) => {
+      const { key } = addBackCategory(line.label);
+      return line.value_num === 0 || (key.startsWith("other:") && ROLLUP.test(line.label)) ? [] : [key];
+    }))],
     reconciled: release.reconciliations.length > 0,
   };
 }

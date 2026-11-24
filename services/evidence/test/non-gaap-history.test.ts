@@ -135,6 +135,12 @@ test("an add-back's category comes from its label, else the label is its own", (
   assert.equal(addBackCategory("Provision for income taxes").key, "income_tax_effect");
 });
 
+test("a rollup of the non-GAAP adjustments is no category, unless it names a kind such as their tax", () => {
+  const categories = (label: string) => nonGaapHistory([release("2025-10-26", 1, [[label, 5]])]).quarters[0]!.categories;
+  assert.deepEqual(categories("Total income tax impact of non-GAAP adjustments"), ["income_tax_effect"]);
+  assert.deepEqual(categories("Total impact of non‑GAAP adjustments to operating income"), []);
+});
+
 test("a total of the non-GAAP adjustments is no category, as NVIDIA's real release rolls them up", () => {
   const html = readFileSync(new URL("./fixtures/sec-8k-nvda-reconciliation.htm", import.meta.url), "utf8");
   const read = releaseReconciliations(submissionOf(html), "2025-11-19");

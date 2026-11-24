@@ -41,6 +41,8 @@ type ParsedValue = {
   value_num: number;
   unit: "currency" | "number" | "percent";
   currency?: string;
+  // Digits printed after the point, as "0.40" has two.
+  decimals: number;
 };
 
 // A figure and the columns it covers with the "$" cell before it.
@@ -70,8 +72,13 @@ type GaapAnchor = {
   value: ParsedValue;
   measure_key: string;
   adjustments: NonGaapAdjustment[];
+  // The most digits after the point any of its lines prints.
+  decimals: number;
   // The section in force at the GAAP row, which a bare "Non-GAAP" row closing it names.
   section: string;
+  // Each measure still open when this GAAP row took its slot, as NVIDIA's cost
+  // of revenue under gross profit, whose non-GAAP row is then no line.
+  displaced: Set<string>;
 };
 
 const NON_GAAP_PATTERN = /\bnon(?:[\s\u00a0]|[-\u2010-\u2015])*gaap\b/i;
@@ -85,7 +92,9 @@ const MEASURES = new Set(["eps_basic", "eps_diluted", "operating_income", "net_i
 const ROW = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
 // Inline XBRL closes an empty cell in its tag: <td colspan="3"/>.
 const CELL = /<t[dh]\b([^>]*?)(?:\/>|>([\s\S]*?)<\/t[dh]>)/gi;
-const SCALE = /(?:\bin\s+|^\s*)(thousands|millions|billions)\b/i;
+const SCALE = /\bin\s+(thousands|millions|billions)\b/i;
+// A note in parentheses can open with its scale, as AMD's "(Millions)"; a sentence cannot.
+const NOTE_SCALE = /(?:\bin\s+|^\s*)(thousands|millions|billions)\b/i;
 
 export function extractNonGaapReconciliations(
   input: ExtractNonGaapReconciliationsInput,
@@ -100,9 +109,6 @@ export function extractNonGaapReconciliations(
 
     const periods = table.periods.map((period) => period.join(" "));
     const anchors = new Map<number, GaapAnchor>();
-    // Each measure a GAAP row opened, which its non-GAAP row closes even
-    // when a later GAAP row took its slot, as NVIDIA's cost of revenue.
-    const opened = new Set<string>();
     // The last row with a label and no figures, which names the measure of a
     // row labelled "GAAP" or "Non-GAAP" alone.
     let section = "";
@@ -120,8 +126,9 @@ export function extractNonGaapReconciliations(
         for (const [slot, value] of amounts) {
           const measure_key = measureAt(slot, section);
           if (measure_key === null) continue;
-          anchors.set(slot, { label, value, measure_key, adjustments: [], section });
-          opened.add(measure_key);
+          const open = anchors.get(slot);
+          const displaced = new Set(open ? [...open.displaced, open.measure_key] : []);
+          anchors.set(slot, { label, value, measure_key, adjustments: [], decimals: 0, section, displaced });
         }
         continue;
       }
@@ -133,9 +140,10 @@ export function extractNonGaapReconciliations(
         if (!NON_GAAP_PATTERN.test(label) || measure !== anchor.measure_key) {
           // A total that restates lines above it is no line. A non-GAAP row
           // that closes nothing, such as the tax impact of the adjustments, is one.
-          const closesOther = NON_GAAP_PATTERN.test(label) && measure !== null && opened.has(measure);
-          if (!closesOther && !(/^total\b/i.test(label) && restates(value.value_num, anchor.adjustments))) {
+          if (NON_GAAP_PATTERN.test(label) && measure !== null && anchor.displaced.delete(measure)) continue;
+          if (!(/^total\b/i.test(label) && restates(value, anchor))) {
             anchor.adjustments.push(Object.freeze({ label, value_num: value.value_num }));
+            anchor.decimals = Math.max(anchor.decimals, value.decimals);
           }
           continue;
         }
@@ -214,16 +222,19 @@ function spanOf(attributes: string, name: "colspan" | "rowspan"): number {
 }
 
 // The header is the rows above the first with text before a figure. A bare
-// year is a figure there only under a header cell that already names a year,
-// as "GAAP net income | 2000" under "Q3 2025". ponytail: a header partway
-// down a table is not read; the periods above apply.
+// year is a figure there only under a header cell that already names a year
+// over its column alone, as "GAAP net income | 2000" under "Q3 2025", not a
+// banner "Years Ended December 31, 2025 and 2024" over "2025 | 2024".
+// ponytail: a header partway down a table is not read; the periods above apply.
 function tableOf(grid: ReadonlyArray<ReadonlyArray<GridCell>>, above: string, continued: TableScale | undefined): ParsedTable | null {
   const cells = grid.filter((row) => row.length > 0);
   if (cells.length === 0) return null;
   const figures = cells.map(figuresOf);
   const isText = (cell: GridCell) => cell.text !== "" && parseValue(cell.text) === null;
+  const over = (cell: GridCell, figure: Figure) => cell.column <= figure.last && cell.column + cell.span > figure.first;
   const dated = (index: number, figure: Figure, label: GridCell) => cells.slice(0, index).some((row) => row.some((cell) =>
-    YEAR.test(cell.text) && cell.column >= label.column + label.span && cell.column <= figure.last && cell.column + cell.span > figure.first));
+    YEAR.test(cell.text) && cell.column >= label.column + label.span && over(cell, figure)
+    && figures[index]!.every((other) => other === figure || !over(cell, other))));
   const found = cells.findIndex((row, index) => figures[index]!.some((figure) => {
     const label = row.find((cell) => cell.column < figure.first && isText(cell));
     return label !== undefined && (!figure.year || dated(index, figure, label));
@@ -288,9 +299,9 @@ function slotsOf(rows: ReadonlyArray<ReadonlyArray<Figure>>): { slots: Array<[fi
 // number of shares, which are reflected in thousands)" and "Amounts in
 // millions, except shares (in thousands)" are in millions.
 function scalesIn(text: string): TableScale[] {
-  return text.replace(/\bexcept\b(?:[^().]|\([^()]*\))*/gi, "").split(/[()]|\.\s/).flatMap((note) => {
-    const scale = SCALE.exec(note)?.[1];
-    return scale ? [scale.toLowerCase() as TableScale] : [];
+  return [...text.replace(/\bexcept\b(?:[^().]|\([^()]*\))*/gi, "").matchAll(/\(([^()]*)\)|[^()]+/g)].flatMap(([prose, note]) => {
+    const notes = note === undefined ? prose.split(/\.\s/).map((sentence) => SCALE.exec(sentence)) : [NOTE_SCALE.exec(note)];
+    return notes.flatMap((match) => (match ? [match[1]!.toLowerCase() as TableScale] : []));
   });
 }
 
@@ -306,19 +317,20 @@ function figuresOf(row: ReadonlyArray<GridCell>): Figure[] {
     const dollar = row[index - 1]?.text === "$" ? row[index - 1]! : undefined;
     const percent = /^\)?%$/.test(row.slice(index + 1).find((next) => next.text !== "" && next.text !== ")")?.text ?? "");
     const value: ParsedValue = percent
-      ? { value_num: parsed.value_num, unit: "percent" }
+      ? { value_num: parsed.value_num, unit: "percent", decimals: parsed.decimals }
       : dollar && parsed.currency === undefined ? { ...parsed, unit: "currency", currency: "USD" } : parsed;
     return [{ first: dollar?.column ?? cell.column, last: cell.column + cell.span - 1, value, year: BARE_YEAR.test(cell.text) }];
   });
 }
 
 // Whether a total sums a run of the lines just above it, to the rounding of
-// its printed figures: half a unit of the last decimal each.
-function restates(total: number, lines: ReadonlyArray<NonGaapAdjustment>): boolean {
-  const decimals = (value: number) => String(value).split(".")[1]?.length ?? 0;
-  const unit = 10 ** -Math.max(decimals(total), ...lines.map((line) => decimals(line.value_num)));
+// its printed figures: half a unit of the last printed decimal each. A total
+// of one line prints that line's figure.
+function restates(total: ParsedValue, anchor: GaapAnchor): boolean {
+  const unit = 10 ** -Math.max(total.decimals, anchor.decimals);
   let sum = 0;
-  return [...lines].reverse().some((line, index) => Math.abs((sum += line.value_num) - total) <= ((index + 2) * unit) / 2);
+  return [...anchor.adjustments].reverse().some((line, index) =>
+    Math.abs((sum += line.value_num) - total.value_num) <= (index === 0 ? 0 : ((index + 2) * unit) / 2));
 }
 
 function isGaapLabel(label: string): boolean {
@@ -355,7 +367,8 @@ function measuresIn(text: string, head: boolean): string[] {
 }
 
 // A row label names the measure its head names, so "Impact of non-GAAP
-// adjustments to operating income" is an impact; a section header names any.
+// adjustments to operating income" is an impact and "Non-GAAP operating
+// income adjustments" adjustments; a section header names any.
 function measureKeyFromLabel(label: string, head: boolean): string {
   // Read before the parentheses go, as "per share (basic)" prints it.
   const basic = /\bbasic\b/i.test(label) && !/\bdiluted\b/i.test(label);
@@ -368,6 +381,8 @@ function measureKeyFromLabel(label: string, head: boolean): string {
     .trim()
     .toLowerCase();
   const named = head ? normalized.split(/\s(?:of|to|on|in|from|for)\s/)[0]! : normalized;
+  const key = normalized.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (head && /\badjustments?\b/.test(named)) return key;
 
   if (/\bper\s+(?:diluted\s+|basic\s+)?(?:common\s+)?share\b|earnings per share|\beps\b/.test(named)) {
     return basic ? "eps_basic" : "eps_diluted";
@@ -376,7 +391,7 @@ function measureKeyFromLabel(label: string, head: boolean): string {
   if (/net\s+(income|loss)/.test(named)) return "net_income";
   if (/gross\s+(?:profit|margin)/.test(named)) return "gross_profit";
   if (/ebitda/.test(named)) return "ebitda";
-  return normalized.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return key;
 }
 
 // A figure as a release prints it: "$1,234", "(56)", "(56" with its ")" in
@@ -389,10 +404,12 @@ function parseValue(raw: string): ParsedValue | null {
   if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return null;
   const value = Number(normalized);
   if (!Number.isFinite(value)) return null;
-  if (/%\)?$/.test(text)) return { value_num: negative ? -value : value, unit: "percent" };
+  const decimals = normalized.split(".")[1]?.length ?? 0;
+  if (/%\)?$/.test(text)) return { value_num: negative ? -value : value, unit: "percent", decimals };
   const parsed: ParsedValue = {
     value_num: negative ? -value : value,
     unit: currency ? "currency" : "number",
+    decimals,
   };
   if (currency !== undefined) parsed.currency = currency;
   return parsed;
