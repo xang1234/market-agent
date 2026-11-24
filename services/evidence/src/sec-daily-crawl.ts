@@ -13,12 +13,14 @@ export type DailyCrawlClient = { fetchDailyIndex(date: Date): Promise<FilingInde
 
 // Handlers fetch the filing they're dispatched (the submission .txt), so the
 // capability they need is fetchFiling — not the index fetch the orchestrator uses.
-// A cause as the ledger's jsonb can hold it: Postgres rejects a NUL in jsonb
-// text, and a parser error can quote raw filing bytes. Capped so one quoted
+// A cause as the ledger's jsonb can hold it: Postgres rejects a NUL or a lone
+// surrogate in jsonb text, and a parser error can quote raw filing bytes. Capped so one quoted
 // document cannot bloat the row.
 const CAUSE_MAX = 500;
 function storableCause(cause: Error): string {
-  return (cause.message || cause.name).replace(/\u0000/g, "").slice(0, CAUSE_MAX);
+  const clean = (text: string) => text.replace(/\u0000/g, "").toWellFormed();
+  // Capped by code point, so the cut never leaves half a surrogate pair, which jsonb rejects too.
+  return Array.from(clean(cause.message) || clean(cause.name)).slice(0, CAUSE_MAX).join("");
 }
 
 export type FormHandlerDeps = { db: QueryExecutor; objectStore: ObjectStore; client: SecFilingFetcher };

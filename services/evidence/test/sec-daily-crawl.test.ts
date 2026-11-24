@@ -84,6 +84,23 @@ test("a cause quoting a NUL byte or a whole document is stored as jsonb can hold
   assert.ok(cause.startsWith("bad <xml>x"));
 });
 
+test("a cause is cut by code point and never holds a lone surrogate or reads empty", async () => {
+  const causeOf = async (message: string) => {
+    const boom: FormHandler = async () => { throw new Error(message); };
+    const d = deps();
+    const result = await crawlDailyFilings(
+      { db: d.db, client: d.client, objectStore: {} as never },
+      { date: new Date("2026-06-12T00:00:00Z"), handlers: { "4": boom } },
+    );
+    return result.byForm["4"].failures[0]!.cause;
+  };
+  const emojiAtCut = await causeOf(`${"a".repeat(499)}\u{1F600}tail`);
+  assert.ok(emojiAtCut.isWellFormed());
+  assert.equal(emojiAtCut, `${"a".repeat(499)}\u{1F600}`);
+  assert.ok((await causeOf("prefix\uD83Dsuffix")).isWellFormed());
+  assert.equal(await causeOf("\u0000"), "Error");
+});
+
 test("a form whose only filing failed is recorded failed with its cause, and the crawl goes on", async () => {
   const ok: FormHandler = async (entry) => STORED(entry.accession);
   const boom: FormHandler = async () => { throw new Error("parse failed"); };
