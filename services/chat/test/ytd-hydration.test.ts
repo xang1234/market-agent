@@ -40,6 +40,16 @@ function fakeMarket(answers: Record<string, ReadonlyArray<"full" | "stale" | "em
   return { requests, fetchImpl };
 }
 
+// Each listing's outcome: its status, or a failure's cause.
+async function read(fetchImpl: typeof fetch): Promise<string[]> {
+  const outcomes = await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl });
+  return LISTINGS.map((listing) => {
+    const outcome = outcomes.get(listing.id)!;
+    return outcome.status === "failed" ? outcome.cause.message : outcome.status;
+  });
+}
+const marketFailed = (listing: { id: string }, reason: string) => `the market could not answer for ${listing.id} (${reason}) just now`;
+
 test("frozen data modes never fetch live prices; live mode uses the market service (#232)", () => {
   assert.equal(marketHydrationOrigin({ MARKET_ORIGIN: "http://127.0.0.1:4321" }), "http://127.0.0.1:4321");
   assert.equal(marketHydrationOrigin({ MARKET_ORIGIN: "http://127.0.0.1:4321", DEV_NO_KEYS: "true" }), null);
@@ -101,36 +111,33 @@ test("before the close, the fetch stops at the last completed session, never the
   assert.equal((market.requests[0].body.range as { end: string }).end, "2026-08-31T04:00:00.000Z");
 });
 
-test("resolves to the listings the market has no bars for on any basis, and to none when every listing has them (#665)", async () => {
+test("a listing the market has no bars for on any basis reads empty, and one with bars reads stored (#665)", async () => {
   const both = fakeMarket({ split_adjusted: ["full", "full"] });
-  assert.deepEqual(await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: both.fetchImpl }), []);
+  assert.deepEqual(await read(both.fetchImpl), ["stored", "stored"]);
   const one = fakeMarket({ split_adjusted: ["full", "empty"], split_and_div_adjusted: ["full", "unavailable"] });
-  assert.deepEqual(await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: one.fetchImpl }), [LISTINGS[1].id]);
+  assert.deepEqual(await read(one.fetchImpl), ["stored", "empty"]);
   // A window that is not current still stored bars.
   const stale = fakeMarket({ split_adjusted: ["stale", "stale"], split_and_div_adjusted: ["unavailable", "unavailable"] });
-  assert.deepEqual(await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: stale.fetchImpl }), []);
+  assert.deepEqual(await read(stale.fetchImpl), ["stored", "stored"]);
   // The split-adjusted answer says so: a dividend-adjusted fallback that failed changes nothing.
   const fallback = fakeMarket({ split_adjusted: ["full", "empty"], split_and_div_adjusted: ["full", "refused"] });
-  assert.deepEqual(await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: fallback.fetchImpl }), [LISTINGS[1].id]);
+  assert.deepEqual(await read(fallback.fetchImpl), ["stored", "empty"]);
   const uncovered = fakeMarket({ split_adjusted: ["full", "unavailable"], split_and_div_adjusted: ["full", "rate_limited"] });
-  assert.deepEqual(await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: uncovered.fetchImpl }), [LISTINGS[1].id]);
+  assert.deepEqual(await read(uncovered.fetchImpl), ["stored", "empty"]);
 });
 
-test("a listing the market failed for rejects, so the step reads failed and is retried, whether or not it may retry (#665)", async () => {
+test("a listing the market failed for reads failed with its cause, so the step reads failed and is retried, whether or not it may retry (#665)", async () => {
   // No dividend-adjusted coverage (Polygon never serves that basis) says nothing about the listing's bars.
   const limited = fakeMarket({ split_adjusted: ["full", "rate_limited"], split_and_div_adjusted: ["full", "unavailable"] });
-  await assert.rejects(hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: limited.fetchImpl }), /rate_limited/);
+  assert.deepEqual(await read(limited.fetchImpl), ["stored", marketFailed(LISTINGS[1], "rate_limited")]);
   // A refused request (a bad key, a malformed answer) is no answer about the listing's bars either.
   const refused = fakeMarket({ split_adjusted: ["full", "refused"], split_and_div_adjusted: ["full", "unavailable"] });
-  await assert.rejects(hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: refused.fetchImpl }), /provider_error/);
+  assert.deepEqual(await read(refused.fetchImpl), ["stored", marketFailed(LISTINGS[1], "provider_error")]);
 });
 
-test("a listing the market failed for rejects with the listings it did answer have no bars, so their hold is kept (#689)", async () => {
+test("a listing the market answered with no bars reads empty beside one it failed for, so its hold is kept (#689)", async () => {
   const mixed = fakeMarket({ split_adjusted: ["empty", "rate_limited"], split_and_div_adjusted: ["unavailable", "unavailable"] });
-  await assert.rejects(
-    hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: mixed.fetchImpl }),
-    (error: Error & { noBars?: ReadonlyArray<string> }) => /rate_limited/.test(error.message) && error.noBars?.join() === LISTINGS[0].id,
-  );
+  assert.deepEqual(await read(mixed.fetchImpl), ["empty", marketFailed(LISTINGS[1], "rate_limited")]);
 });
 
 test("a refused or rate-limited dividend-adjusted fallback request changes nothing, as its outcome would not (#689)", async () => {
@@ -138,13 +145,13 @@ test("a refused or rate-limited dividend-adjusted fallback request changes nothi
     const split = fakeMarket({ split_adjusted: ["full", "unavailable"] });
     const fetchImpl = (async (url: URL | string, init?: RequestInit) =>
       (JSON.parse(String(init?.body)) as { basis: string }).basis === "split_adjusted" ? split.fetchImpl(url, init) : new Response("no", { status })) as typeof fetch;
-    assert.deepEqual(await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl }), [LISTINGS[1].id], String(status));
+    assert.deepEqual(await read(fetchImpl), ["stored", "empty"], String(status));
   }
 });
 
-test("a market failure or a hung market rejects, so the turn's step reads failed", async (t) => {
+test("a market failure reads failed for every listing, and a hung market rejects, so the turn's step reads failed", async (t) => {
   const failing = (async () => new Response("down", { status: 502 })) as typeof fetch;
-  await assert.rejects(hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: failing }), /answered 502/);
+  assert.deepEqual(await read(failing), LISTINGS.map((listing) => marketFailed(listing, "answered 502")));
   // A market that never answers is cut off by the timeout.
   const keepAlive = setInterval(() => {}, 1_000);
   t.after(() => clearInterval(keepAlive));
