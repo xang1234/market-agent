@@ -35,7 +35,7 @@ import { claimSources } from "./render-assertions.ts";
 import { ANSWER_DEADLINES, renderedAnswer, withDeadlines, type AnswerInput, type DroppedClaims } from "./llm-runtime.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS, LATEST, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 import { turnStopSignal } from "./turn-stop.ts";
-import { isFinding, runDetectors, type DetectorOutcome } from "./standout-findings.ts";
+import { isFinding, noFindingNote, runDetectors, type DetectorOutcome } from "./standout-findings.ts";
 import { shownAs } from "./verdicts.ts";
 import type { AssertionReport } from "./assertions.ts";
 
@@ -347,11 +347,12 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
     return pending.then((loading) => (loading ? [issuer] : []));
   })).then((lists) => lists.flat());
 
-  // One engine request per ask, published to the turn: what the tool returns of a published one is `shown`'s.
-  const certify = (tool: CertifyingTool, ask: CertifiedAsk, shown: (published: Published, packet: EvidencePacket) => JsonObject): Promise<ToolLoopOutput> => {
+  // One engine request per ask: what the tool returns of a published one is `read`'s, and its figures join the answer when `read` keeps them.
+  const certify = (tool: CertifyingTool, ask: CertifiedAsk, read: (published: Published, packet: EvidencePacket) => { fields: JsonObject; kept: boolean }): Promise<ToolLoopOutput> => {
     const prior = asked.get(ask.fingerprint);
     if (prior) return prior;
-    for (const issuer of ask.subjects) askedFor.add(issuer);
+    // Only an ask for figures can say a company has none; a findings run that keeps none says so in its note.
+    if (tool === "certified_financials") for (const issuer of ask.subjects) askedFor.add(issuer);
     const answer = (async (): Promise<ToolLoopOutput> => {
       const loading = await stillLoading(ask.subjects);
       if (loading.length > 0) notes.push(`Filings for ${labelList(loading.map(labelOf))} are still loading; ask again in a minute.`);
@@ -378,8 +379,9 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
       }
       return certifiedOutput(tool, outcome, who, async (published) => {
         const packet = await published.packet();
-        certified.push({ block: published.block, packet, subjects: ask.subjects });
-        return shown(published, packet);
+        const { fields, kept } = read(published, packet);
+        if (kept) certified.push({ block: published.block, packet, subjects: ask.subjects });
+        return fields;
       }, notes);
     })();
     asked.set(ask.fingerprint, answer);
@@ -439,25 +441,34 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
       const ask = certifiedAsk(args, known, job.incomeLines);
       if ("invalid" in ask) return invalid("certified_financials", ask.invalid);
       return certify("certified_financials", ask, (_published, packet) => ({
-        figures: packet.figures.map((figure) => ({
-          ...(figure.company ? { company: figure.company } : {}),
-          metric: figure.metric,
-          period: figure.period ?? "",
-          ...(figure.gap === undefined ? { value: figure.value } : { gap: figure.gap }),
-        })),
+        kept: true,
+        fields: {
+          figures: packet.figures.map((figure) => ({
+            ...(figure.company ? { company: figure.company } : {}),
+            metric: figure.metric,
+            period: figure.period ?? "",
+            ...(figure.gap === undefined ? { value: figure.value } : { gap: figure.gap }),
+          })),
+        },
       }));
     },
     get_findings: async (args) => {
       const ask = findingsAsk(args, known);
       if ("invalid" in ask) return invalid("get_findings", ask.invalid);
+      // A run with no finding shows no figures, only a note of what each detector declined.
       return certify("get_findings", ask, (published) => {
         const company = labelOf(ask.subjects[0]!);
         const outcomes = runDetectors(published.content, company);
-        found.push({ company, outcomes });
+        const none = noFindingNote(company, outcomes);
+        if (none === null) found.push({ company, outcomes });
+        else notes.push(none);
         return {
-          company,
-          findings: outcomes.filter(isFinding).map((finding) => ({ detector: finding.detector_id, statement: finding.statement })),
-          declined: outcomes.flatMap((outcome) => (isFinding(outcome) ? [] : [{ detector: outcome.detector_id, reason: outcome.reason, detail: outcome.detail }])),
+          kept: none === null,
+          fields: {
+            company,
+            findings: outcomes.filter(isFinding).map((finding) => ({ detector: finding.detector_id, statement: finding.statement })),
+            declined: outcomes.flatMap((outcome) => (isFinding(outcome) ? [] : [{ detector: outcome.detector_id, reason: outcome.reason, detail: outcome.detail }])),
+          },
         };
       });
     },

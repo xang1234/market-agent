@@ -113,6 +113,27 @@ test("standout findings", { timeout: 300_000 }, async (t) => {
     assert.ok(composed?.instructions?.some((rule) => rule.startsWith("evidence_packet.findings")), "the answer is told how to cite a finding");
   });
 
+  await t.test("a get_findings run with no finding adds no figures to the answer, only a note naming each detector's decline", async () => {
+    const issuer = await seedIssuer(db, { revenue: (year) => (year >= 2022 ? "1000" : null), operating_income: (year) => (year >= 2022 ? "100" : null) });
+    const router: ControlledRouter = (() => {
+      let sent = 0;
+      const steps = [{ toolCalls: [{ id: "c1", name: "get_findings", arguments: { subject_ref: { kind: "issuer", id: issuer } } }] }, { text: "DONE" }];
+      return { complete: async () => ({ text: "", ...steps[sent++], deployment: { channel: "openai", model: "o3" } }) };
+    })();
+    const runId = randomUUID();
+    const section = await analystSectionRunner({
+      financial: { pool, evidence: createEvidenceFinancialPort },
+      router: async () => router,
+      read: async () => assert.fail("no stored read"),
+      compose: async () => assert.fail("nothing to write from"),
+    })({ subject: { issuer_id: issuer, label: "AAA" }, goal: "What stands out in AAA's history?", sectionId: "findings", userId: IDS.owner, runId, authority: chatAuthority(IDS.owner, threadId, runId), snapshotId: randomUUID(), asOf: new Date().toISOString() });
+    assert.deepEqual(section.packet?.figures, []);
+    assert.equal(section.packet?.findings, undefined);
+    assert.deepEqual(section.packet?.gaps, [
+      "AAA: no standout finding in its own history (operating margin: fewer fiscal years on file than it ranks; stock-based compensation as a multiple of free cash flow: fewer fiscal years on file than it ranks; cash conversion (operating cash flow / net income): fewer fiscal years on file than it ranks).",
+    ]);
+  });
+
   await t.test("a missing year, a non-positive base and a year inside the range each decline by name", async () => {
     const issuer = await seedIssuer(db, {
       revenue: (year) => (year === 2017 ? null : "1000"),

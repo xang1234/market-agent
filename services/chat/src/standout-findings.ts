@@ -149,3 +149,18 @@ export function runDetectors(content: FinancialAnswerContent, company: string): 
 }
 
 export const isFinding = (outcome: DetectorOutcome): outcome is Finding => "statement" in outcome;
+
+const DECLINE_WORDS: Readonly<Record<DeclineReason, string>> = {
+  incomplete_history: "fewer fiscal years on file than it ranks",
+  tag_change: "a year filed under another concept",
+  non_positive_base: "a zero or negative base",
+  engine_gap: "not computed",
+  within_range: "the latest year is not at the extreme",
+};
+
+/** What a run with no finding says of each detector; null when one found something. */
+export function noFindingNote(company: string, outcomes: ReadonlyArray<DetectorOutcome>): string | null {
+  if (outcomes.some(isFinding)) return null;
+  const labelOf = new Map(DETECTORS.map((detector) => [detector.id, detector.label]));
+  return `${company}: no standout finding in its own history (${outcomes.map((outcome) => `${labelOf.get(outcome.detector_id)}: ${DECLINE_WORDS[(outcome as Decline).reason]}`).join("; ")}).`;
+}
