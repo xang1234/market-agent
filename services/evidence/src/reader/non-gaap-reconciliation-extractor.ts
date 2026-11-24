@@ -93,11 +93,12 @@ const ROW = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
 // Inline XBRL closes an empty cell in its tag: <td colspan="3"/>.
 const CELL = /<t[dh]\b([^>]*?)(?:\/>|>([\s\S]*?)<\/t[dh]>)/gi;
 const SCALE = /\bin\s+(thousands|millions|billions)\b/i;
-// A note that its amounts are whole dollars, which no earlier table's scale overrides.
-const UNSCALED = /\bin\s+(?:u\.?s\.?\s+)?dollars\b|\(\s*(?:u\.?s\.?\s+)?dollars\s*\)/i;
+// A note that its amounts are whole dollars, which no earlier table's scale overrides;
+// "per share amounts in dollars" says so of per-share figures only.
+const UNSCALED = /(?<!\bper\s+share\s+(?:amounts?|data)\s+)\bin\s+(?:u\.?s\.?\s+)?dollars\b|\(\s*(?:u\.?s\.?\s+)?dollars\s*\)/i;
 // A note in parentheses can open with its scale, as AMD's "(Millions)"; a sentence cannot, and
 // "(billions of devices)" or "(thousands of employees)" counts something else.
-const NOTE_SCALE = /\bin\s+(thousands|millions|billions)\b|^\s*(thousands|millions|billions)\b(?!\s+of\b)/i;
+const NOTE_SCALE = /\bin\s+(thousands|millions|billions)\b|^\s*(thousands|millions|billions)\b(?!\s+of\b(?!\s+(?:u\.?s\.?\s+)?dollars\b))/i;
 
 export function extractNonGaapReconciliations(
   input: ExtractNonGaapReconciliationsInput,
@@ -266,7 +267,7 @@ function tableOf(grid: ReadonlyArray<ReadonlyArray<GridCell>>, above: string, co
     }),
   })]);
   const text = cells.flat().map((cell) => cell.text).join(" ");
-  const scale = scalesIn(text)[0] ?? scalesIn(above).at(-1) ?? (UNSCALED.test(text) || UNSCALED.test(above) ? undefined : continued);
+  const scale = scalesIn(text)[0] ?? scalesIn(above).at(-1) ?? (UNSCALED.test(text) ? undefined : continued);
   return Object.freeze({ rows: Object.freeze(rows), periods: Object.freeze(periods), text, ...(scale ? { scale } : {}) });
 }
 
@@ -388,9 +389,10 @@ function measureKeyFromLabel(label: string, head: boolean): string {
     .replace(/^\s*total\b/i, "")
     .trim()
     .toLowerCase();
-  const named = head ? normalized.split(/\s(?:of|to|on|in|from|for|before|after|excluding|without|including|less)\s/)[0]! : normalized;
+  const named = head ? normalized.split(/\s(?:of|to|on|in|from|for)\s/)[0]! : normalized;
   const key = normalized.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  if (head && /\badjustments?\b/.test(named)) return key;
+  // "Operating income adjustments" names no measure; "operating income before adjustments" does.
+  if (head && /\badjustments?\b/.test(named.split(/\s(?:before|after|excluding|without|including|less)\s/)[0]!)) return key;
 
   if (/\bper\s+(?:diluted\s+|basic\s+)?(?:common\s+)?share\b|earnings per share|\beps\b/.test(named)) {
     return basic ? "eps_basic" : "eps_diluted";

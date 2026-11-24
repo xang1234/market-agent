@@ -492,6 +492,23 @@ test("a table's scale ignores an exception's parenthetical, and reads a bare \"(
   // A table that says its amounts are dollars keeps no earlier scale (Devin on #764).
   const dollars = `<table><tr><td>Amounts in dollars</td><td>Q3 2025</td></tr><tr><td>GAAP operating income</td><td>$20,000,000</td></tr></table>`;
   assert.deepEqual(readTables(`<p>(in millions)</p>${table}\n${dollars}`).map((read) => read.scale), ["millions", undefined]);
+  // A per-share note in dollars keeps the scale, and a scale "of dollars" is one (delta review on #764).
+  const perShare = `<table><tr><td>(Except per share amounts in dollars)</td><td>Q3 2025</td></tr><tr><td>Revenue</td><td>$100</td></tr></table>`;
+  assert.deepEqual(readTables(`<p>(in millions)</p>${table}\n${perShare}`).map((read) => read.scale), ["millions", "millions"]);
+  assert.equal(readTables(`<p>(Millions of dollars, except per share data)</p>${table}`)[0]!.scale, "millions");
+  assert.equal(readTables(`<p>(Thousands of U.S. dollars)</p>${table}`)[0]!.scale, "thousands");
+});
+
+test("a measure per share stays per share past less or excluding (delta review on #764)", () => {
+  for (const label of ["GAAP net income less preferred dividends per diluted share", "GAAP net income excluding special items per diluted share"]) {
+    const html = `<table>
+      <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th></tr>
+      <tr><td>${label}</td><td>$1.00</td></tr>
+      <tr><td>Stock-based compensation</td><td>0.10</td></tr>
+      <tr><td>Non-GAAP net income per diluted share</td><td>$1.10</td></tr>
+    </table>`;
+    assert.deepEqual(lines(html).map((line) => line[0]), ["eps_diluted"], label);
+  }
 });
 
 test("a total sums its lines to each one's printed rounding, its own included (Devin on #764)", () => {
