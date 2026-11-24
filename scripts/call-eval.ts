@@ -52,14 +52,14 @@ const ENGINE_OUTCOMES: ReadonlyArray<Extract<CallEngineFigure, { kind: "gap" }>>
 
 /** AAPL as a full declined Call, NVDA's blocked free cash flow, each engine outcome on each input, and each input outcome the model finds. */
 export const CALL_CASES: ReadonlyArray<CallCase> = [
-  { id: "aapl", evidence: AAPL, rule: 1, cites: ["bear_case"] },
-  { id: "aapl-no-consensus", evidence: { ...AAPL, consensus: [] }, rule: 1, cites: ["bear_case"] },
-  { id: "aapl-no-closes", evidence: { ...AAPL, closes: null }, rule: 1, cites: ["anchored_exit_multiple", "bear_case"] },
+  { id: "aapl", evidence: AAPL, rule: 1, cites: ["base_case"] },
+  { id: "aapl-no-consensus", evidence: { ...AAPL, consensus: [] }, rule: 1, cites: ["base_case"] },
+  { id: "aapl-no-closes", evidence: { ...AAPL, closes: null }, rule: 1, cites: ["anchored_exit_multiple", "bear_case", "base_case"] },
   {
     id: "aapl-fy2019-free-cash-flow-blocked",
     evidence: { ...AAPL, history: AAPL_HISTORY.map((year) => year.fiscal_year === 2019 ? { ...year, figures: { ...year.figures, free_cash_flow: ENGINE_OUTCOMES[2]! } } : year) },
     rule: 1,
-    cites: ["anchored_exit_multiple", "bear_case"],
+    cites: ["anchored_exit_multiple", "bear_case", "base_case"],
   },
   { id: "nvda-free-cash-flow-blocked", evidence: with_("free_cash_flow", ENGINE_OUTCOMES[2]!), rule: 0, cites: ["free_cash_flow"] },
   ...FACTS.flatMap((fact) => ENGINE_OUTCOMES.map((outcome): CallCase => ({
@@ -74,7 +74,7 @@ export const CALL_CASES: ReadonlyArray<CallCase> = [
   { id: "stale-price", evidence: { ...AAPL, price_date: "2026-10-30" }, rule: 0, cites: ["share_price"] },
   { id: "non-positive-free-cash-flow", evidence: { ...AAPL, figures: { ...AAPL.figures, free_cash_flow: { kind: "value", value: "-1", currency: "USD" } } }, rule: 0, cites: ["free_cash_flow"] },
   { id: "non-usd-price", evidence: { ...AAPL, figures: { ...AAPL.figures, share_price: { kind: "value", value: "342.37", currency: "EUR" } } }, rule: 0, cites: ["share_price"] },
-  { id: "no-multiple-today", evidence: { ...AAPL, figures: { ...AAPL.figures, net_cash: { kind: "value", value: "5000000000000", currency: "USD" } } }, rule: 1, cites: ["anchored_exit_multiple", "bear_case"] },
+  { id: "no-multiple-today", evidence: { ...AAPL, figures: { ...AAPL.figures, net_cash: { kind: "value", value: "5000000000000", currency: "USD" } } }, rule: 1, cites: ["anchored_exit_multiple", "bear_case", "base_case"] },
 ];
 
 function with_(fact: CallFactId, figure: CallEngineFigure): CallEvidence {
