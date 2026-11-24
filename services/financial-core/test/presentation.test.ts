@@ -452,6 +452,45 @@ test("a missing input reads in no scope of another company's figures outside its
   assert.equal(labelTexts(engineAnswer(capexWindow(["c2019", "c2020", "c2021"], ["c2019", "c2020", "c2021"]), years, { a: "Caterpillar Inc." }), "o_c2019")[1], PRODUCTIVE_ASSETS_CAPEX);
 });
 
+// Apple's OCF has no filing here and its capex is PP&E; NVIDIA files its OCF for continuing operations.
+test("a missing input read by two outputs reads in each one's own column, never across both (#744)", () => {
+  const plan = comparisonPlan([
+    ...["a", "b"].map((slot) => reportedAt(`${slot}_ocf`, slot, "operating_cash_flow", FY(2023))),
+    reportedAt("a_capex", "a", "capex", FY(2023)),
+    { node_id: "a_fcf", operation: "free_cash_flow", operation_version: "free_cash_flow.v1", operating_cash_flow: "a_ocf", capex: "a_capex" },
+  ], ["a_ocf", "b_ocf", "a_fcf"]);
+  const facts = { b_ocf: fiscalYearFact("b", "operating_cash_flow", 2023, "900", CONTINUING_OPERATIONS), a_capex: fiscalYearFact("a", "capex", 2023, "100") };
+  const content = engineAnswer(plan, facts, { a: "Apple Inc.", b: "NVIDIA Corp" });
+  assert.deepEqual(["o_a_ocf", "o_a_fcf"].map((output) => labelTexts(content, output)[1]), [CONTINUING_OCF, "Free cash flow (OCF less PP&E cash capex)"]);
+  assert.ok(!("concept_scopes" in content.labels[result(content, "o_a_fcf").measure_label_id]!));
+});
+
+// Apple files its OCF in the reviewed concept and has no capex filing; NVIDIA files both in a scope.
+test("a missing input reads in no scope of figures whose other inputs keep them out of its column (#744)", () => {
+  const plan = comparisonPlan(["a", "b"].flatMap((slot) => [
+    reportedAt(`${slot}_ocf`, slot, "operating_cash_flow", FY(2023)),
+    reportedAt(`${slot}_capex`, slot, "capex", FY(2023)),
+    { node_id: `${slot}_fcf`, operation: "free_cash_flow" as const, operation_version: "free_cash_flow.v1", operating_cash_flow: `${slot}_ocf`, capex: `${slot}_capex` },
+  ]), ["a_fcf", "b_fcf"]);
+  const facts = {
+    a_ocf: fiscalYearFact("a", "operating_cash_flow", 2023, "500"),
+    b_ocf: fiscalYearFact("b", "operating_cash_flow", 2023, "900", CONTINUING_OPERATIONS),
+    b_capex: fiscalYearFact("b", "capex", 2023, "100", PRODUCTIVE_ASSETS),
+  };
+  const content = engineAnswer(plan, facts, { a: "Apple Inc.", b: "NVIDIA Corp" });
+  assert.deepEqual(["o_a_fcf", "o_b_fcf"].map((output) => labelTexts(content, output)[1]), ["Free cash flow (OCF less PP&E cash capex)", BOTH_SCOPES_FCF]);
+});
+
+// Apple's Q1 FY2024 capex has no filing here; NVIDIA files its FY2023 capex as productive assets.
+test("a missing quarter reads in no scope of a fiscal year beside it, which is another column (#744)", () => {
+  const plan = comparisonPlan([
+    reportedAt("a_capex", "a", "capex", { kind: "fiscal_period", fiscal_year: 2024, fiscal_period: "Q1" }),
+    reportedAt("b_capex", "b", "capex", FY(2023)),
+  ], ["a_capex", "b_capex"]);
+  const content = engineAnswer(plan, { b_capex: fiscalYearFact("b", "capex", 2023, "100", PRODUCTIVE_ASSETS) }, { a: "Apple Inc.", b: "NVIDIA Corp" });
+  assert.deepEqual(["o_a_capex", "o_b_capex"].map((output) => labelTexts(content, output)[1]), ["Capital expenditures (PP&E cash payments)", PRODUCTIVE_ASSETS_CAPEX]);
+});
+
 // Cash conversion over a continuing-operations OCF is the engine's incompatible_definition gap (operations.ts ratio), so
 // its measure, and with it its label and its key, carries no scope.
 const cashConversion = (slot: string, year: number) => [

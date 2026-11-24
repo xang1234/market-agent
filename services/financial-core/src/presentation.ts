@@ -162,7 +162,7 @@ export function presentFinancialUnit(input: {
   const { plan } = input;
   const outputNodes = plan.outputs.filter((output) => output.unit_id === input.unit_id).map((output) => output.node_id);
   const read = dependencyClosure(plan, outputNodes);
-  const scoped = scopeReader(plan, input.concept_scopes, outputNodes);
+  const scopesFor = scopeReader(plan, input.concept_scopes, outputNodes);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const readsOf = periodReader(plan, nodes, input.periods);
   const byOutput = new Map(input.results.map((result) => [result.output_id, result]));
@@ -179,6 +179,7 @@ export function presentFinancialUnit(input: {
     if (!result) throw new RangeError(`no committed result for output ${output.output_id}`);
     const node = nodes.get(output.node_id)!;
     const slot = subjectSlot(plan, node);
+    const scoped = scopesFor(output.node_id);
     return {
       result_id: result.result_id,
       output_id: output.output_id,
@@ -370,7 +371,7 @@ function lineOf(plan: FinancialPlan, node: OperationNode, measureLabelId: string
 }
 
 // A column is a line and a rank, not a period: ranked from the requested period so a gap keeps its column, and a company missing a newer period shifts left.
-function columnKeyByResult(results: ReadonlyArray<PresentedResult>, lines: ReadonlyMap<string, Line>): ReadonlyMap<string, string> {
+function columnKeyByResult(results: ReadonlyArray<Pick<PresentedResult, "result_id" | "subject_label_id">>, lines: ReadonlyMap<string, Line>): ReadonlyMap<string, string> {
   const groups = new Map<string, Array<{ result_id: string } & Line>>();
   for (const result of results) {
     const line = lines.get(result.result_id)!;
@@ -488,37 +489,59 @@ export type BoundScopes = ReadonlyMap<LocalId, ConceptScopeV1 | null>;
 type ScopesOf = (node: OperationNode) => ReadonlyArray<ConceptScopeV1["kind"]>;
 
 // A node's concept scopes are those of the bound inputs it reads (#731), so a label never turns on which member of a
-// ranking or which side of a change comes first. An unbound input reads as the bound inputs of its metric beside it
-// when they share one scope, so a missing member never opens a column or series of the reviewed concept beside
-// scoped figures. Beside it means the same company's, or those read by outputs of its own structure, which are one
-// table column or ranking (#744). Inputs of one metric in two scopes leave it its metric's reviewed concept. A ratio's
-// measure carries no scope (operations.ts ratio), so neither does a node read through one.
-function scopeReader(plan: FinancialPlan, bound: BoundScopes, outputs: ReadonlyArray<LocalId>): ScopesOf {
+// ranking or which side of a change comes first. An unbound input reads, within each output that reads it, as the
+// bound inputs of its metric beside that output when they share one scope, so a missing member never opens a column
+// or series of the reviewed concept beside scoped figures. Beside it are the output itself (a ranking's members) and
+// the outputs it would share a table column or series with if no figure carried a scope, whose bound inputs agree with
+// its own (#744). So a heading names a scope only when each figure under it carries it or is missing beside one that
+// does. A ratio's measure carries no scope (operations.ts ratio), so neither does a node read through one.
+function scopeReader(plan: FinancialPlan, bound: BoundScopes, outputs: ReadonlyArray<LocalId>): (output: LocalId) => ScopesOf {
   const nodeOf = (id: LocalId) => plan.operations.find((candidate) => candidate.node_id === id)!;
-  const structures = Map.groupBy(outputs, (id) => structureKey(plan, nodeOf(id)));
-  const groups = [...structures.values()].map((ids) => dependencyClosure(plan, ids));
-  const reported = plan.operations.filter((node): node is ReportedMetricNode => node.operation === "reported_metric" && groups.some((group) => group.has(node.node_id)));
-  const beside = (node: ReportedMetricNode, other: ReportedMetricNode) =>
-    other.subject_slot === node.subject_slot || groups.some((group) => group.has(node.node_id) && group.has(other.node_id));
-  const inherited = (node: ReportedMetricNode) => {
-    const kinds = new Set(reported.filter((other) => other.metric_key === node.metric_key && bound.has(other.node_id) && beside(node, other)).map((other) => bound.get(other.node_id)?.kind ?? null));
-    return kinds.size === 1 ? [...kinds][0] ?? null : null;
+  const boundKinds = new Map(outputs.map((output) => {
+    const reported = [...dependencyClosure(plan, [output])].map(nodeOf).filter((node): node is ReportedMetricNode => node.operation === "reported_metric" && bound.has(node.node_id));
+    const byMetric = Map.groupBy(reported, (node) => node.metric_key);
+    return [output, new Map([...byMetric].map(([metric, nodes]) => [metric, new Set<ConceptScopeV1["kind"] | null>(nodes.map((node) => bound.get(node.node_id)?.kind ?? null))]))] as const;
+  }));
+  const agree = (left: LocalId, right: LocalId) => [...boundKinds.get(left)!].every(([metric, kinds]) => {
+    const other = boundKinds.get(right)!.get(metric);
+    return !other || (other.size === kinds.size && [...kinds].every((kind) => other.has(kind)));
+  });
+  const placed = placements(plan, outputs);
+  const placeOf = (output: LocalId) => placed.get(output) ?? output;
+  return (output) => {
+    const beside = outputs.filter((other) => placeOf(other) === placeOf(output) && agree(output, other));
+    const inherited = (metric: string) => {
+      const kinds = new Set(beside.flatMap((other) => [...(boundKinds.get(other)!.get(metric) ?? [])]));
+      return kinds.size === 1 ? [...kinds][0]! : null;
+    };
+    const kindsOf = (node: OperationNode): ReadonlyArray<ConceptScopeV1["kind"]> => {
+      if (node.operation === "ratio") return [];
+      if (node.operation === "reported_metric") {
+        const kind = bound.has(node.node_id) ? bound.get(node.node_id)?.kind ?? null : inherited(node.metric_key);
+        return kind === null ? [] : [kind];
+      }
+      return operationDependencies(node).flatMap((id) => kindsOf(nodeOf(id)));
+    };
+    return (node) => [...new Set(kindsOf(node))].sort();
   };
-  const scopeOf = (node: ReportedMetricNode) => (bound.has(node.node_id) ? bound.get(node.node_id)?.kind ?? null : inherited(node));
-  const kindsOf = (node: OperationNode): ReadonlyArray<ConceptScopeV1["kind"]> => {
-    if (node.operation === "ratio") return [];
-    if (node.operation === "reported_metric") {
-      const kind = scopeOf(node);
-      return kind === null ? [] : [kind];
-    }
-    return operationDependencies(node).flatMap((id) => kindsOf(nodeOf(id)));
-  };
-  return (node) => [...new Set(kindsOf(node))].sort();
+}
+
+// Each value output's table column or series line as the layout places it, with structure in place of scoped measure.
+// An output not here stands alone.
+function placements(plan: FinancialPlan, outputs: ReadonlyArray<LocalId>): ReadonlyMap<LocalId, string> {
+  const nodes = outputs.map((id) => plan.operations.find((node) => node.node_id === id)!).filter((node) => OPERATION_REGISTRY[node.operation].produces === "value");
+  const lines = new Map(nodes.map((node) => [node.node_id, lineOf(plan, node, structureKey(plan, node))]));
+  const tabled = nodes.flatMap((node) => {
+    const slot = subjectSlot(plan, node);
+    return slot === null ? [] : [{ result_id: node.node_id, subject_label_id: slot }];
+  });
+  if (new Set(tabled.map((entry) => entry.subject_label_id)).size >= 2) return columnKeyByResult(tabled, lines);
+  return new Map([...lines].map(([id, { key, anchor }]) => [id, `${key}|${anchor.calendar}`]));
 }
 
 /** What a node measures, as the answer labels its measure ("Revenue"), given each bound input's concept scope. */
 export function measureText(plan: FinancialPlan, node: OperationNode, bound: BoundScopes): string {
-  return labelText(plan, node, scopeReader(plan, bound, [node.node_id])(node));
+  return labelText(plan, node, scopeReader(plan, bound, [node.node_id])(node.node_id)(node));
 }
 
 /** A node's label in the given concept scopes, which its parts read in too. */
