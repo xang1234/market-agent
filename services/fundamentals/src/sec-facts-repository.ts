@@ -1555,7 +1555,8 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     // capex (operator 2026-11-23, #758). Equal is within rounding, so the
     // restatement keeps the figure that stands, from the filing it stands on.
     const unordered = unorderedDates([statements, ...(derivation?.terms ?? []).map((term) => termStatements(values, term))], roundings);
-    const sameDay = scopedFiguresByDate(statements, rescoped, roundings, originalFiled);
+    // Only a figure whose scope can switch is read in every order (#756).
+    const sameDay = rescoped.length > 0 ? scopedFiguresByDate(statements, rescoped, roundings, originalFiled) : new Map<string, ScopedFigures[]>();
     let standing: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on, rounding: roundings.get(originalAccession!) ?? null };
     const inputs: RoundedFigure[] = derivation?.terms.map((term) => ({ value: term.raw_token, rounding: roundings.get(term.source.accession) ?? null })) ?? [];
     // A derived figure stands on its unmoved inputs, whose rounding a line may fall within.
@@ -1571,9 +1572,10 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
       : [{ ...later, stands: standsOn ?? "original" }, "economic_restatement"];
     for (const filing of filingsInOrder(statements, derivation, values, rescoped)) {
       // Decided once a date, from where the year stands before that day's first filing.
+      // `read` does not model a derivation's inputs, so a derived figure no filing stands on is opposed by any two.
       const day = sameDay.get(filing.filed);
       sameDay.delete(filing.filed);
-      if (day !== undefined && opposed(day, { figure: standing, reviewed: asReviewed })) unordered.add(filing.filed);
+      if (day !== undefined && (derivation !== null && standsOn === null ? day.length > 1 : opposed(day, { figure: standing, reviewed: asReviewed }))) unordered.add(filing.filed);
       // A line in another scope only ever repeats the figure that stands, or leaves it unverified (#731).
       const changed = unordered.has(filing.filed) && filing.rescoped.length > 0
         ? filing.rescoped[0]

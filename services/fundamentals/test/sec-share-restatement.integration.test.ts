@@ -59,11 +59,12 @@ function splitCorpFacts(cik: number, dilutedRecast: string) {
   };
 }
 
-/** Polygon's split list, the same for every ticker: NVDA's 10-for-1. */
-const polygon: PolygonFetcher = async (path) => ({
+/** Polygon's split list, the same for every ticker: NVDA's 10-for-1 unless `from` and `to` say otherwise. */
+const splitList = (from: number, to: number): PolygonFetcher => async (path) => ({
   status: "OK",
-  results: [{ ticker: new URLSearchParams(path.slice(path.indexOf("?"))).get("ticker"), execution_date: "2024-06-10", split_from: 1, split_to: 10, id: "E-2024" }],
+  results: [{ ticker: new URLSearchParams(path.slice(path.indexOf("?"))).get("ticker"), execution_date: "2024-06-10", split_from: from, split_to: to, id: "E-2024" }],
 });
+const polygon = splitList(1, 10);
 
 test("a later 10-K's comparative of an as-filed EPS or share count", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -80,7 +81,7 @@ test("a later 10-K's comparative of an as-filed EPS or share count", { timeout: 
 
   let issuers = 0;
   /** An issuer whose FY2025 10-K states FY2024 diluted EPS as `dilutedRecast`, listed on XNAS when `listed`. */
-  const splitCorp = async (dilutedRecast: string, listed: boolean) => {
+  const splitCorp = async (dilutedRecast: string, listed: boolean, facts: (cik: number, dilutedRecast: string) => unknown = splitCorpFacts, splits = polygon) => {
     const n = ++issuers;
     const issuerId = `36000000-0000-4000-8000-0000000003${String(n).padStart(2, "0")}`;
     const listing = { listing_id: `36000000-0000-4000-8000-0000000004${String(n).padStart(2, "0")}`, ticker: `SPL${n}` };
@@ -95,7 +96,7 @@ test("a later 10-K's comparative of an as-filed EPS or share count", { timeout: 
     };
     if (listed) await list();
     const options = {
-      fetcher: secCompanyFetcher(() => splitCorpFacts(cik, dilutedRecast), { completed_at: "2026-10-01T15:00:00.000Z" }),
+      fetcher: secCompanyFetcher(() => facts(cik, dilutedRecast), { completed_at: "2026-10-01T15:00:00.000Z" }),
       sourceId: FALLBACK_SOURCE_ID,
       logger: { warn: () => {} },
     };
@@ -103,7 +104,7 @@ test("a later 10-K's comparative of an as-filed EPS or share count", { timeout: 
       issuerId,
       list,
       /** What `npm run sync:splits` does for the listing, fetching at `at`. */
-      syncSplits: (at: string) => syncListingSplits(db, polygon, listing, () => new Date(at)),
+      syncSplits: (at: string) => syncListingSplits(db, splits, listing, () => new Date(at)),
       ingest: () => createSecBackedStatementRepository(db, options)
         .find({ issuer_id: issuerId, family: "income", basis: "as_reported", fiscal_year: 2024, fiscal_period: "FY" }),
       backfill: () => backfillSecCompanionStatements(db, { issuerId, ...options }),
@@ -169,6 +170,39 @@ test("a later 10-K's comparative of an as-filed EPS or share count", { timeout: 
     assert.deepEqual(await epsDiluted(unlisted.issuerId), ["11.93", "11.93"]);
     await unlisted.backfill();
     assert.deepEqual(await laterDisclosures(unlisted.issuerId), retired(unverified), "a second backfill changes nothing");
+  });
+
+  // Gemini on #756. 100M, too short to show its rounding, is 100.4M after a
+  // 251-for-250 split, and a 10-K/A the same day repeating the 10-K changes nothing.
+  await t.test("a comparative the split explains, filed twice one day, adds nothing", async () => {
+    const twice = (cik: number) => {
+      const accession = (year: string, serial: string) => `${String(cik).padStart(10, "0")}-${year}-${serial}`;
+      const k24: Filing = { accn: accession("24", "000029"), fy: 2024, fp: "FY", form: "10-K", filed: "2024-02-21" };
+      const later = [{ accn: accession("25", "000023"), form: "10-K" }, { accn: accession("25", "000024"), form: "10-K/A" }]
+        .map((filing): Filing => ({ ...filing, fy: 2025, fp: "FY", filed: "2025-02-26" }));
+      const units = (unit: string, original: string, recast: string, fy2025: string) => ({
+        label: "",
+        description: "",
+        units: { [unit]: [value(k24, "2023-01-30", "2024-01-28", original), ...later.flatMap((filing) => [value(filing, "2023-01-30", "2024-01-28", recast), value(filing, "2024-01-29", "2025-01-26", fy2025)])] },
+      });
+      return {
+        cik,
+        entityName: `Split Corp ${cik}`,
+        facts: {
+          "us-gaap": {
+            Revenues: units("USD", "60922000000", "60922000000", "130497000000"),
+            NetIncomeLoss: units("USD", "29760000000", "29760000000", "72880000000"),
+            WeightedAverageNumberOfSharesOutstandingBasic: units("shares", "100000000", "100400000", "100123000"),
+          },
+        },
+      };
+    };
+    const corp = await splitCorp("", true, twice, splitList(250, 251));
+    await corp.syncSplits("2026-10-02T12:00:00.000Z");
+    await corp.ingest();
+    assert.deepEqual(await laterDisclosures(corp.issuerId), []);
+    const selection = await selectFiscalYear(db, { issuerId: corp.issuerId, metricKey: "weighted_average_basic_shares", fiscalYear: 2024 }, CUTOFF, "as_restated");
+    assert.equal(selection.status === "selected" ? selection.input.candidate.value_text : selection.reason_code, "100000000");
   });
 
   await t.test("splits last fetched before the later 10-K was filed leave it unverified until a fresh sync", async () => {

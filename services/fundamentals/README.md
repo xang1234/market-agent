@@ -138,10 +138,12 @@ npm test         # contract + AAPL FY2024 income statement verification
   figure only on its own filing's source, so a derived quarter restates
   this way only at its exact figure, and at one equal only within rounding
   it is unverified. A later figure that
-  differs, or filings on one date, the original included, that state the
-  period in different scopes or figures, leave it unverified, since their
-  order is unknown. Ingest does this in `recordSecRestatements` and
-  `opposedDates` (`src/sec-facts-repository.ts`). as_restated growth from a
+  differs leaves it unverified. So do filings on one date, the original
+  included, whose order is unknown, when reading them in another order
+  leaves another figure or scope standing. A derived quarter that no later
+  filing stands on yet is unverified by any two filings on one date. Ingest
+  does this in `recordSecRestatements`, which reads each such date in every
+  order (`opposed` in `src/sec-facts-repository.ts`). as_restated growth from a
   year restated this way to a year in the reviewed concept computes, and the
   FCF backtest counts such a window only when every restatement of the start
   public by its end states it as that equal figure without the scope

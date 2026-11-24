@@ -415,6 +415,32 @@ test("capex filed as productive assets certifies with its concept recorded", { t
     }
   });
 
+  // Gemini on #756. Read first, 30.4M switches the derived quarter only within
+  // rounding, which is unverified, and 30.0M switches it at its exact figure.
+  await t.test("same-day PP&E lines for a derived quarter are unverified in either accession order", async (t) => {
+    for (const [exact, rounded] of [["0000000731-25-000102", "0000000731-25-000202"], ["0000000731-25-000202", "0000000731-25-000102"]] as const) {
+      const { download, lookup, relations, picked } = await setUp(t, `fin-capex-derived-same-day-${exact}`);
+      const filed = (accn: string, fp: string, form: string, date: string) => (start: string, end: string, val: number): Value => ({ start, end, val, accn, fy: 2024, fp, form, filed: date });
+      const q1 = filed("0000000731-24-000101", "Q1", "10-Q", "2024-05-01");
+      const q2 = filed("0000000731-24-000102", "Q2", "10-Q", "2024-08-01");
+      const ppe = (accn: string, val: number) => {
+        const line = filed(accn, "Q2", "10-Q/A", "2025-08-01");
+        return [line("2024-04-01", "2024-06-30", val), line("2025-04-01", "2025-06-30", 28_100_000)];
+      };
+      download.text = companyFacts({
+        Revenues: [q1("2024-01-01", "2024-03-31", 100), q2("2024-04-01", "2024-06-30", 100)],
+        PaymentsToAcquireProductiveAssets: [
+          q1("2024-01-01", "2024-03-31", 25_000_000), q1("2023-01-01", "2023-03-31", 20_000_000),
+          q2("2024-01-01", "2024-06-30", 55_000_000), q2("2023-01-01", "2023-06-30", 47_000_000),
+        ],
+        PaymentsToAcquirePropertyPlantAndEquipment: [...ppe(exact, 30_000_000), ...ppe(rounded, 30_400_000)],
+      });
+      await lookup("Q2");
+      assert.deepEqual((await relations()).map(({ relation }) => relation), ["original", "unverified_restatement"], `exact line ${exact}`);
+      assert.equal(await picked("as_restated", "Q2"), "restatement_unverified", `exact line ${exact}`);
+    }
+  });
+
   await t.test("a later 10-K that switches to PP&E at another figure is an unverified restatement", async (t) => {
     const { download, lookup, relations, picked } = await setUp(t, "fin-capex-productive-switch-changed");
     download.text = companyFacts({
