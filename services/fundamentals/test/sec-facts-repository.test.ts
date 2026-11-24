@@ -493,13 +493,14 @@ test("hydrating an issuer's latest years stores each of them from one download",
   const db = new FakeFundamentalsDb();
   const downloads: string[] = [];
   const fetcher = secCompanyFetcher(() => companyFacts());
-  await hydrateSecIssuerLatestYears(db, {
+  const outcome = await hydrateSecIssuerLatestYears(db, {
     issuerId: ISSUER_ID,
     reads: new Map([["revenue", 2]]),
     fetcher: (path) => { downloads.push(path); return fetcher(path); },
     sourceId: SOURCE_ID,
     clock: () => new Date("2026-05-08T00:00:00.000Z"),
   });
+  assert.deepEqual(outcome.status === "stored" && outcome.rows.map((row) => row.fiscal_year), [2024, 2023]);
   assert.deepEqual([...new Set(db.facts.map((fact) => fact.fiscal_year))].sort(), [2023, 2024]);
   assert.equal(db.facts.find((fact) => fact.fiscal_year === 2024 && metricKeyFor(db.metrics, fact.metric_id) === "revenue")?.value_num, 1000);
   assert.deepEqual(downloads.filter((path) => path.startsWith("/api/xbrl/companyfacts/")), ["/api/xbrl/companyfacts/CIK0000320193.json"]);
@@ -530,8 +531,9 @@ test("an issuer whose planned reads are stored with proofs is not downloaded aga
     clock: () => new Date(now),
   });
   const plan = new Map([["revenue", 2], ["gross_profit", 1]]);
-  await hydrate(new withGrossProfit(), "2026-10-20T00:00:00.000Z", plan);
+  const outcome = await hydrate(new withGrossProfit(), "2026-10-20T00:00:00.000Z", plan);
   assert.deepEqual(downloads, [], "fresh proven reads are read, not fetched");
+  assert.equal(outcome.status, "stored", "reads already on file are stored, not empty");
   await hydrate(new revenueOnly(), "2026-10-20T00:00:00.000Z", plan);
   assert.ok(downloads.length > 0, "a planned metric without proven facts is fetched");
   downloads.length = 0;
@@ -539,22 +541,46 @@ test("an issuer whose planned reads are stored with proofs is not downloaded aga
   assert.ok(downloads.length > 0, "a stored latest year older than a filing cycle is fetched again");
 });
 
-test("a prior year SEC cannot extract still lets the latest year be stored, then reports the failure", async () => {
+test("a prior year SEC cannot extract still lets the latest year be stored, then reports the failure with its cause", async () => {
   const db = new FakeFundamentalsDb();
   const facts = companyFacts();
   facts.facts["us-gaap"].CostOfRevenue.units.USD[1]!.start = "2023-01-02";
-  await assert.rejects(
-    hydrateSecIssuerLatestYears(db, {
-      issuerId: ISSUER_ID,
-      reads: new Map([["revenue", 2]]),
-      fetcher: secCompanyFetcher(() => facts),
-      sourceId: SOURCE_ID,
-      clock: () => new Date("2026-05-08T00:00:00.000Z"),
-      logger: { warn() {} },
-    }),
-    (error) => error instanceof FundamentalsDataUnavailableError && /disagrees/u.test(error.message),
-  );
+  const outcome = await hydrateSecIssuerLatestYears(db, {
+    issuerId: ISSUER_ID,
+    reads: new Map([["revenue", 2]]),
+    fetcher: secCompanyFetcher(() => facts),
+    sourceId: SOURCE_ID,
+    clock: () => new Date("2026-05-08T00:00:00.000Z"),
+    logger: { warn() {} },
+  });
+  assert.ok(outcome.status === "failed" && outcome.cause instanceof FundamentalsDataUnavailableError && /disagrees/u.test(outcome.cause.message));
   assert.deepEqual([...new Set(db.facts.map((fact) => fact.fiscal_year))], [2024]);
+});
+
+test("hydration that stores nothing reports empty with its reason, not success (#769)", async () => {
+  const hydrate = (db: FakeFundamentalsDb, issuerId: string, fetcher: SecEdgarFetcher) => hydrateSecIssuerLatestYears(db, {
+    issuerId,
+    reads: new Map([["revenue", 2]]),
+    fetcher,
+    sourceId: SOURCE_ID,
+    clock: () => new Date("2026-05-08T00:00:00.000Z"),
+    logger: { warn() {} },
+  });
+  const noFetch: SecEdgarFetcher = async () => { throw new Error("no fetch expected"); };
+  class NoCik extends FakeFundamentalsDb {
+    async query<R extends Record<string, unknown> = Record<string, unknown>>(text: string, values: unknown[] = []): Promise<{ rows: R[] }> {
+      if (text.includes("from issuers")) return { rows: [{ issuer_id: ISSUER_ID, cik: null }] as unknown as R[] };
+      return super.query<R>(text, values);
+    }
+  }
+  const noRevenue = { ...companyFacts(), facts: { "us-gaap": { CostOfRevenue: annualUsd(600, 500) } } };
+  const notFound: SecEdgarFetcher = async () => { throw new SecEdgarFetchError(404, "sec_edgar: HTTP 404"); };
+  assert.deepEqual(await hydrate(new FakeFundamentalsDb(), GOLDEN_ISSUER_IDS.NVDA, noFetch), { status: "empty", reason: "frozen_issuer" });
+  assert.deepEqual(await hydrate(new NoCik(), ISSUER_ID, noFetch), { status: "empty", reason: "no_cik" });
+  assert.deepEqual(await hydrate(new FakeFundamentalsDb(), ISSUER_ID, notFound), { status: "empty", reason: "missing_coverage" });
+  const db = new FakeFundamentalsDb();
+  assert.deepEqual(await hydrate(db, ISSUER_ID, secCompanyFetcher(() => noRevenue)), { status: "empty", reason: "missing_coverage" });
+  assert.deepEqual(db.facts, []);
 });
 
 test("a year SEC has no statement for is skipped while the others are stored", async () => {
