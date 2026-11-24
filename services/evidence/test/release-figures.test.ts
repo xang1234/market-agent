@@ -490,5 +490,13 @@ test("\"on an unadjusted basis\" states a GAAP figure, and never one its sentenc
   assert.ok(reviewed(read("result", "gross_margin", quote, { basis: "non_gaap", value: "70.0%" })));
   for (const basis of ["gaap", "non_gaap"] as const) {
     assert.ok(reviewed(read("result", "gross_margin", "Gross margin was 70.0% on an unadjusted constant currency basis.", { basis, value: "70.0%" })), basis);
+    // "unadjusted" beside another basis word names that basis, not GAAP.
+    assert.ok(reviewed(read("result", "revenue", "Revenue was $8.5 billion on an unadjusted cash basis.", { basis, value: "$8.5 billion" })), `cash ${basis}`);
   }
+});
+
+test("a bare amount is a range's low, never a change stated after the guide", () => {
+  assert.ok(reviewed(read("guidance", "gross_margin", "We expect non-GAAP gross margin to be 71.0 to 72.0%.", { basis: "non_gaap", value: "72.0%" })));
+  const change = "We expect non-GAAP gross margin of 72% - 2 percentage points higher than last quarter.";
+  assert.deepEqual(read("guidance", "gross_margin", change, { basis: "non_gaap", value: "72%" }), { basis: "non_gaap", low: 72, high: 72 });
 });

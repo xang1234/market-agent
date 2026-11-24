@@ -163,7 +163,9 @@ function markerAt(found: RegExpMatchArray, offset: number): Marker {
   const span = { start: offset + found.index!, end: offset + found.index! + word.length };
   if (inner !== undefined) {
     const nonGaap = /non-? ?gaap|\badjusted/i.test(inner);
-    const gaap = /\bgaap\b|\bunadjusted\b/i.test(inner.replace(/non-? ?gaap/gi, ""));
+    // "unadjusted" is GAAP only alone ("on an unadjusted basis"), not beside
+    // a word naming another basis ("on an unadjusted cash basis").
+    const gaap = /\bgaap\b/i.test(inner.replace(/non-? ?gaap/gi, "")) || /^unadjusted $/i.test(inner);
     return { ...span, basis: nonGaap === gaap ? "other" : nonGaap ? "non_gaap" : "gaap", reach: "before" };
   }
   return { ...span, basis: /^gaap$/i.test(word) ? "gaap" : "non_gaap", reach: "after" };
@@ -356,9 +358,11 @@ export function readFigure(
   let to: number;
   if (value !== null) {
     const point = found.get(value)!;
-    // A bare amount may be a range's low ("71.0 to 72.0%").
-    const ends = amounts.filter((other) => !isFigure(other) || (other.dollars === point.dollars && other.mark === point.mark));
-    if (kind === "guidance" && ends.some((other) => statedAsRange(quote, other, point) || statedAsRange(quote, point, other))) {
+    // A bare amount may be a range's low ("71.0 to 72.0%"), never its high:
+    // "72% - 2 percentage points higher" states a change, not a range.
+    const ends = amounts.filter((other) => isFigure(other) && other.dollars === point.dollars && other.mark === point.mark);
+    const bareLow = amounts.some((other) => !isFigure(other) && statedAsRange(quote, other, point));
+    if (kind === "guidance" && (bareLow || ends.some((other) => statedAsRange(quote, other, point) || statedAsRange(quote, point, other)))) {
       return { review: `"${value}" is one end of a range its sentence states` };
     }
     const center = level(value);
