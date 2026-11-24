@@ -230,12 +230,14 @@ export function baseRateTable(windows: ReadonlyArray<Window>, archive: BaseRateT
       rates.n = sorted.length;
     }
   }
-  const starts = windows.map((window) => window.start_year);
+  // A loop, not Math.min(...): the archive gives about 57,000 windows, near the engine's argument limit.
+  const first = windows.reduce((low, window) => Math.min(low, window.start_year), Infinity);
+  const last = windows.reduce((high, window) => Math.max(high, window.start_year), -Infinity);
   return {
     version: "growth_base_rates.v1",
     archive,
     horizon_years: HORIZON_YEARS,
-    start_years: { first: Math.min(...starts), last: Math.max(...starts) },
+    start_years: { first, last },
     filers_read: filersRead,
     unbucketed,
     buckets,
