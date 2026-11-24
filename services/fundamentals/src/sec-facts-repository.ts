@@ -1572,10 +1572,11 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
       : [{ ...later, stands: standsOn ?? "original" }, "economic_restatement"];
     for (const filing of filingsInOrder(statements, derivation, values, rescoped)) {
       // Decided once a date, from where the year stands before that day's first filing.
-      // `read` does not model a derivation's inputs, so a derived figure no filing stands on is opposed by any two.
+      // `read` does not model a derivation's inputs, which a later filing may move
+      // even after one stands on the figure, so a derived figure is opposed by any two.
       const day = sameDay.get(filing.filed);
       sameDay.delete(filing.filed);
-      if (day !== undefined && (derivation !== null && standsOn === null ? day.length > 1 : opposed(day, { figure: standing, reviewed: asReviewed }))) unordered.add(filing.filed);
+      if (day !== undefined && (derivation !== null ? day.length > 1 : opposed(day, { figure: standing, reviewed: asReviewed }))) unordered.add(filing.filed);
       // A line in another scope only ever repeats the figure that stands, or leaves it unverified (#731).
       const changed = unordered.has(filing.filed) && filing.rescoped.length > 0
         ? filing.rescoped[0]

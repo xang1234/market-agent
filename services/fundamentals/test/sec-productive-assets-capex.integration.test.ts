@@ -441,6 +441,32 @@ test("capex filed as productive assets certifies with its concept recorded", { t
     }
   });
 
+  // Devin on #762. A filing that stands on the derived quarter does not end the
+  // need to model its inputs: B moves the six-month input as it switches back.
+  await t.test("same-day filings for a derived quarter a filing stands on are unverified in either accession order", async (t) => {
+    for (const [a, b] of [["0000000731-25-000301", "0000000731-25-000302"], ["0000000731-25-000302", "0000000731-25-000301"]] as const) {
+      const { download, lookup, picked } = await setUp(t, `fin-capex-derived-stands-${a}`);
+      const filed = (accn: string, fp: string, form: string, date: string) => (start: string, end: string, val: number): Value => ({ start, end, val, accn, fy: 2024, fp, form, filed: date });
+      const q1 = filed("0000000731-24-000101", "Q1", "10-Q", "2024-05-01");
+      const q2 = filed("0000000731-24-000102", "Q2", "10-Q", "2024-08-01");
+      const later = filed("0000000731-25-000200", "Q2", "10-Q/A", "2025-02-01");
+      const lineA = filed(a, "Q2", "10-Q/A", "2025-08-01");
+      const lineB = filed(b, "Q2", "10-Q/A", "2025-08-01");
+      download.text = companyFacts({
+        Revenues: [q1("2024-01-01", "2024-03-31", 100), q2("2024-04-01", "2024-06-30", 100)],
+        PaymentsToAcquireProductiveAssets: [
+          q1("2024-01-01", "2024-03-31", 25_000_000), q1("2023-01-01", "2023-03-31", 20_000_000),
+          q2("2024-01-01", "2024-06-30", 55_000_000), q2("2023-01-01", "2023-06-30", 47_000_000),
+          later("2024-01-01", "2024-06-30", 56_000_000), later("2024-04-01", "2024-06-30", 31_000_000),
+          lineB("2024-01-01", "2024-06-30", 57_000_000), lineB("2024-04-01", "2024-06-30", 31_000_000),
+        ],
+        PaymentsToAcquirePropertyPlantAndEquipment: [lineA("2024-04-01", "2024-06-30", 31_400_000), lineB("2024-04-01", "2024-06-30", 30_700_000)],
+      });
+      await lookup("Q2");
+      assert.equal(await picked("as_restated", "Q2"), "restatement_unverified", `A is ${a}`);
+    }
+  });
+
   await t.test("a later 10-K that switches to PP&E at another figure is an unverified restatement", async (t) => {
     const { download, lookup, relations, picked } = await setUp(t, "fin-capex-productive-switch-changed");
     download.text = companyFacts({
