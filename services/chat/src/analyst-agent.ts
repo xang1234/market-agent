@@ -650,7 +650,11 @@ function withFindings(packet: EvidencePacket, found: ReadonlyArray<{ company: st
   return findings.length === 0 ? packet : { ...packet, findings };
 }
 
-const FINDINGS_RULE = "evidence_packet.findings are standout findings the engine certified, each over the F ids it lists: to use one, state its figures in an observation citing those F ids (its ranking figure says how unusual the year is), and rest any inference about it on that observation.";
+const FINDINGS_RULE = [
+  "evidence_packet.findings are standout findings the engine certified, each over the F ids it lists: to use one, state its figures in an observation citing those F ids",
+  "(its ranking figure says how unusual the year is, and a ranking is cited in an observation, never a comparison), and rest any inference about it on that observation.",
+  "Such an inference names the extreme in words (\"its lowest of the years ranked\") and never their count (\"decade\", \"ten-year\"), as an inference states no amount.",
+].join(" ");
 
 function withFindingsRule<W extends { instructions: ReadonlyArray<string> }>(writing: W, packet: EvidencePacket): W {
   return packet.findings ? { ...writing, instructions: [...writing.instructions, FINDINGS_RULE] } : writing;
