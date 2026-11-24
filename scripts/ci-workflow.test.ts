@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { chmod, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
@@ -142,6 +144,17 @@ test("ci workflow lints every service with the shared typed config", async () =>
   assert.match(section, /for lock in services\/\*\/package-lock\.json; do npm --prefix "\$\{lock%\/package-lock\.json\}" ci; done/);
   assert.match(section, /run:\s*npm --prefix lint run lint/);
   assert.match((await readPackageJson("lint")).scripts?.lint ?? "", /for t in services\/\*\/tsconfig\.json/);
+});
+
+test("the lint script fails when any one service fails, even if later ones pass", async () => {
+  // A stand-in eslint fails its first call only, so a loop that kept only the
+  // last exit status would pass.
+  const bin = await mkdtemp(join(tmpdir(), "lint-exit-"));
+  await writeFile(join(bin, "eslint"), `#!/bin/sh\n[ -e "${bin}/called" ] && exit 0\ntouch "${bin}/called"\nexit 1\n`);
+  await chmod(join(bin, "eslint"), 0o755);
+  const script = (await readPackageJson("lint")).scripts?.lint ?? "";
+  const run = spawnSync("sh", ["-c", script], { cwd: join(REPO_ROOT, "lint"), env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  assert.equal(run.status, 1);
 });
 
 async function testedPackageDirs(): Promise<string[]> {

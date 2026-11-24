@@ -5,7 +5,7 @@
 - Before pushing, self-review the diff for the bug classes reviewers keep finding here: swallowed exceptions or overly broad `except`, race conditions on first claim or lease, circuit breakers or state that can never reset, platform-specific exceptions (Windows ValueError), and missing imports.
 
 ### Known bug classes here
-Backend lint runs in CI: `npm --prefix lint ci && npm --prefix lint run lint`. Errors fail CI; warnings mark existing hits to fix, and a rule moves to error when its hits reach zero.
+Backend lint runs in CI: `npm --prefix lint run lint`. Typed rules read every service's imports, so first run `npm ci` in `lint`, `db` and each service, as the CI `lint` job does. Errors fail CI; warnings mark existing hits to fix, and a rule moves to error when its hits reach zero.
 Each class has come back in several modules (closed issues cited). Check the diff against every one that applies.
 - **Prose read by regex or keyword rules** (narrative guard #137-#302, keyword router #398, #749, #750). A new or changed rule ships with a corpus diff in the PR body: every real input whose reading changed. A rule that changes no real reading is not added. Synthetic-only edge cases go in a follow-up issue. Check: `services/evidence/test/reader-corpus.test.ts` (`npm run corpus:update` in services/evidence rewrites the expected files), and CI fails a PR that changes a reader without changing its corpus (expected file or new inputs). Add each review round's sentences to `services/evidence/test/reader-corpus/release-figure-sentences.tsv`, or the corpus will not catch them next time.
 - **Periods matched by label** (#344, #474, #479, #541). Key, group and compare periods by end date and period kind. A fiscal label is for display. Check: `Period` type (#769).
