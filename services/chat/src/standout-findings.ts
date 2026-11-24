@@ -122,18 +122,19 @@ export function runDetectors(content: FinancialAnswerContent, company: string): 
   const label = (id: string) => content.labels[id]?.text ?? id;
   return DETECTORS.map((detector): DetectorOutcome => {
     const decline = (reason: DeclineReason, detail: string): Decline => ({ detector_id: detector.id, reason, detail });
-    const gap = (result: PresentedResult | undefined) => {
+    // A ranking tolerates every evidence gap among its years and blocks only on a failed read, so its block is an engine gap.
+    const gap = (result: PresentedResult | undefined, of: "latest" | "ranking") => {
       if (result?.presented.kind !== "gap") return decline("engine_gap", "the engine published no result");
-      const reason = result.disposition === "execution_error" ? "engine_gap" : REASONS[result.presented.reason_code] ?? "engine_gap";
-      return decline(reason, `${result.presented.reason_code}: ${result.presented.text}`);
+      const failed = result.disposition === "execution_error" || (of === "ranking" && result.disposition === "blocked_dependency");
+      return decline(failed ? "engine_gap" : REASONS[result.presented.reason_code] ?? "engine_gap", `${result.presented.reason_code}: ${result.presented.text}`);
     };
     const latest = byOutput.get(`out_${measureOf(detector, 0)}`);
-    if (latest?.presented.kind !== "value") return gap(latest);
+    if (latest?.presented.kind !== "value") return gap(latest, "latest");
     const period = latest.period_label_id;
     let within: string | null = null;
     for (const direction of detector.directions) {
       const ranking = byOutput.get(`out_${rankNode(detector, direction)}`);
-      if (ranking?.presented.kind !== "ranking") return gap(ranking);
+      if (ranking?.presented.kind !== "ranking") return gap(ranking, "ranking");
       const { complete, order, leader_label_ids: leaders } = ranking.presented;
       if (!complete || leaders === null) return decline("incomplete_history", `${order.length} of ${detector.years} fiscal years have a value`);
       // A year tied at the extreme is no standout: a flat series ties every year.

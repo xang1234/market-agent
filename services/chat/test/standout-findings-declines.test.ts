@@ -29,9 +29,18 @@ test("a blocked latest year claims only that an input was not certified, never t
   assert.deepEqual(declines("blocked_dependency", "blocked_by_dependency"), ["uncertified_input", "uncertified_input", "uncertified_input"]);
 });
 
-test("a failed execution is an engine gap whatever its reason code", () => {
-  assert.deepEqual(declines("execution_error", "blocked_by_dependency"), ["engine_gap", "engine_gap", "engine_gap"]);
+test("a failed execution is an engine gap", () => {
   assert.deepEqual(declines("execution_error", "database_error"), ["engine_gap", "engine_gap", "engine_gap"]);
+});
+
+// The latest year is certified; a read of an earlier year failed, which is the only gap a ranking blocks on.
+test("a blocked ranking beside a certified latest year is an engine gap, not an uncertified latest input", () => {
+  const latest = { ...gapResult("out_operating_margin_y0", "missing", "missing_input"), disposition: "verified", presented: { kind: "value", text: "19.00%" } };
+  const content = {
+    labels: {},
+    results: [latest, gapResult("out_operating_margin_extreme_highest", "blocked_dependency", "blocked_by_dependency")],
+  } as unknown as FinancialAnswerContent;
+  assert.equal((runDetectors(content, "AAA")[0] as { reason: string }).reason, "engine_gap");
 });
 
 test("a figure filed under another concept is a tag change", () => {
