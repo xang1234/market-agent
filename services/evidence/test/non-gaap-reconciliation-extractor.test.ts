@@ -489,6 +489,21 @@ test("a table's scale ignores an exception's parenthetical, and reads a bare \"(
   assert.equal(readTables(`<p>(In thousands)</p>${table}`)[0]!.scale, "thousands");
   // A table straight after another continues its statement, as AMD's net income table does its gross profit's.
   assert.deepEqual(readTables(`<p>(in millions)</p>${table}\n${table}<p>Unaudited</p>${table}`).map((read) => read.scale), ["millions", "millions", undefined]);
+  // A table that says its amounts are dollars keeps no earlier scale (Devin on #764).
+  const dollars = `<table><tr><td>Amounts in dollars</td><td>Q3 2025</td></tr><tr><td>GAAP operating income</td><td>$20,000,000</td></tr></table>`;
+  assert.deepEqual(readTables(`<p>(in millions)</p>${table}\n${dollars}`).map((read) => read.scale), ["millions", undefined]);
+});
+
+test("a total sums its lines to each one's printed rounding, its own included (Devin on #764)", () => {
+  const html = `<table>
+    <tr><th>GAAP to non-GAAP reconciliation</th><th>Q3 2025</th></tr>
+    <tr><td>GAAP operating income</td><td>$10.0</td></tr>
+    <tr><td>Stock-based compensation, cost of revenue</td><td>0.24</td></tr>
+    <tr><td>Stock-based compensation, operating expenses</td><td>0.30</td></tr>
+    <tr><td>Total stock-based compensation</td><td>0.5</td></tr>
+    <tr><td>Non-GAAP operating income</td><td>$10.5</td></tr>
+  </table>`;
+  assert.deepEqual(lines(html), [["operating_income", "Q3 2025", 10, 10.5, [["Stock-based compensation, cost of revenue", 0.24], ["Stock-based compensation, operating expenses", 0.3]]]]);
 });
 
 test("NVIDIA's real reconciliation: the non-GAAP cost of revenue closes its own GAAP row, no add-back to gross profit", () => {

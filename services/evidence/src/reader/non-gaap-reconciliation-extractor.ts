@@ -72,8 +72,8 @@ type GaapAnchor = {
   value: ParsedValue;
   measure_key: string;
   adjustments: NonGaapAdjustment[];
-  // The most digits after the point any of its lines prints.
-  decimals: number;
+  // The digits after the point each of its lines prints, in order.
+  decimals: number[];
   // The section in force at the GAAP row, which a bare "Non-GAAP" row closing it names.
   section: string;
   // Each measure still open when this GAAP row took its slot, as NVIDIA's cost
@@ -93,6 +93,8 @@ const ROW = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
 // Inline XBRL closes an empty cell in its tag: <td colspan="3"/>.
 const CELL = /<t[dh]\b([^>]*?)(?:\/>|>([\s\S]*?)<\/t[dh]>)/gi;
 const SCALE = /\bin\s+(thousands|millions|billions)\b/i;
+// A note that its amounts are whole dollars, which no earlier table's scale overrides.
+const UNSCALED = /\bin\s+(?:u\.?s\.?\s+)?dollars\b|\(\s*(?:u\.?s\.?\s+)?dollars\s*\)/i;
 // A note in parentheses can open with its scale, as AMD's "(Millions)"; a sentence cannot, and
 // "(billions of devices)" or "(thousands of employees)" counts something else.
 const NOTE_SCALE = /\bin\s+(thousands|millions|billions)\b|^\s*(thousands|millions|billions)\b(?!\s+of\b)/i;
@@ -129,7 +131,7 @@ export function extractNonGaapReconciliations(
           if (measure_key === null) continue;
           const open = anchors.get(slot);
           const displaced = new Set(open ? [...open.displaced, open.measure_key] : []);
-          anchors.set(slot, { label, value, measure_key, adjustments: [], decimals: 0, section, displaced });
+          anchors.set(slot, { label, value, measure_key, adjustments: [], decimals: [], section, displaced });
         }
         continue;
       }
@@ -144,7 +146,7 @@ export function extractNonGaapReconciliations(
           if (NON_GAAP_PATTERN.test(label) && measure !== null && anchor.displaced.delete(measure)) continue;
           if (!(/^total\b/i.test(label) && restates(value, anchor))) {
             anchor.adjustments.push(Object.freeze({ label, value_num: value.value_num }));
-            anchor.decimals = Math.max(anchor.decimals, value.decimals);
+            anchor.decimals.push(value.decimals);
           }
           continue;
         }
@@ -264,7 +266,7 @@ function tableOf(grid: ReadonlyArray<ReadonlyArray<GridCell>>, above: string, co
     }),
   })]);
   const text = cells.flat().map((cell) => cell.text).join(" ");
-  const scale = scalesIn(text)[0] ?? scalesIn(above).at(-1) ?? continued;
+  const scale = scalesIn(text)[0] ?? scalesIn(above).at(-1) ?? (UNSCALED.test(text) || UNSCALED.test(above) ? undefined : continued);
   return Object.freeze({ rows: Object.freeze(rows), periods: Object.freeze(periods), text, ...(scale ? { scale } : {}) });
 }
 
@@ -325,13 +327,18 @@ function figuresOf(row: ReadonlyArray<GridCell>): Figure[] {
 }
 
 // Whether a total sums a run of the lines just above it, to the rounding of
-// its printed figures: half a unit of the last printed decimal each. A total
-// of one line prints that line's figure.
+// its printed figures: half a unit of the last decimal each one prints, the
+// total's included ("0.24 + 0.30" is "0.5"). A total of one line prints that
+// line's figure.
 function restates(total: ParsedValue, anchor: GaapAnchor): boolean {
-  const unit = 10 ** -Math.max(total.decimals, anchor.decimals);
+  const half = (decimals: number) => 10 ** -decimals / 2;
   let sum = 0;
-  return [...anchor.adjustments].reverse().some((line, index) =>
-    Math.abs((sum += line.value_num) - total.value_num) <= (index === 0 ? 0 : ((index + 2) * unit) / 2));
+  let slack = half(total.decimals);
+  return anchor.adjustments.map((line, index) => [line.value_num, anchor.decimals[index]!] as const).reverse().some(([value, decimals], index) => {
+    sum += value;
+    slack += half(decimals);
+    return Math.abs(sum - total.value_num) <= (index === 0 ? 0 : slack);
+  });
 }
 
 function isGaapLabel(label: string): boolean {

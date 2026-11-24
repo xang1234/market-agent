@@ -139,6 +139,10 @@ test("a rollup of the non-GAAP adjustments is no category, unless it names a kin
   const categories = (label: string) => nonGaapHistory([release("2025-10-26", 1, [[label, 5]])]).quarters[0]!.categories;
   assert.deepEqual(categories("Total income tax impact of non-GAAP adjustments"), ["income_tax_effect"]);
   assert.deepEqual(categories("Total impact of non‑GAAP adjustments to operating income"), []);
+  // A measure's own adjustments in one line, with or without "Total" (Devin on #764).
+  assert.deepEqual(categories("Non-GAAP operating income adjustments"), []);
+  assert.deepEqual(categories("Total non-GAAP operating income adjustments"), []);
+  assert.deepEqual(categories("Non-GAAP stock-based compensation"), ["stock_based_compensation"]);
 });
 
 test("a total of the non-GAAP adjustments is no category, as NVIDIA's real release rolls them up", () => {
