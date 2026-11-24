@@ -2,6 +2,7 @@
 // review sees every reading it moves. CI passes the merge's base commit; locally
 // `node --experimental-strip-types scripts/reader-corpus-check.ts origin/main`.
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 // Each regex reader and the expected file its corpus test in
@@ -20,7 +21,7 @@ export function missingExpectations(changed: ReadonlyArray<string>): string[] {
       `so the PR diff shows every reading the change moves (CLAUDE.md, "Known bug classes here": prose read by regex or keyword rules).`);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   const base = process.argv[2];
   if (!base) throw new Error("usage: reader-corpus-check.ts <base ref>");
   const changed = execFileSync("git", ["diff", "--name-only", `${base}...HEAD`], { encoding: "utf8" }).split("\n").filter(Boolean);

@@ -1163,7 +1163,9 @@ jobs:
       - name: Run repository contract tests
         run: node --experimental-strip-types --test "scripts/*.test.ts"
 
-      # A regex reader's change ships with its corpus expectations (#767).
+      # A regex reader's change ships with its corpus expectations (#767). On a
+      # pull_request the checkout is the PR's merge commit, so HEAD^1 is its base.
       - name: A changed text reader updates its corpus expectations
+        if: github.event_name == 'pull_request'
         run: node --experimental-strip-types scripts/reader-corpus-check.ts HEAD^1
 

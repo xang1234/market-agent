@@ -15,6 +15,8 @@ const UPDATE = process.env.UPDATE_READER_CORPUS === "1";
 // The lines an expected file holds, written first under UPDATE.
 function expected(file: string, header: string, lines: ReadonlyArray<string>): string[] {
   const path = join(CORPUS, file);
+  const crash = lines.find((line) => line.includes(" -> THROW "));
+  if (UPDATE && crash) throw new Error(`A reader throws on a corpus input, and a crash is never an expected reading. Fix it first:\n${crash}`);
   if (UPDATE) writeFileSync(path, [header, ...lines].join("\n") + "\n");
   return readFileSync(path, "utf8").split("\n").filter((line) => line !== "" && !line.startsWith("#"));
 }
@@ -91,6 +93,7 @@ test("release-figures.ts reads every corpus pick as the expected file says", () 
   );
   const moved = moves(want, got);
   assert.ok(moved === null, moved ?? "");
+  assert.ok(!want.some((line) => line.includes(" -> THROW ")), "release-figure-readings.txt records a crash as an expected reading");
 });
 
 // The 10-K fixtures and the AMD and NVIDIA release exhibits (#749), each table
