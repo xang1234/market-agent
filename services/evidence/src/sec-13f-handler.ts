@@ -14,6 +14,7 @@ import { createClaimArgument } from "./claim-argument-repo.ts";
 import { parse13fInfoTable, classify13fAmendment } from "./sec-13f-extractor.ts";
 import { isSuperinvestorFiler, superinvestorName } from "./superinvestor-filers.ts";
 import { resolveHoldingsByIssuer } from "./sec-13f-resolve.ts";
+import type { Outcome } from "../../shared/src/outcome.ts";
 import { insertHolding, holdingsByFiler, priorPeriodForFiler, supersede13fFiling, findFilerIssuerHolding, recordFilingPeriod, periodRestatedBy } from "./institutional-holdings-repo.ts";
 
 export type Form13fFilingRef = Pick<FilingIndexEntry, "cik" | "accession" | "form" | "filedDate">;
@@ -39,10 +40,10 @@ function changeVerb(kind: ChangeKind): string {
   }[kind];
 }
 
-export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) => {
+export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps): Promise<Outcome<string>> => {
   // Q8: process only the seeded superinvestor filers.
   if (!isSuperinvestorFiler(entry.cik)) {
-    return { ingested: false };
+    return { status: "empty", reason: "not_superinvestor" };
   }
   const filerCik = String(entry.cik).padStart(10, "0");
   const filerName = superinvestorName(entry.cik) ?? `CIK ${entry.cik}`;
@@ -71,7 +72,7 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
       `[sec-13f] skip ${entry.accession}: 13F-HR/A with unrecognized amendmentType ` +
         `"${filing.amendmentType ?? "(absent)"}" — not ingested (fra-kb2p)`,
     );
-    return { ingested: false };
+    return { status: "empty", reason: "unclassified_amendment" };
   }
   const restate = isAmendment && amendmentType === "RESTATEMENT";
   const supplemental = isAmendment && amendmentType === "NEW HOLDINGS";
@@ -83,7 +84,7 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
     const restatedBy = await periodRestatedBy(deps.db, filerCik, filing.periodOfReport);
     if (restatedBy) {
       console.warn(`[sec-13f] skip ${entry.accession}: ${filerName} @ ${filing.periodOfReport} already restated by ${restatedBy}`);
-      return { ingested: false };
+      return { status: "empty", reason: "period_restated" };
     }
   }
 
@@ -103,7 +104,7 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
   // resolve is unknown, not empty, and a supplement with nothing resolved adds nothing.
   if (resolved.length === 0 && !restate && (supplemental || hadUnresolved)) {
     console.warn(`[sec-13f] skip ${entry.accession}: no resolvable holdings for ${filerName}`);
-    return { ingested: false };
+    return { status: "empty", reason: "no_resolvable_holdings" };
   }
 
   const period = filing.periodOfReport;
@@ -268,5 +269,5 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
     }
   });
 
-  return { ingested: true };
+  return { status: "stored", rows: [entry.accession] };
 };

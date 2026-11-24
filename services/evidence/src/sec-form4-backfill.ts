@@ -87,7 +87,7 @@ export async function backfillIssuerForm4(
       filedDate: candidate.filedDate,
     };
     const result = await handleForm4(entry, handlerDeps);
-    if (result.ingested) ingested += 1;
+    if (result.status === "stored") ingested += 1;
     else skipped += 1;
   }
   return { ingested, skipped };
