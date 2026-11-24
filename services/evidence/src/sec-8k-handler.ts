@@ -5,7 +5,7 @@
 // removed from the generic filings backfill (they need this typed event
 // extraction, not a plain document ingest).
 import type { FilingIndexEntry } from "./sec-daily-index.ts";
-import type { FormHandlerDeps } from "./sec-daily-crawl.ts";
+import type { FormHandlerDeps, HandlerResult } from "./sec-daily-crawl.ts";
 import { withTransaction } from "./transaction.ts";
 import { createSource } from "./source-repo.ts";
 import { ingestDocumentInTransaction, type IngestDocumentTransactionDeps } from "./ingest.ts";
@@ -118,7 +118,7 @@ export async function persist8kFiling(
   return true;
 }
 
-export const handle8k = async (entry: Form8kFilingRef, deps: FormHandlerDeps) => {
+export const handle8k = async (entry: Form8kFilingRef, deps: FormHandlerDeps): Promise<HandlerResult> => {
   // For an 8-K the filer IS the issuer, and the filer CIK is known from the index
   // entry — so resolve BEFORE the network fetch and skip untracked filers without
   // downloading the filing. (Form 4 can't: its issuer CIK is inside the parsed
@@ -126,7 +126,7 @@ export const handle8k = async (entry: Form8kFilingRef, deps: FormHandlerDeps) =>
   const issuerId = await resolveIssuerIdByCik(deps.db, entry.cik);
   if (issuerId === null) {
     console.warn(`[sec-8k] skip ${entry.accession}: filer CIK ${entry.cik} not tracked`);
-    return { ingested: false };
+    return { status: "empty", reason: "issuer_not_tracked" };
   }
 
   const fetched = await deps.client.fetchFiling({
@@ -140,10 +140,10 @@ export const handle8k = async (entry: Form8kFilingRef, deps: FormHandlerDeps) =>
   // malformed filing can be reprocessed later (mirrors the Form 4 empty guard).
   if (items.length === 0) {
     console.warn(`[sec-8k] skip ${entry.accession}: no ITEM INFORMATION in header`);
-    return { ingested: false };
+    return { status: "empty", reason: "no_items" };
   }
 
   const ingested = await withTransaction(deps.db, (tx) =>
     persist8kFiling({ tx, objectStore: deps.objectStore }, { issuerId, fetched, entry, items }));
-  return { ingested };
+  return ingested ? { status: "stored", rows: [entry.accession] } : { status: "empty", reason: "cik_moved" };
 };

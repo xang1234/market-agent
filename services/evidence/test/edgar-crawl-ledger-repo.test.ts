@@ -24,8 +24,26 @@ test("recordCrawlBatch upserts on (form, index_date) with counts", async () => {
     filingsIngested: 8,
     filingsSkipped: 2,
     startedAt: "2026-06-12T06:00:00Z",
+    failures: [],
   });
   assert.match(calls[0].sql, /insert into edgar_crawl_ledger/i);
   assert.match(calls[0].sql, /on conflict \(form, index_date\) do update/i);
-  assert.deepEqual(calls[0].params, ["4", "2026-06-12", "succeeded", 10, 8, 2, "2026-06-12T06:00:00Z"]);
+  assert.deepEqual(calls[0].params, ["4", "2026-06-12", "succeeded", 10, 8, 2, "2026-06-12T06:00:00Z", "[]"]);
+});
+
+test("recordCrawlBatch writes a partial day's causes, and a rerun replaces them", async () => {
+  const { db, calls } = fakeDb([]);
+  const failures = [{ accession: "0000320193-26-000051", cause: "SEC EDGAR fetch failed (503)" }];
+  await recordCrawlBatch(db, {
+    form: "4",
+    indexDate: "2026-06-12",
+    status: "partial",
+    filingsTotal: 2,
+    filingsIngested: 1,
+    filingsSkipped: 1,
+    startedAt: "2026-06-12T06:00:00Z",
+    failures,
+  });
+  assert.equal(calls[0].params[7], JSON.stringify(failures));
+  assert.match(calls[0].sql, /failures = excluded\.failures/i);
 });

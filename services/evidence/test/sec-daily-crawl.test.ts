@@ -10,10 +10,14 @@ const ENTRIES: FilingIndexEntry[] = [
   { cik: 1, company: "Ignore", form: "10-Q", filedDate: "2026-06-12", fileName: "edgar/data/1/0000000001-26-000001.txt", accession: "0000000001-26-000001" },
 ];
 
-function deps(opts: { existingAccessions?: Set<string> } = {}) {
+const STORED = (accession: string) => ({ status: "stored", rows: [accession] }) as const;
+
+function deps(opts: { existingAccessions?: Set<string>; entries?: FilingIndexEntry[] } = {}) {
   const existing = opts.existingAccessions ?? new Set<string>();
+  const ledger: unknown[][] = [];
   const db = {
     query: async (sql: string, params: unknown[] = []) => {
+      if (/insert into edgar_crawl_ledger/i.test(sql)) ledger.push(params);
       if (/from documents/i.test(sql)) {
         const accession = params[0] as string;
         return { rows: existing.has(accession) ? [{ document_id: "doc-1" }] : [] } as never;
@@ -21,13 +25,16 @@ function deps(opts: { existingAccessions?: Set<string> } = {}) {
       return { rows: [] } as never;
     },
   } as unknown as QueryExecutor;
-  const client = { fetchDailyIndex: async (_d: Date) => ENTRIES } as never;
-  return { db, client };
+  const client = { fetchDailyIndex: async (_d: Date) => opts.entries ?? ENTRIES } as never;
+  return { db, client, ledger };
 }
+
+// The ledger row a form's crawl wrote: [form, date, status, total, ingested, skipped, started, failures].
+const ledgerRow = (ledger: unknown[][], form: string) => ledger.find((params) => params[0] === form);
 
 test("dispatches only the requested forms to their handler; ignores others", async () => {
   const seen: string[] = [];
-  const handler: FormHandler = async (entry) => { seen.push(`${entry.form}:${entry.accession}`); return { ingested: true }; };
+  const handler: FormHandler = async (entry) => { seen.push(`${entry.form}:${entry.accession}`); return STORED(entry.accession); };
   const d = deps();
   const result = await crawlDailyFilings(
     { db: d.db, client: d.client, objectStore: {} as never },
@@ -40,7 +47,7 @@ test("dispatches only the requested forms to their handler; ignores others", asy
 
 test("skips filings whose accession already has a documents row (idempotent)", async () => {
   const handlerCalls: string[] = [];
-  const handler: FormHandler = async (entry) => { handlerCalls.push(entry.accession); return { ingested: true }; };
+  const handler: FormHandler = async (entry) => { handlerCalls.push(entry.accession); return STORED(entry.accession); };
   const d = deps({ existingAccessions: new Set(["0000320193-26-000050"]) });
   const result = await crawlDailyFilings(
     { db: d.db, client: d.client, objectStore: {} as never },
@@ -49,22 +56,87 @@ test("skips filings whose accession already has a documents row (idempotent)", a
   assert.deepEqual(handlerCalls, []);
   assert.equal(result.byForm["4"].skipped, 1);
   assert.equal(result.byForm["4"].ingested, 0);
+  assert.deepEqual(result.byForm["4"].skipReasons, { already_stored: 1 });
 });
 
-test("a handler throwing marks that form partial but does not abort the crawl", async () => {
-  const ok: FormHandler = async () => ({ ingested: true });
+test("a filing the handler did not ingest is counted under the handler's reason", async () => {
+  const untracked: FormHandler = async () => ({ status: "empty", reason: "issuer_not_tracked" });
+  const d = deps();
+  const result = await crawlDailyFilings(
+    { db: d.db, client: d.client, objectStore: {} as never },
+    { date: new Date("2026-06-12T00:00:00Z"), handlers: { "4": untracked } },
+  );
+  assert.deepEqual(result.byForm["4"], { total: 1, ingested: 0, skipped: 1, status: "succeeded", skipReasons: { issuer_not_tracked: 1 }, failures: [] });
+  assert.equal(ledgerRow(d.ledger, "4")?.[2], "succeeded");
+  assert.equal(ledgerRow(d.ledger, "4")?.[7], "[]");
+});
+
+test("a cause quoting a NUL byte or a whole document is stored as jsonb can hold it", async () => {
+  const boom: FormHandler = async () => { throw new Error(`bad <xml>\u0000${"x".repeat(1000)}`); };
+  const d = deps();
+  const result = await crawlDailyFilings(
+    { db: d.db, client: d.client, objectStore: {} as never },
+    { date: new Date("2026-06-12T00:00:00Z"), handlers: { "4": boom } },
+  );
+  const cause = result.byForm["4"].failures[0]!.cause;
+  assert.equal(cause.includes("\u0000"), false);
+  assert.equal(cause.length, 500);
+  assert.ok(cause.startsWith("bad <xml>x"));
+});
+
+test("a cause is cut by code point and never holds a lone surrogate or reads empty", async () => {
+  const causeOf = async (message: string) => {
+    const boom: FormHandler = async () => { throw new Error(message); };
+    const d = deps();
+    const result = await crawlDailyFilings(
+      { db: d.db, client: d.client, objectStore: {} as never },
+      { date: new Date("2026-06-12T00:00:00Z"), handlers: { "4": boom } },
+    );
+    return result.byForm["4"].failures[0]!.cause;
+  };
+  const emojiAtCut = await causeOf(`${"a".repeat(499)}\u{1F600}tail`);
+  assert.ok(emojiAtCut.isWellFormed());
+  assert.equal(emojiAtCut, `${"a".repeat(499)}\u{1F600}`);
+  assert.ok((await causeOf("prefix\uD83Dsuffix")).isWellFormed());
+  assert.equal(await causeOf("\u0000"), "Error");
+});
+
+test("a form whose only filing failed is recorded failed with its cause, and the crawl goes on", async () => {
+  const ok: FormHandler = async (entry) => STORED(entry.accession);
   const boom: FormHandler = async () => { throw new Error("parse failed"); };
   const d = deps();
   const result = await crawlDailyFilings(
     { db: d.db, client: d.client, objectStore: {} as never },
     { date: new Date("2026-06-12T00:00:00Z"), handlers: { "4": boom, "8-K": ok } },
   );
-  assert.equal(result.byForm["4"].status, "partial");
+  const failures = [{ accession: "0000320193-26-000050", cause: "parse failed" }];
+  assert.equal(result.byForm["4"].status, "failed", "nothing ingested and a failure is not a partial day");
+  assert.deepEqual(result.byForm["4"].failures, failures);
+  assert.equal(ledgerRow(d.ledger, "4")?.[2], "failed");
+  assert.equal(ledgerRow(d.ledger, "4")?.[7], JSON.stringify(failures));
   assert.equal(result.byForm["8-K"].status, "succeeded");
+  assert.equal(ledgerRow(d.ledger, "8-K")?.[7], "[]");
+});
+
+test("a form that ingested some filings and failed one is partial, with the failed filing's cause", async () => {
+  const second = { ...ENTRIES[0]!, accession: "0000320193-26-000051", fileName: "edgar/data/320193/0000320193-26-000051.txt" };
+  const handler: FormHandler = async (entry) => {
+    if (entry.accession === second.accession) throw new Error("SEC EDGAR fetch failed (503)");
+    return STORED(entry.accession);
+  };
+  const d = deps({ entries: [ENTRIES[0]!, second] });
+  const result = await crawlDailyFilings(
+    { db: d.db, client: d.client, objectStore: {} as never },
+    { date: new Date("2026-06-12T00:00:00Z"), handlers: { "4": handler } },
+  );
+  const failures = [{ accession: second.accession, cause: "SEC EDGAR fetch failed (503)" }];
+  assert.deepEqual(result.byForm["4"], { total: 2, ingested: 1, skipped: 1, status: "partial", skipReasons: {}, failures });
+  assert.equal(ledgerRow(d.ledger, "4")?.[2], "partial");
+  assert.equal(ledgerRow(d.ledger, "4")?.[7], JSON.stringify(failures));
 });
 
 test("a dedup (DB) failure aborts the crawl instead of silently skipping", async () => {
-  const handler: FormHandler = async () => ({ ingested: true });
+  const handler: FormHandler = async (entry) => STORED(entry.accession);
   const db = {
     query: async (sql: string) => {
       if (/from documents/i.test(sql)) throw new Error("db down");
