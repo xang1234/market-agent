@@ -130,7 +130,7 @@ test("standout findings", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(section.packet?.figures, []);
     assert.equal(section.packet?.findings, undefined);
     assert.deepEqual(section.packet?.gaps, [
-      "AAA: no standout finding in its own history (operating margin: fewer fiscal years on file than it ranks; stock-based compensation as a multiple of free cash flow: fewer fiscal years on file than it ranks; cash conversion (operating cash flow / net income): fewer fiscal years on file than it ranks).",
+      "AAA: no standout finding in its own history (operating margin: a year in its window has no value; stock-based compensation as a multiple of free cash flow: a year in its window has no value; cash conversion (operating cash flow / net income): a year in its window has no value).",
     ]);
   });
 

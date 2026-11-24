@@ -151,7 +151,7 @@ export function runDetectors(content: FinancialAnswerContent, company: string): 
 export const isFinding = (outcome: DetectorOutcome): outcome is Finding => "statement" in outcome;
 
 const DECLINE_WORDS: Readonly<Record<DeclineReason, string>> = {
-  incomplete_history: "fewer fiscal years on file than it ranks",
+  incomplete_history: "a year in its window has no value",
   tag_change: "a year filed under another concept",
   non_positive_base: "a zero or negative base",
   engine_gap: "not computed",
