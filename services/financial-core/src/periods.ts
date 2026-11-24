@@ -37,6 +37,23 @@ export function coverSameMonths(left: Pick<PeriodIdentity, "start" | "end">, rig
   return 2 * Math.abs(dayNumber(left.end) - dayNumber(right.end)) <= days;
 }
 
+// A 52/53-week year ends on one weekday in a 7-day window, so its end sits at
+// most 6 days off the same date a year earlier; a 14-week quarter sits 7 days
+// off three calendar months. A moved fiscal year end shifts it by a month or more.
+const STEP_TOLERANCE_DAYS = 14;
+
+/** `olderEnd` falls `months` calendar months before `newerEnd`, give or take STEP_TOLERANCE_DAYS. */
+export function endsStepsApart(newerEnd: IsoDate, olderEnd: IsoDate, months: number): boolean {
+  if (!Number.isInteger(months) || months <= 0) return false;
+  const [year, month, day] = newerEnd.split("-").map(Number);
+  // A month-end date steps to that month's end: May 31 three months back is
+  // Feb 28, not Mar 3, and Feb 28, 2025 a year back is Feb 29, 2024.
+  const lastDay = new Date(Date.UTC(year!, month! - months, 0)).getUTCDate();
+  const monthEnd = day === new Date(Date.UTC(year!, month!, 0)).getUTCDate();
+  const target = Date.UTC(year!, month! - 1 - months, monthEnd ? lastDay : Math.min(day!, lastDay)) / DAY_MS;
+  return Math.abs(dayNumber(olderEnd) - target) <= STEP_TOLERANCE_DAYS;
+}
+
 export function classifyDuration(period: PeriodIdentity): "instant" | "quarter" | "annual" | "other" {
   const days = periodDays(period);
   if (days === null) return "instant";

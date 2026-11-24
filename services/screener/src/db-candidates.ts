@@ -9,6 +9,7 @@ import {
   loadRecentIssuerFundamentals,
   type IssuerFundamentalFact,
 } from "../../fundamentals/src/issuer-fundamentals-reader.ts";
+import { endsStepsApart } from "../../financial-core/src/periods.ts";
 import { lastRegularSessionDate } from "../../market/src/ytd-window.ts";
 
 // The four annual reported metrics the screener derives margins and growth
@@ -239,25 +240,26 @@ function pickCurrentPriorFundamentals(facts: ReadonlyArray<IssuerFundamentalFact
   prior: Record<string, number | null>;
 } {
   // Revenue-anchored: current = latest fiscal year that has a revenue fact;
-  // prior = current - 1. Keeps margins' numerator and denominator in the same
-  // year and matches the pre-migration latest_year CTE behavior.
-  let currentYear: number | null = null;
+  // prior = current - 1, when it ends a year before current's revenue (a moved
+  // fiscal year end leaves it empty). Keeps margins' numerator and denominator
+  // in the same year and matches the pre-migration latest_year CTE behavior.
+  let anchor: { year: number; end: string | null } | null = null;
   for (const fact of facts) {
     if (fact.metric_key === "revenue" && fact.fiscal_year !== null) {
-      if (currentYear === null || fact.fiscal_year > currentYear) {
-        currentYear = fact.fiscal_year;
-      }
+      if (anchor === null || fact.fiscal_year > anchor.year) anchor = { year: fact.fiscal_year, end: fact.period_end };
     }
   }
 
   const current = emptyFacts();
   const prior = emptyFacts();
-  if (currentYear === null) return { current, prior };
+  if (anchor === null) return { current, prior };
 
-  const priorYear = currentYear - 1;
+  const { year: currentYear, end: currentEnd } = anchor;
+  const isPrior = (fact: IssuerFundamentalFact) =>
+    fact.fiscal_year === currentYear - 1 && currentEnd !== null && fact.period_end !== null && endsStepsApart(currentEnd, fact.period_end, 12);
   const seen = new Set<string>();
   for (const fact of facts) {
-    if (fact.fiscal_year !== currentYear && fact.fiscal_year !== priorYear) continue;
+    if (fact.fiscal_year !== currentYear && !isPrior(fact)) continue;
     if (!(fact.metric_key in current)) continue; // ignore metrics outside the set
     const key = `${fact.fiscal_year}:${fact.metric_key}`;
     if (seen.has(key)) continue; // reader orders as_of desc ⇒ first write is newest

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyDuration, periodDays, periodsContiguous, periodsIdentical, periodsOverlap, type PeriodIdentity } from "../src/periods.ts";
+import { classifyDuration, endsStepsApart, periodDays, periodsContiguous, periodsIdentical, periodsOverlap, type PeriodIdentity } from "../src/periods.ts";
 
 function duration(start: string, end: string, fiscal_period: PeriodIdentity["fiscal_period"] = "FY", fiscal_year = Number(end.slice(0, 4))): PeriodIdentity {
   return { kind: "duration", start, end, fiscal_year, fiscal_period, calendar_version: "fiscal-calendar.v1" };
@@ -45,4 +45,28 @@ test("overlap and contiguity use exact dates", () => {
   assert.equal(periodsOverlap(q1, q2), false);
   assert.equal(periodsOverlap(ytd, q2), true);
   assert.equal(periodsContiguous(q1, duration("2023-04-02", "2023-06-30", "Q2")), false);
+});
+
+test("a prior period is found by its end date, so a fiscal-year-end change is not a year back", () => {
+  // A year that follows a normal one, and Apple's 53-week FY2023 after its 52-week FY2022.
+  assert.equal(endsStepsApart("2024-12-31", "2023-12-31", 12), true);
+  assert.equal(endsStepsApart("2023-09-30", "2022-09-24", 12), true);
+  // NVIDIA's 53-week FY2021 (ended 2021-01-31) after FY2020 (ended 2020-01-26).
+  assert.equal(endsStepsApart("2021-01-31", "2020-01-26", 12), true);
+  // Apple's 14-week Q1 FY2023 after Q4 FY2022: seven days off three calendar months.
+  assert.equal(endsStepsApart("2022-12-31", "2022-09-24", 3), true);
+  // Year end moved from June to December: FY2023 and FY2024 end 18 months apart.
+  assert.equal(endsStepsApart("2024-12-31", "2023-06-30", 12), false);
+  // #479: Q4 FY2025 and Q1 FY2026 end nine months apart.
+  assert.equal(endsStepsApart("2025-10-26", "2025-01-26", 3), false);
+  assert.equal(endsStepsApart("2023-12-31", "2024-12-31", 12), false);
+  // A step count that is not a positive whole number never pairs.
+  assert.equal(endsStepsApart("2023-12-31", "2024-12-31", -12), false);
+  assert.equal(endsStepsApart("2024-12-31", "2025-01-05", 0), false);
+  // Month ends step to month ends: Oracle-style quarters ending May 31 and Feb 28.
+  assert.equal(endsStepsApart("2023-05-31", "2023-02-15", 3), true);
+  assert.equal(endsStepsApart("2023-05-31", "2023-03-17", 3), false);
+  // Feb 28, 2025 steps a year back to Feb 29, 2024: 14 days before that pairs, 15 does not.
+  assert.equal(endsStepsApart("2025-02-28", "2024-02-15", 12), true);
+  assert.equal(endsStepsApart("2025-02-28", "2024-02-14", 12), false);
 });
