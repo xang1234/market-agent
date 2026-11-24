@@ -13,6 +13,14 @@ export type DailyCrawlClient = { fetchDailyIndex(date: Date): Promise<FilingInde
 
 // Handlers fetch the filing they're dispatched (the submission .txt), so the
 // capability they need is fetchFiling — not the index fetch the orchestrator uses.
+// A cause as the ledger's jsonb can hold it: Postgres rejects a NUL in jsonb
+// text, and a parser error can quote raw filing bytes. Capped so one quoted
+// document cannot bloat the row.
+const CAUSE_MAX = 500;
+function storableCause(cause: Error): string {
+  return (cause.message || cause.name).replace(/\u0000/g, "").slice(0, CAUSE_MAX);
+}
+
 export type FormHandlerDeps = { db: QueryExecutor; objectStore: ObjectStore; client: SecFilingFetcher };
 // What a handler returns: it throws on failure, so it never returns `failed`;
 // the crawl turns a throw into one.
@@ -94,7 +102,7 @@ export async function crawlDailyFilings(
       // A handler failure counts the filing as skipped (keeps total = ingested
       // + skipped), keeps and logs its cause, and the crawl continues.
       outcome.skipped += 1;
-      outcome.failures.push({ accession: entry.accession, cause: result.cause.message || result.cause.name });
+      outcome.failures.push({ accession: entry.accession, cause: storableCause(result.cause) });
       console.error(
         `[sec-daily-crawl] handler failed for form=${entry.form} accession=${entry.accession}`,
         result.cause,

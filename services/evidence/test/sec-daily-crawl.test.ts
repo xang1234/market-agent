@@ -71,6 +71,19 @@ test("a filing the handler did not ingest is counted under the handler's reason"
   assert.equal(ledgerRow(d.ledger, "4")?.[7], "[]");
 });
 
+test("a cause quoting a NUL byte or a whole document is stored as jsonb can hold it", async () => {
+  const boom: FormHandler = async () => { throw new Error(`bad <xml>\u0000${"x".repeat(1000)}`); };
+  const d = deps();
+  const result = await crawlDailyFilings(
+    { db: d.db, client: d.client, objectStore: {} as never },
+    { date: new Date("2026-06-12T00:00:00Z"), handlers: { "4": boom } },
+  );
+  const cause = result.byForm["4"].failures[0]!.cause;
+  assert.equal(cause.includes("\u0000"), false);
+  assert.equal(cause.length, 500);
+  assert.ok(cause.startsWith("bad <xml>x"));
+});
+
 test("a form whose only filing failed is recorded failed with its cause, and the crawl goes on", async () => {
   const ok: FormHandler = async (entry) => STORED(entry.accession);
   const boom: FormHandler = async () => { throw new Error("parse failed"); };
