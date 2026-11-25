@@ -37,7 +37,7 @@
         "unit_id": "call",
         "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
       },
-      "base_rate_table": "547384e18543e4178e40539c719059f5e5d55965381205a48a7f43b459e41abd",
+      "base_rate_table": "26286bd73e9600ec4b70ad553e318626cb58cf8158084d5835724621e2af162c",
       "facts": [
         {
           "id": "free_cash_flow",
@@ -494,7 +494,7 @@
         "unit_id": "call",
         "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
       },
-      "base_rate_table": "547384e18543e4178e40539c719059f5e5d55965381205a48a7f43b459e41abd",
+      "base_rate_table": "26286bd73e9600ec4b70ad553e318626cb58cf8158084d5835724621e2af162c",
       "facts": [
         {
           "id": "free_cash_flow",
@@ -851,7 +851,7 @@
         "unit_id": "call",
         "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
       },
-      "base_rate_table": "547384e18543e4178e40539c719059f5e5d55965381205a48a7f43b459e41abd",
+      "base_rate_table": "26286bd73e9600ec4b70ad553e318626cb58cf8158084d5835724621e2af162c",
       "facts": [
         {
           "id": "free_cash_flow",
