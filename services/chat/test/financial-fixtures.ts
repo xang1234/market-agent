@@ -147,6 +147,7 @@ export function chatHarness(
   options: {
     model: PlanningModel | null;
     analyst?: ChatAnalystToolRuntime;
+    analystAgent?: ChatCoordinatorOptions["analystAgent"];
     // null: the runtime is given no scope.
     researchScope?: Parameters<typeof createChatFinancialRuntime>[0]["researchScope"] | null;
     readQuestion?: ChatCoordinatorOptions["readQuestion"];
@@ -163,6 +164,7 @@ export function chatHarness(
   const persisted: Array<Parameters<ChatAssistantMessageCommit>[0]> = [];
   const coordinator = createChatCoordinator({
     analystToolRuntime: options.analyst ?? forbiddenAnalyst,
+    ...(options.analystAgent ? { analystAgent: options.analystAgent } : {}),
     // By default the reading names the tickers the question writes, with no change asked.
     readQuestion: options.readQuestion ?? (async (question) => ({ ...METRIC_READING, companies: { kind: "as_named", names: extractSubjectMentions(question) } })),
     persistAssistantMessage: async (message) => {

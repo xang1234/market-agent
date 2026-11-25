@@ -23,7 +23,12 @@ import { mergeIssuerAway } from "../../fundamentals/test/issuer-merge-fixture.ts
 import { aaplCallInputs } from "../../fundamentals/test/sec-call-inputs-fixture.ts";
 import { POLYGON_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import { callBlockHash, verifyCalls, type CallBlock } from "../../snapshot/src/call.ts";
+import { LlmRouterError, type ControlledRouter } from "../../llm/src/router.ts";
+import { analystAgentRunner } from "../src/analyst-agent.ts";
+import type { AnalystToolResult } from "../src/analyst-tools.ts";
+import { answerTurn } from "../src/answer-trace.ts";
 import { publishCall } from "../src/call.ts";
+import type { ChatAnalystAgent } from "../src/coordinator.ts";
 import { chatAuthority } from "../src/financial-runtime.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
@@ -31,6 +36,7 @@ import { chatDatabase, chatHarness, completed, resolveMention } from "./financia
 
 // Monday 10:00 in New York: Friday 2026-11-06's close is the latest.
 const CUTOFF = "2026-11-09T15:00:00.000Z";
+const LLM_ENV = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1,o3", LITELLM_MODEL: "openai/gpt-4.1", AGENT_LITELLM_MODEL: "openai/o3" };
 const FINVIZ = "00000000-0000-4000-a000-0000000000f5";
 
 type Issuer = Readonly<{ ticker: string; issuer: string; listing: string; cik: number; accession: string }>;
@@ -144,13 +150,15 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
   await seedIssuer(db, pool, HOLI, filerFacts(HOLI), true, "2026-11-27T12:00:00Z", "2026-11-25T21:00:00Z");
   await seedIssuer(db, pool, EVEN, filerFacts(EVEN), true, undefined, "2026-11-09T21:00:00Z", "2026-11-10T01:00:00.000Z");
 
-  const ask = async (question: string, options: { clock?: string; turnId?: string; threadId?: string; model?: PlanningModel } = {}) => {
+  const ask = async (question: string, options: { clock?: string; turnId?: string; threadId?: string; model?: PlanningModel; agent?: ChatAnalystAgent } = {}) => {
     const threadId = options.threadId ?? randomUUID();
     if (!options.threadId) await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [threadId, IDS.owner]);
-    const harness = chatHarness(pool, { model: options.model ?? null, resolveMention: resolve, clock: () => new Date(options.clock ?? CUTOFF) });
+    const harness = chatHarness(pool, {
+      model: options.model ?? null, resolveMention: resolve, clock: () => new Date(options.clock ?? CUTOFF), ...(options.agent ? { analystAgent: options.agent } : {}),
+    });
     const done = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: question, ...(options.turnId ? { turnId: options.turnId } : {}) })).events);
     const message = (await listChatMessagesForThread(pool, { thread_id: threadId, user_id: IDS.owner }))!.messages.find((candidate) => candidate.message_id === done.message_id)!;
-    return { threadId, message, block: (message.blocks as unknown as CallBlock[])[0]! };
+    return { threadId, done, message, block: (message?.blocks as unknown as CallBlock[] | undefined)?.[0]! };
   };
   const rows = (call: CallContent | CallContentV1) => [...call.facts, ...call.assumptions, ...call.requires].map((row) => [row.id, row.kind, row.basis.length > 0, row.figure.text]);
 
@@ -276,6 +284,41 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     assert.deepEqual(call.requires.map((row) => row.figure.text), ["7.3% a year", "Not computed: the exit multiple is not anchored.", "8.18%"]);
     assert.equal(call.stance.rule, 1);
     assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the scoped basis");
+  });
+
+  // #715: the analyst agent on, a Call ask runs the Call, whether the agent's model answers or fails; the Call needs none.
+  const agentWith = (router: ControlledRouter) => analystAgentRunner({
+    financial: { pool, evidence: createEvidenceFinancialPort, resolveMention: resolve },
+    router: async () => router,
+    read: async (name) => ({ tool: name, status: "no_business_claims", truncated: false, reads: [], no_filing: [] }) as AnalystToolResult,
+    compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: "NVDA designs GPUs." }), onAnswered }),
+    asOf: () => CUTOFF,
+  });
+  const answering = (): ControlledRouter => {
+    let step = 0;
+    return {
+      complete: async () => (step++ === 0
+        ? { text: "", toolCalls: [{ id: "profile", name: "get_company_profile", arguments: { subject_ref: { kind: "issuer", id: NVDA.issuer } } as never }], deployment: { channel: "openai", model: "o3" } }
+        : { text: "DONE", deployment: { channel: "openai", model: "o3" } }),
+    };
+  };
+  const failing: ControlledRouter = { complete: async () => { throw new LlmRouterError("client_failed", "the model is down", []); } };
+  const calls = async () => Number((await db.query(`select count(*)::int as n from calls`)).rows[0]!.n);
+
+  await t.test("the analyst agent on with a working model, a Call ask still makes the Call (#715)", async () => {
+    const before = await calls();
+    const { done, block } = await ask("Make a Call on NVDA", { agent: agentWith(answering()) });
+    assert.equal(done.bundle_id, "financial_answer", "the Call path answers, not the agent");
+    assert.equal(block.kind, "call");
+    assert.equal(await calls(), before + 1);
+  });
+
+  await t.test("the analyst agent on with its model failing, a Call ask still makes the Call (#715)", async () => {
+    const before = await calls();
+    const { done, block } = await ask("Make a Call on NVDA", { agent: agentWith(failing) });
+    assert.equal(done.bundle_id, "financial_answer", "the Call path answers, not the agent");
+    assert.equal(block.kind, "call");
+    assert.equal(await calls(), before + 1);
   });
 
   await t.test("continuing-operations OCF certifies: the Call is AAPL's, and free cash flow's basis names the continuing-operations concept (#743)", async () => {
