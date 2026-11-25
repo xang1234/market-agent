@@ -4,9 +4,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { IDS, seedCashResilience } from "../../financial-engine/test/db-fixtures.ts";
+import type { ControlledRouter } from "../../llm/src/router.ts";
+import { analystAgentRunner } from "../src/analyst-agent.ts";
+import type { AnalystToolResult } from "../src/analyst-tools.ts";
+import { answerTurn } from "../src/answer-trace.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
-import { chatDatabase, chatHarness, completed } from "./financial-fixtures.ts";
+import { chatDatabase, chatHarness, completed, resolveMention } from "./financial-fixtures.ts";
+
+const LLM_ENV = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1,o3", LITELLM_MODEL: "openai/gpt-4.1", AGENT_LITELLM_MODEL: "openai/o3" };
 
 test("chat cash resilience", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -15,10 +22,10 @@ test("chat cash resilience", { timeout: 300_000 }, async (t) => {
   }
   const { db, pool, threadId } = await chatDatabase(t, "chat-cash-res");
   await seedCashResilience(db);
-  const ask = async (userIntent: string) =>
-    (await chatHarness(pool, { model: null }).run({ threadId, userId: IDS.owner, userIntent })).events;
-  const answer = async (userIntent: string) => {
-    const done = completed(await ask(userIntent));
+  const ask = async (userIntent: string, harness = chatHarness(pool, { model: null })) =>
+    (await harness.run({ threadId, userId: IDS.owner, userIntent })).events;
+  const answer = async (userIntent: string, harness?: ReturnType<typeof chatHarness>) => {
+    const done = completed(await ask(userIntent, harness));
     const read = await listChatMessagesForThread(pool, { thread_id: threadId, user_id: IDS.owner });
     const message = read!.messages.find((candidate) => candidate.message_id === done.message_id)!;
     const block = (message.blocks as Array<{ id: string; financial: any }>)[0]!;
@@ -44,6 +51,33 @@ test("chat cash resilience", { timeout: 300_000 }, async (t) => {
       ],
     });
   });
+
+  // #803: with the analyst agent on, its model answering or none configured, each ask is the financial lane's and the agent is never called.
+  const scripted: ControlledRouter = { complete: async () => ({ text: "DONE", deployment: { channel: "openai", model: "o3" } }) };
+  for (const [name, router] of [["a working model", scripted], ["no model configured", null]] as const) {
+    await t.test(`the analyst agent on with ${name}, the view, a named year and a score each stay the financial lane's (#803)`, async () => {
+      const turns: unknown[] = [];
+      const agent = analystAgentRunner({
+        financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
+        router: async () => router,
+        read: async (tool) => ({ tool, status: "no_business_claims", truncated: false, reads: [], no_filing: [] }) as AnalystToolResult,
+        compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: "AAA makes things." }), onAnswered }),
+        asOf: () => new Date().toISOString(),
+      });
+      const on = chatHarness(pool, {
+        model: null,
+        analystAgent: async (turn) => {
+          turns.push(turn);
+          return agent(turn);
+        },
+      });
+      const ratios = (rows: string[][]) => rows.slice(5).map((row) => row[2]);
+      assert.deepEqual(ratios((await answer("Show AAA's cash resilience", on)).rows), ["1.2", "0.5", "1.5"]);
+      assert.deepEqual(ratios((await answer("AAA cash resilience for FY2023", on)).rows), ["1.2", "0.5", "1.5"]);
+      assert.deepEqual(completed(await ask("Give AAA a cash resilience score", on)).financial_gap, { reason_code: "unsupported" });
+      assert.equal(turns.length, 0, "the analyst agent receives no call");
+    });
+  }
 
   await t.test("a named fiscal year is planned for that year", async () => {
     const { rows } = await answer("AAA cash resilience for FY2023");

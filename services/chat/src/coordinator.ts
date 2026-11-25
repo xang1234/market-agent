@@ -36,9 +36,6 @@ import {
   type ChatCommittedMessage,
   type ChatReadMessage,
 } from "./messages.ts";
-import { readCallAsk } from "./call.ts";
-import { turnScenarioAsk } from "./eps-scenarios.ts";
-import { readPriceComparisonAsk } from "./scenario-price-comparison.ts";
 import { financialAwareRunner, offeredChoicesRunner } from "./financial-turn.ts";
 import { workSummaryRunner, type ChatWorkSummarySave } from "./work-summary.ts";
 import { companyNameIn, companyWordsIn, type CompanyChange, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
@@ -379,15 +376,6 @@ type NormalizedChatTurnInput = ChatTurnInput & {
 
 const DEFAULT_COMPLETED_TURN_RETENTION_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_COMPLETED_TURNS = 1000;
-// The fixed asks the financial lane answers with no model, read by the parsers its take reads them with, so the agent never
-// takes one (#715, #803): a Call (ADR 0005), a P/E scenario, and a price comparison. Every other message is the agent's.
-// ponytail: the scenario is read with no company resolved yet, so a one-label edit that names its company ("make AAPL bull 35") stays the agent's.
-const FINANCIAL_ASKS: ReadonlyArray<(text: string) => unknown> = [
-  readCallAsk,
-  (text) => turnScenarioAsk(text, []),
-  readPriceComparisonAsk,
-];
-
 const DEFAULT_COMPLETED_TURN_TOMBSTONE_RETENTION_MS = 60 * 60 * 1000;
 const DEFAULT_MAX_COMPLETED_TURN_TOMBSTONES = 10000;
 
@@ -424,12 +412,14 @@ export function createChatCoordinator(
     loadPriorSubjects: options.loadPriorSubjects,
     renderSubjectClarification: options.renderSubjectClarification,
   });
-  const financialLane = financialAwareRunner(subjectAware, { financialRuntime: options.financialRuntime, persistAssistantMessage });
+  const { financialRuntime } = options;
+  // Without the analyst agent the financial lane takes its turns and hands the rest to subjectAware. With it, the lane first
+  // claims the fixed asks it answers with no model (#715, #803), and every other turn is the agent's, a fixed ask the lane
+  // gives back included. A company the agent leaves to be picked goes to the lane's take, which hands on to subjectAware, never back.
+  const financialLane = financialAwareRunner(subjectAware, { take: financialRuntime?.take, persistAssistantMessage });
   const agentSeat = options.analystAgent
     && analystAgentSeat({ next: subjectAware, picking: financialLane }, options.analystAgent, { persistAssistantMessage, verificationMode: options.verificationMode ?? "strict" });
-  const seat: ChatTurnRunner = agentSeat
-    ? (context) => (FINANCIAL_ASKS.some((reads) => reads(context.userIntent ?? "") !== null) ? financialLane : agentSeat)(context)
-    : financialLane;
+  const seat: ChatTurnRunner = agentSeat ? financialAwareRunner(agentSeat, { take: financialRuntime?.claim, persistAssistantMessage }) : financialLane;
   const runner = workSummaryRunner(threadTitleGenerationRunner(runActivityReportingRunner(offeredChoicesRunner(readingRunner(seat, options.readQuestion), options.financialRuntime), options.runActivity), {
     generateThreadTitle: options.generateThreadTitle,
     onThreadTitleGenerationError: options.onThreadTitleGenerationError,

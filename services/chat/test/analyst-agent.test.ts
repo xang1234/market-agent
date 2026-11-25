@@ -1261,7 +1261,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
 
   const lane = () => {
     const taken: string[] = [];
-    return { taken, runtime: { take: async (context: { userIntent?: string; companiesByReading?: true }) => (taken.push(`${context.userIntent ?? ""}${context.companiesByReading ? " (by reading)" : ""}`), null), everyOfferedChoice: async () => null, assertReady: async () => {} } };
+    return { taken, runtime: { take: async (context: { userIntent?: string; companiesByReading?: true }) => (taken.push(`${context.userIntent ?? ""}${context.companiesByReading ? " (by reading)" : ""}`), null), claim: async () => null, everyOfferedChoice: async () => null, assertReady: async () => {} } };
   };
 
   await t.test("a comparison naming a company still to be picked goes to the financial lane, which asks, with a page's company or without", async () => {
