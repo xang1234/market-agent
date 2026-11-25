@@ -81,7 +81,7 @@ test("handleForm4 records all transactions + material-only claims (atomic)", asy
 
   const deps = { db, objectStore: new MemoryObjectStore(), client: fakeClient() } as unknown as FormHandlerDeps;
   const result = await handleForm4(entry(), deps);
-  assert.equal(result.ingested, true);
+  assert.equal(result.status, "stored");
 
   const txns = await client.query(`select count(*)::int as n from insider_transactions where issuer_id = $1`, [issuerId]);
   assert.equal(txns.rows[0]!.n, 2, "both transactions recorded in the read model");
@@ -120,7 +120,7 @@ test("handleForm4 stores nothing when the issuer's CIK moves to another issuer a
   )).rows.map((row) => row.issuer_id);
   const db = cikMovesAfterRead(client as unknown as QueryExecutor, { cik: "0000320193", from: from!, to: to! });
   const result = await handleForm4(entry(), { db, objectStore: new MemoryObjectStore(), client: fakeClient() } as unknown as FormHandlerDeps);
-  assert.equal(result.ingested, false);
+  assert.deepEqual(result, { status: "empty", reason: "cik_moved" });
   const stored = await client.query(`select (select count(*)::int from documents) as docs, (select count(*)::int from insider_transactions) as txns`);
   assert.deepEqual(stored.rows[0], { docs: 0, txns: 0 }, "nothing written for the issuer that lost the CIK");
 });
@@ -135,7 +135,7 @@ test("handleForm4 skips an untracked issuer CIK without writing", async (t) => {
   const db = client as unknown as QueryExecutor;
   // No issuer seeded → CIK 320193 is not tracked.
   const result = await handleForm4(entry(), { db, objectStore: new MemoryObjectStore(), client: fakeClient() } as unknown as FormHandlerDeps);
-  assert.equal(result.ingested, false);
+  assert.deepEqual(result, { status: "empty", reason: "issuer_not_tracked" });
   const txns = await client.query(`select count(*)::int as n from insider_transactions`);
   assert.equal(txns.rows[0]!.n, 0, "nothing written for an untracked issuer");
 });
@@ -185,7 +185,7 @@ test("handleForm4 skips a derivative-only filing without persisting an orphan do
   } as unknown as FormHandlerDeps;
 
   const result = await handleForm4(entry(), deps);
-  assert.equal(result.ingested, false, "no non-derivative transactions → not ingested");
+  assert.deepEqual(result, { status: "empty", reason: "no_transactions" }, "no non-derivative transactions → not ingested");
 
   const docs = await client.query(`select count(*)::int as n from documents`);
   assert.equal(docs.rows[0]!.n, 0, "no orphan documents row — the filing can be reprocessed later");
@@ -375,7 +375,7 @@ test("handleForm4 ingests a 4/A with no prior filing (insert-only, supersede is 
   const deps = { db, objectStore: new MemoryObjectStore(), client: { fetchFiling: async () => ({ bytes: new TextEncoder().encode(form4Txt({ form: "4/A", ownerCik: "0001214156", pShares: 800 })), contentType: "text/plain", retrievedAt: "2026-06-12T00:00:00.000Z", url: "https://www.sec.gov/x.txt" }) } } as unknown as FormHandlerDeps;
 
   const result = await handleForm4(entryFor("4/A", "0000320193-26-000062"), deps);
-  assert.equal(result.ingested, true);
+  assert.equal(result.status, "stored");
   const { rows, shares } = await pShareCount(client, issuerId);
   assert.equal(rows, 1, "amendment inserted normally when there is nothing to supersede");
   assert.equal(shares, 800);

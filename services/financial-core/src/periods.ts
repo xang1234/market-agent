@@ -37,6 +37,39 @@ export function coverSameMonths(left: Pick<PeriodIdentity, "start" | "end">, rig
   return 2 * Math.abs(dayNumber(left.end) - dayNumber(right.end)) <= days;
 }
 
+// A 52/53-week year ends on one weekday in a 7-day window, so its end sits at
+// most 6 days off the same date a year earlier; a 14-week quarter sits 7 days
+// off three calendar months. A moved fiscal year end shifts it by a month or more.
+const STEP_TOLERANCE_DAYS = 14;
+
+// A fiscal quarter runs 12 to 17 weeks, so Costco's and Kroger's 16- and
+// 17-week quarters end up to about 30 days off three calendar months, and a
+// run of quarters no further, as a year's quarters sum to a year. One quarter
+// more or less moves the end at least 12 weeks, so half that tells them apart.
+const QUARTER_STEP_TOLERANCE_DAYS = 42;
+
+/** `olderEnd` falls `months` calendar months before `newerEnd`, give or take STEP_TOLERANCE_DAYS. */
+export function endsStepsApart(newerEnd: IsoDate, olderEnd: IsoDate, months: number): boolean {
+  return endsMonthsApart(newerEnd, olderEnd, months, STEP_TOLERANCE_DAYS);
+}
+
+/** `olderEnd` ends `quarters` fiscal quarters before `newerEnd`, three calendar months a quarter give or take QUARTER_STEP_TOLERANCE_DAYS. */
+export function endsQuartersApart(newerEnd: IsoDate, olderEnd: IsoDate, quarters: number): boolean {
+  if (!Number.isInteger(quarters)) return false;
+  return endsMonthsApart(newerEnd, olderEnd, 3 * quarters, QUARTER_STEP_TOLERANCE_DAYS);
+}
+
+function endsMonthsApart(newerEnd: IsoDate, olderEnd: IsoDate, months: number, toleranceDays: number): boolean {
+  if (!Number.isInteger(months) || months <= 0) return false;
+  const [year, month, day] = newerEnd.split("-").map(Number);
+  // A month-end date steps to that month's end: May 31 three months back is
+  // Feb 28, not Mar 3, and Feb 28, 2025 a year back is Feb 29, 2024.
+  const lastDay = new Date(Date.UTC(year!, month! - months, 0)).getUTCDate();
+  const monthEnd = day === new Date(Date.UTC(year!, month!, 0)).getUTCDate();
+  const target = Date.UTC(year!, month! - 1 - months, monthEnd ? lastDay : Math.min(day!, lastDay)) / DAY_MS;
+  return Math.abs(dayNumber(olderEnd) - target) <= toleranceDays;
+}
+
 export function classifyDuration(period: PeriodIdentity): "instant" | "quarter" | "annual" | "other" {
   const days = periodDays(period);
   if (days === null) return "instant";

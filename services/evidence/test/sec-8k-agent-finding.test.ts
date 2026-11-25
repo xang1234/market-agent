@@ -92,7 +92,7 @@ test("a listing-universe agent surfaces a material 8-K claim; a 9.01-only filing
 
   // 1) Items 5.02 + 9.01 → exactly one issuer-attributed claim (the 5.02), surfaced
   //    to the listing universe through the expansion.
-  assert.equal((await handle8k(entry(OFFICER_ACCESSION), deps)).ingested, true);
+  assert.equal((await handle8k(entry(OFFICER_ACCESSION), deps)).status, "stored");
 
   const claimRows = await client.query<{ claim_id: string; predicate: string }>(
     `select claim_id::text as claim_id, predicate from claims`,
@@ -110,7 +110,7 @@ test("a listing-universe agent surfaces a material 8-K claim; a 9.01-only filing
 
   // 2) A 9.01-only filing → recorded as an event, but the materiality gate blocks
   //    a claim, so the listing universe surfaces nothing new.
-  assert.equal((await handle8k(entry(EXHIBITS_ACCESSION), deps)).ingested, true);
+  assert.equal((await handle8k(entry(EXHIBITS_ACCESSION), deps)).status, "stored");
 
   const afterExhibits = await loadLocalRuntimeEvidence(db, listingUniverse);
   assert.deepEqual(

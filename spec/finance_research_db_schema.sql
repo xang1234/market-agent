@@ -1228,12 +1228,16 @@ create table edgar_crawl_ledger (
   filings_total    integer not null default 0 check (filings_total >= 0),
   filings_ingested integer not null default 0 check (filings_ingested >= 0),
   filings_skipped  integer not null default 0 check (filings_skipped >= 0),
+  -- One {accession, cause} per filing whose handler failed (#769).
+  failures         jsonb not null default '[]'::jsonb
+                     constraint edgar_crawl_ledger_failures_check check (jsonb_typeof(failures) = 'array'),
   started_at       timestamptz not null,
   finished_at      timestamptz not null default now(),
   created_at       timestamptz not null default now(),
   unique (form, index_date),
   check (filings_ingested + filings_skipped = filings_total),
-  check (finished_at >= started_at)
+  check (finished_at >= started_at),
+  constraint edgar_crawl_ledger_cause_check check ((status = 'succeeded') = (failures = '[]'::jsonb))
 );
 
 create index edgar_crawl_ledger_form_date_idx

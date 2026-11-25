@@ -1,0 +1,17 @@
+{
+  "name": "lint",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "lint": "cd .. && s=0; for t in services/*/tsconfig.json; do eslint --config lint/eslint.config.js \"${t%/tsconfig.json}\" || s=1; done; exit $s"
+  },
+  "devDependencies": {
+    "eslint": "9.39.4",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.59.0"
+  }
+}

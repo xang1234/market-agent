@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
+import type { Outcome } from "../../shared/src/outcome.ts";
 import { IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { createTurnHydrator } from "../src/turn-hydration.ts";
 import { hydrateYtdBars, type HydrationListing } from "../src/ytd-hydration.ts";
@@ -11,6 +12,11 @@ const LIVE = { SEC_EDGAR_USER_AGENT: "test-agent", MARKET_ORIGIN: "http://market
 // A listed company with no filings or bars on file.
 const ZETA = "4f000000-0000-4000-8000-0000000000e0";
 const LISTING = "4f000000-0000-4000-8000-0000000000e1";
+const STORED: Outcome<unknown> = { status: "stored", rows: [{}] };
+const EMPTY: Outcome<unknown> = { status: "empty", reason: "missing_coverage" };
+// A price fetch's outcomes when the market has no bars for `noBars`.
+const barsOutcomes = (listings: ReadonlyArray<HydrationListing>, noBars: ReadonlyArray<string> = []) =>
+  new Map(listings.map((listing) => [listing.id, noBars.includes(listing.id) ? EMPTY : STORED]));
 
 function recorder() {
   const events: Array<Record<string, unknown>> = [];
@@ -27,7 +33,7 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
   await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $1, 'common_stock')`, [ZETA]);
   await db.query(`insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone) values ($1, $2, 'XNAS', 'ZETA', 'USD', 'America/New_York')`, [LISTING, ZETA]);
 
-  const fakes = (options: { filings?: (issuerId: string) => Promise<void> } = {}) => {
+  const fakes = (options: { filings?: (issuerId: string) => Promise<Outcome<unknown>> } = {}) => {
     const sec: string[] = [];
     const bars: Array<{ origin: string; listings: ReadonlyArray<HydrationListing> }> = [];
     return {
@@ -35,11 +41,11 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
       bars,
       fetchFilings: async (issuerId: string) => {
         sec.push(issuerId);
-        await options.filings?.(issuerId);
+        return (await options.filings?.(issuerId)) ?? EMPTY;
       },
       fetchBars: async (origin: string, listings: ReadonlyArray<HydrationListing>) => {
         bars.push({ origin, listings });
-        return [];
+        return barsOutcomes(listings);
       },
     };
   };
@@ -57,7 +63,7 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
   };
 
   await t.test("fetches filings and prices only for the companies that lack them, and says so on the stream", async (st) => {
-    const fetch = fakes({ filings: async () => { st.after(await fileZeta()); } });
+    const fetch = fakes({ filings: async () => { st.after(await fileZeta()); return STORED; } });
     const hydrate = createTurnHydrator({ db: pool, env: LIVE, ...fetch });
     const { events, turn } = recorder();
     const loading = await hydrate([{ issuer_id: IDS.issuerA, label: "AAA" }, { issuer_id: ZETA, label: "ZETA" }], turn);
@@ -88,7 +94,7 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
 
   await t.test("a fetch past the turn's budget leaves its company still loading, and a later turn waits on it rather than fetching again", async () => {
     let finish!: () => void;
-    const fetch = fakes({ filings: () => new Promise<void>((resolve) => { finish = resolve; }) });
+    const fetch = fakes({ filings: () => new Promise((resolve) => { finish = () => resolve(STORED); }) });
     const hydrate = createTurnHydrator({ db: pool, env: { SEC_EDGAR_USER_AGENT: "test-agent" }, ...fetch, budgetMs: 30 });
     const first = recorder();
     const started = Date.now();
@@ -102,7 +108,7 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
 
   await t.test("a fetch still running reads still loading once some of its years are stored, and settles to filed", async () => {
     let finish!: () => void;
-    const fetch = fakes({ filings: () => new Promise<void>((resolve) => { finish = resolve; }) });
+    const fetch = fakes({ filings: () => new Promise((resolve) => { finish = () => resolve(STORED); }) });
     const deps = { db: pool, env: { SEC_EDGAR_USER_AGENT: "test-agent" }, ...fetch, budgetMs: 30 };
     const hydrate = createTurnHydrator(deps);
     assert.deepEqual([...await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn)], [ZETA]);
@@ -144,7 +150,7 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
   await t.test("a fetch that fails late cools down for a minute from its failure, not its start", async () => {
     let clock = 2_000_000;
     let fail!: (error: Error) => void;
-    const fetch = fakes({ filings: () => new Promise<void>((_, reject) => { fail = reject; }) });
+    const fetch = fakes({ filings: () => new Promise((_, reject) => { fail = reject; }) });
     const hydrate = createTurnHydrator({ db: pool, env: { SEC_EDGAR_USER_AGENT: "test-agent" }, ...fetch, now: () => clock, budgetMs: 1, logger: { warn: () => {} } });
     await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn);
     clock += 50_000;
@@ -196,10 +202,10 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
       db: pool,
       env: { MARKET_ORIGIN: "http://market.test" },
       now: () => clock,
-      fetchFilings: async () => {},
+      fetchFilings: async () => EMPTY,
       fetchBars: async (_origin, listings) => {
         calls.push(listings.map((listing) => listing.id));
-        return listings.map((listing) => listing.id);
+        return barsOutcomes(listings, listings.map((listing) => listing.id));
       },
     });
     const { events, turn } = recorder();
@@ -237,7 +243,7 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     );
     try {
       const calls: Array<{ listings: ReadonlyArray<HydrationListing>; cutoff: string }> = [];
-      const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => {}, fetchBars: async (_origin, listings, cutoff) => { calls.push({ listings, cutoff }); return []; } });
+      const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => EMPTY, fetchBars: async (_origin, listings, cutoff) => { calls.push({ listings, cutoff }); return barsOutcomes(listings); } });
       await hydrate([{ issuer_id: ZETA, label: "ZETA" }], recorder().turn);
       const { events, turn } = recorder();
       await hydrate([{ issuer_id: ZETA }], { ...turn, ytdCutoff: "2026-06-30T20:00:00.000Z" });
@@ -261,7 +267,7 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
     const [june, november] = ["2026-06-30T21:00:00.000Z", "2026-11-13T22:00:00.000Z"];
     for (const [first, second] of [[june, november], [november, june]]) {
       const calls: Array<{ listings: string[]; cutoff: string }> = [];
-      const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => {}, fetchBars: async (_origin, listings, cutoff) => { calls.push({ listings: listings.map((listing) => listing.id), cutoff }); return []; } });
+      const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => EMPTY, fetchBars: async (_origin, listings, cutoff) => { calls.push({ listings: listings.map((listing) => listing.id), cutoff }); return barsOutcomes(listings); } });
       await hydrate([aaa.company], { ...recorder().turn, ytdCutoff: first });
       const { events, turn } = recorder();
       await hydrate([aaa.company, bbb.company], { ...turn, ytdCutoff: second });
@@ -290,7 +296,7 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
       }));
       return new Response(JSON.stringify({ results }), { status: 200 });
     }) as typeof fetch;
-    const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => {}, fetchBars: (origin, listings, now) => hydrateYtdBars({ origin, listings, now, fetchImpl }) });
+    const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => EMPTY, fetchBars: (origin, listings, now) => hydrateYtdBars({ origin, listings, now, fetchImpl }) });
     await hydrate([aaa.company], { ...recorder().turn, ytdCutoff: cutoff });
     await hydrate([aaa.company, bbb.company], { ...recorder().turn, ytdCutoff: cutoff });
     assert.deepEqual(requests, [
@@ -314,8 +320,10 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
       }));
       return new Response(JSON.stringify({ results }), { status: 200 });
     }) as typeof fetch;
-    const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, now: () => clock, fetchFilings: async () => {}, fetchBars: (origin, listings, now) => hydrateYtdBars({ origin, listings, now, fetchImpl }), logger: { warn: () => {} } });
-    await hydrate([aaa.company, bbb.company], { ...recorder().turn, ytdCutoff: cutoff });
+    const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, now: () => clock, fetchFilings: async () => EMPTY, fetchBars: (origin, listings, now) => hydrateYtdBars({ origin, listings, now, fetchImpl }), logger: { warn: () => {} } });
+    const { events, turn } = recorder();
+    await hydrate([aaa.company, bbb.company], { ...turn, ytdCutoff: cutoff });
+    assert.deepEqual(events.at(-1), { type: "tool.completed", tool_call_id: "load_prices-t1", tool_name: "load_prices", label: "Loading prices for AAAA and BBBB", status: "failed" }, "a fetch that failed in part names no company as having none");
     clock += 30_000;
     await hydrate([aaa.company, bbb.company], { ...recorder().turn, ytdCutoff: cutoff });
     assert.deepEqual(requests, [[aaa.listing, bbb.listing]], "within the minute, neither is fetched again");
@@ -334,10 +342,10 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
       env: { MARKET_ORIGIN: "http://market.test" },
       now: () => clock,
       budgetMs: 10,
-      fetchFilings: async () => {},
+      fetchFilings: async () => EMPTY,
       fetchBars: (_origin, listings) => {
         calls.push(listings.map((listing) => listing.id));
-        return new Promise((resolve) => answers.push(resolve));
+        return new Promise((resolve) => answers.push((noBars) => resolve(barsOutcomes(listings, noBars))));
       },
     });
     await hydrate([aaa.company], { ...recorder().turn, ytdCutoff: cutoff });
@@ -353,7 +361,7 @@ test("turn hydration", { timeout: 300_000 }, async (t) => {
 
   await t.test("the same comparison asked again within a minute, to the same sessions, is not fetched again", async () => {
     const calls: string[] = [];
-    const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => {}, fetchBars: async (_origin, _listings, cutoff) => { calls.push(cutoff); return []; } });
+    const hydrate = createTurnHydrator({ db: pool, env: { MARKET_ORIGIN: "http://market.test" }, fetchFilings: async () => EMPTY, fetchBars: async (_origin, listings, cutoff) => { calls.push(cutoff); return barsOutcomes(listings); } });
     await hydrate([aaa.company, bbb.company], { ...recorder().turn, ytdCutoff: "2026-11-13T22:00:00.000Z" });
     const { events, turn } = recorder();
     await hydrate([bbb.company, aaa.company], { ...turn, ytdCutoff: "2026-11-13T22:00:05.000Z" });

@@ -4,7 +4,7 @@ Tests prove the plumbing works. They don't show whether an answer helps an analy
 the owner scores by hand, so answer quality can be compared from one run to the next.
 
 - **Questions and rubric:** `scripts/research-quality-questions.ts`. Every question runs on the frozen golden dataset:
-  NVDA, AMD and AAPL, with quarterly and annual income metrics, quotes and ten daily price bars, plus NVDA's
+  NVDA, AMD and AAPL, with quarterly and annual income metrics, quotes and daily price bars from 2025-12-01, plus NVDA's
   business-segment revenue for its latest quarter, and one filed claim: AMD's explanation of its Q2 2025 margin drop,
   quoted from its earnings release (8-K exhibit 99.1, #282). Nothing else is seeded, so the missing-data questions have
   one honest answer: "not available", and only AMD's Q2 2025 has a cause in evidence.
@@ -118,6 +118,60 @@ on the same frozen data, then pair the two run records:
    whether or not `reveal.md` was written, because scores entered after the mapping may have been seen aren't blind.
    That includes a complete reveal after an `--incomplete` one, so reveal incomplete only when the review stops there.
    A reveal refused for an unscored cell locks nothing.
+
+## Bare arm and figure check (#781)
+
+The bare arm asks the same questions of the same model with no chat pipeline. The model gets the frozen golden
+dataset as a document in its system prompt and answers in markdown. A blinded pair of an app run and a bare run
+shows what the pipeline adds. The figure check marks every number an answer states as right, wrong or not checkable.
+
+To run the bare arm:
+
+1. Set `LLM_ANTHROPIC_API_KEY` to the app's anthropic channel key.
+2. Run `node --experimental-strip-types scripts/research-quality-bare.ts run [--model anthropic/<model>]`. The model
+   defaults to `anthropic/claude-sonnet-5-5`. Each question is one conversation, and its turns go in order to the
+   Messages API.
+3. Pair it with an app run made with `--blind` from a checkout at the same commit:
+   `node --experimental-strip-types scripts/research-quality-pairs.ts pair <app.run.json> <bare.run.json>`.
+
+The run writes `<run>.run.json`, `<run>.md` and `<run>.scores.json` to `.dev/eval-runs/research-quality/`, with
+`"blind": true`. Its provenance is this checkout's commit, question set and dataset revision. Each answer is one
+`rich_text` block. Each turn records the answering model as chat does (`anthropic/claude-sonnet-5-5`), so the pair
+tool doesn't count the pair as confounded. The record also holds `"arm": "bare"` and the `request` settings. The
+pairing packet shows neither.
+
+The system prompt is the analyst instructions, the page the conversation opened from when a question has one, and
+the data brief. `dataBrief()` in `scripts/research-quality-bare.ts` writes the brief from the exports of
+`services/chat/test/golden/dataset.ts`. It holds every value the seed loads: statements, segments, quotes, daily bars
+and AMD's filed explanation. The request sets `max_tokens` to 8192 and streams. It sends no `thinking`, effort,
+temperature or tools, so the API defaults apply. On Claude Sonnet 5.5 the default runs adaptive thinking, and each
+turn records its `thinkingBlocks`. A turn is retried once on a 429, a 5xx, an overloaded stream or a dropped
+connection, then recorded as `provider_error`. A refused key, model or request stops the run.
+
+To check figures, run
+`node --experimental-strip-types scripts/research-quality-figures.ts check <run.json>...` with the same key. It reads
+app runs and bare runs alike. Each completed turn is rendered with `renderBlock`, as the report shows it.
+
+1. Code finds every numeral: amounts with B, M or K, percentages, points, basis points, multiples, negatives and
+   ISO dates.
+2. One call per turn to `anthropic/claude-opus-5-5` labels each numeral by id. A label is a year, a quarter, a date,
+   a count or part of a name. A figure names the values on file it states (`reported`) or is computed from
+   (`derived`, with a margin, growth, difference, ratio or share of total and its operands). The labeller's prompt
+   lists what is on file but no values.
+3. Code gives the verdict. A reported figure is `matched` when it equals the data at the precision it shows. A
+   derived figure is `derived_ok` when its recomputed value does. Otherwise it is `wrong`. A figure that points at
+   nothing on file, or that the labeller skipped, is `not_checkable`, with its reason.
+
+A whole number's trailing zeros count as rounding, so `$60B` matches 62.1 billion. Only a minus sign makes a number
+negative. Parentheses don't, because in prose they hold an aside such as "previous close ($176.10)". A difference is
+compared by size, since its sign follows the operand order the labeller picks. Two operands can't express a sum, so
+a trailing-four-quarter total is `not_checkable`.
+
+The check writes `<run>.figures.json` beside the run, with each numeral's span, label and verdict per turn. It prints
+one line per run with the counts, then each wrong figure with its sentence. After a change to the verdict code, run
+`node --experimental-strip-types scripts/research-quality-figures.ts rejudge <figures.json>...`. It judges the saved
+labels again without a model call, and it refuses a turn whose numerals the enumerator no longer finds in the same
+places.
 
 ## Held-out traps (#221)
 

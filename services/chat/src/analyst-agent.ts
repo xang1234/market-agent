@@ -942,7 +942,7 @@ function readSummary(result: AnalystToolResult): JsonObject {
         quarter_end: quarter.quarter_end,
         reconciled: quarter.reconciled,
         eps_spread: quarter.eps?.spread ?? null,
-        operating_margin_spread_pp: quarter.operating_margin?.spread_pp ?? null,
+        operating_margin_spread_pp: quarter.operating_margin?.spread.value ?? null,
         sbc_share_of_non_gaap_net_income_pct: quarter.sbc?.share_pct ?? null,
       })),
       add_backs: result.categories.map((category) => ({ label: category.label, quarters: category.quarters, of: category.of, recurring: category.recurring })),

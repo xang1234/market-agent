@@ -132,7 +132,7 @@ test("SEC EPS and share counts are certified as filed", { timeout: 300_000 }, as
     const shareContexts = async () => (await stored()).filter((row) => SHARE_KEYS.includes(row[0] as string)).map((row) => row.slice(1));
     assert.deepEqual((await shareContexts()).map((row) => row[3]), [null, null, null, null, null, null, null, null]);
     const backfill = () => backfillSecCompanionStatements(db, { issuerId: ISSUER, fetcher, sourceId: FALLBACK_SOURCE_ID, logger: { warn: () => {} } });
-    assert.deepEqual(await backfill(), { periods: 2 });
+    assert.deepEqual(await backfill(), { status: "stored", rows: [{ fiscal_year: 2024, fiscal_period: "FY" }, { fiscal_year: 2025, fiscal_period: "Q1" }] });
     const certified = [
       ["FY", "reported", "12.05", "as_filed", "2024-02-21", "basic"],
       ["Q1", "reported", "6.04", "as_filed", "2024-05-29", "basic"],

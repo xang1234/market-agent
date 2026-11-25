@@ -100,7 +100,7 @@ test("a listing-universe agent surfaces a material insider claim; a sub-threshol
 
   // 1) Material open-market buy → exactly one issuer-attributed claim, surfaced
   //    to the listing universe through the expansion.
-  assert.equal((await handleForm4(entry(MATERIAL_ACCESSION), deps)).ingested, true);
+  assert.equal((await handleForm4(entry(MATERIAL_ACCESSION), deps)).status, "stored");
 
   const claimRows = await client.query<{ claim_id: string }>(
     `select claim_id::text as claim_id from claims where predicate = 'insider.transaction'`,
@@ -117,7 +117,7 @@ test("a listing-universe agent surfaces a material insider claim; a sub-threshol
 
   // 2) Sub-threshold buy → recorded in the read model, but the materiality gate
   //    blocks a claim, so the listing universe surfaces nothing new.
-  assert.equal((await handleForm4(entry(SUB_ACCESSION), deps)).ingested, true);
+  assert.equal((await handleForm4(entry(SUB_ACCESSION), deps)).status, "stored");
 
   const txnCount = await client.query<{ n: number }>(
     `select count(*)::int as n from insider_transactions where issuer_id = $1`,

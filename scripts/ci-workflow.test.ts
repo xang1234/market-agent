@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
@@ -135,6 +137,33 @@ test("ci workflow installs db deps for services that import the shared db test h
   }
 });
 
+test("ci workflow lints every service with the shared typed config", async () => {
+  const workflow = await readFile(CI_WORKFLOW, "utf8");
+  const section = workflow.slice(workflow.indexOf("\n  lint:"));
+
+  assert.match(section, /for lock in services\/\*\/package-lock\.json; do npm --prefix "\$\{lock%\/package-lock\.json\}" ci; done/);
+  assert.match(section, /run:\s*npm --prefix lint run lint/);
+  assert.match((await readPackageJson("lint")).scripts?.lint ?? "", /for t in services\/\*\/tsconfig\.json/);
+});
+
+test("the lint script fails when any one service fails, even if later ones pass", async () => {
+  // A stand-in eslint logs each call and fails only the first, so a loop that
+  // kept only the last exit status would pass.
+  const bin = await mkdtemp(join(tmpdir(), "lint-exit-"));
+  try {
+    await writeFile(join(bin, "eslint"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${bin}/calls"\n[ "$(wc -l < "${bin}/calls")" -gt 1 ] && exit 0\nexit 1\n`);
+    await chmod(join(bin, "eslint"), 0o755);
+    const script = (await readPackageJson("lint")).scripts?.lint ?? "";
+    const run = spawnSync("sh", ["-c", script], { cwd: join(REPO_ROOT, "lint"), env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+    const calls = (await readFile(join(bin, "calls"), "utf8")).split("\n").filter(Boolean);
+    assert.equal(run.stderr.toString(), "");
+    assert.ok(calls.length >= 2, "the stand-in ran for the failing service and a later passing one");
+    assert.equal(run.status, 1);
+  } finally {
+    await rm(bin, { recursive: true, force: true });
+  }
+});
+
 async function testedPackageDirs(): Promise<string[]> {
   const candidates = await nodePackageDirs();
   const tested: string[] = [];
@@ -148,6 +177,7 @@ async function testedPackageDirs(): Promise<string[]> {
 async function nodePackageDirs(): Promise<string[]> {
   return [
     "db",
+    "lint",
     "web",
     ...(await servicePackageDirs()).map((service) => `services/${service}`),
   ].sort();
