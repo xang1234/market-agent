@@ -155,13 +155,13 @@ export function runDetectors(content: FinancialAnswerContent, company: string): 
 
 export const isFinding = (outcome: DetectorOutcome): outcome is Finding => "statement" in outcome;
 
-const DECLINE_WORDS: Readonly<Record<DeclineReason, string>> = {
+export const DECLINE_WORDS: Readonly<Record<DeclineReason, string>> = {
   incomplete_history: "a year in its window has no value",
   uncertified_input: "an input to its latest year was not certified",
   tag_change: "a figure in its window filed under another concept",
   non_positive_base: "a zero or negative base",
   engine_gap: "not computed",
-  within_range: "the latest year is not at the extreme",
+  within_range: "the latest year is not alone at the extreme",
 };
 
 /** What a run with no finding says of each detector; null when one found something. */

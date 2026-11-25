@@ -58,3 +58,22 @@ test("a ranking that published no result is an engine gap", () => {
   } as unknown as FinancialAnswerContent;
   assert.equal((runDetectors(content, "AAA")[0] as { reason: string }).reason, "engine_gap");
 });
+
+test("get_findings declares every decline reason the detectors can return", async () => {
+  const { DECLINE_WORDS } = await import("../src/standout-findings.ts");
+  const { readFile } = await import("node:fs/promises");
+  const registry = JSON.parse(await readFile(new URL("../../../spec/finance_research_tool_registry.json", import.meta.url), "utf8"));
+  const declared = new Set<string>();
+  const walk = (node: unknown, inFindings: boolean): void => {
+    if (Array.isArray(node)) return node.forEach((child) => walk(child, inFindings));
+    if (node === null || typeof node !== "object") return;
+    const record = node as Record<string, unknown>;
+    const here = inFindings || record.name === "get_findings";
+    if (here && record.reason && typeof record.reason === "object" && Array.isArray((record.reason as { enum?: unknown }).enum)) {
+      for (const value of (record.reason as { enum: string[] }).enum) declared.add(value);
+    }
+    for (const child of Object.values(record)) walk(child, here);
+  };
+  walk(registry, false);
+  assert.deepEqual([...declared].sort(), Object.keys(DECLINE_WORDS).sort());
+});
