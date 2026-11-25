@@ -123,7 +123,11 @@ export type RatioDefinition = Readonly<{
   denominator: MetricKey;
   denominator_constraint: "positive";
   timing: "same_instant" | "same_duration";
+  // Why an operand filed in a narrower concept scope (#731, #743) is not divided: the ratio's text for that gap.
+  scoped_operand_gap: string;
 }>;
+
+const BALANCES_ARE_UNSCOPED = "A balance-sheet ratio divides balances, which are never filed in a concept scope.";
 
 /** Only approved metric pairs; `ratio` is not arbitrary division. */
 export const RATIO_CATALOG_V1: ReadonlyMap<MetricKey, RatioDefinition> = new Map(
@@ -136,6 +140,7 @@ export const RATIO_CATALOG_V1: ReadonlyMap<MetricKey, RatioDefinition> = new Map
       denominator: "total_assets",
       denominator_constraint: "positive" as const,
       timing: "same_instant" as const,
+      scoped_operand_gap: BALANCES_ARE_UNSCOPED,
     },
     {
       ratio_key: "liabilities_to_equity",
@@ -145,6 +150,7 @@ export const RATIO_CATALOG_V1: ReadonlyMap<MetricKey, RatioDefinition> = new Map
       denominator: "total_equity",
       denominator_constraint: "positive" as const,
       timing: "same_instant" as const,
+      scoped_operand_gap: BALANCES_ARE_UNSCOPED,
     },
     {
       ratio_key: "operating_cash_flow_to_net_income",
@@ -154,6 +160,17 @@ export const RATIO_CATALOG_V1: ReadonlyMap<MetricKey, RatioDefinition> = new Map
       denominator: "net_income_consolidated",
       denominator_constraint: "positive" as const,
       timing: "same_duration" as const,
+      scoped_operand_gap: "Cash conversion divides operating cash flow including discontinued operations by net income, which includes them, and this operating cash flow is filed for continuing operations only.",
+    },
+    {
+      ratio_key: "stock_based_compensation_to_free_cash_flow",
+      definition_version: "stock_based_compensation_to_free_cash_flow.v1",
+      label: "Stock-based compensation / free cash flow (fiscal year)",
+      numerator: "stock_based_compensation",
+      denominator: "free_cash_flow",
+      denominator_constraint: "positive" as const,
+      timing: "same_duration" as const,
+      scoped_operand_gap: "This free cash flow is computed from a narrower filed concept (continuing-operations operating cash flow or productive-asset capex), so stock-based compensation is not divided by it.",
     },
   ].map((definition) => [definition.ratio_key, Object.freeze(definition)]),
 );

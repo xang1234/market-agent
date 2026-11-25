@@ -409,7 +409,12 @@ export type EvidencePacket = {
   // and footnote name every company's period, so commentary beside it need
   // not say them again.
   periods_shown?: true;
+  // Standout findings (standout-findings.ts): each a sentence filled from the
+  // engine figures it names, and how unusual it is in the company's own history.
+  findings?: ReadonlyArray<PacketFinding>;
 };
+
+export type PacketFinding = Readonly<{ company: string; detector: string; statement: string; figures: ReadonlyArray<string> }>;
 
 // The claims a route reads first (#207): its predicate families, from the
 // start of the period it covers. Others still fill any room left, newest first.
@@ -767,6 +772,7 @@ export function packetForModel(packet: EvidencePacket): Record<string, unknown> 
     ...(packet.disagreements.length > 0 ? { disagreements: packet.disagreements } : {}),
     ...(packet.claims_status === "unavailable" ? { claims_status: "unavailable" } : {}),
     ...(packet.claims_truncated ? { claims_truncated: true } : {}),
+    ...(packet.findings?.length ? { findings: packet.findings } : {}),
   };
 }
 

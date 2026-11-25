@@ -58,6 +58,7 @@ import { enginePacket, type EvidencePacket } from "./evidence-packet.ts";
 import { requestedListingsOf } from "./perf-block.ts";
 import type { TurnHydrator } from "./turn-hydration.ts";
 import { priceComparisonTurn } from "./scenario-price-comparison.ts";
+import { findingsDraft } from "./standout-findings.ts";
 import { callTurn, readCallAsk } from "./call.ts";
 import { planEpsScenarios, priorScenario, SCENARIO_DECLINE, SCENARIO_GAP, SCENARIO_INPUTS, scenarioAnswer, turnScenarioAsk, type ScenarioAsk } from "./eps-scenarios.ts";
 import { asksCause, filedCauses, namedFigures, NOT_ASKED, type FiledCause } from "./filed-cause.ts";
@@ -816,6 +817,7 @@ async function planTurn(
   // A company a clarification resolved now reads as the company, not an unknown word.
   if (choice.kind === "scenario") return turn.planScenario(planningContext(subjects), turnScenarioAsk(text, subjects) ?? choice.ask);
   if (choice.kind === "cash_resilience") return planCashResilience(planningContext(subjects), text);
+  if (choice.kind === "findings") return planFindings(planningContext(subjects));
   if (choice.kind === "segments_gap" || choice.kind === "named_gap") {
     return { outcome: "unsupported", reason: choice.kind === "segments_gap" ? "segments" : choice.reason, issues: [], model_calls: 0 };
   }
@@ -910,6 +912,12 @@ async function planCashResilience(context: PlanningContext, text: string): Promi
     outputs: parts.flatMap((part) => part.outputs),
     thresholds: [],
   });
+}
+
+/** One company's standout-finding detectors as one deterministic plan, with no model; a second company is unplanned, so the plan is refused. */
+function planFindings(context: PlanningContext): PlanningResult {
+  const subjects = context.requested_subjects.map((subject, index) => ({ slot_id: `s${index}`, mention: subject.mention }));
+  return buildDeterministicPlan(context, { subjects, ...findingsDraft("s0"), thresholds: [] });
 }
 
 /**

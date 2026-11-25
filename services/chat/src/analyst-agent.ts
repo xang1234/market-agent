@@ -35,6 +35,7 @@ import { claimSources } from "./render-assertions.ts";
 import { ANSWER_DEADLINES, renderedAnswer, withDeadlines, type AnswerInput, type DroppedClaims } from "./llm-runtime.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS, LATEST, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 import { turnStopSignal } from "./turn-stop.ts";
+import { isFinding, noFindingNote, runDetectors, type DetectorOutcome } from "./standout-findings.ts";
 import { shownAs } from "./verdicts.ts";
 import type { AssertionReport } from "./assertions.ts";
 
@@ -322,6 +323,7 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
   const labelOf = (issuer: string) => job.labels.get(issuer) ?? known.get(issuer)?.mention ?? issuer;
   const whoOf = (args: JsonObject) => labelList(argIssuers(args).filter((issuer) => known.has(issuer)).map(labelOf));
   const certified: Certified[] = [];
+  const found: Array<{ company: string; outcomes: ReadonlyArray<DetectorOutcome> }> = [];
   // Each price read's chart, in the order the model asked for them, so its figures' ids do not depend on which read finished first.
   const priceReads: Array<{ priced?: Priced }> = [];
   const askedFor = new Set<string>();
@@ -345,12 +347,12 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
     return pending.then((loading) => (loading ? [issuer] : []));
   })).then((lists) => lists.flat());
 
-  const certify = async (args: JsonObject): Promise<ToolLoopOutput> => {
-    const ask = certifiedAsk(args, known, job.incomeLines);
-    if ("invalid" in ask) return invalid("certified_financials", ask.invalid);
+  // One engine request per ask: what the tool returns of a published one is `read`'s, and its figures join the answer when `read` keeps them.
+  const certify = (tool: CertifyingTool, ask: CertifiedAsk, read: (published: Published, packet: EvidencePacket) => { fields: JsonObject; kept: boolean }): Promise<ToolLoopOutput> => {
     const prior = asked.get(ask.fingerprint);
     if (prior) return prior;
-    for (const issuer of ask.subjects) askedFor.add(issuer);
+    // Only an ask for figures can say a company has none; a findings run that keeps none says so in its note.
+    if (tool === "certified_financials") for (const issuer of ask.subjects) askedFor.add(issuer);
     const answer = (async (): Promise<ToolLoopOutput> => {
       const loading = await stillLoading(ask.subjects);
       if (loading.length > 0) notes.push(`Filings for ${labelList(loading.map(labelOf))} are still loading; ask again in a minute.`);
@@ -373,12 +375,13 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
       });
       if (outcome.status === "declined" && outcome.reason === "planning_unavailable" && plannerRefused) {
         notes.push(`${who}: the figures were not computed, as the turn reached its limit of model calls.`);
-        return { content: JSON.stringify({ tool: "certified_financials", status: "declined", reason: "turn_call_limit" }) };
+        return { content: JSON.stringify({ tool, status: "declined", reason: "turn_call_limit" }) };
       }
-      return certifiedOutput(outcome, who, async (published) => {
+      return certifiedOutput(tool, outcome, who, async (published) => {
         const packet = await published.packet();
-        certified.push({ block: published.block, packet, subjects: ask.subjects });
-        return packet;
+        const { fields, kept } = read(published, packet);
+        if (kept) certified.push({ block: published.block, packet, subjects: ask.subjects });
+        return fields;
       }, notes);
     })();
     asked.set(ask.fingerprint, answer);
@@ -434,7 +437,41 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
 
   // The tools read here, beside the stored reads; the price tool only on a chat turn.
   const runners: Readonly<Record<string, (args: JsonObject) => Promise<ToolLoopOutput>>> = {
-    certified_financials: certify,
+    certified_financials: async (args) => {
+      const ask = certifiedAsk(args, known, job.incomeLines);
+      if ("invalid" in ask) return invalid("certified_financials", ask.invalid);
+      return certify("certified_financials", ask, (_published, packet) => ({
+        kept: true,
+        fields: {
+          figures: packet.figures.map((figure) => ({
+            ...(figure.company ? { company: figure.company } : {}),
+            metric: figure.metric,
+            period: figure.period ?? "",
+            ...(figure.gap === undefined ? { value: figure.value } : { gap: figure.gap }),
+          })),
+        },
+      }));
+    },
+    get_findings: async (args) => {
+      const ask = findingsAsk(args, known);
+      if ("invalid" in ask) return invalid("get_findings", ask.invalid);
+      // A run with no finding shows no figures, only a note of what each detector declined.
+      return certify("get_findings", ask, (published) => {
+        const company = labelOf(ask.subjects[0]!);
+        const outcomes = runDetectors(published.content, company);
+        const none = noFindingNote(company, outcomes);
+        if (none === null) found.push({ company, outcomes });
+        else notes.push(none);
+        return {
+          kept: none === null,
+          fields: {
+            company,
+            findings: outcomes.filter(isFinding).map((finding) => ({ detector: finding.detector_id, statement: finding.statement })),
+            declined: outcomes.flatMap((outcome) => (isFinding(outcome) ? [] : [{ detector: outcome.detector_id, reason: outcome.reason, detail: outcome.detail }])),
+          },
+        };
+      });
+    },
     ...(job.prices ? { [PRICE_TOOL]: readPrice } : {}),
   };
   const inFlight = new Set<Promise<ToolLoopOutput>>();
@@ -493,7 +530,7 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
   const covered = [...new Set([...job.named.map(issuerOf), ...certified.flatMap((entry) => entry.subjects)])];
   const read = job.noFilingAsOfCutoff ? datedNoFiling(analyst, asOf, labelOf) : { analyst, notes: [] };
   const priced = priceReads.flatMap((entry) => entry.priced ?? []);
-  const packet = mergePackets({
+  const merged = mergePackets({
     engine: certified.map((entry) => entry.packet),
     prices: priced.flatMap((entry) => entry.figures),
     analyst: read.analyst,
@@ -502,6 +539,7 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
     labels: new Map([...known.keys()].map((issuer) => [issuer, labelOf(issuer)])),
     cutoff: asOf,
   });
+  const packet = withFindings(merged, found);
   if (toolCalls.some((entry) => entry.status === "ok")) await job.logToolCalls?.(toolCalls);
   return { conversation, toolCalls, certified, priced, analyst, packet, covered, labelOf, modelFailed };
 }
@@ -529,7 +567,7 @@ async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promis
     factBlocks: noted,
     conversation,
     packet,
-    ...WRITING[job.writing](figured),
+    ...withFindingsRule(WRITING[job.writing](figured), packet),
   };
   const { emit } = job.planningContext;
   try {
@@ -596,8 +634,31 @@ const GATHER_RULES = [
   "get_non_gaap_history reads the GAAP to non-GAAP reconciliations of a company's stored earnings releases over its last 8 quarters:",
   "the diluted EPS and operating margin spreads, each add-back's count of quarters, and stock-based compensation's share of non-GAAP net income.",
   "A question about competitors reads the business.competition claims and the company's industry peers.",
+  "get_findings checks one company's own history for standout findings: its operating margin at the highest or lowest of its last 10 fiscal years,",
+  "its cash conversion at the lowest of its last 10, and its stock-based compensation as a multiple of free cash flow at the highest of its last 5;",
+  "each is certified by the engine or declined with its reason. Read it for what stands out or is unusual about a company, or to analyze one.",
   "Read every company the question is about, in one step when you can.",
 ];
+
+// Each finding names its figures by their packet ids; one whose figures the packet lacks is left out.
+function withFindings(packet: EvidencePacket, found: ReadonlyArray<{ company: string; outcomes: ReadonlyArray<DetectorOutcome> }>): EvidencePacket {
+  const idOf = new Map(packet.figures.flatMap((figure) => (figure.result_id === undefined ? [] : [[figure.result_id, figure.id] as const])));
+  const findings = found.flatMap(({ company, outcomes }) => outcomes.filter(isFinding).flatMap((finding) => {
+    const figures = finding.result_ids.map((id) => idOf.get(id));
+    return figures.every((id) => id !== undefined) ? [{ company, detector: finding.detector_id, statement: finding.statement, figures: figures as string[] }] : [];
+  }));
+  return findings.length === 0 ? packet : { ...packet, findings };
+}
+
+const FINDINGS_RULE = [
+  "evidence_packet.findings are standout findings the engine certified, each over the F ids it lists: to use one, state its figures in an observation citing those F ids",
+  "(its ranking figure says how unusual the year is, and a ranking is cited in an observation, never a comparison), and rest any inference about it on that observation.",
+  "Such an inference names the extreme in words (\"its lowest of the years ranked\") and never their count (\"decade\", \"ten-year\"), as an inference states no amount.",
+].join(" ");
+
+function withFindingsRule<W extends { instructions: ReadonlyArray<string> }>(writing: W, packet: EvidencePacket): W {
+  return packet.findings ? { ...writing, instructions: [...writing.instructions, FINDINGS_RULE] } : writing;
+}
 
 const QUIET = (() => undefined) as unknown as ChatTurnRunContext["emit"];
 
@@ -715,9 +776,12 @@ const TOPIC: Readonly<Record<string, string>> = {
   get_analyst_consensus: "Analyst consensus",
   get_non_gaap_history: "Non-GAAP reconciliations",
   get_price_performance: "Price returns",
+  get_findings: "Standout findings",
 };
 
-type AgentTool = AnalystToolName | "certified_financials" | typeof PRICE_TOOL;
+type CertifyingTool = "certified_financials" | "get_findings";
+type AgentTool = AnalystToolName | CertifyingTool | typeof PRICE_TOOL;
+type Published = Extract<CertifiedFinancials, { status: "published" }>;
 type PlanStep = Readonly<{ tool_call_id: string; tool_name: string; label: string }>;
 
 const PREDICATE_WORDS: Readonly<Record<(typeof CLAIM_PREDICATES)[number], string>> = {
@@ -744,6 +808,7 @@ const STEP_LABELS: Readonly<Record<AgentTool, (args: JsonObject, who: string) =>
   get_peer_set: (_args, who) => `Finding ${who}'s industry peers`,
   get_analyst_consensus: (_args, who) => `Reading analyst consensus for ${who}`,
   get_non_gaap_history: (_args, who) => `Reading ${who}'s non-GAAP reconciliations`,
+  get_findings: (_args, who) => `Checking ${who}'s history for standout findings`,
   get_price_performance: (args, who) =>
     `Reading ${who}'s price ${argIssuers(args).length > 1 ? "returns" : "return"}${isPricePeriod(args.period) ? ` ${PERIOD_WORDS[args.period].step}` : ""}`,
 };
@@ -858,25 +923,16 @@ function readPeriod(value: JsonValue | undefined): ReadPeriod | null {
 }
 
 async function certifiedOutput(
+  tool: CertifyingTool,
   outcome: CertifiedFinancials,
   who: string,
-  keep: (published: Extract<CertifiedFinancials, { status: "published" }>) => Promise<EvidencePacket>,
+  keep: (published: Published) => Promise<JsonObject>,
   notes: string[],
 ): Promise<ToolLoopOutput> {
-  const output = (status: string, fields: JsonObject = {}): ToolLoopOutput => ({ content: JSON.stringify({ tool: "certified_financials", status, ...fields }) });
+  const output = (status: string, fields: JsonObject = {}): ToolLoopOutput => ({ content: JSON.stringify({ tool, status, ...fields }) });
   switch (outcome.status) {
-    case "published": {
-      const packet = await keep(outcome);
-      return output("published", {
-        run_id: outcome.run_id,
-        figures: packet.figures.map((figure) => ({
-          ...(figure.company ? { company: figure.company } : {}),
-          metric: figure.metric,
-          period: figure.period ?? "",
-          ...(figure.gap === undefined ? { value: figure.value } : { gap: figure.gap }),
-        })),
-      });
-    }
+    case "published":
+      return output("published", { run_id: outcome.run_id, ...(await keep(outcome)) });
     case "existing":
       notes.push(`${who}: these figures were computed in an earlier attempt of this turn and cannot be shown again.`);
       return output("existing", { run_id: outcome.run_id });
@@ -896,6 +952,17 @@ async function certifiedOutput(
 
 function catalogChoices(clarification: Clarification): string[] {
   return clarification.kind === "metric" ? clarification.choices.map((choice) => choice.label) : [];
+}
+
+const FINDINGS_ARGUMENTS = new Set(["subject_ref", "query"]);
+
+export function findingsAsk(args: JsonObject, known: ReadonlyMap<string, RequestedSubject>): CertifiedAsk | { invalid: string } {
+  const unread = Object.keys(args).filter((key) => !FINDINGS_ARGUMENTS.has(key));
+  if (unread.length > 0) return { invalid: `${unread.join(", ")} not supported` };
+  const ref = args.subject_ref;
+  const issuer = isRecord(ref) && ref.kind === "issuer" && typeof ref.id === "string" ? ref.id.toLowerCase() : null;
+  if (issuer === null || !known.has(issuer)) return { invalid: UNKNOWN_COMPANY };
+  return { subjects: [issuer], choice: { kind: "findings" }, question: "Standout findings in the company's own history", fingerprint: `findings:${issuer}` };
 }
 
 const PRICE_ARGUMENTS = new Set(["subject_refs", "period", "query"]);
