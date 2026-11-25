@@ -7,7 +7,7 @@
 //
 // Writes <run>.figures.json beside each run and prints one line per run, then each wrong
 // figure with its sentence.
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -37,7 +37,8 @@ export type Numeral = {
   // One unit of the last digit shown, scaled like value: the precision the text claims.
   step: number;
   unit: NumeralUnit;
-  // The text carries a minus sign or accounting parentheses.
+  // The text carries a minus sign. Parentheses don't sign a number: in prose they hold an
+  // aside ("previous close ($176.10)") far more often than an accounting negative.
   signed: boolean;
   // The text carries its own B/M/K scale, so a table's "in millions" doesn't apply.
   scaled: boolean;
@@ -47,7 +48,6 @@ const NUMBER = String.raw`\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+`;
 const SUFFIX = String.raw`\s?(?:%|percent\b|percentage points?\b|pp\b|ppts?\b|points?\b|bps\b|bp\b|basis points\b|trillion\b|billion\b|million\b|thousand\b|tn\b|bn\b|mn\b|mm\b|[tbmk]\b)|(?:x\b|×)`;
 const NUMERAL = new RegExp(
   String.raw`(?<date>\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z?)?)`
-  + String.raw`|(?<acct>\((?:US)?\$(?<acctNumber>${NUMBER})(?<acctSuffix>${SUFFIX})?\))`
   + String.raw`|(?<sign>(?<![\w.])[-−](?=(?:US)?\$?\d|\.\d))?(?:US)?\$?(?<number>${NUMBER})(?<suffix>${SUFFIX})?`,
   "giu",
 );
@@ -80,10 +80,10 @@ export function enumerateNumerals(text: string): Numeral[] {
     const groups = match.groups!;
     const base = { id: `n${i + 1}`, text: match[0], start: match.index!, end: match.index! + match[0].length };
     if (groups.date) return { ...base, value: Number.NaN, step: Number.NaN, unit: "date" as const, signed: false, scaled: false };
-    const digits = groups.number ?? groups.acctNumber!;
-    const suffix = groups.suffix ?? groups.acctSuffix ?? "";
+    const digits = groups.number!;
+    const suffix = groups.suffix ?? "";
     const { unit, scale } = unitOf(suffix);
-    const signed = groups.acct !== undefined || groups.sign !== undefined;
+    const signed = groups.sign !== undefined;
     const magnitude = Number(digits.replaceAll(",", "")) * scale;
     return { ...base, value: signed ? -magnitude : magnitude, step: stepOf(digits) * scale, unit, signed, scaled: scale !== 1 };
   });
@@ -264,14 +264,17 @@ export function derive(derivation: FigureLabel["derivation"], operands: Readonly
 const SCALE_WORDS = { thousands: 1e3, millions: 1e6, billions: 1e9 } as const;
 
 // One numeral's verdict. The text's own sign wins; failing that the sign its words give;
-// with neither, only the size is compared ("a loss of $134M" against -134M).
+// with neither, only the size is compared ("a loss of $134M" against -134M). A difference
+// is compared by size: its sign follows the operand order, which is the labeller's guess.
+// ponytail: so "margin rose 12.5 points" passes for a fall; check direction when a
+// labeller orders differences reliably.
 export function verdictFor(numeral: Numeral, label: FigureLabel | undefined): Checked {
   if (!label) return { verdict: "not_checkable", reason: "the labeller skipped it" };
   if (numeral.unit === "date") return { verdict: "not_checkable", reason: "a date labelled as a figure" };
   const scale = numeral.unit === "amount" && !numeral.scaled && label.scale ? SCALE_WORDS[label.scale] : 1;
   const step = numeral.step * scale;
   const shown = numeral.value * scale * (!numeral.signed && label.sign === "-" ? -1 : 1);
-  const bySign = numeral.signed || label.sign !== null;
+  const bySign = (numeral.signed || label.sign !== null) && !(label.basis === "derived" && label.derivation === "difference");
   const fits = (actual: number) => withinPrecision(bySign ? shown : Math.abs(shown), bySign ? actual : Math.abs(actual), step);
   let options: number[];
   if (label.basis === "reported") {
@@ -376,6 +379,29 @@ export function summaryLines(file: FiguresFile): string[] {
   ];
 }
 
+// Judges a checked run again from its saved labels, so a change to the verdict code is
+// measured on the same labels without paying for new ones. Refuses a turn whose numerals
+// the enumerator no longer finds where they were, since its ids would point elsewhere.
+export function rejudge(file: FiguresFile): FiguresFile {
+  const turns = file.turns.map((turn) => {
+    const numerals = enumerateNumerals(turn.text);
+    const moved = numerals.length !== turn.numerals.length
+      || numerals.some((n, i) => n.end <= turn.numerals[i]!.start || n.start >= turn.numerals[i]!.end);
+    if (moved) throw new Refusal(`${file.run} ${turn.question} turn ${turn.turn}: the enumerator now finds other numerals; run check again`);
+    const result: LabelResult = turn.labeller.error !== undefined ? { ok: false, error: turn.labeller.error } : {
+      ok: true,
+      labels: {
+        labels: turn.numerals.filter((n) => n.label === "label").map((n) => n.id),
+        figures: turn.numerals.flatMap((n) => (n.label !== null && n.label !== "label" ? [n.label] : [])),
+      },
+      usage: turn.labeller.usage,
+      stopReason: turn.labeller.stopReason,
+    };
+    return checkTurn({ questionId: turn.question, turn: turn.turn, messages: [], text: turn.text, numerals }, result, turn.message);
+  });
+  return { ...file, checkedAgainst: { datasetRevision: datasetRevision(ROOT), asOf: GOLDEN_AS_OF }, totals: tally(turns), turns };
+}
+
 // --- the labeller ----------------------------------------------------------------------
 
 export const LABELLER = { model: "anthropic/claude-opus-5-5", effort: "medium", max_tokens: 32_000 } as const;
@@ -439,9 +465,19 @@ export function anthropicLabeller(call: CallMessages): Labeller {
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   await runCli(async () => {
     const [command, ...files] = process.argv.slice(2);
-    if (command !== "check" || files.length === 0) {
-      console.error("usage: research-quality-figures.ts check <run.json>...");
+    if (!(command === "check" || command === "rejudge") || files.length === 0) {
+      console.error("usage: research-quality-figures.ts check <run.json>... | rejudge <figures.json>...");
       process.exitCode = 2;
+      return;
+    }
+    if (command === "rejudge") {
+      for (const path of files) {
+        const saved = JSON.parse(readFileSync(path, "utf8")) as FiguresFile;
+        if (typeof saved?.run !== "string" || !Array.isArray(saved.turns)) throw new Refusal(`${path} isn't a <run>.figures.json`);
+        const file = rejudge(saved);
+        writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
+        console.log([...summaryLines(file), `  ${path}`].join("\n"));
+      }
       return;
     }
     const apiKey = process.env.LLM_ANTHROPIC_API_KEY?.trim();

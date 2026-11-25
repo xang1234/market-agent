@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { GOLDEN_COMPANIES, goldenDailyBars } from "../services/chat/test/golden/dataset.ts";
 import { questionSetDigest, type RunRecord } from "./research-quality-eval.ts";
+import { Refusal } from "./research-quality-eval.ts";
 import {
   LABELS_SCHEMA,
   anthropicLabeller,
@@ -12,6 +13,7 @@ import {
   labellerPrompt,
   labellerSystemPrompt,
   markNumerals,
+  rejudge,
   sentenceAt,
   summaryLines,
   verdictFor,
@@ -43,7 +45,7 @@ test("every numeral is found with its span, value, precision, unit and sign", ()
     + "margin fell 12.5 points (−1,250 bps); 3.2x; ($134M) and (10.84%); as of 2026-09-01T00:00:00.000Z; 74.40%; 1,010,000 shares at $178.40. Q3 FY2024–Q2 FY2026.";
   const found = enumerateNumerals(text);
   assert.deepEqual(found.map((n) => n.text), [
-    "$62.1B", "4", "2026", "2026-01-25", "9%", "$57,006 million", "-$134.0M", "12.5 points", "−1,250 bps", "3.2x", "($134M)", "10.84%",
+    "$62.1B", "4", "2026", "2026-01-25", "9%", "$57,006 million", "-$134.0M", "12.5 points", "−1,250 bps", "3.2x", "$134M", "10.84%",
     "2026-09-01T00:00:00.000Z", "74.40%", "1,010,000", "$178.40", "3", "2024", "2", "2026",
   ]);
   for (const n of found) assert.equal(text.slice(n.start, n.end), n.text);
@@ -52,8 +54,7 @@ test("every numeral is found with its span, value, precision, unit and sign", ()
   assert.ok(Math.abs(by("$62.1B").step - 1e8) < 1);
   assert.deepEqual([by("$57,006 million").value, by("$57,006 million").step], [57_006e6, 1e6]);
   assert.deepEqual([by("-$134.0M").value, by("-$134.0M").signed], [-134e6, true]);
-  assert.deepEqual([by("($134M)").value, by("($134M)").signed], [-134e6, true]);
-  assert.deepEqual([by("10.84%").value, by("10.84%").signed, by("10.84%").unit], [10.84, false, "percent"], "a parenthesized percentage is an aside, not a negative");
+  assert.deepEqual([by("$134M").value, by("$134M").signed, by("10.84%").signed], [134e6, false, false], "parentheses hold an aside, not a negative");
   assert.deepEqual([by("12.5 points").unit, by("−1,250 bps").unit, by("−1,250 bps").value, by("3.2x").unit], ["points", "bps", -1250, "multiple"]);
   assert.equal(by("2026-01-25").unit, "date");
   assert.equal(found.filter((n) => n.text === "2026").every((n) => !n.signed), true, "a range dash isn't a minus sign");
@@ -109,6 +110,8 @@ test("each derivation is recomputed from its operands", () => {
   assert.deepEqual(check("12.5 points", derived("n1", "difference", fell, { sign: "-" })), { verdict: "derived_ok" });
   assert.deepEqual(check("−1,250 bps", derived("n1", "difference", fell)), { verdict: "derived_ok" });
   assert.equal(check("13.5 points", derived("n1", "difference", fell)).verdict, "wrong");
+  // "AMD's gross margin is 12.5 points lower": the operands come in either order.
+  assert.deepEqual(check("12.5 points", derived("n1", "difference", [...fell].reverse(), { sign: "-" })), { verdict: "derived_ok" });
   // 209,911 / 34,669 = 6.055x
   const scale = [of(nvda("revenue", 2026, "FY")), of(ref("AMD", "revenue", 2025, "FY"))];
   assert.deepEqual(check("6.1x", derived("n1", "ratio", scale)), { verdict: "derived_ok" });
@@ -199,6 +202,20 @@ test("a turn that didn't complete isn't checked, and a labeller failure leaves e
   assert.deepEqual(failed.totals, { figures: 1, matched: 0, derived_ok: 0, wrong: 0, not_checkable: 1 });
   assert.equal(failed.turns[0]!.labeller.error, "unreadable labels (stop reason max_tokens)");
   assert.match(summaryLines(failed)[0]!, /\(1 turns not labelled\)$/u);
+});
+
+test("a checked run is judged again from its saved labels, and refused when its numerals moved", async () => {
+  const label: Labeller = async () => ({ ok: true, labels: { labels: [], figures: [reported("n1", ref("NVDA", "revenue", 2026, "Q4"), { sign: "+" })] } });
+  const file = await checkRun(runWith([{ message: "a", outcome: "completed", blocks: text("Revenue was $62.1B, and $1B more."), answeredBy: "m" }]), label);
+  assert.deepEqual(file.totals, { figures: 2, matched: 1, derived_ok: 0, wrong: 0, not_checkable: 1 });
+  assert.deepEqual(rejudge(JSON.parse(JSON.stringify(file))), file);
+  const fixed = JSON.parse(JSON.stringify(file));
+  fixed.turns[0].numerals[0].label.source.fiscal_period = "Q3";
+  fixed.turns[0].numerals[0].label.source.fiscal_year = 2026;
+  assert.equal(rejudge(fixed).turns[0]!.numerals[0]!.verdict, "wrong", "verdicts come from the saved labels");
+  const moved = JSON.parse(JSON.stringify(file));
+  moved.turns[0].text = "Revenue was $62.1B.";
+  assert.throws(() => rejudge(moved), (error: unknown) => error instanceof Refusal && /run check again/u.test(error.message));
 });
 
 test("a wrong figure's sentence is the one it sits in", () => {

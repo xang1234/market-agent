@@ -162,9 +162,16 @@ app runs and bare runs alike. Each completed turn is rendered with `renderBlock`
    derived figure is `derived_ok` when its recomputed value does. Otherwise it is `wrong`. A figure that points at
    nothing on file, or that the labeller skipped, is `not_checkable`, with its reason.
 
-A whole number's trailing zeros count as rounding, so `$60B` matches 62.1 billion. The check writes
-`<run>.figures.json` beside the run, with each numeral's span, label and verdict per turn. It prints one line per run
-with the counts, then each wrong figure with its sentence.
+A whole number's trailing zeros count as rounding, so `$60B` matches 62.1 billion. Only a minus sign makes a number
+negative. Parentheses don't, because in prose they hold an aside such as "previous close ($176.10)". A difference is
+compared by size, since its sign follows the operand order the labeller picks. Two operands can't express a sum, so
+a trailing-four-quarter total is `not_checkable`.
+
+The check writes `<run>.figures.json` beside the run, with each numeral's span, label and verdict per turn. It prints
+one line per run with the counts, then each wrong figure with its sentence. After a change to the verdict code, run
+`node --experimental-strip-types scripts/research-quality-figures.ts rejudge <figures.json>...`. It judges the saved
+labels again without a model call, and it refuses a turn whose numerals the enumerator no longer finds in the same
+places.
 
 ## Held-out traps (#221)
 
