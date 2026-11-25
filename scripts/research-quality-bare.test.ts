@@ -121,6 +121,25 @@ test("a 429, 5xx or overloaded stream is retried once, then is the turn's provid
   const midStream = fakeFetch([() => new Response(sse({ type: "message_start", message: { model: "m", usage: {} } }, { type: "error", error: { type: "overloaded_error", message: "Overloaded" } })), () => new Response(answer("ok"))]);
   assert.equal((await callMessages({}, { ...fast, fetch: midStream.send })).ok, true);
   assert.equal(midStream.sent.length, 2);
+  const start = { type: "message_start", message: { model: "m", usage: {} } };
+  const partial = { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "NVDA's rev" } };
+  const opened = { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } };
+  const cutShort = fakeFetch([() => new Response(sse(start, opened, partial)), () => new Response(answer("ok"))]);
+  assert.deepEqual(await callMessages({}, { ...fast, fetch: cutShort.send }), (await callMessages({}, { ...fast, fetch: fakeFetch([() => new Response(answer("ok"))]).send })));
+  assert.equal(cutShort.sent.length, 2, "a stream that ends before message_stop is retried, not kept as an answer");
+  const broken = () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(sse(start, opened, partial)));
+      controller.error(new TypeError("terminated", { cause: new Error("other side closed") }));
+    },
+  }));
+  const reset = fakeFetch([broken, () => new Response(answer("ok"))]);
+  assert.equal((await callMessages({}, { ...fast, fetch: reset.send })).ok, true, "a connection dropped mid-stream is retried");
+  assert.equal(reset.sent.length, 2);
+  const resetTwice = fakeFetch([broken, broken]);
+  assert.deepEqual(await callMessages({}, { ...fast, fetch: resetTwice.send }), { ok: false, outcome: "provider_error", error: "the answer stream broke: Error: other side closed" });
+  const cutTwice = fakeFetch([() => new Response(sse(start, opened, partial)), () => new Response(sse(start, opened, partial))]);
+  assert.deepEqual(await callMessages({}, { ...fast, fetch: cutTwice.send }), { ok: false, outcome: "provider_error", error: "the answer stream ended before message_stop" });
   const refused = fakeFetch([() => new Response("bad request", { status: 400 })]);
   assert.deepEqual(await callMessages({}, { ...fast, fetch: refused.send }), { ok: false, outcome: "provider_error", status: 400, error: "HTTP 400: bad request" });
   assert.equal(refused.sent.length, 1, "a 400 isn't retried");

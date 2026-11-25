@@ -154,8 +154,9 @@ export type CallMessages = (body: Record<string, unknown>) => Promise<MessagesRe
 const TRANSIENT_STREAM_ERRORS = new Set(["overloaded_error", "api_error", "rate_limit_error"]);
 
 // One streamed request (streaming keeps a long answer under fetch's header timeout),
-// retried once on 429, 5xx, an overloaded or server error mid-stream, or a dropped
-// connection; anything else, or a second failure, is the turn's provider error.
+// retried once on 429, 5xx, an overloaded or server error mid-stream, a dropped
+// connection before or during the stream, or a stream that ends before message_stop;
+// anything else, or a second failure, is the turn's provider error.
 export async function callMessages(body: Record<string, unknown>, options: CallOptions): Promise<MessagesResult> {
   const first = await attempt(body, options);
   if (first.ok || !("transient" in first) || !first.transient) return strip(first);
@@ -205,8 +206,11 @@ async function readStream(response: Response): Promise<Attempt> {
   let stopReason: string | null = null;
   let usage: Record<string, number> = {};
   let buffer = "";
+  let stopped = false;
   const handle = (event: Record<string, any>): Attempt | undefined => {
-    if (event.type === "message_start") {
+    if (event.type === "message_stop") {
+      stopped = true;
+    } else if (event.type === "message_start") {
       model = event.message.model;
       usage = { ...event.message.usage };
     } else if (event.type === "content_block_start") {
@@ -224,8 +228,19 @@ async function readStream(response: Response): Promise<Attempt> {
     }
     return undefined;
   };
-  for await (const chunk of response.body!.pipeThrough(new TextDecoderStream())) {
-    buffer += chunk;
+  const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
+  for (;;) {
+    let next: ReadableStreamReadResult<string>;
+    // Only the read is caught: a transport failure mid-stream is the provider's, like a
+    // dropped connection before it, while a parse or programming error keeps its stack.
+    try {
+      next = await reader.read();
+    } catch (error) {
+      if ((error as Error).name === "TimeoutError") return { ok: false, outcome: "timeout", error: "the answer stream timed out", transient: false };
+      return { ok: false, outcome: "provider_error", error: `the answer stream broke: ${String((error as Error).cause ?? error)}`, transient: true };
+    }
+    if (next.done) break;
+    buffer += next.value;
     let end: number;
     while ((end = buffer.indexOf("\n\n")) !== -1) {
       const data = buffer.slice(0, end).split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("");
@@ -234,6 +249,7 @@ async function readStream(response: Response): Promise<Attempt> {
       if (failed) return failed;
     }
   }
+  if (!stopped) return { ok: false, outcome: "provider_error", error: "the answer stream ended before message_stop", transient: true };
   const text = content.filter((block) => block.type === "text").map((block) => block.text as string).join("").trim();
   return {
     ok: true,

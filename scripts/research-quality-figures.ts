@@ -276,8 +276,13 @@ export function verdictFor(numeral: Numeral, label: FigureLabel | undefined): Ch
   if (numeral.unit === "date") return { verdict: "not_checkable", reason: "a date labelled as a figure" };
   const scale = numeral.unit === "amount" && !numeral.scaled && label.scale ? SCALE_WORDS[label.scale] : 1;
   const step = numeral.step * scale;
-  const shown = numeral.value * scale * (!numeral.signed && label.sign === "-" ? -1 : 1);
-  const bySign = (numeral.signed || label.sign !== null) && !(label.basis === "derived" && label.derivation === "difference");
+  // A margin, share or ratio is a level: "fell to 60.5%" says how it moved, not that it is
+  // negative, so only the text's own sign counts. ponytail: an unsigned negative margin
+  // ("an operating loss of 1.7% of revenue") is then compared by size.
+  const level = label.basis === "derived" && (label.derivation === "margin" || label.derivation === "share_of_total" || label.derivation === "ratio");
+  const sign = level ? null : label.sign;
+  const shown = numeral.value * scale * (!numeral.signed && sign === "-" ? -1 : 1);
+  const bySign = (numeral.signed || sign !== null) && !(label.basis === "derived" && label.derivation === "difference");
   const fits = (actual: number, places = step) => withinPrecision(bySign ? shown : Math.abs(shown), bySign ? actual : Math.abs(actual), places);
   const wrong = (options: number[]): Checked => ({ verdict: "wrong", expected: options[0], ...(options.some((actual) => fits(actual, step * 3)) ? { reason: LAST_DIGIT } : {}) });
   let options: number[];
@@ -433,7 +438,7 @@ export function labellerSystemPrompt(): string {
       "- company, metric and period in a few words, as the sentence gives them;",
       "- basis \"reported\" when it states one value on file, with source pointing at that value;",
       "- basis \"derived\" when it is computed (a margin, growth rate, share or multiple always is) from values on file, with derivation and its two operands in this order: margin [profit, revenue]; share_of_total [part, total]; growth [earlier, later]; difference [first, the value subtracted from it], so a change from A to B is [B, A]; ratio [numerator, denominator]. An operand is one value on file, or one value over another (over) when the figure compares two margins or ratios;",
-      "- sign \"-\" when the words make the number negative (a loss, a decline, a fall, a drop), \"+\" when they make it positive (a rise, a gain), null when they give no direction;",
+      "- sign is the sign of the marked figure itself, not of the trend around it: \"-\" for a loss, or a change stated as a decline (\"fell 5%\"); \"+\" for a change stated as a gain (\"rose 5%\"); null otherwise. In \"margin fell to 60.5%\", 60.5% is a level, so its sign is null;",
       "- scale when the number has no B, M or K of its own but its table or sentence puts it in thousands, millions or billions.",
       "Point at what the sentence says, even where you think it is wrong. A figure about something not on file (another metric, period or company) still goes in figures, with source null and no operands.",
     ].join("\n"),
