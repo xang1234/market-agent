@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readScenarioAsk, turnScenarioAsk } from "../src/eps-scenarios.ts";
+import { mayAskScenario, readScenarioAsk, turnScenarioAsk } from "../src/eps-scenarios.ts";
 
 const COMPANY = ["AAPL", "NVDA", "3M", "SCEN"];
 const ask = (labels: number, stated: Record<string, string>, fiscal_year: number | "latest" | null = null) => ({ invalid: false, labels, stated, fiscal_year }) as const;
@@ -170,6 +170,14 @@ test("a message's P/E scenarios, as readScenarioAsk reads them", () => {
     ["What was AAPL's EPS?", null],
   ];
   assert.deepEqual(table.map(([text]) => [text, readScenarioAsk(text, COMPANY)]), table);
+  assert.deepEqual(table.flatMap(([text, read]) => (read !== null && !mayAskScenario(text) ? [text] : [])), [], "every ask read has the wording mayAskScenario looks for");
+});
+
+test("mayAskScenario: an ask's wording, cutting a company's words out or not; an ordinary question has none", () => {
+  assert.equal(mayAskScenario("make AAPL bull 35"), true);
+  assert.deepEqual(readScenarioAsk("P AAPL/E 20/25/30", ["AAPL"]), invalid(0), "cutting AAPL out closes up P / E");
+  assert.equal(mayAskScenario("P AAPL/E 20/25/30"), true);
+  for (const text of ["What does AAPL sell?", "How has AAPL's share price moved?", "Show AAA's cash resilience", "Is AAPL bullish?"]) assert.equal(mayAskScenario(text), false, text);
 });
 
 test("a company's words are its resolved mention and label, each whole", () => {

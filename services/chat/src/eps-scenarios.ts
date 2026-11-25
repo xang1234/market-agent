@@ -111,6 +111,15 @@ export function readScenarioAsk(text: string, company: ReadonlyArray<string>): S
   return isUnlabelledList(lower) ? { labels, ...INVALID } : null;
 }
 
+// The wording every ask needs: a label, or the P/E wording an unlabelled list
+// starts with. A company's words are cut out whole, between non-word
+// characters, leaving one space, so cutting them never makes a word; it can
+// close up only "P / E", which the slash stands for.
+const ASK_WORDING = new RegExp(String.raw`(?<![\p{L}\p{N}])(?:${SCENARIOS.join("|")}|${PE_WORDING}|multiples?)(?![\p{L}\p{N}])|\/`, "u");
+
+/** Whether readScenarioAsk could read an ask from the message for some company's words: false lets a caller skip resolving its companies. */
+export const mayAskScenario = (text: string): boolean => ASK_WORDING.test(text.toLowerCase());
+
 // One pass from the end: whether each token reaches a number through connectors only.
 function labelReachesNumber(tokens: ReadonlyArray<Token>, matches: ReadonlyArray<RegExpExecArray>): boolean {
   let reaches = false;
