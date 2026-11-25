@@ -31,6 +31,7 @@ export type IssuerFundamentalFact = {
   period_kind: string;
   fiscal_year: number | null;
   fiscal_period: string | null;
+  period_end: string | null;
   as_of: string;
   source_id: string;
   // How completely the period is covered; a value derived from it inherits this.
@@ -90,6 +91,7 @@ export async function loadRecentIssuerFundamentals(
     period_kind: fact.period_kind,
     fiscal_year: fact.fiscal_year,
     fiscal_period: fact.fiscal_period,
+    period_end: fact.period_end,
     as_of: fact.as_of,
     source_id: fact.source_id,
     coverage_level: fact.coverage_level,

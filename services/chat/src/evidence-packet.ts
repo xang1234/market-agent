@@ -318,7 +318,7 @@ function nonGaapQuarterText(quarter: NonGaapQuarter): string {
     eps && `diluted EPS GAAP ${eps.gaap.toFixed(2)}, non-GAAP ${eps.non_gaap.toFixed(2)}, a spread of ${eps.spread.toFixed(2)}`,
     income && `operating income GAAP ${amount(income.gaap)}, non-GAAP ${amount(income.non_gaap)}${inScale(income.scale)}`,
     // A margin is shown only when revenue is in operating income's scale.
-    margin && `operating margin on revenue of ${amount(margin.revenue)}${inScale(income!.scale)}, GAAP ${margin.gaap_pct.toFixed(1)}%, non-GAAP ${margin.non_gaap_pct.toFixed(1)}%, a spread of ${margin.spread_pp.toFixed(1)} percentage points`,
+    margin && `operating margin on revenue of ${amount(margin.revenue)}${inScale(income!.scale)}, GAAP ${margin.gaap_pct.toFixed(1)}%, non-GAAP ${margin.non_gaap_pct.toFixed(1)}%, a spread of ${margin.spread.value.toFixed(1)} percentage points`,
     sbc && `stock-based compensation added back ${amount(sbc.value)}${inScale(sbc.scale)} (${SBC_BASIS_TEXT[sbc.basis]})${sbc.share_pct === null ? "" : `, ${sbc.share_pct.toFixed(1)}% of non-GAAP net income of ${amount(sbc.non_gaap_net_income!)}`}`,
   ].filter(Boolean);
   return `${head}: ${parts.join("; ") || "the release reconciles none of diluted EPS, operating income and stock-based compensation"}`;

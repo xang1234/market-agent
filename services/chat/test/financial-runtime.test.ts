@@ -18,6 +18,10 @@ import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
 import { changing, chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, METRIC_READING, MISSING_ISSUER, NO_ASKS, resolveMention, resolveNamedListing, revenueModel, SEC_ISSUER, SEC_ISSUER_B, SEC_ISSUER_C, SEC_ISSUER_D, seedListingA } from "./financial-fixtures.ts";
 import type { TurnHydrator } from "../src/turn-hydration.ts";
+import type { Outcome } from "../../shared/src/outcome.ts";
+
+// A filings fetch that stored the company's statements.
+const STORED: Outcome<unknown> = { status: "stored", rows: [{}] };
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 
 test("an unready engine stops the server instead of leaving metric questions on legacy numbers", async () => {
@@ -348,6 +352,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       fetchFilings: async (issuerId) => {
         fetched.push(issuerId);
         removals.push(await fileFacts(db, [issuerId]));
+        return STORED;
       },
       fetchBars: async () => assert.fail("no market origin is configured"),
     });
@@ -379,6 +384,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       fetchFilings: async (issuerId) => {
         fetched.push(issuerId);
         removals.push(await fileFacts(db, [issuerId]));
+        return STORED;
       },
       fetchBars: async () => assert.fail("no market origin is configured"),
     });
@@ -419,7 +425,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     } as ChatSubjectPreResolution);
     for (const [name, fetchFilings] of [
       ["fails", async () => { throw new Error("sec_edgar: HTTP 503"); }],
-      ["never settles", () => new Promise<void>(() => {})],
+      ["never settles", () => new Promise<never>(() => {})],
     ] as const) {
       const hydrate = createTurnHydrator({
         db: pool,
@@ -443,7 +449,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const hydrate = createTurnHydrator({
       db: pool,
       env: { SEC_EDGAR_USER_AGENT: "test-agent" },
-      fetchFilings: () => new Promise<void>((resolve) => { finish = resolve; }),
+      fetchFilings: () => new Promise((resolve) => { finish = () => resolve(STORED); }),
       fetchBars: async () => assert.fail("no market origin is configured"),
       budgetMs: 30,
     });
@@ -477,7 +483,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       env: { SEC_EDGAR_USER_AGENT: "test-agent" },
       fetchFilings: async (issuerId) => {
         remove = await fileFacts(db, [issuerId]);
-        await new Promise<void>(() => {});
+        return new Promise<never>(() => {});
       },
       fetchBars: async () => assert.fail("no market origin is configured"),
       budgetMs: 1_000,

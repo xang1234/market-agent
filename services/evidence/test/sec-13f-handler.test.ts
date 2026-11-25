@@ -47,8 +47,19 @@ test("handle13f ignores a non-superinvestor filer", async (t) => {
   const deps = { db, objectStore: new MemoryObjectStore(), client: fakeClient(submission("03-31-2026", [{ name: "APPLE INC", cusip: AAPL_CUSIP, value: 200000, shares: 1000 }])) } as unknown as FormHandlerDeps;
 
   const result = await handle13f(entry("0001193125-26-000001", "2026-05-15", 9999999), deps);
-  assert.equal(result.ingested, false);
+  assert.deepEqual(result, { status: "empty", reason: "not_superinvestor" });
   assert.equal((await client.query(`select count(*)::int as n from institutional_holdings`)).rows[0]!.n, 0);
+});
+
+test("handle13f skips an original whose holdings all fail to resolve, and says so", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-unresolved");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const deps = { db, objectStore: new MemoryObjectStore(), client: fakeClient(submission("03-31-2026", [{ name: "UNTRACKED CO", cusip: "999999999", value: 1000, shares: 10 }])) } as unknown as FormHandlerDeps;
+
+  assert.deepEqual(await handle13f(entry("0001193125-26-000002"), deps), { status: "empty", reason: "no_resolvable_holdings" });
+  assert.equal((await client.query(`select count(*)::int as n from documents`)).rows[0]!.n, 0);
 });
 
 test("handle13f stores resolvable holdings, skips CUSIP misses, no claims on a baseline period", async (t) => {
@@ -66,7 +77,7 @@ test("handle13f stores resolvable holdings, skips CUSIP misses, no claims on a b
   ]);
   const deps = { db, objectStore: new MemoryObjectStore(), client: fakeClient(txt) } as unknown as FormHandlerDeps;
   const result = await handle13f(entry("0001193125-26-000002"), deps);
-  assert.equal(result.ingested, true);
+  assert.equal(result.status, "stored");
 
   assert.equal((await client.query(`select count(*)::int as n from institutional_holdings`)).rows[0]!.n, 2, "two resolvable; the miss is skipped");
   assert.equal((await client.query(`select count(*)::int as n from claims where predicate like 'position_change.%'`)).rows[0]!.n, 0, "baseline period → no change claims");
@@ -97,7 +108,7 @@ test("handle13f emits new/increased/exit claims vs the prior period", async (t) 
     { name: "NEW HOLDING CO", cusip: NEW_CUSIP, value: 9000, shares: 300 },
   ]);
   const deps = { db, objectStore: new MemoryObjectStore(), client: fakeClient(txt) } as unknown as FormHandlerDeps;
-  assert.equal((await handle13f(entry("0001193125-26-000011"), deps)).ingested, true);
+  assert.equal((await handle13f(entry("0001193125-26-000011"), deps)).status, "stored");
 
   const claims = await client.query<{ predicate: string }>(`select predicate from claims where predicate like 'position_change.%' order by predicate`);
   assert.deepEqual(
@@ -247,7 +258,7 @@ test("handle13f (13F-HR/A RESTATEMENT) drops an omitted issuer's stale row and s
       { name: "COCA COLA CO", cusip: KO_CUSIP, value: 5000, shares: 50 },
     ], "RESTATEMENT")),
   );
-  assert.equal(res.ingested, true);
+  assert.equal(res.status, "stored");
 
   // Read model: the dropped issuer's stale row is gone — no over-count.
   const rows = await client.query<{ issuer_id: string }>(
@@ -295,7 +306,7 @@ test("handle13f (13F-HR/A RESTATEMENT) with no resolvable holdings still superse
     entry("0001193125-26-000045", "2026-06-01", BERKSHIRE, "13F-HR/A"),
     memDeps(db, submission("03-31-2026", [], "RESTATEMENT")),
   );
-  assert.equal(res.ingested, true, "the empty restatement is processed (supersedes), not skipped");
+  assert.equal(res.status, "stored", "the empty restatement is processed (supersedes), not skipped");
 
   // The original Q1 holding is superseded (removed), not left stale.
   assert.equal(
@@ -339,7 +350,7 @@ test("handle13f (13F-HR/A NEW HOLDINGS) merges supplemental rows without flaggin
     entry("0001193125-26-000052", "2026-06-01", BERKSHIRE, "13F-HR/A"),
     memDeps(db, submission("03-31-2026", [{ name: "ADDED CO", cusip: NEW_CUSIP, value: 3000, shares: 30 }], "NEW HOLDINGS")),
   );
-  assert.equal(res.ingested, true);
+  assert.equal(res.status, "stored");
 
   // Merge: the original AAPL + KO rows are retained and the supplemental ADD is added.
   const rows = await client.query<{ issuer_id: string }>(
@@ -379,7 +390,7 @@ test("handle13f (13F-HR/A NEW HOLDINGS) skips a supplemental share class of an a
     entry("0001193125-26-000062", "2026-06-01", BERKSHIRE, "13F-HR/A"),
     memDeps(db, submission("03-31-2026", [{ name: "ALPHABET INC CL C", cusip: "02079K107", value: 2000, shares: 200 }], "NEW HOLDINGS")),
   );
-  assert.equal(res.ingested, true);
+  assert.equal(res.status, "stored");
 
   // The overlapping issuer is skipped: the original's row is neither merged into nor
   // overwritten. Merging needs stale-claim retirement + an amendment-aware reprocess (fra-f1hx).
@@ -405,7 +416,7 @@ test("handle13f skips a 13F-HR/A with an unrecognized amendmentType rather than 
     entry("0001193125-26-000061", "2026-06-01", BERKSHIRE, "13F-HR/A"),
     memDeps(db, submission("03-31-2026", [{ name: "APPLE INC", cusip: AAPL_CUSIP, value: 10000, shares: 100 }])),
   );
-  assert.equal(res.ingested, false);
+  assert.deepEqual(res, { status: "empty", reason: "unclassified_amendment" });
   assert.equal((await client.query(`select count(*)::int as n from institutional_holdings`)).rows[0]!.n, 0, "no holdings written");
   assert.equal((await client.query(`select count(*)::int as n from documents`)).rows[0]!.n, 0, "no document written");
 });
@@ -457,7 +468,7 @@ test("handle13f (original 13F-HR) with zero holdings records the empty period an
   });
 
   const res = await handle13f(entry("0001193125-26-000074"), memDeps(db, submission("03-31-2026", [])));
-  assert.equal(res.ingested, true, "a genuinely empty portfolio is ingested, not skipped");
+  assert.equal(res.status, "stored", "a genuinely empty portfolio is ingested, not skipped");
   const exits = await client.query<{ n: number }>(`select count(*)::int as n from claims where predicate = 'position_change.exit'`);
   assert.equal(exits.rows[0]!.n, 1, "AAPL exits vs Q4");
   const periods = await client.query<{ p: string }>(
@@ -516,7 +527,7 @@ test("handle13f skips an original 13F-HR arriving after its period was already r
     { name: "APPLE INC", cusip: AAPL_CUSIP, value: 5000, shares: 100 },
     { name: "COCA COLA CO", cusip: KO_CUSIP, value: 600, shares: 10 },
   ])));
-  assert.equal(res.ingested, false);
+  assert.deepEqual(res, { status: "empty", reason: "period_restated" });
 
   const rows = await client.query<{ issuer_id: string; shares: string }>(
     `select issuer_id::text as issuer_id, shares from institutional_holdings where filing_period = '2026-03-31'`,

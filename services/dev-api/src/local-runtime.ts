@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 
 import { Pool } from "pg";
 import { logPoolErrors } from "../../shared/src/pool-client.ts";
+import { failed } from "../../shared/src/outcome.ts";
 
 import {
   addClaimClusterMember,
@@ -205,9 +206,10 @@ const secFetcher = processSecFetcher(process.env);
 
 const HYDRATION_BUDGET_MS = 15_000;
 
-// Every failure, SEC's or the store's, is logged and leaves the engine to
-// report the gap; the memo never fails for want of fresh facts. Hydration
-// past its budget keeps running, and the memo freezes its cutoff without it.
+// Every failure, SEC's or the store's, is logged with its cause, and an issuer
+// that stored nothing with the reason; either leaves the engine to report the
+// gap, and the memo never fails for want of fresh facts. Hydration past its
+// budget keeps running, and the memo freezes its cutoff without it.
 export async function hydrateAnalyzeIssuers(
   db: Pool,
   fetcher: SecEdgarFetcher | null,
@@ -217,14 +219,21 @@ export async function hydrateAnalyzeIssuers(
 ): Promise<void> {
   if (fetcher === null) return;
   const settled = Promise.all([...reads].map(async ([issuerId, issuerReads]) => {
-    try {
-      await hydrateSecIssuerLatestYears(db, { issuerId, reads: issuerReads, fetcher, sourceId: SEC_EDGAR_FILING_SOURCE_ID, logger });
-    } catch (error) {
-      logger.warn("analyze SEC hydration failed; the engine reports the gap", {
-        issuer_id: issuerId,
-        reason: error instanceof FundamentalsDataUnavailableError ? error.reason : "store_failed",
-        error: error instanceof Error ? error.message : String(error),
-      });
+    const outcome = await hydrateSecIssuerLatestYears(db, { issuerId, reads: issuerReads, fetcher, sourceId: SEC_EDGAR_FILING_SOURCE_ID, logger }).catch(failed);
+    switch (outcome.status) {
+      case "stored":
+        return;
+      case "empty":
+        // A frozen golden issuer is seeded, not hydrated, so it has no gap to explain.
+        if (outcome.reason === "frozen_issuer") return;
+        logger.warn("analyze SEC hydration stored nothing; the engine reports the gap", { issuer_id: issuerId, reason: outcome.reason });
+        return;
+      case "failed":
+        logger.warn("analyze SEC hydration failed; the engine reports the gap", {
+          issuer_id: issuerId,
+          reason: outcome.cause instanceof FundamentalsDataUnavailableError ? outcome.cause.reason : "store_failed",
+          error: outcome.cause.message,
+        });
     }
   }));
   let timer: ReturnType<typeof setTimeout> | undefined;

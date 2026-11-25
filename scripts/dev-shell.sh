@@ -94,6 +94,7 @@ ensure_install() {
 
 install_node_packages() {
   ensure_install "$ROOT/db"
+  ensure_install "$ROOT/lint"
   ensure_install "$ROOT/web"
   ensure_install "$ROOT/services/chat"
   ensure_install "$ROOT/services/resolver"

@@ -4,7 +4,7 @@
 // write can never strand a filing (the daily crawl skips accessions that already
 // have a documents row).
 import type { FilingIndexEntry } from "./sec-daily-index.ts";
-import type { FormHandlerDeps } from "./sec-daily-crawl.ts";
+import type { FormHandlerDeps, HandlerResult } from "./sec-daily-crawl.ts";
 import { withTransaction } from "./transaction.ts";
 import { createSource } from "./source-repo.ts";
 import { ingestDocumentInTransaction } from "./ingest.ts";
@@ -66,7 +66,7 @@ function claimText(owner: Form4ReportingOwner, txn: Form4Transaction, type: stri
   return `${owner.name} (${insiderRole(owner)}) ${action} ${txn.shares} shares${price}.`;
 }
 
-export const handleForm4 = async (entry: Form4FilingRef, deps: FormHandlerDeps) => {
+export const handleForm4 = async (entry: Form4FilingRef, deps: FormHandlerDeps): Promise<HandlerResult> => {
   // Fetch + parse + resolve the issuer outside the transaction (network/reads).
   const fetched = await deps.client.fetchFiling({
     cik: entry.cik,
@@ -82,21 +82,21 @@ export const handleForm4 = async (entry: Form4FilingRef, deps: FormHandlerDeps) 
   // parsing lands, rather than the filing being masked by an orphan documents row.
   if (filing.transactions.length === 0) {
     console.warn(`[sec-form4] skip ${entry.accession}: no non-derivative transactions extracted`);
-    return { ingested: false };
+    return { status: "empty", reason: "no_transactions" };
   }
 
   const issuerId = await resolveIssuerIdByCik(deps.db, filing.issuerCik);
   if (issuerId === null) {
     console.warn(`[sec-form4] skip ${entry.accession}: issuer CIK ${filing.issuerCik} not tracked`);
-    return { ingested: false };
+    return { status: "empty", reason: "issuer_not_tracked" };
   }
 
   const filedAt = `${entry.filedDate}T00:00:00Z`;
 
-  const ingested = await withTransaction(deps.db, async (tx) => {
+  return withTransaction(deps.db, async (tx): Promise<HandlerResult> => {
     if (!(await issuerHoldsCik(tx.db, issuerId, filing.issuerCik))) {
       console.warn(`[sec-form4] skip ${entry.accession}: issuer ${issuerId} no longer holds CIK ${filing.issuerCik}`);
-      return false;
+      return { status: "empty", reason: "cik_moved" };
     }
     const source = await createSource(tx.db, {
       provider: "sec_edgar",
@@ -215,8 +215,6 @@ export const handleForm4 = async (entry: Form4FilingRef, deps: FormHandlerDeps) 
         role: "subject",
       });
     }
-    return true;
+    return { status: "stored", rows: [entry.accession] };
   });
-
-  return { ingested };
 };

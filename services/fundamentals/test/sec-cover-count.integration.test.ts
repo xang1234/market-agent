@@ -189,7 +189,10 @@ test("a filing's cover count is stored as filed on its own date", { timeout: 300
     )).rows[0];
     const before = await proofs();
     assert.ok(await ingest(2024, "FY"));
-    assert.deepEqual(await backfillSecCompanionStatements(db, { issuerId: ISSUER, fetcher, sourceId: FALLBACK_SOURCE_ID, logger: { warn: () => {} } }), { periods: 4 });
+    assert.deepEqual(await backfillSecCompanionStatements(db, { issuerId: ISSUER, fetcher, sourceId: FALLBACK_SOURCE_ID, logger: { warn: () => {} } }), {
+      status: "stored",
+      rows: [{ fiscal_year: 2024, fiscal_period: "FY" }, { fiscal_year: 2025, fiscal_period: "FY" }, { fiscal_year: 2025, fiscal_period: "Q1" }, { fiscal_year: 2025, fiscal_period: "Q2" }],
+    });
     assert.deepEqual(await counts(), stored);
     assert.deepEqual(await proofs(), before);
   });

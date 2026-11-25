@@ -41,6 +41,13 @@ test("a database failure while hydrating is logged and leaves the memo to the en
   ]);
 });
 
+test("an issuer hydration stores nothing for is logged with the reason, so the memo's gap has one (#769)", async () => {
+  const noCik = { query: async (text: string) => ({ rows: text.includes("from issuers") ? [{ issuer_id: ISSUER, cik: null }] : [] }) } as unknown as Pool;
+  const warnings: unknown[][] = [];
+  await hydrateAnalyzeIssuers(noCik, unavailable, new Map([[ISSUER, new Map([["revenue", 1]])]]), { warn: (...args: unknown[]) => warnings.push(args) });
+  assert.deepEqual(warnings, [["analyze SEC hydration stored nothing; the engine reports the gap", { issuer_id: ISSUER, reason: "no_cik" }]]);
+});
+
 test("hydration past its budget is logged and the memo goes on", async () => {
   const hung = () => new Promise<never>(() => {});
   const warnings: unknown[][] = [];
@@ -54,6 +61,8 @@ test("the frozen golden issuers are never repaired from live SEC", async () => {
   const touched: string[] = [];
   const db = { query: async (text: string) => { touched.push(text); return { rows: [] }; } } as unknown as Pool;
   const fetcher = async (path: string) => { touched.push(path); throw new Error("no fetch expected"); };
-  await hydrateAnalyzeIssuers(db, fetcher, new Map(Object.values(GOLDEN_ISSUER_IDS).map((id) => [id, new Map([["revenue", 2]])])), { warn() {} });
+  const warnings: unknown[][] = [];
+  await hydrateAnalyzeIssuers(db, fetcher, new Map(Object.values(GOLDEN_ISSUER_IDS).map((id) => [id, new Map([["revenue", 2]])])), { warn: (...args: unknown[]) => warnings.push(args) });
   assert.deepEqual(touched, []);
+  assert.deepEqual(warnings, [], "a seeded issuer has no gap to log");
 });

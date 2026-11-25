@@ -52,6 +52,7 @@ import { factActiveSql, factKnownAtSql } from "../../evidence/src/fact-activity.
 import { FundamentalsDataUnavailableError } from "./availability.ts";
 import { FROZEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
 import { issuerHoldsCik } from "../../shared/src/identifiers.ts";
+import { isNonEmpty, type Outcome } from "../../shared/src/outcome.ts";
 import {
   FISCAL_PERIODS,
   normalizedStatement,
@@ -142,16 +143,26 @@ export async function hydrateSecIssuer(
     logger?: Pick<Console, "warn">;
   },
 ): Promise<NormalizedStatement | null> {
-  const [statement] = await hydrateSecPeriods(db, input, () => [{ fiscal_year: input.fiscal_year, fiscal_period: input.fiscal_period }]);
-  return statement ?? null;
+  const outcome = await hydrateSecPeriods(db, input, () => [{ fiscal_year: input.fiscal_year, fiscal_period: input.fiscal_period }]);
+  switch (outcome.status) {
+    case "stored":
+      return outcome.rows[0];
+    case "empty":
+      return null;
+    case "failed":
+      throw outcome.cause;
+  }
 }
 
 // Stores the issuer's annual statements for the latest fiscal years its
 // planned reads need (from the latest year with a 10-K revenue value) from one
 // companyfacts download, unless every read is already stored with its proofs.
-// `reads` is how many of the latest fiscal years each metric is read for. A
-// year SEC has no statement for is skipped; the years that extract are stored
-// before a failure is thrown as hydrateSecIssuer throws it.
+// `reads` is how many of the latest fiscal years each metric is read for, and
+// a year SEC has no statement for is skipped. Resolves stored with what is on
+// file for the reads, proven before or stored now; empty for a frozen golden
+// issuer, one with no usable CIK, or one SEC has no statement for; failed with
+// SEC's failure once the years that extract are stored. A failure storing
+// them throws as it is.
 export async function hydrateSecIssuerLatestYears(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
@@ -162,23 +173,29 @@ export async function hydrateSecIssuerLatestYears(
     clock?: () => Date;
     logger?: Pick<Console, "warn">;
   },
-): Promise<void> {
-  if (FROZEN_ISSUER_IDS.has(input.issuerId)) return;
-  if (await storedProvenReads(db, input.issuerId, input.reads, (input.clock ?? (() => new Date()))())) return;
+): Promise<Outcome<Readonly<{ fiscal_year: number }>>> {
+  if (FROZEN_ISSUER_IDS.has(input.issuerId)) return { status: "empty", reason: "frozen_issuer" };
+  const proven = await storedProvenReads(db, input.issuerId, input.reads, (input.clock ?? (() => new Date()))());
+  if (isNonEmpty(proven)) return { status: "stored", rows: proven };
   const years = Math.max(0, ...input.reads.values());
-  await hydrateSecPeriods(db, input, (facts) => {
+  return hydrateSecPeriods(db, input, (facts) => {
     const latest = latestAnnualRevenueYear(facts);
     return latest === null ? [] : Array.from({ length: years }, (_, offset) => ({ fiscal_year: latest - offset, fiscal_period: "FY" as const }));
   });
 }
 
-// Whether every planned read is stored as SEC facts the engine would accept:
-// a precision proof with its token, a financial context, and a publication
-// proof, for the latest fiscal year on file and the years before it each
-// metric needs. A latest year that ended more
-// than a filing cycle ago (15 months) does not count: a newer 10-K is due, so
-// the issuer is fetched again.
-async function storedProvenReads(db: FundamentalsQueryExecutor, issuerId: UUID, reads: ReadonlyMap<string, number>, now: Date): Promise<boolean> {
+// The proven facts on file for the planned reads when every one is stored as
+// SEC facts the engine would accept, none otherwise: a precision proof with
+// its token, a financial context, and a publication proof, for the latest
+// fiscal year on file and the years before it each metric needs. A latest year
+// that ended more than a filing cycle ago (15 months) does not count: a newer
+// 10-K is due, so the issuer is fetched again.
+async function storedProvenReads(
+  db: FundamentalsQueryExecutor,
+  issuerId: UUID,
+  reads: ReadonlyMap<string, number>,
+  now: Date,
+): Promise<ReadonlyArray<{ metric_key: string; fiscal_year: number; period_end: string }>> {
   const { rows } = await db.query<{ metric_key: string; fiscal_year: number; period_end: string }>(
     `select distinct m.metric_key, f.fiscal_year, f.period_end::text as period_end
        from facts f
@@ -201,26 +218,28 @@ async function storedProvenReads(db: FundamentalsQueryExecutor, issuerId: UUID, 
     [issuerId, [...reads.keys()]],
   );
   const latest = rows.reduce<(typeof rows)[number] | null>((best, row) => (best === null || Number(row.fiscal_year) > Number(best.fiscal_year) ? row : best), null);
-  if (latest === null) return false;
+  if (latest === null) return [];
   const filingCycle = new Date(`${latest.period_end}T00:00:00.000Z`);
   filingCycle.setUTCMonth(filingCycle.getUTCMonth() + 15);
-  if (!(filingCycle > now)) return false;
+  if (!(filingCycle > now)) return [];
   const proven = new Set(rows.map((row) => `${row.metric_key}:${Number(row.fiscal_year)}`));
   return [...reads].every(([metric, years]) =>
-    Array.from({ length: years }, (_, offset) => proven.has(`${metric}:${Number(latest.fiscal_year) - offset}`)).every(Boolean));
+    Array.from({ length: years }, (_, offset) => proven.has(`${metric}:${Number(latest.fiscal_year) - offset}`)).every(Boolean))
+    ? rows
+    : [];
 }
 
 async function hydrateSecPeriods(
   db: FundamentalsTransactionalQueryExecutor,
   input: { issuerId: UUID; fetcher: SecEdgarFetcher; sourceId: UUID; clock?: () => Date; logger?: Pick<Console, "warn"> },
   periodsOf: (facts: SecCompanyFacts) => ReadonlyArray<{ fiscal_year: number; fiscal_period: FiscalPeriod }>,
-): Promise<Array<NormalizedStatement | null>> {
-  if (FROZEN_ISSUER_IDS.has(input.issuerId)) return [];
+): Promise<Outcome<NormalizedStatement>> {
+  if (FROZEN_ISSUER_IDS.has(input.issuerId)) return { status: "empty", reason: "frozen_issuer" };
   const logger = input.logger ?? console;
   const clock = input.clock ?? (() => new Date());
   const issuer = await loadIssuer(db, input.issuerId);
   const cik = Number(issuer?.cik);
-  if (!Number.isInteger(cik) || cik <= 0) return [];
+  if (!Number.isInteger(cik) || cik <= 0) return { status: "empty", reason: "no_cik" };
 
   // SEC's failures are held until what did extract is stored, so a bad
   // year never costs the years beside it.
@@ -256,9 +275,10 @@ async function hydrateSecPeriods(
       error: error instanceof Error ? error.message : String(error),
     });
     const unavailable = classifySecIngestionError(error);
-    if (unavailable) throw unavailable;
+    if (unavailable) return { status: "failed", cause: unavailable };
   }
-  return stored.map((entry) => entry.statement);
+  const statements = stored.flatMap((entry) => (entry.statement ? [entry.statement] : []));
+  return isNonEmpty(statements) ? { status: "stored", rows: statements } : { status: "empty", reason: "missing_coverage" };
 }
 
 // For every SEC income period already on file for an issuer, from one
@@ -268,7 +288,10 @@ async function hydrateSecPeriods(
 // facts the old period selector got wrong (a 10-K's oldest comparative, a
 // framed prior-year quarter) are replaced. With annualHistoryYears (dev only,
 // #610), it also stores the download's newest that many 10-K fiscal years,
-// whether or not any income is on file for them.
+// whether or not any income is on file for them. Resolves stored with the
+// periods the download holds statements for, now on file; empty for a frozen
+// golden issuer, one with no usable CIK, one with nothing to backfill, or a
+// download with nothing for its periods. A failure throws.
 export async function backfillSecCompanionStatements(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
@@ -279,11 +302,11 @@ export async function backfillSecCompanionStatements(
     logger?: Pick<Console, "warn">;
     annualHistoryYears?: number;
   },
-): Promise<{ periods: number }> {
-  if (FROZEN_ISSUER_IDS.has(input.issuerId)) return { periods: 0 };
+): Promise<Exclude<Outcome<Readonly<{ fiscal_year: number; fiscal_period: FiscalPeriod }>>, { status: "failed" }>> {
+  if (FROZEN_ISSUER_IDS.has(input.issuerId)) return { status: "empty", reason: "frozen_issuer" };
   const issuer = await loadIssuer(db, input.issuerId);
   const cik = Number(issuer?.cik);
-  if (!Number.isInteger(cik) || cik <= 0) return { periods: 0 };
+  if (!Number.isInteger(cik) || cik <= 0) return { status: "empty", reason: "no_cik" };
   const { rows } = await db.query<{ fiscal_year: number; fiscal_period: FiscalPeriod }>(
     `select distinct f.fiscal_year, f.fiscal_period::text as fiscal_period
        from facts f
@@ -303,11 +326,12 @@ export async function backfillSecCompanionStatements(
     [input.issuerId, SEC_INCOME_METRIC_KEYS],
   );
   const history = input.annualHistoryYears ?? 0;
-  if (rows.length === 0 && history === 0) return { periods: 0 };
+  if (rows.length === 0 && history === 0) return { status: "empty", reason: "no_income_periods" };
   const fetched = await fetchCompanyFacts(input.fetcher, cik);
   const periods = new Map(rows.map((row) => [`${row.fiscal_year}|${row.fiscal_period}`, row]));
   for (const fiscal_year of tenKFiscalYears(fetched.facts, history)) periods.set(`${fiscal_year}|FY`, { fiscal_year, fiscal_period: "FY" });
   const filings: SecFilingRef[] = [];
+  const onFile: Array<{ fiscal_year: number; fiscal_period: FiscalPeriod }> = [];
   for (const period of periods.values()) {
     const extracted = extractFiling({
       fetched,
@@ -319,11 +343,12 @@ export async function backfillSecCompanionStatements(
       income: "repair",
       logger: input.logger ?? console,
     });
-    const { filing } = await storeFiling(db, extracted, input.clock ?? (() => new Date()));
+    const { filing, stored } = await storeFiling(db, extracted, input.clock ?? (() => new Date()));
     if (filing) filings.push(filing);
+    if (stored) onFile.push({ fiscal_year: period.fiscal_year, fiscal_period: period.fiscal_period });
   }
   await recordSecFilingAcceptances(db, input.fetcher, { cik, filings, logger: input.logger ?? console });
-  return { periods: periods.size };
+  return isNonEmpty(onFile) ? { status: "stored", rows: onFile } : { status: "empty", reason: "missing_coverage" };
 }
 
 /** The newest `count` fiscal years an original 10-K in the download reports, by its fiscal-year label. */
@@ -437,14 +462,15 @@ function extractFiling(input: IngestInput): ExtractedFiling {
 // cash flow and balance sheet beside it. Income is "require" (a lookup: it must
 // extract) or "repair" (a backfill: stored income facts that differ from the
 // filing are replaced; a period it cannot extract is left as it is). Returns
-// the income statement, or null without it, and the accession filing it stored
-// facts on. Every period of one download is dated by that download's
-// completion, never by when it was processed.
+// the income statement, or null without it, the accession filing it stored
+// facts on, and whether its statements are on file (stored now, or already
+// stored as filed). Every period of one download is dated
+// by that download's completion, never by when it was processed.
 async function storeFiling(
   db: FundamentalsTransactionalQueryExecutor,
   { input, accessionNumber, source, sourceId, target, income, companions, coverCount }: ExtractedFiling,
   clock: () => Date,
-): Promise<{ statement: NormalizedStatement | null; filing: SecFilingRef | null }> {
+): Promise<{ statement: NormalizedStatement | null; filing: SecFilingRef | null; stored: boolean }> {
   const asOf = input.fetched.evidence.completed_at;
   const registry = await loadMetricRegistry(db, [
     ...[...(income ? [income] : []), ...companions].flatMap((entry) => entry.statement.lines.map((line) => line.metric_key)),
@@ -457,7 +483,7 @@ async function storeFiling(
   const cover = coverCount && mapCoverCount(registry, coverCount, target, input.logger);
   if (mapped.length === 0 && !cover) {
     if (source) await upsertSecFilingSource(db, source);
-    return { statement: income?.statement ?? null, filing: null };
+    return { statement: income?.statement ?? null, filing: null, stored: false };
   }
   const stored = await withPinnedTransaction(db, async (client) => {
     // Each ingest of an issuer checks its inferences against what it reads, so
@@ -522,9 +548,9 @@ async function storeFiling(
   });
   if (!stored) {
     input.logger.warn(`sec: issuer ${input.issuerId} no longer holds CIK ${input.cik}; its download is not stored`);
-    return { statement: null, filing: null };
+    return { statement: null, filing: null, stored: false };
   }
-  return { statement: income?.statement ?? null, filing: accessionNumber ? { sourceId, accessionNumber } : null };
+  return { statement: income?.statement ?? null, filing: accessionNumber ? { sourceId, accessionNumber } : null, stored: true };
 }
 
 // A metric our registry lacks is ours and throws as it is. A line SEC tagged

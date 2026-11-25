@@ -5,14 +5,15 @@
 - Before pushing, self-review the diff for the bug classes reviewers keep finding here: swallowed exceptions or overly broad `except`, race conditions on first claim or lease, circuit breakers or state that can never reset, platform-specific exceptions (Windows ValueError), and missing imports.
 
 ### Known bug classes here
+Backend lint runs in CI: `npm --prefix lint run lint`. Typed rules read every service's imports, so first run `npm ci` in `lint`, `db` and each service, as the CI `lint` job does. Errors fail CI; warnings mark existing hits to fix, and a rule moves to error when its hits reach zero.
 Each class has come back in several modules (closed issues cited). Check the diff against every one that applies.
-- **Prose read by regex or keyword rules** (narrative guard #137-#302, keyword router #398, #749, #750). A new or changed rule ships with a corpus diff in the PR body: every real input whose reading changed. A rule that changes no real reading is not added. Synthetic-only edge cases go in a follow-up issue. Check: corpus tests (#767).
-- **Periods matched by label** (#344, #474, #479, #541). Key, group and compare periods by end date and period kind. A fiscal label is for display. Check: `Period` type (#769).
-- **Results that depend on arrival order** (#333, #334, #756). Reduce filings in filed date and accession order, never download or insert order. Add a test that feeds the inputs in every order and expects identical stored rows, proofs included. Check: `require-array-sort-compare` (#768).
+- **Prose read by regex or keyword rules** (narrative guard #137-#302, keyword router #398, #749, #750). A new or changed rule ships with a corpus diff in the PR body: every real input whose reading changed. A rule that changes no real reading is not added. Synthetic-only edge cases go in a follow-up issue. Check: `services/evidence/test/reader-corpus.test.ts` (`npm run corpus:update` in services/evidence rewrites the expected files), and CI fails a PR that changes a reader without changing its corpus (expected file or new inputs). Add each review round's sentences to `services/evidence/test/reader-corpus/release-figure-sentences.tsv`, or the corpus will not catch them next time.
+- **Periods matched by label** (#344, #474, #479, #541). Key, group and compare periods by end date and period kind. A fiscal label is for display. Check: a prior period is found by its end date with `endsStepsApart` or `endsQuartersApart` (`services/financial-core/src/periods.ts`), as the engine's latest offsets do (#769).
+- **Results that depend on arrival order** (#333, #334, #756). Reduce filings in filed date and accession order, never download or insert order. Add a test that feeds the inputs in every order and expects identical stored rows, proofs included. Lint: `require-array-sort-compare` (warn until its existing hits are fixed).
 - **Missing or failed data that asserts something** (#381, #695, #744, #763). A missing figure carries no scope, basis or label of its own, and a failure never reads as "not available" or "no claims".
 - **"ok" with nothing stored** (#399, #665, #688). Success means rows written. A failure keeps its cause. Check: `Outcome` type (#769).
 - **Values that lose their unit or precision** (#539, #544, #749). A change in a percent is in percentage points. Rounding tolerance comes from the printed decimals, never `String(value)`.
-- **Wall clock in logic** (#259, #611, #614). Take the date as an input. Date a market event by its trading session, not UTC.
+- **Wall clock in logic** (#259, #611, #614). Take the date as an input. Date a market event by its trading session, not UTC. Lint: `no-restricted-syntax` on argument-less `new Date()` and `Date.now()` in `services/*/src` (warn for now).
 
 ## PR Review Workflow
 ### Addressing PR review comments

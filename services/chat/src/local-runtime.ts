@@ -80,7 +80,9 @@ const hydrateTurn = createTurnHydrator({
   env: process.env,
   fetchFilings: async (issuerId) => {
     const fetcher = processSecFetcher(process.env);
-    if (fetcher) await hydrateSecIssuerLatestYears(pool(), { issuerId, reads: TURN_SEC_READS, fetcher, sourceId: SEC_EDGAR_FILING_SOURCE_ID });
+    return fetcher
+      ? hydrateSecIssuerLatestYears(pool(), { issuerId, reads: TURN_SEC_READS, fetcher, sourceId: SEC_EDGAR_FILING_SOURCE_ID })
+      : { status: "empty", reason: "no_sec_user_agent" };
   },
   // ponytail: an inherited window is fetched to its own cutoff and reread from
   // stored bars, so a provider correction since shows corrected returns;

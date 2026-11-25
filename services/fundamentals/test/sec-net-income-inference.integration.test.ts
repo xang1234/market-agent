@@ -242,7 +242,7 @@ test("the backfill re-certifies a period whose only income fact 0076 invalidated
   await db.query(await readFile(join(workspaceRoot, "db", "migrations", "0076_net_income_profit_loss.up.sql"), "utf8"));
   assert.equal(await isActive(legacyId), false);
 
-  assert.deepEqual(await backfill(), { periods: 1 });
+  assert.deepEqual(await backfill(), { status: "stored", rows: [{ fiscal_year: 2023, fiscal_period: "FY" }] });
   assert.deepEqual((await netIncome()).filter((row) => row.active).map(({ metric_key, value, flags, proof }) => [metric_key, value, flags, proof]), [
     ["net_income", "90", inferred("ProfitLoss"), "source_token_preserved"],
     ["net_income_consolidated", "90", [], "source_token_preserved"],

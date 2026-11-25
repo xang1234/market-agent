@@ -154,6 +154,36 @@ test("buildKeyStats computes revenue growth from a prior period with both period
   );
 });
 
+test("buildKeyStats computes revenue growth after a 53-week year, whose end is six days later in the calendar", () => {
+  const fy2022 = aaplSecMappedStatement({
+    fiscal_year: 2022,
+    period_start: "2021-09-26",
+    period_end: "2022-09-24",
+    as_of: "2022-10-28T20:30:00.000Z",
+    revenue: 394_328_000_000,
+  });
+  const growth = statByKey(buildKeyStats({ statement: aaplPriorMappedStatement(), prior_statement: fy2022 }).stats, "revenue_growth_yoy");
+
+  assert.equal(growth.value_num, (383_285_000_000 - 394_328_000_000) / 394_328_000_000);
+  assert.deepEqual(growth.warnings, []);
+});
+
+test("buildKeyStats leaves revenue growth unavailable when the prior fiscal year does not end a year earlier", () => {
+  // The year end moved from June to December: FY2023 and FY2024 end 18 months apart.
+  const current = { ...aaplMappedStatement(), period_start: "2024-01-01", period_end: "2024-12-31" };
+  const prior = { ...aaplPriorMappedStatement(), period_start: "2022-07-01", period_end: "2023-06-30" };
+  const growth = statByKey(buildKeyStats({ statement: current, prior_statement: prior }).stats, "revenue_growth_yoy");
+
+  assert.equal(growth.value_num, null);
+  assert.equal(growth.coverage_level, "unavailable");
+  assert.deepEqual(growth.warnings, [
+    {
+      code: "input_mismatch",
+      message: "revenue_growth_yoy prior period ending 2023-06-30 does not end a year before the current period ending 2024-12-31.",
+    },
+  ]);
+});
+
 test("buildKeyStats resolves AAPL P/E as a price fact and ratio computation with visible inputs", () => {
   const envelope = buildKeyStats({
     statement: aaplMappedStatement(),

@@ -4,7 +4,7 @@
 // claims/events are written in one transaction. Holdings whose CUSIP doesn't
 // resolve to a tracked issuer are skipped + logged (coverage grows via fra-ajvd.7).
 import type { FilingIndexEntry } from "./sec-daily-index.ts";
-import type { FormHandlerDeps } from "./sec-daily-crawl.ts";
+import type { FormHandlerDeps, HandlerResult } from "./sec-daily-crawl.ts";
 import { withTransaction } from "./transaction.ts";
 import { createSource } from "./source-repo.ts";
 import { ingestDocumentInTransaction } from "./ingest.ts";
@@ -39,10 +39,10 @@ function changeVerb(kind: ChangeKind): string {
   }[kind];
 }
 
-export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) => {
+export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps): Promise<HandlerResult> => {
   // Q8: process only the seeded superinvestor filers.
   if (!isSuperinvestorFiler(entry.cik)) {
-    return { ingested: false };
+    return { status: "empty", reason: "not_superinvestor" };
   }
   const filerCik = String(entry.cik).padStart(10, "0");
   const filerName = superinvestorName(entry.cik) ?? `CIK ${entry.cik}`;
@@ -71,7 +71,7 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
       `[sec-13f] skip ${entry.accession}: 13F-HR/A with unrecognized amendmentType ` +
         `"${filing.amendmentType ?? "(absent)"}" — not ingested (fra-kb2p)`,
     );
-    return { ingested: false };
+    return { status: "empty", reason: "unclassified_amendment" };
   }
   const restate = isAmendment && amendmentType === "RESTATEMENT";
   const supplemental = isAmendment && amendmentType === "NEW HOLDINGS";
@@ -83,7 +83,7 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
     const restatedBy = await periodRestatedBy(deps.db, filerCik, filing.periodOfReport);
     if (restatedBy) {
       console.warn(`[sec-13f] skip ${entry.accession}: ${filerName} @ ${filing.periodOfReport} already restated by ${restatedBy}`);
-      return { ingested: false };
+      return { status: "empty", reason: "period_restated" };
     }
   }
 
@@ -103,7 +103,7 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
   // resolve is unknown, not empty, and a supplement with nothing resolved adds nothing.
   if (resolved.length === 0 && !restate && (supplemental || hadUnresolved)) {
     console.warn(`[sec-13f] skip ${entry.accession}: no resolvable holdings for ${filerName}`);
-    return { ingested: false };
+    return { status: "empty", reason: "no_resolvable_holdings" };
   }
 
   const period = filing.periodOfReport;
@@ -268,5 +268,5 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
     }
   });
 
-  return { ingested: true };
+  return { status: "stored", rows: [entry.accession] };
 };

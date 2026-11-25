@@ -1,5 +1,7 @@
 import type { QueryExecutor } from "./types.ts";
 
+export type CrawlFailure = { accession: string; cause: string };
+
 export type RecordCrawlBatchInput = {
   form: string;
   indexDate: string; // ISO date (YYYY-MM-DD)
@@ -8,19 +10,21 @@ export type RecordCrawlBatchInput = {
   filingsIngested: number;
   filingsSkipped: number;
   startedAt: string; // ISO8601
+  failures: ReadonlyArray<CrawlFailure>; // empty exactly when status is "succeeded"
 };
 
 export async function recordCrawlBatch(db: QueryExecutor, input: RecordCrawlBatchInput): Promise<void> {
   await db.query(
     `insert into edgar_crawl_ledger
-       (form, index_date, status, filings_total, filings_ingested, filings_skipped, started_at, finished_at)
-     values ($1, $2::date, $3, $4, $5, $6, $7::timestamptz, now())
+       (form, index_date, status, filings_total, filings_ingested, filings_skipped, started_at, failures, finished_at)
+     values ($1, $2::date, $3, $4, $5, $6, $7::timestamptz, $8::jsonb, now())
      on conflict (form, index_date) do update set
        status = excluded.status,
        filings_total = excluded.filings_total,
        filings_ingested = excluded.filings_ingested,
        filings_skipped = excluded.filings_skipped,
        started_at = excluded.started_at,
+       failures = excluded.failures,
        finished_at = now()`,
     [
       input.form,
@@ -30,6 +34,7 @@ export async function recordCrawlBatch(db: QueryExecutor, input: RecordCrawlBatc
       input.filingsIngested,
       input.filingsSkipped,
       input.startedAt,
+      JSON.stringify(input.failures),
     ],
   );
 }

@@ -1,0 +1,244 @@
+# Each pick of phrases from release-figure-sentences.tsv that readFigure stores, on the basis it was tagged. Every pick not listed goes to review.
+Adjusted diluted EPS was $1.20. | result eps non_gaap {"value":"$1.20"} -> non_gaap 1.2..1.2
+Apple posted quarterly revenue of $95.4 billion, up 5 percent year over year from $90.8 billion, and quarterly earnings per diluted share of $1.65. | result revenue gaap {"value":"$1.65"} -> gaap 1.65..1.65
+Apple posted quarterly revenue of $95.4 billion, up 5 percent year over year from $90.8 billion, and quarterly earnings per diluted share of $1.65. | result revenue gaap {"value":"$90.8 billion"} -> gaap 90800000000..90800000000
+Apple posted quarterly revenue of $95.4 billion, up 5 percent year over year from $90.8 billion, and quarterly earnings per diluted share of $1.65. | result revenue gaap {"value":"$95.4 billion"} -> gaap 95400000000..95400000000
+Cash flow from operating activities was $15.2 billion. | result free_cash_flow gaap {"value":"$15.2 billion"} -> gaap 15200000000..15200000000
+Diluted EPS is expected to be $1.10, plus or minus $300 million. | guidance eps gaap {"value":"$1.10"} -> gaap 1.1..1.1
+Diluted earnings per share was $3.30 and increased 10%, compared with $3.00 in the prior year. | result eps gaap {"value":"$3.00"} -> gaap 3..3
+Diluted earnings per share was $3.30 and increased 10%, compared with $3.00 in the prior year. | result eps gaap {"value":"$3.30"} -> gaap 3.3..3.3
+First quarter revenue was $10.3 billion, gross margin was 53%, operating income was $1.5 billion, net income was $1.4 billion and diluted earnings per share was $0.84. | result revenue gaap {"value":"$0.84"} -> gaap 0.84..0.84
+First quarter revenue was $10.3 billion, gross margin was 53%, operating income was $1.5 billion, net income was $1.4 billion and diluted earnings per share was $0.84. | result revenue gaap {"value":"$1.4 billion"} -> gaap 1400000000..1400000000
+First quarter revenue was $10.3 billion, gross margin was 53%, operating income was $1.5 billion, net income was $1.4 billion and diluted earnings per share was $0.84. | result revenue gaap {"value":"$1.5 billion"} -> gaap 1500000000..1500000000
+First quarter revenue was $10.3 billion, gross margin was 53%, operating income was $1.5 billion, net income was $1.4 billion and diluted earnings per share was $0.84. | result revenue gaap {"value":"$10.3 billion"} -> gaap 10300000000..10300000000
+For the first quarter of 2026, AMD expects revenue to be approximately $9.8 billion, plus or minus $300 million, including approximately $100 million of AMD Instinct MI308 sales to China. | guidance revenue gaap {"value":"$300 million"} -> gaap 300000000..300000000
+For the first quarter of 2026, AMD expects revenue to be approximately $9.8 billion, plus or minus $300 million, including approximately $100 million of AMD Instinct MI308 sales to China. | guidance revenue gaap {"value":"approximately $100 million"} -> gaap 100000000..100000000
+For the first quarter of 2026, AMD expects revenue to be approximately $9.8 billion, plus or minus $300 million, including approximately $100 million of AMD Instinct MI308 sales to China. | guidance revenue gaap {"value":"approximately $9.8 billion","plus_minus":"$300 million"} -> gaap 9500000000..10100000000
+For the first quarter of 2026, AMD expects revenue to be approximately $9.8 billion, plus or minus $300 million, including approximately $100 million of AMD Instinct MI308 sales to China. | guidance revenue gaap {"value":"approximately $9.8 billion"} -> gaap 9800000000..9800000000
+For the fourth quarter of 2025, AMD expects revenue to be approximately $9.6 billion, plus or minus $300 million. | guidance revenue gaap {"value":"$300 million"} -> gaap 300000000..300000000
+For the fourth quarter of 2025, AMD expects revenue to be approximately $9.6 billion, plus or minus $300 million. | guidance revenue gaap {"value":"approximately $9.6 billion","plus_minus":"$300 million"} -> gaap 9300000000..9900000000
+For the fourth quarter of 2025, AMD expects revenue to be approximately $9.6 billion, plus or minus $300 million. | guidance revenue gaap {"value":"approximately $9.6 billion"} -> gaap 9600000000..9600000000
+For the fourth quarter of 2026, AMD expects revenue to be approximately $17 billion, plus or minus 3%. | guidance revenue gaap {"value":"approximately $17 billion","plus_minus":"3%"} -> gaap 16490000000..17510000000
+For the fourth quarter of 2026, AMD expects revenue to be approximately $17 billion, plus or minus 3%. | guidance revenue gaap {"value":"approximately $17 billion"} -> gaap 17000000000..17000000000
+For the quarter, GAAP and non-GAAP gross margins were 72.4% and 72.7%, respectively. | result gross_margin gaap {"value":"72.4%"} -> gaap 72.4..72.4
+For the quarter, GAAP and non-GAAP gross margins were 72.4% and 72.7%, respectively. | result gross_margin non_gaap {"value":"72.7%"} -> non_gaap 72.7..72.7
+For the quarter, GAAP and non-GAAP gross margins were 73.4% and 73.6%, respectively. | result gross_margin gaap {"value":"73.4%"} -> gaap 73.4..73.4
+For the quarter, GAAP and non-GAAP gross margins were 73.4% and 73.6%, respectively. | result gross_margin non_gaap {"value":"73.6%"} -> non_gaap 73.6..73.6
+For the quarter, GAAP and non-GAAP gross margins were 74.8% and 74.9%, respectively. | result gross_margin gaap {"value":"74.8%"} -> gaap 74.8..74.8
+For the quarter, GAAP and non-GAAP gross margins were 74.8% and 74.9%, respectively. | result gross_margin non_gaap {"value":"74.9%"} -> non_gaap 74.9..74.9
+For the quarter, GAAP and non-GAAP gross margins were 74.9% and 75.0%, respectively. | result gross_margin gaap {"value":"74.9%"} -> gaap 74.9..74.9
+For the quarter, GAAP and non-GAAP gross margins were 74.9% and 75.0%, respectively. | result gross_margin non_gaap {"value":"75.0%"} -> non_gaap 75..75
+For the quarter, GAAP and non-GAAP gross margins were 75.0% and 75.2%, respectively. | result gross_margin gaap {"value":"75.0%"} -> gaap 75..75
+For the quarter, GAAP and non-GAAP gross margins were 75.0% and 75.2%, respectively. | result gross_margin non_gaap {"value":"75.2%"} -> non_gaap 75.2..75.2
+For the quarter, GAAP and non-GAAP gross margins were both 75.0%. | result gross_margin gaap {"value":"75.0%"} -> gaap 75..75
+For the quarter, GAAP and non-GAAP gross margins were both 75.0%. | result gross_margin non_gaap {"value":"75.0%"} -> non_gaap 75..75
+For the second quarter of 2025, AMD expects revenue to be approximately $7.4 billion, plus or minus $300 million. | guidance revenue gaap {"value":"$300 million"} -> gaap 300000000..300000000
+For the second quarter of 2025, AMD expects revenue to be approximately $7.4 billion, plus or minus $300 million. | guidance revenue gaap {"value":"approximately $7.4 billion","plus_minus":"$300 million"} -> gaap 7100000000..7700000000
+For the second quarter of 2025, AMD expects revenue to be approximately $7.4 billion, plus or minus $300 million. | guidance revenue gaap {"value":"approximately $7.4 billion"} -> gaap 7400000000..7400000000
+For the second quarter of 2026, AMD expects revenue to be approximately $11.2 billion, plus or minus $300 million. | guidance revenue gaap {"value":"$300 million"} -> gaap 300000000..300000000
+For the second quarter of 2026, AMD expects revenue to be approximately $11.2 billion, plus or minus $300 million. | guidance revenue gaap {"value":"approximately $11.2 billion","plus_minus":"$300 million"} -> gaap 10900000000..11500000000
+For the second quarter of 2026, AMD expects revenue to be approximately $11.2 billion, plus or minus $300 million. | guidance revenue gaap {"value":"approximately $11.2 billion"} -> gaap 11200000000..11200000000
+For the third quarter of 2024, AMD expects revenue to be approximately $6.7 billion, plus or minus $300 million. | guidance revenue gaap {"value":"$300 million"} -> gaap 300000000..300000000
+For the third quarter of 2024, AMD expects revenue to be approximately $6.7 billion, plus or minus $300 million. | guidance revenue gaap {"value":"approximately $6.7 billion","plus_minus":"$300 million"} -> gaap 6400000000..7000000000
+For the third quarter of 2024, AMD expects revenue to be approximately $6.7 billion, plus or minus $300 million. | guidance revenue gaap {"value":"approximately $6.7 billion"} -> gaap 6700000000..6700000000
+For the third quarter of 2025, AMD expects revenue to be approximately $8.7 billion, plus or minus $300 million, up 28% from $6.8 billion a year ago. | guidance revenue gaap {"value":"$300 million"} -> gaap 300000000..300000000
+For the third quarter of 2025, AMD expects revenue to be approximately $8.7 billion, plus or minus $300 million, up 28% from $6.8 billion a year ago. | guidance revenue gaap {"value":"$6.8 billion"} -> gaap 6800000000..6800000000
+For the third quarter of 2025, AMD expects revenue to be approximately $8.7 billion, plus or minus $300 million, up 28% from $6.8 billion a year ago. | guidance revenue gaap {"value":"approximately $8.7 billion","plus_minus":"$300 million"} -> gaap 8400000000..9000000000
+For the third quarter of 2025, AMD expects revenue to be approximately $8.7 billion, plus or minus $300 million, up 28% from $6.8 billion a year ago. | guidance revenue gaap {"value":"approximately $8.7 billion"} -> gaap 8700000000..8700000000
+For the third quarter of 2025, AMD expects revenue to be approximately $8.7 billion, plus or minus $300 million. | guidance revenue gaap {"value":"$300 million"} -> gaap 300000000..300000000
+For the third quarter of 2025, AMD expects revenue to be approximately $8.7 billion, plus or minus $300 million. | guidance revenue gaap {"value":"approximately $8.7 billion","plus_minus":"$300 million"} -> gaap 8400000000..9000000000
+For the third quarter of 2025, AMD expects revenue to be approximately $8.7 billion, plus or minus $300 million. | guidance revenue gaap {"value":"approximately $8.7 billion"} -> gaap 8700000000..8700000000
+For the third quarter of 2026, AMD expects revenue to be approximately $13 billion, plus or minus $300 million. | guidance revenue gaap {"value":"$300 million"} -> gaap 300000000..300000000
+For the third quarter of 2026, AMD expects revenue to be approximately $13 billion, plus or minus $300 million. | guidance revenue gaap {"value":"approximately $13 billion","plus_minus":"$300 million"} -> gaap 12700000000..13300000000
+For the third quarter of 2026, AMD expects revenue to be approximately $13 billion, plus or minus $300 million. | guidance revenue gaap {"value":"approximately $13 billion"} -> gaap 13000000000..13000000000
+Fourth quarter revenue was a record $10.3 billion, gross margin was 54%, operating income was $1.8 billion, net income was $1.5 billion and diluted earnings per share was $0.92. | result revenue gaap {"value":"$0.92"} -> gaap 0.92..0.92
+Fourth quarter revenue was a record $10.3 billion, gross margin was 54%, operating income was $1.8 billion, net income was $1.5 billion and diluted earnings per share was $0.92. | result revenue gaap {"value":"$1.5 billion"} -> gaap 1500000000..1500000000
+Fourth quarter revenue was a record $10.3 billion, gross margin was 54%, operating income was $1.8 billion, net income was $1.5 billion and diluted earnings per share was $0.92. | result revenue gaap {"value":"$1.8 billion"} -> gaap 1800000000..1800000000
+Fourth quarter revenue was a record $10.3 billion, gross margin was 54%, operating income was $1.8 billion, net income was $1.5 billion and diluted earnings per share was $0.92. | result revenue gaap {"value":"$10.3 billion"} -> gaap 10300000000..10300000000
+Free cash flow is expected to be approximately $1.0 billion. | guidance free_cash_flow gaap {"value":"approximately $1.0 billion"} -> gaap 1000000000..1000000000
+Free cash flow was $1.2 billion. | result free_cash_flow gaap {"value":"$1.2 billion"} -> gaap 1200000000..1200000000
+Free cash flow was -$1.2 billion. | result free_cash_flow gaap {"value":"-$1.2 billion"} -> gaap -1200000000..-1200000000
+Free cash flow was -$150 million. | result free_cash_flow gaap {"value":"-$150 million"} -> gaap -150000000..-150000000
+GAAP and non-GAAP financial measures are discussed below, and GAAP gross margin was 70.0%. | result gross_margin gaap {"value":"70.0%"} -> gaap 70..70
+GAAP and non-GAAP gross margins are expected to be 70.6% and 71.0%, respectively, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"70.6%","plus_minus":"50 basis points"} -> gaap 70.1..71.1
+GAAP and non-GAAP gross margins are expected to be 70.6% and 71.0%, respectively, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"70.6%"} -> gaap 70.6..70.6
+GAAP and non-GAAP gross margins are expected to be 70.6% and 71.0%, respectively, plus or minus 50 basis points. | guidance gross_margin non_gaap {"value":"71.0%","plus_minus":"50 basis points"} -> non_gaap 70.5..71.5
+GAAP and non-GAAP gross margins are expected to be 70.6% and 71.0%, respectively, plus or minus 50 basis points. | guidance gross_margin non_gaap {"value":"71.0%"} -> non_gaap 71..71
+GAAP and non-GAAP gross margins are expected to be 71.8% and 72.0%, respectively, plus or minus 50 basis points, compared with 60.5% in Q1. | guidance gross_margin gaap {"value":"71.8%","plus_minus":"50 basis points"} -> gaap 71.3..72.3
+GAAP and non-GAAP gross margins are expected to be 71.8% and 72.0%, respectively, plus or minus 50 basis points, compared with 60.5% in Q1. | guidance gross_margin gaap {"value":"71.8%"} -> gaap 71.8..71.8
+GAAP and non-GAAP gross margins are expected to be 71.8% and 72.0%, respectively, plus or minus 50 basis points, compared with 60.5% in Q1. | guidance gross_margin non_gaap {"value":"72.0%","plus_minus":"50 basis points"} -> non_gaap 71.5..72.5
+GAAP and non-GAAP gross margins are expected to be 71.8% and 72.0%, respectively, plus or minus 50 basis points, compared with 60.5% in Q1. | guidance gross_margin non_gaap {"value":"72.0%"} -> non_gaap 72..72
+GAAP and non-GAAP gross margins are expected to be 71.8% and 72.0%, respectively, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"71.8%","plus_minus":"50 basis points"} -> gaap 71.3..72.3
+GAAP and non-GAAP gross margins are expected to be 71.8% and 72.0%, respectively, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"71.8%"} -> gaap 71.8..71.8
+GAAP and non-GAAP gross margins are expected to be 71.8% and 72.0%, respectively, plus or minus 50 basis points. | guidance gross_margin non_gaap {"value":"72.0%","plus_minus":"50 basis points"} -> non_gaap 71.5..72.5
+GAAP and non-GAAP gross margins are expected to be 71.8% and 72.0%, respectively, plus or minus 50 basis points. | guidance gross_margin non_gaap {"value":"72.0%"} -> non_gaap 72..72
+GAAP and non-GAAP gross margins are expected to be 73.0% and 73.5%, respectively, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"73.0%","plus_minus":"50 basis points"} -> gaap 72.5..73.5
+GAAP and non-GAAP gross margins are expected to be 73.0% and 73.5%, respectively, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"73.0%"} -> gaap 73..73
+GAAP and non-GAAP gross margins are expected to be 73.0% and 73.5%, respectively, plus or minus 50 basis points. | guidance gross_margin non_gaap {"value":"73.5%","plus_minus":"50 basis points"} -> non_gaap 73..74
+GAAP and non-GAAP gross margins are expected to be 73.0% and 73.5%, respectively, plus or minus 50 basis points. | guidance gross_margin non_gaap {"value":"73.5%"} -> non_gaap 73.5..73.5
+GAAP and non-GAAP gross margins are expected to be 73.3% and 73.5%, respectively, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"73.3%","plus_minus":"50 basis points"} -> gaap 72.8..73.8
+GAAP and non-GAAP gross margins are expected to be 73.3% and 73.5%, respectively, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"73.3%"} -> gaap 73.3..73.3
+GAAP and non-GAAP gross margins are expected to be 73.3% and 73.5%, respectively, plus or minus 50 basis points. | guidance gross_margin non_gaap {"value":"73.5%","plus_minus":"50 basis points"} -> non_gaap 73..74
+GAAP and non-GAAP gross margins are expected to be 73.3% and 73.5%, respectively, plus or minus 50 basis points. | guidance gross_margin non_gaap {"value":"73.5%"} -> non_gaap 73.5..73.5
+GAAP and non-GAAP gross margins are expected to be 74.0%, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"74.0%","plus_minus":"50 basis points"} -> gaap 73.5..74.5
+GAAP and non-GAAP gross margins are expected to be 74.0%, plus or minus 50 basis points. | guidance gross_margin non_gaap {"value":"74.0%","plus_minus":"50 basis points"} -> non_gaap 73.5..74.5
+GAAP and non-GAAP gross margins are expected to be 74.8% and 75.0%, respectively, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"74.8%","plus_minus":"50 basis points"} -> gaap 74.3..75.3
+GAAP and non-GAAP gross margins are expected to be 74.8% and 75.0%, respectively, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"74.8%"} -> gaap 74.8..74.8
+GAAP and non-GAAP gross margins are expected to be 74.8% and 75.0%, respectively, plus or minus 50 basis points. | guidance gross_margin non_gaap {"value":"75.0%","plus_minus":"50 basis points"} -> non_gaap 74.5..75.5
+GAAP and non-GAAP gross margins are expected to be 74.8% and 75.0%, respectively, plus or minus 50 basis points. | guidance gross_margin non_gaap {"value":"75.0%"} -> non_gaap 75..75
+GAAP and non-GAAP gross margins are expected to be 74.9% and 75.0%, respectively, plus or minus 50 basis points, inclusive of a 0.1% impact from stock-based compensation expense. | guidance gross_margin gaap {"value":"74.9%","plus_minus":"50 basis points"} -> gaap 74.4..75.4
+GAAP and non-GAAP gross margins are expected to be 74.9% and 75.0%, respectively, plus or minus 50 basis points, inclusive of a 0.1% impact from stock-based compensation expense. | guidance gross_margin gaap {"value":"74.9%"} -> gaap 74.9..74.9
+GAAP and non-GAAP gross margins are expected to be 74.9% and 75.0%, respectively, plus or minus 50 basis points, inclusive of a 0.1% impact from stock-based compensation expense. | guidance gross_margin non_gaap {"value":"75.0%","plus_minus":"50 basis points"} -> non_gaap 74.5..75.5
+GAAP and non-GAAP gross margins are expected to be 74.9% and 75.0%, respectively, plus or minus 50 basis points, inclusive of a 0.1% impact from stock-based compensation expense. | guidance gross_margin non_gaap {"value":"75.0%"} -> non_gaap 75..75
+GAAP and non-GAAP gross margins are expected to be 74.9% and 75.0%, respectively, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"74.9%","plus_minus":"50 basis points"} -> gaap 74.4..75.4
+GAAP and non-GAAP gross margins are expected to be 74.9% and 75.0%, respectively, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"74.9%"} -> gaap 74.9..74.9
+GAAP and non-GAAP gross margins are expected to be 74.9% and 75.0%, respectively, plus or minus 50 basis points. | guidance gross_margin non_gaap {"value":"75.0%","plus_minus":"50 basis points"} -> non_gaap 74.5..75.5
+GAAP and non-GAAP gross margins are expected to be 74.9% and 75.0%, respectively, plus or minus 50 basis points. | guidance gross_margin non_gaap {"value":"75.0%"} -> non_gaap 75..75
+GAAP and non-GAAP gross margins are expected to be between 71.0% and 72.0%. | guidance gross_margin gaap {"low":"71.0%","high":"72.0%"} -> gaap 71..72
+GAAP and non-GAAP gross margins are expected to be between 71.0% and 72.0%. | guidance gross_margin non_gaap {"low":"71.0%","high":"72.0%"} -> non_gaap 71..72
+GAAP and non-GAAP gross margins were 60.5% and 61.0%, respectively. | result gross_margin gaap {"value":"60.5%"} -> gaap 60.5..60.5
+GAAP and non-GAAP gross margins were 60.5% and 61.0%, respectively. | result gross_margin non_gaap {"value":"61.0%"} -> non_gaap 61..61
+GAAP and non-GAAP operating expenses are expected to be approximately $11.0 billion and $10.7 billion, respectively. | guidance operating_expenses gaap {"value":"approximately $11.0 billion"} -> gaap 11000000000..11000000000
+GAAP and non-GAAP operating expenses are expected to be approximately $11.0 billion and $10.7 billion, respectively. | guidance operating_expenses non_gaap {"value":"$10.7 billion"} -> non_gaap 10700000000..10700000000
+GAAP and non-GAAP operating expenses are expected to be approximately $4.8 billion and $3.4 billion, respectively. | guidance operating_expenses gaap {"value":"approximately $4.8 billion"} -> gaap 4800000000..4800000000
+GAAP and non-GAAP operating expenses are expected to be approximately $4.8 billion and $3.4 billion, respectively. | guidance operating_expenses non_gaap {"value":"$3.4 billion"} -> non_gaap 3400000000..3400000000
+GAAP and non-GAAP operating expenses are expected to be approximately $5.2 billion and $3.6 billion, respectively. | guidance operating_expenses gaap {"value":"approximately $5.2 billion"} -> gaap 5200000000..5200000000
+GAAP and non-GAAP operating expenses are expected to be approximately $5.2 billion and $3.6 billion, respectively. | guidance operating_expenses non_gaap {"value":"$3.6 billion"} -> non_gaap 3600000000..3600000000
+GAAP and non-GAAP operating expenses are expected to be approximately $5.7 billion and $4.0 billion, respectively. | guidance operating_expenses gaap {"value":"approximately $5.7 billion"} -> gaap 5700000000..5700000000
+GAAP and non-GAAP operating expenses are expected to be approximately $5.7 billion and $4.0 billion, respectively. | guidance operating_expenses non_gaap {"value":"$4.0 billion"} -> non_gaap 4000000000..4000000000
+GAAP and non-GAAP operating expenses are expected to be approximately $5.9 billion and $4.2 billion, respectively. | guidance operating_expenses gaap {"value":"approximately $5.9 billion"} -> gaap 5900000000..5900000000
+GAAP and non-GAAP operating expenses are expected to be approximately $5.9 billion and $4.2 billion, respectively. | guidance operating_expenses non_gaap {"value":"$4.2 billion"} -> non_gaap 4200000000..4200000000
+GAAP and non-GAAP operating expenses are expected to be approximately $6.7 billion and $5.0 billion, respectively. | guidance operating_expenses gaap {"value":"approximately $6.7 billion"} -> gaap 6700000000..6700000000
+GAAP and non-GAAP operating expenses are expected to be approximately $6.7 billion and $5.0 billion, respectively. | guidance operating_expenses non_gaap {"value":"$5.0 billion"} -> non_gaap 5000000000..5000000000
+GAAP and non-GAAP operating expenses are expected to be approximately $7.7 billion and $7.5 billion, respectively, inclusive of $1.9 billion of stock-based compensation expense. | guidance operating_expenses gaap {"value":"approximately $7.7 billion"} -> gaap 7700000000..7700000000
+GAAP and non-GAAP operating expenses are expected to be approximately $7.7 billion and $7.5 billion, respectively, inclusive of $1.9 billion of stock-based compensation expense. | guidance operating_expenses non_gaap {"value":"$7.5 billion"} -> non_gaap 7500000000..7500000000
+GAAP and non-GAAP operating expenses are expected to be approximately $8.5 billion and $8.3 billion, respectively. | guidance operating_expenses gaap {"value":"approximately $8.5 billion"} -> gaap 8500000000..8500000000
+GAAP and non-GAAP operating expenses are expected to be approximately $8.5 billion and $8.3 billion, respectively. | guidance operating_expenses non_gaap {"value":"$8.3 billion"} -> non_gaap 8300000000..8300000000
+GAAP and non-GAAP operating expenses are expected to be approximately $9.2 billion and $9.0 billion, respectively. | guidance operating_expenses gaap {"value":"approximately $9.2 billion"} -> gaap 9200000000..9200000000
+GAAP and non-GAAP operating expenses are expected to be approximately $9.2 billion and $9.0 billion, respectively. | guidance operating_expenses non_gaap {"value":"$9.0 billion"} -> non_gaap 9000000000..9000000000
+GAAP diluted EPS was ($0.50). | result eps gaap {"value":"($0.50)"} -> gaap -0.5..-0.5
+GAAP gross margin was 35.4%, down 3.3 percentage points compared with 38.7% in Q2 2024, while non-GAAP gross margin was 38.7%. | result gross_margin gaap {"value":"35.4%"} -> gaap 35.4..35.4
+GAAP gross margin was 60.5%, and GAAP diluted earnings per share was $0.76. | result gross_margin gaap {"value":"60.5%"} -> gaap 60.5..60.5
+GAAP gross margin was 60.5%, including a $4.5 billion H20 charge, and non-GAAP gross margin was 61.0%. | result gross_margin gaap {"value":"60.5%"} -> gaap 60.5..60.5
+GAAP gross margin was 60.5%, including a $4.5 billion H20 charge, and non-GAAP gross margin was 61.0%. | result gross_margin non_gaap {"value":"61.0%"} -> non_gaap 61..61
+Gross margin is expected to be 70.0% or 72.0%, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"70.0%","plus_minus":"50 basis points"} -> gaap 69.5..70.5
+Gross margin is expected to be 70.0% or 72.0%, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"70.0%"} -> gaap 70..70
+Gross margin is expected to be 70.0% or 72.0%, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"72.0%","plus_minus":"50 basis points"} -> gaap 71.5..72.5
+Gross margin is expected to be 70.0% or 72.0%, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"72.0%"} -> gaap 72..72
+Gross margin is expected to be 72%, plus or minus 50 basis points, and operating margin 30%, up 2% year over year. | guidance gross_margin gaap {"value":"30%"} -> gaap 30..30
+Gross margin is expected to be 72%, plus or minus 50 basis points, and operating margin 30%, up 2% year over year. | guidance gross_margin gaap {"value":"72%","plus_minus":"50 basis points"} -> gaap 71.5..72.5
+Gross margin is expected to be 72%, plus or minus 50 basis points, and operating margin 30%, up 2% year over year. | guidance gross_margin gaap {"value":"72%"} -> gaap 72..72
+Gross margin is expected to be 72.0%, and operating margin 30.0%, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"30.0%","plus_minus":"50 basis points"} -> gaap 29.5..30.5
+Gross margin is expected to be 72.0%, and operating margin 30.0%, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"30.0%"} -> gaap 30..30
+Gross margin is expected to be 72.0%, and operating margin 30.0%, plus or minus 50 basis points. | guidance gross_margin gaap {"value":"72.0%"} -> gaap 72..72
+Gross margin is expected to be 72.0%, up 50 basis points from Q1. | guidance gross_margin gaap {"value":"72.0%"} -> gaap 72..72
+Gross margin on a non-GAAP basis was 43%, revenue was $7.7 billion. | result gross_margin non_gaap {"value":"43%"} -> non_gaap 43..43
+Gross margin was 43% on a non-GAAP basis, and revenue was $7.7 billion. | result gross_margin non_gaap {"value":"43%"} -> non_gaap 43..43
+Gross margin was 70.0% on an unadjusted basis. | result gross_margin gaap {"value":"70.0%"} -> gaap 70..70
+Non-GAAP gross margin (incl. Q1 adjustments) was 72.0%. | result gross_margin non_gaap {"value":"72.0%"} -> non_gaap 72..72
+Non-GAAP gross margin (see Exh. 99.1) was 72.0%. | result gross_margin non_gaap {"value":"72.0%"} -> non_gaap 72..72
+Non-GAAP gross margin 43% $7.7 billion | result gross_margin non_gaap {"value":"43%"} -> non_gaap 43..43
+Non-GAAP gross margin for Q1 vs. Q2 was 72.0%. | result gross_margin non_gaap {"value":"72.0%"} -> non_gaap 72..72
+Non-GAAP gross margin is estimated to be 43% inclusive of approximately $800 million in charges for inventory and related reserves due to the new export controls as previously disclosed in AMD's Current Report on Form 8-K filed on April 16, 2025. | guidance gross_margin non_gaap {"value":"43%"} -> non_gaap 43..43
+Non-GAAP gross margin is expected to be 54.0% +/- 50 bps. | guidance gross_margin non_gaap {"value":"54.0%","plus_minus":"- 50 bps"} -> non_gaap 53.5..54.5
+Non-GAAP gross margin is expected to be 54.0% +/- 50 bps. | guidance gross_margin non_gaap {"value":"54.0%","plus_minus":"50 bps"} -> non_gaap 53.5..54.5
+Non-GAAP gross margin is expected to be 54.0% +/- 50 bps. | guidance gross_margin non_gaap {"value":"54.0%"} -> non_gaap 54..54
+Non-GAAP gross margin is expected to be approximately 53.5%. | guidance gross_margin non_gaap {"value":"approximately 53.5%"} -> non_gaap 53.5..53.5
+Non-GAAP gross margin is expected to be approximately 54%. | guidance gross_margin non_gaap {"value":"approximately 54%"} -> non_gaap 54..54
+Non-GAAP gross margin is expected to be approximately 54.5%. | guidance gross_margin non_gaap {"value":"approximately 54.5%"} -> non_gaap 54.5..54.5
+Non-GAAP gross margin is expected to be approximately 55%. | guidance gross_margin non_gaap {"value":"approximately 55%"} -> non_gaap 55..55
+Non-GAAP gross margin is expected to be approximately 56%. | guidance gross_margin non_gaap {"value":"approximately 56%"} -> non_gaap 56..56
+Non-GAAP gross margin was 43%, and revenue was $7.7 billion. | result gross_margin non_gaap {"value":"43%"} -> non_gaap 43..43
+Non-GAAP gross margin was 72.0%. | result gross_margin non_gaap {"value":"72.0%"} -> non_gaap 72..72
+Non-GAAP gross margin was 72.5%. | result gross_margin non_gaap {"value":"72.5%"} -> non_gaap 72.5..72.5
+Non-GAAP net income was $1.8 billion or $1.09 per diluted share. | result eps non_gaap {"value":"$1.09"} -> non_gaap 1.09..1.09
+Non-GAAP results improved significantly and revenue was $7.7 billion. | result revenue non_gaap {"value":"$7.7 billion"} -> non_gaap 7700000000..7700000000
+Non-GAAP revenue in the U.S. Data Center segment was $5.0 billion. | result revenue non_gaap {"value":"$5.0 billion"} -> non_gaap 5000000000..5000000000
+Non-GAAP revenue was $7.7 billion, gross margin was 54%, and diluted EPS was $1.09. | result revenue non_gaap {"value":"$7.7 billion"} -> non_gaap 7700000000..7700000000
+Non-GAAP(1) gross margin was 54.0%, compared with 52.0% in Q1 2024. | result gross_margin non_gaap {"value":"54.0%"} -> non_gaap 54..54
+On a GAAP basis, free cash flow was $1.2 billion. | result free_cash_flow gaap {"value":"$1.2 billion"} -> gaap 1200000000..1200000000
+On a GAAP basis, gross margin was 50%. | result gross_margin gaap {"value":"50%"} -> gaap 50..50
+On a non-GAAP (*) basis, gross margin was 43%, operating income was $897 million, net income was $781 million and diluted earnings per share was $0.48. | result gross_margin non_gaap {"value":"43%"} -> non_gaap 43..43
+On a non-GAAP (*) basis, gross margin was 54%, operating income was $1.7 billion, net income was $1.5 billion and diluted earnings per share was $0.92. | result gross_margin non_gaap {"value":"54%"} -> non_gaap 54..54
+On a non-GAAP (*) basis, gross margin was 54%, operating income was $2.2 billion, net income was $2 billion and diluted earnings per share was $1.20. | result gross_margin non_gaap {"value":"54%"} -> non_gaap 54..54
+On a non-GAAP (*) basis, gross margin was 57%, operating income was $2.9 billion, net income was $2.5 billion, and diluted earnings per share was $1.53. | result operating_income non_gaap {"value":"$2.5 billion"} -> non_gaap 2500000000..2500000000
+On a non-GAAP (*) basis, gross margin was 57%, operating income was $2.9 billion, net income was $2.5 billion, and diluted earnings per share was $1.53. | result operating_income non_gaap {"value":"$2.9 billion"} -> non_gaap 2900000000..2900000000
+On a non-GAAP (*) basis, gross margin was 57%, operating income was a record $2.9 billion, net income was a record $2.5 billion and diluted earnings per share was a record $1.53. | result gross_margin non_gaap {"value":"57%"} -> non_gaap 57..57
+On a non-GAAP basis, gross margin was 54%, operating income was $1.7 billion and diluted EPS was $1.09. | result operating_income non_gaap {"value":"$1.09"} -> non_gaap 1.09..1.09
+On a non-GAAP basis, gross margin was 54%, operating income was $1.7 billion and diluted EPS was $1.09. | result operating_income non_gaap {"value":"$1.7 billion"} -> non_gaap 1700000000..1700000000
+On a non-GAAP basis, gross margin was 54%, operating income was $1.7 billion, and cash flow from operations was $2.1 billion. | result operating_cash_flow non_gaap {"value":"$1.7 billion"} -> non_gaap 1700000000..1700000000
+On a non-GAAP basis, net income was $1.8 billion, or $1.09 per diluted share, and revenue was $7.7 billion. | result revenue non_gaap {"value":"$1.09"} -> non_gaap 1.09..1.09
+On a non-GAAP basis, net income was $1.8 billion, or $1.09 per diluted share, and revenue was $7.7 billion. | result revenue non_gaap {"value":"$1.8 billion"} -> non_gaap 1800000000..1800000000
+On a non-GAAP(*) basis, gross margin was 55%, operating income was $2.5 billion, net income was $2.3 billion and diluted earnings per share was $1.37. | result gross_margin non_gaap {"value":"55%"} -> non_gaap 55..55
+On a non-GAAP(*) basis, gross margin was 56%, operating income was $3.1 billion, net income was $2.8 billion and diluted earnings per share was $1.66. | result gross_margin non_gaap {"value":"56%"} -> non_gaap 56..56
+On a non-GAAP(*) basis, gross margin was 56%, operating income was $3.9 billion, net income was $3.5 billion and diluted earnings per share was $2.09. | result gross_margin non_gaap {"value":"56%"} -> non_gaap 56..56
+On a non-GAAP* basis, operating income was $2.2 billion. | result operating_income non_gaap {"value":"$2.2 billion"} -> non_gaap 2200000000..2200000000
+Operating income less acquisition-related costs was $2.2 billion. | result operating_income gaap {"value":"$2.2 billion"} -> gaap 2200000000..2200000000
+Operating income was ($50 million). | result operating_income gaap {"value":"($50 million)"} -> gaap -50000000..-50000000
+Plus or minus 2%, revenue is expected to be $45.0 billion. | guidance revenue gaap {"value":"$45.0 billion"} -> gaap 45000000000..45000000000
+Quarterly net income was $24.8 billion, or $1.65 per diluted share, compared with net income of $23.6 billion, or $1.53 per diluted share, in the year-ago quarter. | result eps gaap {"value":"$1.53"} -> gaap 1.53..1.53
+Quarterly net income was $24.8 billion, or $1.65 per diluted share, compared with net income of $23.6 billion, or $1.53 per diluted share, in the year-ago quarter. | result eps gaap {"value":"$1.65"} -> gaap 1.65..1.65
+Revenue for the first quarter was $44.1 billion, up 69% from a year ago and up 12% sequentially. | result revenue gaap {"value":"$44.1 billion"} -> gaap 44100000000..44100000000
+Revenue for the first quarter was a record $81.6 billion, up 85% from a year ago and up 20% sequentially. | result revenue gaap {"value":"$81.6 billion"} -> gaap 81600000000..81600000000
+Revenue for the fourth quarter was a record $68.1 billion, up 73% from a year ago and up 20% sequentially. | result revenue gaap {"value":"$68.1 billion"} -> gaap 68100000000..68100000000
+Revenue for the second quarter was $46.7 billion, up 56% from a year ago and up 6% sequentially. | result revenue gaap {"value":"$46.7 billion"} -> gaap 46700000000..46700000000
+Revenue for the third quarter was a record $115.8 billion, up 103% from a year ago and up 20% sequentially. | result revenue gaap {"value":"$115.8 billion"} -> gaap 115800000000..115800000000
+Revenue is expected to be $108.0 billion, plus or minus 2%. | guidance revenue gaap {"value":"$108.0 billion","plus_minus":"2%"} -> gaap 105840000000..110160000000
+Revenue is expected to be $108.0 billion, plus or minus 2%. | guidance revenue gaap {"value":"$108.0 billion"} -> gaap 108000000000..108000000000
+Revenue is expected to be $130.0 billion, plus or minus 3%. | guidance revenue gaap {"value":"$130.0 billion","plus_minus":"3%"} -> gaap 126100000000..133900000000
+Revenue is expected to be $130.0 billion, plus or minus 3%. | guidance revenue gaap {"value":"$130.0 billion"} -> gaap 130000000000..130000000000
+Revenue is expected to be $37.5 billion, plus or minus 2%. | guidance revenue gaap {"value":"$37.5 billion","plus_minus":"2%"} -> gaap 36750000000..38250000000
+Revenue is expected to be $37.5 billion, plus or minus 2%. | guidance revenue gaap {"value":"$37.5 billion"} -> gaap 37500000000..37500000000
+Revenue is expected to be $43.0 billion, plus or minus 2%. | guidance revenue gaap {"value":"$43.0 billion","plus_minus":"2%"} -> gaap 42140000000..43860000000
+Revenue is expected to be $43.0 billion, plus or minus 2%. | guidance revenue gaap {"value":"$43.0 billion"} -> gaap 43000000000..43000000000
+Revenue is expected to be $44.0 billion to $46.0 billion, plus or minus 2%. | guidance revenue gaap {"low":"$44.0 billion","high":"$46.0 billion"} -> gaap 44000000000..46000000000
+Revenue is expected to be $45 billion, up 2% year over year. | guidance revenue gaap {"value":"$45 billion"} -> gaap 45000000000..45000000000
+Revenue is expected to be $45.0 billion and operating expenses $4.0 billion, plus or minus $100 million. | guidance revenue gaap {"value":"$100 million"} -> gaap 100000000..100000000
+Revenue is expected to be $45.0 billion and operating expenses $4.0 billion, plus or minus $100 million. | guidance revenue gaap {"value":"$4.0 billion","plus_minus":"$100 million"} -> gaap 3900000000..4100000000
+Revenue is expected to be $45.0 billion and operating expenses $4.0 billion, plus or minus $100 million. | guidance revenue gaap {"value":"$4.0 billion"} -> gaap 4000000000..4000000000
+Revenue is expected to be $45.0 billion and operating expenses $4.0 billion, plus or minus $100 million. | guidance revenue gaap {"value":"$45.0 billion"} -> gaap 45000000000..45000000000
+Revenue is expected to be $45.0 billion, down 3% sequentially. | guidance revenue gaap {"value":"$45.0 billion"} -> gaap 45000000000..45000000000
+Revenue is expected to be $45.0 billion, plus 2%. | guidance revenue gaap {"value":"$45.0 billion"} -> gaap 45000000000..45000000000
+Revenue is expected to be $45.0 billion, plus or minus 2%, reflecting an $8.0 billion loss in H20 revenue. | guidance revenue gaap {"value":"$45.0 billion","plus_minus":"2%"} -> gaap 44100000000..45900000000
+Revenue is expected to be $45.0 billion, plus or minus 2%, reflecting an $8.0 billion loss in H20 revenue. | guidance revenue gaap {"value":"$45.0 billion"} -> gaap 45000000000..45000000000
+Revenue is expected to be $45.0 billion, plus or minus 2%, reflecting an $8.0 billion loss in H20 revenue. | guidance revenue gaap {"value":"$8.0 billion"} -> gaap 8000000000..8000000000
+Revenue is expected to be $45.0 billion, plus or minus 2%. | guidance revenue gaap {"value":"$45.0 billion","plus_minus":"2%"} -> gaap 44100000000..45900000000
+Revenue is expected to be $45.0 billion, plus or minus 2%. | guidance revenue gaap {"value":"$45.0 billion"} -> gaap 45000000000..45000000000
+Revenue is expected to be $45.0 billion, plus or minus approximately 2%. | guidance revenue gaap {"value":"$45.0 billion"} -> gaap 45000000000..45000000000
+Revenue is expected to be $45.0 billion, up 2% year over year. | guidance revenue gaap {"value":"$45.0 billion"} -> gaap 45000000000..45000000000
+Revenue is expected to be $45.0 billion, ±2%. | guidance revenue gaap {"value":"$45.0 billion","plus_minus":"2%"} -> gaap 44100000000..45900000000
+Revenue is expected to be $45.0 billion, ±2%. | guidance revenue gaap {"value":"$45.0 billion"} -> gaap 45000000000..45000000000
+Revenue is expected to be $54.0 billion, plus or minus 2%. | guidance revenue gaap {"value":"$54.0 billion","plus_minus":"2%"} -> gaap 52920000000..55080000000
+Revenue is expected to be $54.0 billion, plus or minus 2%. | guidance revenue gaap {"value":"$54.0 billion"} -> gaap 54000000000..54000000000
+Revenue is expected to be $65.0 billion, plus or minus 2%. | guidance revenue gaap {"value":"$65.0 billion","plus_minus":"2%"} -> gaap 63700000000..66300000000
+Revenue is expected to be $65.0 billion, plus or minus 2%. | guidance revenue gaap {"value":"$65.0 billion"} -> gaap 65000000000..65000000000
+Revenue is expected to be $78.0 billion, plus or minus 2%. | guidance revenue gaap {"value":"$78.0 billion","plus_minus":"2%"} -> gaap 76440000000..79560000000
+Revenue is expected to be $78.0 billion, plus or minus 2%. | guidance revenue gaap {"value":"$78.0 billion"} -> gaap 78000000000..78000000000
+Revenue is expected to be $8.7 billion, plus/minus $300 million. | guidance revenue gaap {"value":"$300 million"} -> gaap 300000000..300000000
+Revenue is expected to be $8.7 billion, plus/minus $300 million. | guidance revenue gaap {"value":"$8.7 billion","plus_minus":"$300 million"} -> gaap 8400000000..9000000000
+Revenue is expected to be $8.7 billion, plus/minus $300 million. | guidance revenue gaap {"value":"$8.7 billion"} -> gaap 8700000000..8700000000
+Revenue is expected to be $91.0 billion, plus or minus 2%. | guidance revenue gaap {"value":"$91.0 billion","plus_minus":"2%"} -> gaap 89180000000..92820000000
+Revenue is expected to be $91.0 billion, plus or minus 2%. | guidance revenue gaap {"value":"$91.0 billion"} -> gaap 91000000000..91000000000
+Revenue was $45.0 Billion. | result revenue gaap {"value":"$45.0 Billion"} -> gaap 45000000000..45000000000
+Second quarter revenue was $11.5 billion, gross margin was 54%, operating income was $2.0 billion, net income was $2.3 billion and diluted earnings per share was $1.38. | result revenue gaap {"value":"$1.38"} -> gaap 1.38..1.38
+Second quarter revenue was $11.5 billion, gross margin was 54%, operating income was $2.0 billion, net income was $2.3 billion and diluted earnings per share was $1.38. | result revenue gaap {"value":"$11.5 billion"} -> gaap 11500000000..11500000000
+Second quarter revenue was $11.5 billion, gross margin was 54%, operating income was $2.0 billion, net income was $2.3 billion and diluted earnings per share was $1.38. | result revenue gaap {"value":"$2.0 billion"} -> gaap 2000000000..2000000000
+Second quarter revenue was $11.5 billion, gross margin was 54%, operating income was $2.0 billion, net income was $2.3 billion and diluted earnings per share was $1.38. | result revenue gaap {"value":"$2.3 billion"} -> gaap 2300000000..2300000000
+Second quarter revenue was $7.7 billion. | result revenue gaap {"value":"$7.7 billion"} -> gaap 7700000000..7700000000
+Second quarter revenue was a record $7.7 billion, gross margin was 40%, operating loss was $134 million, net income was $872 million and diluted earnings per share was $ 0.54 . | result revenue gaap {"value":"$ 0.54"} -> gaap 0.54..0.54
+Second quarter revenue was a record $7.7 billion, gross margin was 40%, operating loss was $134 million, net income was $872 million and diluted earnings per share was $ 0.54 . | result revenue gaap {"value":"$134 million"} -> gaap 134000000..134000000
+Second quarter revenue was a record $7.7 billion, gross margin was 40%, operating loss was $134 million, net income was $872 million and diluted earnings per share was $ 0.54 . | result revenue gaap {"value":"$7.7 billion"} -> gaap 7700000000..7700000000
+Second quarter revenue was a record $7.7 billion, gross margin was 40%, operating loss was $134 million, net income was $872 million and diluted earnings per share was $ 0.54 . | result revenue gaap {"value":"$872 million"} -> gaap 872000000..872000000
+Third quarter revenue was $13.4 billion, gross margin was 54%, operating income was $2.8 billion, net income was $2.4 billion and diluted earnings per share was $1.46. | result revenue gaap {"value":"$1.46"} -> gaap 1.46..1.46
+Third quarter revenue was $13.4 billion, gross margin was 54%, operating income was $2.8 billion, net income was $2.4 billion and diluted earnings per share was $1.46. | result revenue gaap {"value":"$13.4 billion"} -> gaap 13400000000..13400000000
+Third quarter revenue was $13.4 billion, gross margin was 54%, operating income was $2.8 billion, net income was $2.4 billion and diluted earnings per share was $1.46. | result revenue gaap {"value":"$2.4 billion"} -> gaap 2400000000..2400000000
+Third quarter revenue was $13.4 billion, gross margin was 54%, operating income was $2.8 billion, net income was $2.4 billion and diluted earnings per share was $1.46. | result revenue gaap {"value":"$2.8 billion"} -> gaap 2800000000..2800000000
+Third quarter revenue was a record $9.2 billion, gross margin was 52%, operating income was $1.3 billion, net income was $1.2 billion and diluted earnings per share was $ 0.75 . | result revenue gaap {"value":"$ 0.75"} -> gaap 0.75..0.75
+Third quarter revenue was a record $9.2 billion, gross margin was 52%, operating income was $1.3 billion, net income was $1.2 billion and diluted earnings per share was $ 0.75 . | result revenue gaap {"value":"$1.2 billion"} -> gaap 1200000000..1200000000
+Third quarter revenue was a record $9.2 billion, gross margin was 52%, operating income was $1.3 billion, net income was $1.2 billion and diluted earnings per share was $ 0.75 . | result revenue gaap {"value":"$1.3 billion"} -> gaap 1300000000..1300000000
+Third quarter revenue was a record $9.2 billion, gross margin was 52%, operating income was $1.3 billion, net income was $1.2 billion and diluted earnings per share was $ 0.75 . | result revenue gaap {"value":"$9.2 billion"} -> gaap 9200000000..9200000000
+We adjusted our full-year outlook and Q3 revenue is expected to be $45.0 billion. | guidance revenue non_gaap {"value":"$45.0 billion"} -> non_gaap 45000000000..45000000000
+We expect gross margin to be between 46.0% and 47.0%, including $900 million of tariff-related costs. | guidance gross_margin gaap {"low":"46.0%","high":"47.0%"} -> gaap 46..47
+We report GAAP and non-GAAP results and revenue was $7.7 billion. | result revenue gaap {"value":"$7.7 billion"} -> gaap 7700000000..7700000000
+We report GAAP and non-GAAP results and revenue was $7.7 billion. | result revenue non_gaap {"value":"$7.7 billion"} -> non_gaap 7700000000..7700000000
+We report GAAP and non-GAAP results; non-GAAP gross margin was 72.0%. | result gross_margin non_gaap {"value":"72.0%"} -> non_gaap 72..72
