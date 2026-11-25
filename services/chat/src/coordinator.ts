@@ -75,7 +75,7 @@ export type ChatTurnRunContext = ChatTurnInput & {
   unresolvedMentions?: ReadonlyArray<string>;
   // The turn's one reading of its question (scope-proposal.ts), shared by every caller; null when there is none.
   reading?: (beforeModelCall?: () => void) => Promise<ScopeProposal | null>;
-  // When that reading started (Date.now()), or undefined before any caller started it.
+  // When that reading started (performance.now()), or undefined before any caller started it.
   readingStartedAt?: () => number | undefined;
   // Set when the analyst agent hands the financial lane a company to pick, so the lane reads its companies as the agent did.
   companiesByReading?: true;
@@ -1093,17 +1093,23 @@ function readingRunner(runner: ChatTurnRunner, readQuestion: ChatCoordinatorOpti
     let startedAt: number | undefined;
     let meter: (() => void) | undefined;
     let unmetered = 0;
+    const unread = (reason: unknown) => {
+      console.warn("[chat] no reading of the question; the turn takes it as unread", reason);
+      return null;
+    };
     const read = (beforeModelCall?: () => void) => {
       if (beforeModelCall && !meter) {
         meter = beforeModelCall;
-        for (; unmetered > 0; unmetered -= 1) meter();
+        try {
+          for (; unmetered > 0; unmetered -= 1) meter();
+        } catch (reason) {
+          // More calls than the caller's meter allows: the reading is unread for it, as when its own call is refused.
+          return Promise.resolve(unread(reason));
+        }
       }
       if (reading || !readQuestion) return reading ??= Promise.resolve(null);
-      startedAt = Date.now();
-      return reading = Promise.resolve().then(() => readQuestion(context.userIntent ?? "", () => (meter ? meter() : void (unmetered += 1)))).catch((reason) => {
-        console.warn("[chat] no reading of the question; the turn takes it as unread", reason);
-        return null;
-      });
+      startedAt = performance.now();
+      return reading = Promise.resolve().then(() => readQuestion(context.userIntent ?? "", () => (meter ? meter() : void (unmetered += 1)))).catch(unread);
     };
     return runner({ ...context, reading: read, readingStartedAt: () => startedAt });
   };

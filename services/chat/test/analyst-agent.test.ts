@@ -7,7 +7,7 @@ import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { LlmClientError, LlmProviderError, LlmRouterError, type ControlledRouter, type LlmChatRequest, type LlmToolCall } from "../../llm/src/router.ts";
-import { analystAgentRouter, analystAgentRunner, analystSectionRunner, certifiedAsk, priceAsk, statusNote, stepLabel, stopNotes, type AnalystAgentDeps } from "../src/analyst-agent.ts";
+import { analystAgentRouter, analystAgentRunner, analystSectionRunner, certifiedAsk, priceAsk, statusNote, stepLabel, stopNotes, withTurnDeadline, type AnalystAgentDeps } from "../src/analyst-agent.ts";
 import type { AnalystToolResult } from "../src/analyst-tools.ts";
 import { answerTurn } from "../src/answer-trace.ts";
 import type { AssertionReport } from "../src/assertions.ts";
@@ -267,6 +267,21 @@ const meteredPlanner = (model: PlanningModel, beforeModelCall: () => void): Plan
   guarded(beforeModelCall);
   return model(request);
 };
+
+test("a turn whose claim-started reading spent its deadline starts already aborted, with no timer set", async () => {
+  const warnings: Error[] = [];
+  const onWarning = (warning: Error) => warnings.push(warning);
+  process.on("warning", onWarning);
+  try {
+    const aborted = await withTurnDeadline({ deadlines: { readMs: 30_000, turnMs: 4_000 } }, async (signal) => signal.aborted, performance.now() - 4_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(aborted, true, "the deadline had passed when the turn started");
+    // Node warns of a negative timer once per process, and Node 22 not at all, so this catches the first only on 23+.
+    assert.deepEqual(warnings.map((warning) => warning.name), []);
+  } finally {
+    process.off("warning", onWarning);
+  }
+});
 
 test("a statement ask is keyed by its own words, never by the turn's reading, which only decides whether the planner reads it", () => {
   const ask = (question: string, lines: string[]) => certifiedAsk({ subject_refs: [{ kind: "issuer", id: A }], metrics: ["income_statement"], question } as never, KNOWN, lines);
@@ -1504,6 +1519,36 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     await coordinator.getOrCreateTurn({ ...base, runId: turnId, turnId, userIntent: "Why did AAA's cash resilience drop?" }).completed;
     const took = Date.now() - started;
     assert.ok(took < READ_MS * 1.6, `the turn took ${took} ms, past its ${READ_MS} ms deadline by more than the time to save it`);
+  });
+
+  await t.test("a claim-started reading that made more model calls than the turn has degrades to unread when the agent charges them", async () => {
+    const agent = analystAgentRunner({
+      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
+      router: async (beforeModelCall) => metered(scripted([{ toolCalls: [call("get_company_profile", PROFILE)] }, { text: "DONE" }]), beforeModelCall),
+      read: profileOf("We sell widgets."),
+      compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: "```assertions\n[]\n```" }), onAnswered }),
+      asOf: () => new Date().toISOString(),
+    });
+    const overBudget = async (_question: string, beforeModelCall?: () => void) => {
+      for (let call = 0; call < 9; call += 1) beforeModelCall?.();
+      return askingGuidance;
+    };
+    let handedBack = false;
+    const coordinator = createChatCoordinator({
+      analystAgent: agent,
+      financialRuntime: claimed,
+      persistAssistantMessage: persist,
+      readQuestion: overBudget,
+      runner: async (context) => {
+        handedBack = true;
+        context.emit("turn.completed", {});
+      },
+    });
+    const turnId = randomUUID();
+    const handle = coordinator.getOrCreateTurn({ ...base, runId: turnId, turnId, userIntent: "Why did AAA's cash resilience drop?" });
+    await handle.completed;
+    assert.deepEqual(handle.events.filter((event) => event.type === "turn.error"), []);
+    assert.equal(handedBack, true, "with no calls left, the agent leaves the turn to the financial lane");
   });
 
   await t.test("the reading's steps leave the answer and its judge their calls, however many the planner takes", async () => {
