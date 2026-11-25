@@ -158,10 +158,10 @@ app runs and bare runs alike. Each completed turn is rendered with `renderBlock`
    a count or part of a name. A figure names the values on file it states (`reported`) or is computed from
    (`derived`, with a margin, growth, difference, ratio or share of total and its operands). The labeller's prompt
    lists what is on file but no values.
-3. Code gives the verdict, with the figure check in `services/financial-core/src/figure-check.ts` that chat shares
-   (#800). A reported figure is `matched` when it equals the data at the precision it shows. A
-   derived figure is `derived_ok` when its recomputed value does. Otherwise it is `wrong`. A figure that points at
-   nothing on file, or that the labeller skipped, is `not_checkable`, with its reason.
+3. Code gives the verdict, with the figure check in `services/financial-core/src/figure-check.ts`, which chat's
+   checked-prose lane is to share (#800). A reported figure is `matched` when it equals the data at the precision
+   it shows. A derived figure is `derived_ok` when its recomputed value does. Otherwise it is `wrong`. A figure that
+   points at nothing on file, or that the labeller skipped, is `not_checkable`, with its reason.
 
 A whole number's trailing zeros count as rounding, so `$60B` matches 62.1 billion. Only a minus sign makes a number
 negative. Parentheses don't, because in prose they hold an aside such as "previous close ($176.10)". A difference is
