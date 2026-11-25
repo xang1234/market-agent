@@ -75,6 +75,8 @@ export type ChatTurnRunContext = ChatTurnInput & {
   unresolvedMentions?: ReadonlyArray<string>;
   // The turn's one reading of its question (scope-proposal.ts), shared by every caller; null when there is none.
   reading?: (beforeModelCall?: () => void) => Promise<ScopeProposal | null>;
+  // When that reading started (Date.now()), or undefined before any caller started it.
+  readingStartedAt?: () => number | undefined;
   // Set when the analyst agent hands the financial lane a company to pick, so the lane reads its companies as the agent did.
   companiesByReading?: true;
   // Set when the analyst agent hands the turn on because its model failed before it read anything, so an answer with nothing to show says so (#695).
@@ -1082,16 +1084,28 @@ type Names = {
   named: ReadonlyArray<ChatSubjectPreResolution>;
 };
 
+// The turn reads its question once, whoever asks first. Its model calls are
+// charged to the first caller that brings a meter, those made before it
+// included, and the time it started is the turn's to count against a deadline.
 function readingRunner(runner: ChatTurnRunner, readQuestion: ChatCoordinatorOptions["readQuestion"]): ChatTurnRunner {
   return (context) => {
     let reading: Promise<ScopeProposal | null> | undefined;
-    const read = (beforeModelCall?: () => void) => reading ??= readQuestion
-      ? Promise.resolve().then(() => readQuestion(context.userIntent ?? "", beforeModelCall)).catch((reason) => {
+    let startedAt: number | undefined;
+    let meter: (() => void) | undefined;
+    let unmetered = 0;
+    const read = (beforeModelCall?: () => void) => {
+      if (beforeModelCall && !meter) {
+        meter = beforeModelCall;
+        for (; unmetered > 0; unmetered -= 1) meter();
+      }
+      if (reading || !readQuestion) return reading ??= Promise.resolve(null);
+      startedAt = Date.now();
+      return reading = Promise.resolve().then(() => readQuestion(context.userIntent ?? "", () => (meter ? meter() : void (unmetered += 1)))).catch((reason) => {
         console.warn("[chat] no reading of the question; the turn takes it as unread", reason);
         return null;
-      })
-      : Promise.resolve(null);
-    return runner({ ...context, reading: read });
+      });
+    };
+    return runner({ ...context, reading: read, readingStartedAt: () => startedAt });
   };
 }
 

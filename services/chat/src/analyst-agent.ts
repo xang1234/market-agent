@@ -224,7 +224,8 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       ...(scope ? { research_scope: { ...scope, companies: gathered.covered.map((id) => (namedIds.has(id) ? { issuer_id: id, label: gathered.labelOf(id) } : { issuer_id: id })) } } : {}),
     };
   };
-  return (context) => withTurnDeadline(deps, (signal) => agentTurn(context, signal));
+  // A reading started before the agent, by the financial lane's claim, spent the turn's time from when it started.
+  return (context) => withTurnDeadline(deps, (signal) => agentTurn(context, signal), context.readingStartedAt?.());
 }
 
 export type AnalystSectionInput = Readonly<{
@@ -288,9 +289,9 @@ export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystS
   return (input) => withTurnDeadline(deps, (signal) => section(input, signal));
 }
 
-async function withTurnDeadline<T>(deps: Pick<AgentModels, "deadlines">, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+async function withTurnDeadline<T>(deps: Pick<AgentModels, "deadlines">, run: (signal: AbortSignal) => Promise<T>, since = Date.now()): Promise<T> {
   const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(new TurnDeadline()), (deps.deadlines ?? DEADLINES).turnMs);
+  const timer = setTimeout(() => deadline.abort(new TurnDeadline()), (deps.deadlines ?? DEADLINES).turnMs - (Date.now() - since));
   const stop = turnStopSignal();
   const signal = stop ? AbortSignal.any([stop, deadline.signal]) : deadline.signal;
   try {
