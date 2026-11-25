@@ -19,7 +19,7 @@ test("a component the 10-K does not report is left out of the sum, never read as
 });
 
 test("a component that is reported but unusable, or unread, blocks the figure instead of being left out", () => {
-  for (const reason of ["ineligible_input", "context_unverified", "restatement_unverified", "conflicting_evidence", "database_error"] as const) {
+  for (const reason of ["ineligible_input", "context_unverified", "restatement_unverified", "conflicting_evidence", "database_error", "incompatible_period"] as const) {
     const results = publish(aapl({ marketable_securities_noncurrent: reason, long_term_debt_current: reason }));
     assert.deepEqual([gapOf(results.net_cash), gapOf(results.total_debt)], [["blocked_dependency", "blocked_by_dependency"], ["blocked_dependency", "blocked_by_dependency"]], reason);
   }

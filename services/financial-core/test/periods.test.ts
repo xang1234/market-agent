@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyDuration, endsStepsApart, periodDays, periodsContiguous, periodsIdentical, periodsOverlap, type PeriodIdentity } from "../src/periods.ts";
+import { classifyDuration, endsQuartersApart, endsStepsApart, periodDays, periodsContiguous, periodsIdentical, periodsOverlap, type PeriodIdentity } from "../src/periods.ts";
 
 function duration(start: string, end: string, fiscal_period: PeriodIdentity["fiscal_period"] = "FY", fiscal_year = Number(end.slice(0, 4))): PeriodIdentity {
   return { kind: "duration", start, end, fiscal_year, fiscal_period, calendar_version: "fiscal-calendar.v1" };
@@ -69,4 +69,25 @@ test("a prior period is found by its end date, so a fiscal-year-end change is no
   // Feb 28, 2025 steps a year back to Feb 29, 2024: 14 days before that pairs, 15 does not.
   assert.equal(endsStepsApart("2025-02-28", "2024-02-15", 12), true);
   assert.equal(endsStepsApart("2025-02-28", "2024-02-14", 12), false);
+});
+
+test("a prior quarter is found by its end date, 16- and 17-week retail quarters included", () => {
+  // Costco's 16-week Q4 FY2024 and 17-week Q4 FY2023, and Kroger's 16-week Q1, end 20 to 27 days off three calendar months.
+  assert.equal(endsStepsApart("2024-09-01", "2024-05-12", 3), false);
+  assert.equal(endsQuartersApart("2025-03-31", "2025-02-28", 1 / 3), false, "a fraction of a quarter is not a step");
+  assert.equal(endsQuartersApart("2024-09-01", "2024-05-12", 1), true);
+  assert.equal(endsQuartersApart("2023-09-03", "2023-05-07", 1), true);
+  assert.equal(endsQuartersApart("2023-05-20", "2023-01-28", 1), true);
+  // Costco's quarters back from Q4 FY2024: Q2, Q1, the 17-week Q4 FY2023 and Q3 FY2023.
+  assert.deepEqual([["2024-02-18", 2], ["2023-11-26", 3], ["2023-09-03", 4], ["2023-05-07", 5]].map(([end, quarters]) => endsQuartersApart("2024-09-01", end as string, quarters as number)), [true, true, true, true]);
+  // Apple's 14-week Q1 FY2023 after Q4 FY2022.
+  assert.equal(endsQuartersApart("2022-12-31", "2022-09-24", 1), true);
+  // #479: Q4 FY2025 ended three quarters before the period labelled Q1 FY2026.
+  assert.equal(endsQuartersApart("2025-10-26", "2025-01-26", 1), false);
+  assert.equal(endsQuartersApart("2025-10-26", "2025-01-26", 3), true);
+  // One quarter more or less never pairs, even beside a 16-week quarter.
+  assert.equal(endsQuartersApart("2024-09-01", "2024-02-18", 1), false);
+  assert.equal(endsQuartersApart("2024-09-01", "2023-09-03", 1), false);
+  assert.equal(endsQuartersApart("2024-09-01", "2024-05-12", 2), false);
+  assert.deepEqual([0, -1, 1.5].map((quarters) => endsQuartersApart("2024-09-01", "2024-05-12", quarters)), [false, false, false]);
 });
