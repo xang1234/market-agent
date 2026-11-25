@@ -185,7 +185,7 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
 
 const INCOME_METRICS = ["revenue", "gross_profit", "operating_income", "net_income"] as const;
 
-type GoldenIssuerFact = Readonly<{
+export type GoldenIssuerFact = Readonly<{
   key: string;
   issuer_id: string;
   metric_key: (typeof INCOME_METRICS)[number];
@@ -197,7 +197,8 @@ type GoldenIssuerFact = Readonly<{
   value_usd: number;
 }>;
 
-const GOLDEN_ISSUER_FACTS: ReadonlyArray<GoldenIssuerFact> = Object.freeze(
+// Every issuer income fact the seed writes, one per company, period and metric.
+export const GOLDEN_ISSUER_FACTS: ReadonlyArray<GoldenIssuerFact> = Object.freeze(
   GOLDEN_COMPANIES.flatMap((company) => {
     const periods = [
       ...company.quarters.map((quarter) => ({
@@ -542,12 +543,23 @@ async function seedQuote(client: Client, company: GoldenCompany): Promise<void> 
   );
 }
 
+export type GoldenDailyBar = Readonly<{ ts: string; open: number; high: number; low: number; close: number; volume: number }>;
+
 // A deterministic walk from 95% of prev_close up to the quote price, one close
 // per weekday session; enough for a performance chart, not a market-data source.
-// Stored as Polygon stores daily bars: split-adjusted only (#191), each stamped
-// at the start of its New York session date.
-async function seedDailyBars(client: Client, company: GoldenCompany): Promise<void> {
+// Stamped at the start of each New York session date.
+export function goldenDailyBars(company: GoldenCompany): GoldenDailyBar[] {
   const sessions = weekdaysBefore(BARS_FROM, GOLDEN_AS_OF);
+  const { price, prev_close } = company.quote;
+  return sessions.map((ts, day) => {
+    const close = prev_close * 0.95 + ((price - prev_close * 0.95) * (day + 1)) / sessions.length;
+    return { ts, open: close * 0.995, high: close * 1.01, low: close * 0.99, close, volume: 1000000 + (day + 1) * 10000 };
+  });
+}
+
+// Stored as Polygon stores daily bars: split-adjusted only (#191).
+async function seedDailyBars(client: Client, company: GoldenCompany): Promise<void> {
+  const bars = goldenDailyBars(company);
   const { rows } = await client.query<{ bar_range_id: string }>(
     `insert into market_bar_ranges
        (listing_id, source_id, provider, interval, adjustment_basis, range_start, range_end,
@@ -556,15 +568,14 @@ async function seedDailyBars(client: Client, company: GoldenCompany): Promise<vo
              $4::timestamptz, $4::timestamptz, 'eod', 'USD', $4::timestamptz,
              $4::timestamptz + interval '100 years')
      returning bar_range_id::text as bar_range_id`,
-    [company.listing_id, MARKET_SOURCE_ID, sessions[0], GOLDEN_AS_OF],
+    [company.listing_id, MARKET_SOURCE_ID, bars[0]!.ts, GOLDEN_AS_OF],
   );
-  const { price, prev_close } = company.quote;
-  const closes = sessions.map((_, day) => prev_close * 0.95 + ((price - prev_close * 0.95) * (day + 1)) / sessions.length);
+  const column = (key: keyof GoldenDailyBar) => bars.map((bar) => bar[key]);
   await client.query(
     `insert into market_bars (bar_range_id, ts, open, high, low, close, volume)
-     select $1::uuid, ts, close * 0.995, close * 1.01, close * 0.99, close, 1000000 + n * 10000
-       from unnest($2::timestamptz[], $3::float8[]) with ordinality as bar(ts, close, n)`,
-    [rows[0]!.bar_range_id, sessions, closes],
+     select $1::uuid, ts, open, high, low, close, volume
+       from unnest($2::timestamptz[], $3::float8[], $4::float8[], $5::float8[], $6::float8[], $7::float8[]) as bar(ts, open, high, low, close, volume)`,
+    [rows[0]!.bar_range_id, column("ts"), column("open"), column("high"), column("low"), column("close"), column("volume")],
   );
 }
 
