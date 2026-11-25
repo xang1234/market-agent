@@ -2,6 +2,7 @@
 // planned deterministically, with no model, and sealed like any certified answer.
 
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
@@ -11,7 +12,7 @@ import { analystAgentRunner } from "../src/analyst-agent.ts";
 import type { AnalystToolResult } from "../src/analyst-tools.ts";
 import { answerTurn } from "../src/answer-trace.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
-import { chatDatabase, chatHarness, completed, resolveMention } from "./financial-fixtures.ts";
+import { chatDatabase, chatHarness, completed, NO_ASKS, resolveMention } from "./financial-fixtures.ts";
 
 const LLM_ENV = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1,o3", LITELLM_MODEL: "openai/gpt-4.1", AGENT_LITELLM_MODEL: "openai/o3" };
 
@@ -78,6 +79,27 @@ test("chat cash resilience", { timeout: 300_000 }, async (t) => {
       assert.equal(turns.length, 0, "the analyst agent receives no call");
     });
   }
+
+  await t.test("with the analyst agent on, a cash-resilience ask whose reading routes to the analyst is the agent's, never claimed (#803)", async () => {
+    const turns: Array<string | undefined> = [];
+    let narrated = 0;
+    const on = chatHarness(pool, {
+      model: null,
+      analystAgent: async (turn) => {
+        turns.push(turn.userIntent);
+        return null;
+      },
+      analyst: () => {
+        narrated += 1;
+        return { snapshot_id: randomUUID(), blocks: [], verification: { ok: true } };
+      },
+      readQuestion: async () => ({ ...NO_ASKS, asks: new Set(["guidance"] as const), companies: { kind: "as_named", names: ["AAA"] } }),
+    });
+    const done = completed(await ask("Show AAA's cash resilience", on));
+    assert.deepEqual(turns, ["Show AAA's cash resilience"], "the agent receives the turn");
+    assert.notEqual(done.bundle_id, "financial_answer", "the financial lane does not claim it");
+    assert.equal(narrated, 1, "the agent hands it on, not to the lane");
+  });
 
   await t.test("a named fiscal year is planned for that year", async () => {
     const { rows } = await answer("AAA cash resilience for FY2023");
