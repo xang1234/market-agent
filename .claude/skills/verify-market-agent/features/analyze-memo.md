@@ -30,6 +30,6 @@ Preconditions: a stack with a model configured, listings imported (`$V import`),
 - Closing or reloading the tab mid-Generate stops the memo. It makes no further model call and saves nothing. Moving to another page inside the app keeps the request open, so the memo still saves.
 - A memo reads as of its cutoff, and a rerun keeps the original's, so a company with no 10-K then says it "had no 10-K on file as of" that day.
 - A theme is not a gate. The judge may hide any of them, so read `themes_shown` against `judge.of` and report the rate. A theme the checks sent to the repair round shows with no judge line of its own, only a `[chat] repair` line in `.dev/logs/dev-api.log`.
-- `stance_words` reads the memo canvas with quoted 10-K claims and their citations taken out, since a filing's own words are quoted as stored. `page_stance_words` reads the whole page, quotes included.
+- `stance_words` reads the memo canvas with quoted 10-K claims and their citations taken out, since a filing's own words are quoted as stored. `page_stance_words` reads the whole page, quotes included, and never fails the run: NVDA's quoted "recommendation systems" lands there. The report's `passed` is the verdict the exit code carries, so read it when a backgrounded run's exit code is lost.
 - Other playbooks get one note saying the agent writes only the Investment memo's sections. `$V memo` always picks the Investment memo.
 - On a `Generate failed` message, read `page.txt` and `.dev/logs/dev-api.log`.

@@ -98,5 +98,5 @@ export function memoVerdict(seen: {
     competitionReadIfOnFile &&
     verdict.risks_cite_only_risk_factors &&
     verdict.stance_words.length === 0;
-  return { report: verdict, passed };
+  return { report: { ...verdict, passed }, passed };
 }
