@@ -167,6 +167,9 @@ test("a sum adds its operands, and an operand adds and subtracts values", () => 
   assert.equal(derive(derived("sum", []), valueOf), "sum needs an operand");
   assert.equal(derive(derived("sum", [of("NVDA revenue Q4 FY2026"), of("NVDA gross profit Q4 FY2026", "NVDA revenue Q4 FY2026")]), valueOf), "a sum of ratios and amounts");
   assert.equal(derive(derived("sum", [total(["NVDA revenue Q4 FY2026", "AMD revenue Q1 FY2024"])]), valueOf), "an operand isn't in the data");
+  // over [] names a denominator with no value in it; only over null skips division.
+  assert.deepEqual(check("$62.1B", derived("sum", [total(["NVDA revenue Q4 FY2026"], [], [])])), { kind: "not_checkable", reason: "it divides by zero" });
+  assert.equal(check("74.4%", derived("margin", [total(["NVDA gross profit Q4 FY2026"], [], []), of("NVDA revenue Q4 FY2026")])).kind, "not_checkable");
 });
 
 test("a hedged figure is near within one and a half units of its last digit, and wrong further off", () => {

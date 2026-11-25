@@ -141,7 +141,7 @@ function operandValue<R>(operand: Operand<R>, valueOf: ValueOf<R>): Quantity | s
   if (add.length === 0 || !known(add) || !known(subtract) || !known(over)) return "an operand isn't in the data";
   if (!oneKind([...add, ...subtract]) || !oneKind(over)) return "an operand mixes amounts and ratios";
   const value = add.reduce((sum, term) => sum + term.value, 0) - subtract.reduce((sum, term) => sum + term.value, 0);
-  if (over.length === 0) return { kind: add[0]!.kind, value };
+  if (operand.over === null) return { kind: add[0]!.kind, value };
   const denominator = over.reduce((sum, term) => sum + term.value, 0);
   return denominator === 0 ? "it divides by zero" : { kind: "fraction", value: value / denominator };
 }
