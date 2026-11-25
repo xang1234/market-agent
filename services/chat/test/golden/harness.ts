@@ -25,6 +25,8 @@ export const GOLDEN_ENV: Record<string, string> = {
   LLM_REPLAY_FILE: join(import.meta.dirname, "llm-replies.json"),
   CHAT_VERIFICATION_MODE: "strict",
   DEV_NO_KEYS: "true",
+  // The replies were recorded with the financial lane answering, so a developer's agent flag stays off (#782).
+  CHAT_ANALYST_AGENT: "",
 };
 
 export type Block = Record<string, unknown> & { id?: string; kind?: string; title?: string };
