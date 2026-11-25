@@ -128,6 +128,13 @@ export function writtenAs({ kind, value }: Quantity, unit: NumeralUnit): number[
   return [value * 100, value];
 }
 
+// The data's value in the figure's unit. A bare number reads a fraction two ways ("41",
+// "0.41"), so this keeps the one nearer the figure's size.
+export function writtenLike(numeral: Numeral, expected: Quantity): number | undefined {
+  const size = (option: number) => Math.abs(Math.abs(option) - Math.abs(numeral.value));
+  return writtenAs(expected, numeral.unit).sort((a, b) => size(a) - size(b))[0];
+}
+
 // Equal at the precision shown: within half the last digit's place.
 export const withinPrecision = (shown: number, actual: number, step: number) =>
   Math.abs(shown - actual) <= step / 2 + 1e-9 * Math.max(Math.abs(shown), Math.abs(actual), step);
@@ -217,7 +224,7 @@ export function verdictFor<R>(numeral: Numeral, label: FigureLabel<R>, valueOf: 
 // "41%", not "34.45%"). An unsigned figure gets the size, since its words carry the sign.
 // scale is the label's, for a bare amount in a table "in millions".
 export function atPrecisionOf(numeral: Numeral, expected: Quantity, scale: Scale = null): string {
-  const [value] = writtenAs(expected, numeral.unit);
+  const value = writtenLike(numeral, expected);
   const digits = new RegExp(NUMBER, "u").exec(numeral.text);
   if (value === undefined || numeral.unit === "date" || digits === null) return String(expected.value);
   const step = stepOf(digits[0]);

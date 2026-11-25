@@ -55,6 +55,7 @@ test("each golden pointer reads its value on file, and a verdict saves its expec
   const q4 = (metric: GoldenRef["metric"]) => of(ref("NVDA", metric, 2026, "Q4"));
   assert.deepEqual(check("74.4%", derived("n1", "margin", [q4("gross_profit"), q4("revenue")])), { verdict: "derived_ok" });
   assert.deepEqual(check("75.1%", derived("n1", "margin", [q4("gross_profit"), q4("revenue")])), { verdict: "wrong", expected: 46_200 / 62_100 * 100 }, "a margin's expected value is a percent");
+  assert.deepEqual(check("0.77", derived("n1", "margin", [q4("gross_profit"), q4("revenue")])), { verdict: "wrong", expected: 46_200 / 62_100 }, "a bare fraction's expected value keeps its scale");
   assert.deepEqual(check("about 74.4%", derived("n1", "margin", [q4("gross_profit"), q4("revenue")])).verdict, "near");
   // AMD's Q2 FY2025 operating income before the filed $800M charge: -134 + 800 = 666.
   const amd = (metric: GoldenRef["metric"]) => ref("AMD", metric, 2025, "Q2");

@@ -188,6 +188,9 @@ test("a hedged figure is near within one and a half units of its last digit, and
 test("the data's value is written at the precision and in the form the figure used", () => {
   const at = (text: string, expected: Parameters<typeof atPrecisionOf>[1], scale: Parameters<typeof atPrecisionOf>[2] = null) => atPrecisionOf(numeral(text), expected, scale);
   assert.equal(at("41%", { kind: "fraction", value: 0.3445 }), "34%", "not 34.45%");
+  assert.equal(at("0.41", { kind: "fraction", value: 0.3445 }), "0.34", "a bare fraction keeps its scale");
+  assert.equal(at("41", { kind: "fraction", value: 0.3445 }), "34", "a bare percent keeps its own");
+  assert.equal(at("41", { kind: "fraction", value: -0.3445 }), "34", "by size, whatever the sign");
   assert.equal(at("$13.9B", amount(12_934e6)), "$12.9B");
   assert.equal(at("$57,006 million", amount(62_100e6)), "$62,100 million");
   assert.equal(at("6.0x", { kind: "ratio", value: 6.0547 }), "6.1x");

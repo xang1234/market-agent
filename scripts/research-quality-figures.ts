@@ -24,7 +24,7 @@ import {
   DERIVATIONS,
   enumerateNumerals,
   verdictFor as judge,
-  writtenAs,
+  writtenLike,
   type Derivation,
   type FigureLabel,
   type Numeral,
@@ -206,7 +206,7 @@ export function verdictFor(numeral: Numeral, figure: LabelledFigure | undefined)
   switch (verdict.kind) {
     case "near":
     case "wrong":
-      return { verdict: verdict.kind, expected: writtenAs(verdict.expected, numeral.unit)[0] };
+      return { verdict: verdict.kind, expected: writtenLike(numeral, verdict.expected) };
     case "not_checkable":
       return { verdict: "not_checkable", reason: verdict.reason };
     default:
