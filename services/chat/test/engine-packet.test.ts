@@ -92,6 +92,9 @@ const QUARTERS = content(
   Object.fromEntries(REVENUE.map(([period], i) => [`period:q${i}`, { kind: "period", text: period }])),
 );
 
+// value() gives every result 0 as a ratio, so each value figure's exact value is a fraction of 0.
+const ZERO = { quantity: { kind: "fraction", value: 0 } } as const;
+
 const block = (financial: FinancialAnswerContent) => ({ id: "financial-answer-x", kind: "financial_answer", financial });
 const prose = (...segments: ReadonlyArray<Record<string, unknown>>) => ({ id: "commentary-x", kind: "rich_text", segments });
 
@@ -101,12 +104,12 @@ test("an engine answer's packet holds its value and gap results in order, each c
     cutoff: "2026-09-01T00:00:00.000Z",
     companies: ["NVDA", "AMD"],
     figures: [
-      { id: "F1", company: "NVDA", metric: "Gross margin (gross profit / revenue)", period: "Q4 FY2026", value: "74.40%", result_id: RESULT(1), source_ids: [] },
-      { id: "F2", company: "NVDA", metric: "Quarter-over-quarter percent change in Revenue", period: "Q4 FY2026 vs Q3 FY2026", value: "8.94%", result_id: RESULT(2), source_ids: [] },
-      { id: "F3", company: "NVDA", metric: "Year-over-year percent change in Revenue", period: "Q4 FY2026 vs Q4 FY2025", value: "57.89%", result_id: RESULT(3), source_ids: [] },
+      { id: "F1", company: "NVDA", metric: "Gross margin (gross profit / revenue)", period: "Q4 FY2026", value: "74.40%", ...ZERO, result_id: RESULT(1), source_ids: [] },
+      { id: "F2", company: "NVDA", metric: "Quarter-over-quarter percent change in Revenue", period: "Q4 FY2026 vs Q3 FY2026", value: "8.94%", ...ZERO, result_id: RESULT(2), source_ids: [] },
+      { id: "F3", company: "NVDA", metric: "Year-over-year percent change in Revenue", period: "Q4 FY2026 vs Q4 FY2025", value: "57.89%", ...ZERO, result_id: RESULT(3), source_ids: [] },
       { id: "F4", company: "AMD", metric: "Gross margin (gross profit / revenue)", period: "Q2 FY2026", value: NOT_REPORTED, gap: NOT_REPORTED, result_id: RESULT(4), source_ids: [] },
-      { id: "F5", company: "AMD", metric: "Quarter-over-quarter percent change in Revenue", period: "Q2 FY2026 vs Q1 FY2026", value: "4.67%", result_id: RESULT(5), source_ids: [] },
-      { id: "F6", company: "AMD", metric: "Year-over-year percent change in Revenue", period: "Q2 FY2026 vs Q2 FY2025", value: "45.74%", result_id: RESULT(6), source_ids: [] },
+      { id: "F5", company: "AMD", metric: "Quarter-over-quarter percent change in Revenue", period: "Q2 FY2026 vs Q1 FY2026", value: "4.67%", ...ZERO, result_id: RESULT(5), source_ids: [] },
+      { id: "F6", company: "AMD", metric: "Year-over-year percent change in Revenue", period: "Q2 FY2026 vs Q2 FY2025", value: "45.74%", ...ZERO, result_id: RESULT(6), source_ids: [] },
     ],
     coverage: [{ company: "NVDA", status: "shown" }, { company: "AMD", status: "shown" }],
     gaps: [],
@@ -118,7 +121,7 @@ test("an engine answer's packet holds its value and gap results in order, each c
   });
   // A peer the turn gave no ticker is named by the engine's label for it; one company names none.
   assert.deepEqual(enginePacket(COMPARISON, new Map([["a", "NVDA"]]), null).companies, ["NVDA", "Advanced Micro Devices, Inc."]);
-  assert.deepEqual(enginePacket(QUARTERS, TICKERS, null).figures[0], { id: "F1", metric: "Revenue", period: "Q1 FY2025", value: "USD 26,044,000,000.00", result_id: RESULT(10), source_ids: [] });
+  assert.deepEqual(enginePacket(QUARTERS, TICKERS, null).figures[0], { id: "F1", metric: "Revenue", period: "Q1 FY2025", value: "USD 26,044,000,000.00", ...ZERO, result_id: RESULT(10), source_ids: [] });
 });
 
 test("the model sees a gap result as unavailable, with its reason and no value, and no result id", () => {
@@ -591,6 +594,7 @@ test("a lead is a figure derived from its two sides' results, and a ranking is a
     metric: "Difference in Gross margin (gross profit / revenue)",
     period: "NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026",
     value: "20.38 pp",
+    ...ZERO,
     lead_of: ["NVDA", "AMD"],
     result_id: RESULT(3),
     source_ids: [],
