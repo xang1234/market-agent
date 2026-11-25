@@ -17,6 +17,7 @@ import {
   sentenceAt,
   summaryLines,
   verdictFor,
+  LAST_DIGIT,
   withinPrecision,
   type DataRef,
   type FigureLabel,
@@ -72,7 +73,8 @@ test("a figure matches the data at the precision it shows", () => {
   const revenue = ref("NVDA", "revenue", 2026, "Q4");
   assert.deepEqual(check("$62.1B", reported("n1", revenue)), { verdict: "matched" });
   assert.deepEqual(check("$62,100 million", reported("n1", revenue)), { verdict: "matched" });
-  assert.deepEqual(check("$62.2B", reported("n1", revenue)), { verdict: "wrong", expected: 62_100e6 });
+  assert.deepEqual(check("$62.2B", reported("n1", revenue)), { verdict: "wrong", expected: 62_100e6, reason: LAST_DIGIT }, "one unit of the last digit off");
+  assert.deepEqual(check("$62.3B", reported("n1", revenue)), { verdict: "wrong", expected: 62_100e6 }, "two units off is a misstatement");
   assert.deepEqual(check("$60B", reported("n1", revenue)), { verdict: "matched" }, "a round number is read at its last significant digit");
   assert.deepEqual(check("62,100", reported("n1", revenue, { scale: "millions" })), { verdict: "matched" }, "a table in $ millions");
   assert.equal(check("62,100", reported("n1", revenue)).verdict, "wrong");
@@ -187,7 +189,7 @@ test("a run's completed turns are rendered, labelled and judged; a skipped numer
   assert.deepEqual(turn!.numerals.map((n) => [n.text, n.verdict]), [["4", null], ["2026", null], ["$62.1B", "matched"], ["75.1%", "wrong"], ["$30B", "not_checkable"]]);
   assert.equal(turn!.numerals[4]!.reason, "the labeller skipped it");
   const lines = summaryLines(file);
-  assert.equal(lines[0], "2026-11-25T000000: figures 3, matched 1, derived_ok 0, wrong 1, not_checkable 1");
+  assert.equal(lines[0], "2026-11-25T000000: figures 3, matched 1, derived_ok 0, wrong 1 (0 off by one in the last digit), not_checkable 1");
   assert.equal(lines[1], "  wrong single-latest-quarter turn 1: 75.1% (data: 74.3961): Gross margin was 75.1% and free cash flow $30B.");
 });
 

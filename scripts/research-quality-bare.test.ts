@@ -146,6 +146,14 @@ test("a bare run is a blind run record the pair tool takes against an app run, a
   assert.equal(saved.arm, "bare");
   assert.equal(saved.request.max_tokens, 8192);
   assert.ok(saved.request.not_sent.includes("thinking"));
+  assert.equal(saved.request.effort, null);
+  assert.ok(saved.request.not_sent.includes("output_config"));
+  assert.ok(bodies.every((body) => !("output_config" in body)), "no effort is sent unless asked for");
+  const low: Array<Record<string, any>> = [];
+  const lowRun = (await runBare({ effort: "low", call: async (body) => (low.push(body), ok("Low.")), dir, now: new Date("2026-11-25T01:02:04Z"), log: () => {} })).record;
+  assert.equal(lowRun.request.effort, "low");
+  assert.ok(!lowRun.request.not_sent.includes("output_config"));
+  assert.ok(low.length > 0 && low.every((body) => body.output_config?.effort === "low"));
   assert.deepEqual(saved.planned, QUESTIONS.map((q) => q.id));
   const turns = saved.questions.flatMap((q) => q.turns);
   assert.equal(turns.length, QUESTIONS.flatMap((q) => q.turns).length);

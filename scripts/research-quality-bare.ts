@@ -252,6 +252,10 @@ async function readStream(response: Response): Promise<Attempt> {
 
 export const DEFAULT_BARE_MODEL = "anthropic/claude-sonnet-5-5";
 export const BARE_MAX_TOKENS = 8192;
+// output_config.effort. Unset, the API thinks at its default effort; the app's answer
+// model asks for "low" (services/chat/src/llm-runtime.ts), so --effort low matches it.
+export const EFFORTS = ["low", "medium", "high", "max"] as const;
+export type Effort = (typeof EFFORTS)[number];
 
 export type BareTurn = AnsweredTurn & { stopReason: string | null; thinkingBlocks: number };
 // What was sent, so a later reader knows the arm. The pairing packet shows only
@@ -261,6 +265,7 @@ export type BareRequest = {
   anthropic_version: string;
   model: string;
   max_tokens: number;
+  effort: Effort | null;
   stream: true;
   // Left to the API's defaults.
   not_sent: string[];
@@ -277,12 +282,12 @@ export function bareModel(flag = DEFAULT_BARE_MODEL): { channel: "anthropic"; mo
   return { channel: "anthropic", model };
 }
 
-export type BareRunOptions = { model?: string; call: CallMessages; dir?: string; now?: Date; log?: (line: string) => void };
+export type BareRunOptions = { model?: string; effort?: Effort; call: CallMessages; dir?: string; now?: Date; log?: (line: string) => void };
 
 // One conversation per question, its turns sent in order. Files are created exclusively
 // and rewritten after each question, as the app runner's are, so an error late in the run
 // keeps every answer before it. A turn after one that failed isn't sent.
-export async function runBare({ model: flag, call, dir = BLIND_RUNS_DIR, now = new Date(), log = console.log }: BareRunOptions): Promise<{ record: BareRunRecord; file: string }> {
+export async function runBare({ model: flag, effort, call, dir = BLIND_RUNS_DIR, now = new Date(), log = console.log }: BareRunOptions): Promise<{ record: BareRunRecord; file: string }> {
   const { channel, model } = bareModel(flag);
   const provenance = runProvenance(ROOT);
   const brief = dataBrief();
@@ -297,8 +302,9 @@ export async function runBare({ model: flag, call, dir = BLIND_RUNS_DIR, now = n
       anthropic_version: ANTHROPIC_VERSION,
       model,
       max_tokens: BARE_MAX_TOKENS,
+      effort: effort ?? null,
       stream: true,
-      not_sent: ["thinking", "output_config", "temperature", "top_p", "top_k", "tools", "tool_choice", "metadata"],
+      not_sent: ["thinking", ...(effort ? [] : ["output_config"]), "temperature", "top_p", "top_k", "tools", "tool_choice", "metadata"],
       data_brief_sha256: createHash("sha256").update(brief).digest("hex"),
       retry: "once on 429, 5xx, overloaded or a dropped connection",
     },
@@ -327,7 +333,7 @@ export async function runBare({ model: flag, call, dir = BLIND_RUNS_DIR, now = n
       }
       messages.push({ role: "user", content: turn.message });
       const startedAt = Date.now();
-      const result = await call({ model, max_tokens: BARE_MAX_TOKENS, system, messages: [...messages] });
+      const result = await call({ model, max_tokens: BARE_MAX_TOKENS, ...(effort ? { output_config: { effort } } : {}), system, messages: [...messages] });
       const elapsedMs = Date.now() - startedAt;
       if (!result.ok) {
         // A refused key, model or request fails every turn after it too; stop billing.
@@ -363,16 +369,18 @@ export async function runBare({ model: flag, call, dir = BLIND_RUNS_DIR, now = n
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   await runCli(async () => {
-    const { positionals: [command], values } = parseArgs({ allowPositionals: true, options: { model: { type: "string" } } });
+    const { positionals: [command], values } = parseArgs({ allowPositionals: true, options: { model: { type: "string" }, effort: { type: "string" } } });
     if (command !== "run") {
-      console.error("usage: research-quality-bare.ts run [--model anthropic/<model>]");
+      console.error(`usage: research-quality-bare.ts run [--model anthropic/<model>] [--effort ${EFFORTS.join("|")}]`);
       process.exitCode = 2;
       return;
     }
+    const effort = values.effort as Effort | undefined;
+    if (effort !== undefined && !EFFORTS.includes(effort)) throw new Refusal(`--effort ${effort} isn't one of ${EFFORTS.join(", ")}`);
     const apiKey = process.env.LLM_ANTHROPIC_API_KEY?.trim();
     if (!apiKey) throw new Refusal("set LLM_ANTHROPIC_API_KEY (the app's anthropic channel key) to run the bare arm");
     const startedAt = Date.now();
-    const { record, file } = await runBare({ model: values.model, call: (body) => callMessages(body, { apiKey }) });
+    const { record, file } = await runBare({ model: values.model, effort, call: (body) => callMessages(body, { apiKey }) });
     const turns = record.questions.flatMap((question) => question.turns);
     const sum = (pick: (usage: NonNullable<BareTurn["usage"]>) => number) => turns.reduce((total, turn) => total + (turn.usage ? pick(turn.usage) : 0), 0);
     console.log(`\ndone: ${record.questions.length} questions, ${turns.filter((turn) => turn.outcome === "completed").length} of ${turns.length} turns completed in ${((Date.now() - startedAt) / 1000).toFixed(1)}s; ${sum((usage) => usage.input_tokens)} input / ${sum((usage) => usage.output_tokens)} output tokens\n${file}`);

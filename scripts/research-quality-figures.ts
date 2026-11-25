@@ -219,6 +219,9 @@ const CLAIM_AMOUNTS = enumerateNumerals(AMD_Q2_2025_RELEASE.text).filter((n) => 
 
 export type Verdict = "matched" | "derived_ok" | "wrong" | "not_checkable";
 export type Checked = { verdict: Verdict; expected?: number; reason?: string };
+// A wrong figure within one and a half units of its last digit: a rounding slip, told
+// apart from a misstatement in the summary.
+export const LAST_DIGIT = "off by one in the last digit";
 
 // A fraction (margin, growth, share, a change between margins) reads as percent or
 // points; a ratio as a multiple; an amount only as an amount. A bare table number may be
@@ -275,25 +278,26 @@ export function verdictFor(numeral: Numeral, label: FigureLabel | undefined): Ch
   const step = numeral.step * scale;
   const shown = numeral.value * scale * (!numeral.signed && label.sign === "-" ? -1 : 1);
   const bySign = (numeral.signed || label.sign !== null) && !(label.basis === "derived" && label.derivation === "difference");
-  const fits = (actual: number) => withinPrecision(bySign ? shown : Math.abs(shown), bySign ? actual : Math.abs(actual), step);
+  const fits = (actual: number, places = step) => withinPrecision(bySign ? shown : Math.abs(shown), bySign ? actual : Math.abs(actual), places);
+  const wrong = (options: number[]): Checked => ({ verdict: "wrong", expected: options[0], ...(options.some((actual) => fits(actual, step * 3)) ? { reason: LAST_DIGIT } : {}) });
   let options: number[];
   if (label.basis === "reported") {
     if (label.source === null) return { verdict: "not_checkable", reason: `${label.metric} (${label.period}) isn't in the data` };
     if (label.source.metric === "filed_claim") {
       if (numeral.unit !== "amount") return { verdict: "not_checkable", reason: "the filed claim states amounts only" };
-      return CLAIM_AMOUNTS.some(fits) ? { verdict: "matched" } : { verdict: "wrong", expected: CLAIM_AMOUNTS[0] };
+      return CLAIM_AMOUNTS.some((actual) => fits(actual)) ? { verdict: "matched" } : wrong(CLAIM_AMOUNTS);
     }
     const actual = valueOf(label.source);
     if (actual === undefined) return { verdict: "not_checkable", reason: "its source isn't in the data" };
     options = candidates({ kind: "amount", value: actual }, numeral.unit);
     if (options.length === 0) return { verdict: "not_checkable", reason: `a reported amount shown as ${numeral.unit}` };
-    return options.some(fits) ? { verdict: "matched" } : { verdict: "wrong", expected: options[0] };
+    return options.some((actual) => fits(actual)) ? { verdict: "matched" } : wrong(options);
   }
   const result = derive(label.derivation, label.operands);
   if (typeof result === "string") return { verdict: "not_checkable", reason: result };
   options = candidates(result, numeral.unit);
   if (options.length === 0) return { verdict: "not_checkable", reason: `a ${label.derivation} shown as ${numeral.unit}` };
-  return options.some(fits) ? { verdict: "derived_ok" } : { verdict: "wrong", expected: options[0] };
+  return options.some((actual) => fits(actual)) ? { verdict: "derived_ok" } : wrong(options);
 }
 
 // --- check -------------------------------------------------------------------------
@@ -372,10 +376,11 @@ export async function checkRun(record: RunRecord, label: Labeller): Promise<Figu
 export function summaryLines(file: FiguresFile): string[] {
   const { figures, matched, derived_ok, wrong, not_checkable } = file.totals;
   const failed = file.turns.filter((turn) => turn.labeller.error !== undefined);
+  const slips = file.turns.flatMap((turn) => turn.numerals).filter((n) => n.verdict === "wrong" && n.reason === LAST_DIGIT).length;
   return [
-    `${file.run}: figures ${figures}, matched ${matched}, derived_ok ${derived_ok}, wrong ${wrong}, not_checkable ${not_checkable}${failed.length > 0 ? ` (${failed.length} turns not labelled)` : ""}`,
+    `${file.run}: figures ${figures}, matched ${matched}, derived_ok ${derived_ok}, wrong ${wrong} (${slips} ${LAST_DIGIT}), not_checkable ${not_checkable}${failed.length > 0 ? ` (${failed.length} turns not labelled)` : ""}`,
     ...file.turns.flatMap((turn) => turn.numerals.filter((n) => n.verdict === "wrong").map((n) =>
-      `  wrong ${turn.question} turn ${turn.turn}: ${n.text} (data: ${n.expected === undefined ? "?" : Number(n.expected.toPrecision(6))}): ${sentenceAt(turn.text, n.start, n.end)}`)),
+      `  wrong ${turn.question} turn ${turn.turn}: ${n.text} (data: ${n.expected === undefined ? "?" : Number(n.expected.toPrecision(6))}${n.reason ? `, ${n.reason}` : ""}): ${sentenceAt(turn.text, n.start, n.end)}`)),
   ];
 }
 
