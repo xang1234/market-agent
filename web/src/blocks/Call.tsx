@@ -18,9 +18,9 @@ const KIND_LABEL: Readonly<Record<CallInputKind, string>> = {
 
 // The agent's opinion on one company (ADR 0005, #604), printed from
 // server-written strings in the ADR's order: facts used, assumptions, what the
-// price requires, then the decline rule that matched and the rows it cites.
-// It is an opinion, never evidence, so nothing in it carries a verification
-// label, and an unknown version shows no values.
+// price requires, then the stance (stated, or the decline rule that matched)
+// and the rows it cites. It is an opinion, never evidence, so nothing in it
+// carries a verification label, and an unknown version shows no values.
 export function Call({ block }: CallProps): ReactElement {
   const testId = `block-call-${block.id}`
   const call = CALL_VERSIONS.has(block.call.version) ? (block.call as CallContent) : null
@@ -42,13 +42,18 @@ export function Call({ block }: CallProps): ReactElement {
       <Rows heading="Assumptions" rows={call.assumptions} />
       <Rows heading="What the price requires" rows={call.requires} />
       <section aria-label="Stance" className="flex flex-col gap-1">
-        <h3 className="text-xs font-medium text-muted">Declined (rule {stance.rule})</h3>
-        <p className="text-sm text-fg">{stance.text}</p>
+        <h3 className="text-xs font-medium text-muted">{stance.kind === 'stated' ? `Stance (rule ${stance.rule})` : `Declined (rule ${stance.rule})`}</h3>
+        <p className="text-sm text-fg" data-part="stance">{stance.text}</p>
         <ul className="list-disc pl-5 text-sm text-fg">
           {stance.reasons.map((reason) => (
             <li key={`${reason.cites}:${reason.text}`} data-reason={reason.cites}>{`${label.get(reason.cites) ?? reason.cites}: ${reason.text}`}</li>
           ))}
         </ul>
+        {stance.kind === 'stated' && (
+          <ul aria-label="Not shown" className="list-disc pl-5 text-xs text-muted">
+            {stance.not_shown.map((entry) => <li key={entry.part} data-not-shown={entry.part}>{entry.text}</li>)}
+          </ul>
+        )}
       </section>
       <p role="note" className="text-xs text-muted">
         {`Your settings: required return ${percent(settings.required_return)}, margin of safety ${settings.margin_of_safety}, bear-loss limit ${percent(settings.bear_loss_limit)}, near band ${percent(settings.near_band)}`}

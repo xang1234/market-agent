@@ -30,7 +30,7 @@ import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { chatDatabase, chatHarness, completed, resolveMention } from "./financial-fixtures.ts";
 
 // AAPL's FY2026 revenue puts it in the top bucket of data/growth-base-rates.json.
-const BASE_RATE = "Of 377 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 183 (48.5%) delivered free cash flow per share growth of at least 7.3% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%).";
+const BASE_RATE = "Of 431 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 168 (39.0%) delivered free cash flow growth of at least 7.3% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%).";
 
 // Monday 10:00 in New York: Friday 2026-11-06's close is the latest.
 const CUTOFF = "2026-11-09T15:00:00.000Z";
@@ -175,7 +175,8 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
       // No closes are captured here; financial-call-anchor.test.ts anchors AAPL's ten fiscal years.
       ["anchored_exit_multiple", "agent_assumption", true, "Not anchored: no closes are captured for the listing by the Call's cutoff."],
       ["share_change", "agent_assumption", true, "0.277% a year"],
-      ["bear_case", "agent_assumption", true, "Not anchored"],
+      ["base_case", "agent_assumption", true, "Not anchored: both cases use the anchored exit multiple, which is not anchored."],
+      ["bear_case", "agent_assumption", true, "Not anchored: both cases use the anchored exit multiple, which is not anchored."],
       ["required_growth", "deterministic_result", true, "7.3% a year"],
       ["required_growth_anchored", "deterministic_result", true, "Not computed: the exit multiple is not anchored."],
       ["base_rate", "deterministic_result", true, BASE_RATE],

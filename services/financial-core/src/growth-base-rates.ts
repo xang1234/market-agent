@@ -1,6 +1,7 @@
 // The base rate a Call sets its required growth against: of the five-year
 // windows that began at a similar size (by starting revenue), how many
-// delivered a growth, and the 25th percentile of what they delivered. The
+// delivered a growth, and the 25th and 50th percentiles of what they
+// delivered (the bear and base cases' growth). The
 // table is data/growth-base-rates.json, built offline from SEC's bulk
 // companyfacts archive (services/fundamentals/src/growth-base-rates.ts). It is
 // a frequency of reported history, not a probability, and never certified.
@@ -48,6 +49,8 @@ export type BaseRate =
     at_or_above: number;
     /** The nearest-rank 25th percentile: the point at rank ceil(n / 4). */
     p25: ExactRational;
+    /** The nearest-rank median: the point at rank ceil(n / 2). */
+    p50: ExactRational;
     non_positive_end: number;
     outcomes: Readonly<Record<BaseRateOutcome, number>>;
   }>
@@ -68,7 +71,8 @@ export function growthBaseRate(table: GrowthBaseRates, metric: BaseRateMetric, s
     if (compareRationals(points[middle]!, growth) < 0) low = middle + 1;
     else high = middle;
   }
-  return { kind: "value", bucket, n: points.length, at_or_above: points.length - low, p25: points[Math.ceil(points.length / 4) - 1]!, non_positive_end, outcomes };
+  return { kind: "value", bucket, n: points.length, at_or_above: points.length - low, p25: points[Math.ceil(points.length / 4) - 1]!,
+    p50: points[Math.ceil(points.length / 2) - 1]!, non_positive_end, outcomes };
 }
 
 /** The table data/growth-base-rates.json holds, or null when any part of it is not what the builder writes. */

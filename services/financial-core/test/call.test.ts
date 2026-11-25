@@ -5,9 +5,15 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assembleCall, DEFAULT_CALL_SETTINGS, parseCallSettings, type CallContent, type CallEvidence } from "../src/index.ts";
+import { assembleCall, DEFAULT_CALL_SETTINGS, parseCallSettings, parseFinancialDecimal, rationalFromDecimal, STANCE_WORDS, type CallContent, type CallEvidence, type ExactRational } from "../src/index.ts";
 
 import { AAPL, AAPL_HISTORY, BASE_RATES, filing, PRICE_SOURCE } from "./call-fixtures.ts";
+
+function q(text: string): ExactRational {
+  const parsed = parseFinancialDecimal(text);
+  assert.ok(parsed.ok);
+  return rationalFromDecimal(parsed.value)!;
+}
 
 const figures = (rows: CallContent["facts"]) => rows.map((row) => [row.id, row.kind, row.figure.text]);
 
@@ -44,7 +50,7 @@ test("evidence from a caller that predates the capex and OCF scopes assembles as
   assert.deepEqual(assembleCall(unscoped as CallEvidence), assembleCall(AAPL));
 });
 
-test("AAPL: today's multiple is 36.15x, the anchored exit multiple 17.33x, and the stance declines under rule 1 for the bear case", () => {
+test("AAPL: today's multiple is 36.15x, the anchored exit multiple 17.33x, the base case 4.2% and the bear case -5.2% a year, and it falls short of your hurdle", () => {
   const call = assembleCall(AAPL);
   assert.deepEqual(figures(call.facts), [
     ["free_cash_flow", "deterministic_result", "USD 136,056,000,000"],
@@ -59,12 +65,13 @@ test("AAPL: today's multiple is 36.15x, the anchored exit multiple 17.33x, and t
     ["exit_multiple", "deterministic_result", "36.15x"],
     ["anchored_exit_multiple", "agent_assumption", "17.33x"],
     ["share_change", "agent_assumption", "0.277% a year"],
-    ["bear_case", "agent_assumption", "Not anchored"],
+    ["base_case", "agent_assumption", "Growth 4.2% a year at 17.33x: base value USD 165.86 per share"],
+    ["bear_case", "agent_assumption", "Growth -5.2% a year at 17.33x: bear value USD 110.55 per share"],
   ]);
   assert.deepEqual(figures(call.requires), [
     ["required_growth", "deterministic_result", "7.3% a year"],
     ["required_growth_anchored", "deterministic_result", "22.5% a year"],
-    ["base_rate", "deterministic_result", "Of 377 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 183 (48.5%) delivered free cash flow per share growth of at least 7.3% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%)."],
+    ["base_rate", "deterministic_result", "Of 431 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 168 (39.0%) delivered free cash flow growth of at least 7.3% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%)."],
     ["consensus", "attributed_consensus", "8.18%"],
   ]);
   assert.equal(call.assumptions[3]!.basis.startsWith("judgment:"), true, "d is the agent's judgment");
@@ -80,11 +87,24 @@ test("AAPL: today's multiple is 36.15x, the anchored exit multiple 17.33x, and t
   assert.equal(call.requires[3]!.label, "Attributed consensus: Finviz EPS growth, next 5 years");
   assert.equal(call.facts[0]!.citations[0]!.text, "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03");
   assert.equal(call.facts[4]!.citations[0]!.text, "Close on 2026-11-06");
+  // H = min(V / 1.25, B / 0.75) = min(132.68, 147.40): the value test binds, and the price is more than 10% above it under every move.
   assert.deepEqual(call.stance, {
-    kind: "declined",
-    rule: 1,
-    text: "Declined under rule 1: the exit multiple is anchored, but the bear case is not, so no stance is stated.",
-    reasons: [{ cites: "bear_case", text: "No bear case is anchored yet, so the bear value per share is not computed." }],
+    kind: "stated",
+    rule: 6,
+    text: "Falls short of your hurdle.",
+    reasons: [
+      { cites: "base_case", text: "The base value V is USD 165.86 per share. The value test holds up to V ÷ your margin of safety 1.25 = USD 132.68." },
+      { cites: "bear_case", text: "The bear value B is USD 110.55 per share. The bear-loss test holds up to B ÷ (1 − your 25% bear-loss limit) = USD 147.40." },
+      { cites: "share_price", text: "The hurdle price H is USD 132.68, the lower of the two. The price, USD 342.37, is above H × (1 + your 10% near band) = USD 145.95." },
+      { cites: "base_case", text: "Growth one point in the base and bear cases together: higher, H USD 138.36; lower, H USD 127.21. No tested move changes the stance." },
+      { cites: "share_change", text: "The share change one point in both cases: higher, H USD 127.06; lower, H USD 138.65. No tested move changes the stance." },
+      { cites: "required_return", text: "Your required return one point: higher, H USD 127.54; lower, H USD 138.11. No tested move changes the stance." },
+      { cites: "anchored_exit_multiple", text: "The exit multiple 1x in both cases: higher, H USD 138.33; lower, H USD 127.04. No tested move changes the stance." },
+    ],
+    not_shown: [
+      { part: "skew", text: "ADR 0005 and ADR 0006 define no bull case, so the difference from a bull value is not shown." },
+      { part: "falsifiers", text: "ADR 0005 and ADR 0006 define no falsifiers, so what would change the stance is not shown." },
+    ],
   });
   assert.deepEqual(call.settings, { required_return: "0.1", margin_of_safety: "1.25", bear_loss_limit: "0.25", near_band: "0.1" });
 });
@@ -153,9 +173,10 @@ test("a year without an EV/FCF multiple leaves the exit multiple unanchored, and
     "Declined under rule 1: neither the exit multiple nor the bear case is anchored, so no stance is stated.",
     [
       { cites: "anchored_exit_multiple", text: "No closes are captured for the listing by the Call's cutoff." },
-      { cites: "bear_case", text: "No bear case is anchored yet, so the bear value per share is not computed." },
+      { cites: "bear_case", text: "Both cases use the anchored exit multiple, which is not anchored." },
     ],
   ]);
+  assert.equal(call.assumptions[4]!.figure.text, "Not anchored: both cases use the anchored exit multiple, which is not anchored.");
 });
 
 test("NVDA: free cash flow blocked on its capex declines under rule 0, and what the price requires names that outcome", () => {
@@ -170,7 +191,7 @@ test("NVDA: free cash flow blocked on its capex declines under rule 0, and what 
   assert.deepEqual(call.requires[0]!.figure, { kind: "outcome", outcome: "blocked_dependency", reason_code: "blocked_by_dependency", text: "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)" });
   assert.equal(call.assumptions[1]!.figure.kind, "outcome");
   const notComputed = "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)";
-  assert.deepEqual([call.assumptions[2]!.figure.text, call.requires[1]!.figure.text, call.assumptions[4]!.figure.text], [notComputed, notComputed, "Not anchored"]);
+  assert.deepEqual([call.assumptions[2]!.figure.text, call.requires[1]!.figure.text, call.assumptions[5]!.figure.text], [notComputed, notComputed, notComputed]);
 });
 
 test("a close more than 5 trading days before the Call date declines under rule 0 as stale_input", () => {
@@ -229,22 +250,102 @@ test("a share change at or below -100% declines under rule 0 citing the share ch
 });
 
 const baseRate = (evidence: CallEvidence) => assembleCall(evidence).requires.find((row) => row.id === "base_rate")!;
+// The committed table with each bucket's total free cash flow points changed.
+const withFcf = (change: (points: ReadonlyArray<ExactRational>) => ReadonlyArray<ExactRational>) =>
+  ({ ...BASE_RATES, buckets: BASE_RATES.buckets.map((bucket) => ({ ...bucket, metrics: { ...bucket.metrics, fcf: { ...bucket.metrics.fcf, points: change(bucket.metrics.fcf.points) } } })) });
 
 test("the base rate cites the dataset and what it left out, and is a frequency, never a probability", () => {
   const row = baseRate(AAPL);
   assert.deepEqual(row.from, ["required_growth", "revenue"]);
   assert.match(row.basis, /^A frequency of reported history, not a probability\./u);
   assert.match(row.basis, /companyfacts archive of 2026-11-24 \(sha256 72bc1c52670fe57a3d701f13cbab55763c122388b314d1eaca921bb18ddfbacd\)/u);
-  assert.match(row.basis, /Not among the 377: 38 that ended early \(the filer stopped filing before year 5\), 6 with no year-5 figure, 54 with no split-chained share count, 95 whose two ends use different capex or cash flow concepts and 45 that started at zero or negative free cash flow\. 34 of the 377 ended at or below zero and count as -100%$/u);
+  assert.match(row.basis, /in total free cash flow, before any change in share count, as the model's g is/u);
+  assert.match(row.basis, /Not among the 431: 38 that ended early \(the filer stopped filing before year 5\), 6 with no year-5 figure, 95 whose two ends use different capex or cash flow concepts and 45 that started at zero or negative free cash flow\. 37 of the 431 ended at or below zero and count as -100%$/u);
 });
 
-test("revenue the engine did not certify leaves the base rate uncomputed and declines nothing; a thin bucket says how thin", () => {
+test("revenue the engine did not certify leaves the base rate and the bear case without a bucket, under rule 1, never rule 0; a thin bucket says how thin", () => {
   const gapped = assembleCall({ ...AAPL, figures: { ...AAPL.figures, revenue: { kind: "gap", disposition: "missing", reason_code: "missing_input" } } });
   assert.deepEqual(gapped.requires.find((row) => row.id === "base_rate")!.figure, {
     kind: "outcome", outcome: "missing", reason_code: "missing_input", text: "Not computed: revenue is not certified (missing, missing_input).",
   });
-  assert.deepEqual(gapped.stance, assembleCall(AAPL).stance);
-  const thin = { ...BASE_RATES, buckets: BASE_RATES.buckets.map((bucket) => ({ ...bucket, metrics: { ...bucket.metrics, fcf_per_share: { ...bucket.metrics.fcf_per_share, points: bucket.metrics.fcf_per_share.points.slice(0, 12) } } })) };
+  assert.deepEqual(gapped.stance, {
+    kind: "declined", rule: 1,
+    text: "Declined under rule 1: the exit multiple is anchored, but the bear case is not, so no stance is stated.",
+    reasons: [{ cites: "bear_case", text: "Revenue is not certified (missing, missing_input), so no size bucket holds the Call." }],
+  });
+  assert.equal(gapped.assumptions[4]!.figure.text, "Not anchored: revenue is not certified (missing, missing_input), so no size bucket holds the Call.");
+  const thin = withFcf((points) => points.slice(0, 12));
   assert.equal(baseRate({ ...AAPL, base_rates: thin }).figure.text, "Not computed: only 12 windows began in starting revenue USD 50.0B and up, fewer than the 100 a base rate needs.");
   assert.match(baseRate({ ...AAPL, figures: { ...AAPL.figures, free_cash_flow: { kind: "gap", disposition: "blocked_dependency", reason_code: "blocked_by_dependency" } } }).figure.text, /^Not computed\. Free cash flow: Not certified/u);
+});
+
+const caseRow = (evidence: CallEvidence, id: "base_case" | "bear_case") => assembleCall(evidence).assumptions.find((row) => row.id === id)!;
+
+test("the base and bear cases are anchored on their bucket's median and 25th percentile of total free cash flow growth, and say they are a frequency, not a probability", () => {
+  const tail = "of total free cash flow growth over five-year windows that began at starting revenue USD 50.0B and up, "
+    + "from SEC's companyfacts archive of 2026-11-24 (sha256 72bc1c52670fe57a3d701f13cbab55763c122388b314d1eaca921bb18ddfbacd). It is a frequency of reported history, not a probability. "
+    + "Total, not per share: buybacks are left out of g, as d leaves them out. The exit multiple is the anchored exit multiple and the share change is d";
+  const [base, bear] = [caseRow(AAPL, "base_case"), caseRow(AAPL, "bear_case")];
+  assert.deepEqual([base.kind, base.basis, base.from], ["agent_assumption", `anchored: growth is the median, at rank 216 of 431, ${tail}`, ["revenue", "anchored_exit_multiple", "share_change"]]);
+  assert.deepEqual([bear.kind, bear.basis, bear.from], ["agent_assumption", `anchored: growth is the 25th percentile, at rank 108 of 431, ${tail}`, ["revenue", "anchored_exit_multiple", "share_change"]]);
+  // Per share is never read: a table whose per-share points all floor at -100% leaves both cases as they are.
+  const perShareFloor = { ...BASE_RATES, buckets: BASE_RATES.buckets.map((bucket) => ({ ...bucket, metrics: { ...bucket.metrics, fcf_per_share: { ...bucket.metrics.fcf_per_share, points: bucket.metrics.fcf_per_share.points.map(() => q("-1")) } } })) };
+  assert.deepEqual(assembleCall({ ...AAPL, base_rates: perShareFloor }), assembleCall(AAPL));
+  const thin = withFcf((points) => points.slice(0, 99));
+  for (const id of ["base_case", "bear_case"] as const) {
+    assert.equal(caseRow({ ...AAPL, base_rates: thin }, id).figure.text, "Not anchored: only 99 windows began in starting revenue USD 50.0B and up, fewer than the 100 a base rate needs.");
+  }
+});
+
+test("a bucket whose 25th percentile is the -100% floor leaves B without a value, under rule 0, and the base rate still reads", () => {
+  // Rank 108 of 431 is the 25th percentile; rank 216 the median.
+  const call = assembleCall({ ...AAPL, base_rates: withFcf((points) => points.map((point, index) => index < 120 ? q("-1") : point)) });
+  assert.deepEqual(call.stance, { kind: "declined", rule: 0, text: "Declined under rule 0: an input has no certified value, so no stance is stated.", reasons: [{ cites: "bear_case", text: "Bear case: Annual growth must be above -100%." }] });
+  assert.equal(call.assumptions[4]!.figure.text, "Growth 4.2% a year at 17.33x: base value USD 165.86 per share");
+  assert.equal(baseRate({ ...AAPL, base_rates: withFcf((points) => points.map((point, index) => index < 120 ? q("-1") : point)) }).figure.kind, "value");
+  const both = assembleCall({ ...AAPL, base_rates: withFcf((points) => points.map((point, index) => index < 220 ? q("-1") : point)) });
+  assert.deepEqual(both.stance.reasons, [{ cites: "base_case", text: "Base case: Annual growth must be above -100%." }, { cites: "bear_case", text: "Bear case: Annual growth must be above -100%." }]);
+});
+
+const priced = (price: string, settings: Partial<CallEvidence["settings"]> = {}) =>
+  assembleCall({ ...AAPL, settings: { ...DEFAULT_CALL_SETTINGS, ...settings }, figures: { ...AAPL.figures, share_price: { kind: "value", value: price, currency: "USD" } } });
+
+test("at USD 50 AAPL clears your hurdle: today's multiple 4.92x is the anchored exit multiple, and every move keeps the price under H", () => {
+  const call = priced("50");
+  assert.equal(call.assumptions[2]!.figure.text, "4.92x");
+  assert.deepEqual([call.stance.kind, call.stance.rule, call.stance.text], ["stated", 4, "Clears your hurdle."]);
+  assert.match(call.stance.reasons[2]!.text, /^The hurdle price H is USD \d+\.\d\d, the lower of the two\. The price, USD 50\.00, is at or below H\.$/u);
+});
+
+test("at USD 150 with a 50% near band AAPL is near your hurdle; at the default 10% band the same price falls short", () => {
+  const near = priced("150", { near_band: "0.5" });
+  assert.deepEqual([near.stance.kind, near.stance.rule, near.stance.text], ["stated", 5, "Near your hurdle."]);
+  assert.equal(near.stance.reasons[2]!.text, "The hurdle price H is USD 122.92, the lower of the two. The price, USD 150.00, is above H and at or below H × (1 + your 50% near band) = USD 184.38.");
+  assert.deepEqual([priced("150").stance.rule, priced("150").stance.text], [6, "Falls short of your hurdle."]);
+});
+
+test("rule 2: net debt that leaves the bear value at or below zero declines, naming B and no hurdle price", () => {
+  const call = assembleCall({ ...AAPL, figures: { ...AAPL.figures, net_cash: { kind: "value", value: "-2000000000000", currency: "USD" } } });
+  assert.deepEqual(call.stance, {
+    kind: "declined",
+    rule: 2,
+    text: "Declined under rule 2: the base or bear value per share is zero or negative, so there is no positive hurdle price and no stance is stated.",
+    reasons: [{ cites: "bear_case", text: "The bear value B is USD -30.98 per share." }],
+  });
+});
+
+test("rule 3: at USD 100 a move changes the stance, so it declines naming the move and shows no hurdle price", () => {
+  const call = priced("100");
+  assert.deepEqual(call.stance, {
+    kind: "declined",
+    rule: 3,
+    text: "Declined under rule 3: a one-point move in growth, the share change or your required return, or a 1x move in the exit multiple, changes the stance, so no stance is stated.",
+    reasons: [
+      { cites: "base_case", text: "Growth one point lower in the base and bear cases together changes the stance." },
+      { cites: "share_change", text: "The share change one point higher in both cases changes the stance." },
+      { cites: "required_return", text: "Your required return one point higher changes the stance." },
+      { cites: "anchored_exit_multiple", text: "The exit multiple 1x lower in both cases changes the stance." },
+    ],
+  });
+  assert.equal(STANCE_WORDS.test(JSON.stringify(call)), false, "a declined Call says no stance wording");
 });

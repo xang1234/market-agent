@@ -4,6 +4,8 @@
 
 Accepted by the owner on 2026-11-09 for the separation rules, the stance wording, the hurdle settings and the trigger. This ADR authorizes no code. The valuation model a Call runs on is #226's to define and approve. Implementation issues follow once both are approved.
 
+Amended on 2026-11-24 with the bear case's anchor (see "Bear case anchor" below), and on 2026-11-25 with the base case (see "Base case" below). A Call can now state a stance.
+
 ## Context
 
 The app answers with facts: reported figures, stored prices and verified arithmetic over them. #201 and #224 forbid it from turning those into a view. A scenario result is "a mechanical scenario, not a price target", and a difference from the price is "never expected return, upside, target, forecast, or recommendation". The research-quality rubric scores factual answers against advice wording (`scripts/research-quality-questions.ts`, `decision_useful`).
@@ -119,10 +121,48 @@ The research-quality rubric keeps scoring factual answers and keeps forbidding a
 
 ## Consequences
 
-- **Prerequisites for a stated stance.** Two anchors don't exist yet. The exit multiple needs about ten years of daily prices (the current Polygon key returns two). The bear case needs debt, cash and securities, pretax income, income tax, stock compensation and remaining performance obligations in the metric map (`services/fundamentals/src/sec-edgar.ts`). Until then every Call declines its stance and uses the declined layout above.
+- **Prerequisites for a stated stance** (as of 2026-11-09; met by #605, the bear case anchor and the base case above). Two anchors don't exist yet. The exit multiple needs about ten years of daily prices (the current Polygon key returns two). The bear case needs debt, cash and securities, pretax income, income tax, stock compensation and remaining performance obligations in the metric map (`services/fundamentals/src/sec-edgar.ts`). Until then every Call declines its stance and uses the declined layout above.
 - **Attributed consensus depends on #592.** Once merged, `consensus_captures` records Finviz consensus each time its capture runs, so a Call can cite consensus as of a day and later Calls can be compared with what consensus did. Running it daily is a separate step: #592 documents a crontab line and schedules nothing.
 - **Single user.** The app has one user, the owner. Opinions about specific stocks shown to anyone else would need a separate review. This ADR covers only the owner's own use.
 - **No change to existing answers.** Factual answers, scenarios (#201) and scenario price comparisons (#224) keep their wording rules.
+
+## Bear case anchor (owner, 2026-11-24)
+
+The owner decided the bear case's anchor on 2026-11-24:
+
+- **Bear growth.** The 25th percentile of five-year free cash flow growth, among windows that began at a comparable size (by starting revenue). The bear exit multiple is the anchored exit multiple (#605), and the share change is `d`.
+- **Measured quantity.** Decided as free cash flow per share on 2026-11-24, and changed to total free cash flow on 2026-11-25 (see "Base case"). Revenue growth is shown beside it and never fed into the model.
+- **Source.** One download of SEC's bulk `companyfacts.zip`, cached with its sha256 and never fetched again. `services/fundamentals/src/growth-base-rates.ts` builds `services/financial-core/data/growth-base-rates.json` from it, offline.
+
+**What a base rate is.** It is a frequency of reported history: of N five-year windows that began at a similar size, K delivered at least a given growth. It is not an assigned probability, and a Call never calls it one. A window whose filer stopped filing before year 5 is a named outcome beside N (`ended_early`), never dropped. A window that ended at or below zero counts at −100%.
+
+**What it decides.** Rule 1's bear-case half is met when the exit multiple is anchored and the Call's bucket holds at least 100 windows. Rule 0 matches when the 25th percentile is the −100% floor, since `g` must stay above −100% (ADR 0006).
+
+## Base case (owner, 2026-11-25)
+
+The owner decided the base case on 2026-11-25, with three decisions:
+
+1. **Base growth.** The median (nearest-rank 50th percentile) of five-year growth among windows that began at a similar size: the bear case's table and bucket.
+2. **Both cases read total free cash flow growth** (`fcf` in `growth-base-rates.json`), not growth per share. The bear case moves from `fcf_per_share` to `fcf`, and so does the base-rate row's "share at or above".
+3. **Base exit multiple.** The anchored exit multiple, as for the bear case. The share change is `d`.
+
+**Why total, not per share.** ADR 0006's `g` is free cash flow growth before dilution. The model applies only `d`, the share change that stock-based compensation implies, and leaves buybacks out, because they are paid from the free cash flow already valued. A filer's history per share includes its buybacks. Fed in as `g`, it would count them a second time, on top of the cash flow that paid for them. In the USD 50B and up bucket the gap is 2.5 points: a median of 6.7% per share against 4.2% in total (`docs/eval-runs/growth-base-rates/2026-11-24.md`). `fcf_per_share` and `revenue` stay in the table.
+
+**What it decides.**
+
+- The base case shares the bear case's bucket, so it is anchored exactly when the bear case is. Rule 1 still names the exit multiple and the bear case, as written.
+- A median at the −100% floor matches rule 0, as the bear case's 25th percentile does.
+- With both cases anchored, `callStance` (`services/financial-core/src/valuation-model.ts`) runs rules 2 to 6 and the stability rule. A Call states "Clears your hurdle", "Near your hurdle" or "Falls short of your hurdle", or declines under rule 2 or 3.
+- A stated Call shows `V`, `B`, `H` and the hurdle price under each stability move. A Call declined under rule 3 names each move that changes it and shows no hurdle price, as the declined layout requires.
+
+**Measured at the default settings** (`docs/eval-runs/growth-base-rates/2026-11-24.md`). AAPL on ADR 0006's probe inputs falls short of the hurdle: `H` is USD 132.68 against a price of USD 342.37. A synthetic large cap with no net cash, whose own median EV/FCF is above today's multiple, clears only below about 7x its free cash flow per share and falls short from about 13x up. Two inputs drive that. At a 10% required return the anchored exit multiple is never above 17.33x, and never above today's multiple. The median growth, 4.2% a year for the largest bucket, is far below the required return. The value test binds in both large-cap buckets. Doubling the bear-loss limit to 50% leaves `H` unchanged. These are the owner's settings and anchors; nothing here changes them.
+
+**Gaps this ADR leaves.** A stated Call names the two it does not show (`not_shown`), and the ADRs define neither:
+
+- **A bull case**, for the skew row.
+- **Falsifiers**, for "what would change it".
+
+One reading is the implementation's, not the ADR's. **Which growth a stability move moves**: the implementation moves base and bear growth together, and both exit multiples together. A required-return move keeps the anchored exit multiple fixed, though the 4% cap depends on the required return.
 
 ## Not decided here
 
