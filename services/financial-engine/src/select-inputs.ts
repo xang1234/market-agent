@@ -17,7 +17,9 @@
 //    quarter. A balance reports only with a context: it is labelled FY of
 //    its filing's fiscal year, whether or not it is that year's end. A
 //    node without an eligible candidate there is a gap with its reason; an
-//    older period is never substituted.
+//    older period is never substituted. A period reported to end other than
+//    offset years, or quarters, before the newest is incompatible_period, as
+//    its label miscounts (#479).
 // 4. An eligible extraction correction replaces the fact it corrects.
 // 5. as_reported takes the original disclosure; as_restated takes, among the
 //    economic restatements public by the cutoff, the one filed last, else the
@@ -58,6 +60,8 @@ import {
   conservativeAvailability,
   dayNumber,
   derivationIssue,
+  endsQuartersApart,
+  endsStepsApart,
   freshnessAt,
   multiplyRationals,
   parseDerivedDecimalText,
@@ -87,7 +91,7 @@ import {
 } from "../../financial-core/src/index.ts";
 import type { InputCandidate, SplitHistory } from "./ports.ts";
 
-export const SELECTION_POLICY_VERSION = "public-information-selection.v7";
+export const SELECTION_POLICY_VERSION = "public-information-selection.v8";
 
 /** A large accelerated filer's filings are due about 112 days apart at most, so an older count is likely superseded. */
 export const SHARE_COUNT_MAX_AGE_DAYS = 130;
@@ -151,7 +155,7 @@ const EXCLUSION_PRIORITY: ReadonlyArray<ReasonCode> = ["precision_unverified", "
 
 type FiscalPeriodSelector = Extract<PeriodSelector, { kind: "fiscal_period" }>;
 
-/** A shared latest period, null when there is none, or the gap of a group whose period cannot be known. */
+/** A shared latest period, null when there is none, or the gap of a group whose period cannot be known or is not dated offset steps back. */
 export type LatestPeriod = FiscalPeriodSelector | null | Readonly<{ unresolved: ReasonCode }>;
 
 const QUARTERS = ["Q1", "Q2", "Q3", "Q4"] as const;
@@ -168,7 +172,8 @@ type LatestSlot = Readonly<{ node: ReportedMetricNode; candidates: ReadonlyArray
  */
 export function sharedLatestPeriods(slots: ReadonlyArray<LatestSlot>, policy: SelectionPolicy): ReadonlyMap<LocalId, LatestPeriod> {
   const groupOf = (node: ReportedMetricNode, periodType: string) => JSON.stringify([node.subject_slot, periodType]);
-  const newestByGroup = new Map<string, number>();
+  // Each group's fiscal positions, with every end its reporting candidates give one.
+  const calendars = new Map<string, Map<number, Set<IsoDate>>>();
   const incompleteGroups = new Map<string, ReasonCode>();
   const shared = slots.filter(({ node }) => node.period.kind === "latest" && !isShareCount(node.metric_key));
   for (const { node, candidates, incomplete } of shared) {
@@ -178,20 +183,34 @@ export function sharedLatestPeriods(slots: ReadonlyArray<LatestSlot>, policy: Se
     if (incomplete !== undefined && !incompleteGroups.has(group)) incompleteGroups.set(group, incomplete);
     for (const candidate of candidates) {
       const position = candidate.metric_key === node.metric_key ? fiscalPosition(candidate.period, periodType) : null;
-      if (position !== null && reportedBy(candidate, policy)) newestByGroup.set(group, Math.max(newestByGroup.get(group) ?? -Infinity, position));
+      if (position === null || !reportedBy(candidate, policy)) continue;
+      const calendar = calendars.get(group) ?? new Map<number, Set<IsoDate>>();
+      calendars.set(group, calendar.set(position, (calendar.get(position) ?? new Set()).add(candidate.period.end)));
     }
   }
   const resolved = new Map<LocalId, LatestPeriod>();
   for (const { node } of shared) {
     if (node.period.kind !== "latest") continue;
-    const group = groupOf(node, node.period.period_type);
+    const { period_type: periodType, offset } = node.period;
+    const group = groupOf(node, periodType);
     const incomplete = incompleteGroups.get(group);
-    const newest = newestByGroup.get(group);
-    resolved.set(node.node_id, incomplete !== undefined ? { unresolved: incomplete }
-      : newest === undefined ? null
-      : fiscalPeriodAt(newest - node.period.offset, node.period.period_type));
+    resolved.set(node.node_id, incomplete !== undefined ? { unresolved: incomplete } : periodBack(calendars.get(group), offset, periodType));
   }
   return resolved;
+}
+
+/**
+ * The period offset years or quarters before the newest one a group reports,
+ * or incompatible_period when an end reported there does not lie that far
+ * before every end of the newest, so its label miscounts (rule 3, #479). A
+ * position nothing reports is left to selection.
+ */
+function periodBack(calendar: ReadonlyMap<number, ReadonlySet<IsoDate>> | undefined, offset: number, periodType: "annual" | "quarterly"): LatestPeriod {
+  if (calendar === undefined) return null;
+  const newest = Math.max(...calendar.keys());
+  const apart = (newer: IsoDate, prior: IsoDate) => periodType === "annual" ? endsStepsApart(newer, prior, 12 * offset) : endsQuartersApart(newer, prior, offset);
+  const datedBack = offset === 0 || [...calendar.get(newest)!].every((newer) => [...calendar.get(newest - offset) ?? []].every((prior) => apart(newer, prior)));
+  return datedBack ? fiscalPeriodAt(newest - offset, periodType) : { unresolved: "incompatible_period" };
 }
 
 /** Whether a candidate reports its period by the cutoff (rule 3). */
