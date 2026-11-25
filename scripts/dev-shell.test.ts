@@ -343,7 +343,7 @@ test("under DEV_PROFILE=chat a VITE_* change restarts the app process, which ser
 
 test("DEV_NO_KEYS=true pins recorded LLM replies and ignores .env.dev's LLM settings", async () => {
   const printLlmEnv =
-    'printf "%s|%s|%s|%s|%s|<%s>|<%s>|%s" "${LLM_CHANNELS:-}" "${LLM_FIXTURE_MODELS:-}" "${LITELLM_MODEL:-}" "${LLM_REPLAY_FILE:-}" "${VITE_MA_FLAG_LLM_SETTINGS:-}" "${LITELLM_FALLBACK_MODELS-unset}" "${LLM_SETTINGS_ENV_FILE-unset}" "${MA_FLAG_LLM_SETTINGS:-}" && printf "|<%s>|<%s>" "${EXTRACTION_LITELLM_MODEL-unset}" "${JUDGE_LITELLM_MODEL-unset}" && printf "|<%s>" "${ANALYZE_LITELLM_MODEL-unset}"';
+    'printf "%s|%s|%s|%s|%s|<%s>|<%s>|%s" "${LLM_CHANNELS:-}" "${LLM_FIXTURE_MODELS:-}" "${LITELLM_MODEL:-}" "${LLM_REPLAY_FILE:-}" "${VITE_MA_FLAG_LLM_SETTINGS:-}" "${LITELLM_FALLBACK_MODELS-unset}" "${LLM_SETTINGS_ENV_FILE-unset}" "${MA_FLAG_LLM_SETTINGS:-}" && printf "|<%s>|<%s>" "${EXTRACTION_LITELLM_MODEL-unset}" "${JUDGE_LITELLM_MODEL-unset}" && printf "|<%s>|<%s>" "${ANALYZE_LITELLM_MODEL-unset}" "${CHAT_ANALYST_AGENT-unset}"';
 
   // A developer's real LLM settings in the env file must not leak into no-keys mode.
   const on = await createShellFixture({
@@ -354,6 +354,7 @@ test("DEV_NO_KEYS=true pins recorded LLM replies and ignores .env.dev's LLM sett
     EXTRACTION_LITELLM_MODEL: "openai/o3",
     JUDGE_LITELLM_MODEL: "openai/o3",
     ANALYZE_LITELLM_MODEL: "openai/o3",
+    CHAT_ANALYST_AGENT: "1",
   });
   const onResult = await runBash(["MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh", printLlmEnv].join("\n"), on.root);
   const root = await realpath(on.root);
@@ -361,7 +362,7 @@ test("DEV_NO_KEYS=true pins recorded LLM replies and ignores .env.dev's LLM sett
   assert.equal(onResult.code, 0, onResult.stderr);
   assert.equal(
     onResult.stdout.trim(),
-    `fixture|recorded|fixture/recorded|${root}/services/chat/test/golden/llm-replies.json|false|<>|<>|false|<>|<>|<>`,
+    `fixture|recorded|fixture/recorded|${root}/services/chat/test/golden/llm-replies.json|false|<>|<>|false|<>|<>|<>|<>`,
   );
 
   const off = await createShellFixture();
