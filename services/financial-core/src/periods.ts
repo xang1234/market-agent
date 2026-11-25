@@ -55,6 +55,7 @@ export function endsStepsApart(newerEnd: IsoDate, olderEnd: IsoDate, months: num
 
 /** `olderEnd` ends `quarters` fiscal quarters before `newerEnd`, three calendar months a quarter give or take QUARTER_STEP_TOLERANCE_DAYS. */
 export function endsQuartersApart(newerEnd: IsoDate, olderEnd: IsoDate, quarters: number): boolean {
+  if (!Number.isInteger(quarters)) return false;
   return endsMonthsApart(newerEnd, olderEnd, 3 * quarters, QUARTER_STEP_TOLERANCE_DAYS);
 }
 

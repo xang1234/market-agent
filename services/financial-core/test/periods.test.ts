@@ -74,6 +74,7 @@ test("a prior period is found by its end date, so a fiscal-year-end change is no
 test("a prior quarter is found by its end date, 16- and 17-week retail quarters included", () => {
   // Costco's 16-week Q4 FY2024 and 17-week Q4 FY2023, and Kroger's 16-week Q1, end 20 to 27 days off three calendar months.
   assert.equal(endsStepsApart("2024-09-01", "2024-05-12", 3), false);
+  assert.equal(endsQuartersApart("2025-03-31", "2025-02-28", 1 / 3), false, "a fraction of a quarter is not a step");
   assert.equal(endsQuartersApart("2024-09-01", "2024-05-12", 1), true);
   assert.equal(endsQuartersApart("2023-09-03", "2023-05-07", 1), true);
   assert.equal(endsQuartersApart("2023-05-20", "2023-01-28", 1), true);
