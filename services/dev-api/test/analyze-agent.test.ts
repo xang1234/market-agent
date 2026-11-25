@@ -307,20 +307,21 @@ test("the analyst agent writes an investment memo's sections from stored sources
     buildAnalyzeRunSeals,
   });
 
-  await t.test("an inference shows in every section when the judge entails it, and never in stance words", async () => {
+  await t.test("an inference shows in every section when the judge entails it, as an unverified view when it does not, and never in stance words", async () => {
     const NEUTRAL = "Customers buy the devices in bulk.";
     const STANCE = "This is a buy.";
     const shownWhen = async (verdict: "entailed" | "unsupported") => {
       const judged = adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps({ ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" }, scriptedModel([], { inferences: [NEUTRAL, STANCE], verdict }))));
       const run = await judged.analyze.createRun({ userId: IDS.owner, body: memoBody });
       const saved = (await db.query(`select blocks from analyze_template_runs where run_id = $1`, [run.run_id])).rows[0].blocks;
-      return sectionsOf(saved).map((section) => [NEUTRAL, STANCE].filter((text) => JSON.stringify(section.children).includes(text)));
+      return sectionsOf(saved).map((section) => [NEUTRAL, STANCE].filter((text) => JSON.stringify(section.children).includes(text))
+        .map((text) => [section.children.flatMap((child) => (child.commentary ?? []) as Array<{ kind: string; text?: string }>).find((part) => part.text === text)?.kind, text]));
     };
-    assert.deepEqual(await shownWhen("entailed"), [[NEUTRAL], [NEUTRAL], [NEUTRAL], [NEUTRAL]], "each section's stance inference is left out");
-    assert.deepEqual(await shownWhen("unsupported"), [[], [], [], []]);
+    assert.deepEqual(await shownWhen("entailed"), AGENT_SECTIONS.map(() => [["inference", NEUTRAL]]), "each section's stance inference is left out");
+    assert.deepEqual(await shownWhen("unsupported"), AGENT_SECTIONS.map(() => [["unverified", NEUTRAL]]), "labelled unverified, and still no stance");
   });
 
-  await t.test("a theme cites the claims it rests on, sealed with the memo, and its quotes come back when the judge does not entail it", async () => {
+  await t.test("a theme cites the claims it rests on, sealed with the memo, and shows unverified after its quotes when the judge does not entail it", async () => {
     const THEME = "Industrial demand: a downturn would cut its sales.";
     const risksWhen = async (verdict: "entailed" | "unsupported") => {
       const judged = adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps({ ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" }, scriptedModel([], { inferences: [THEME], themes: true, verdict }))));
@@ -337,7 +338,11 @@ test("the analyst agent writes an investment memo's sections from stored sources
       quoted: true,
       sealed: true,
     }, "the quote stands behind the theme's citation, and the memo's seal binds it");
-    assert.deepEqual(await risksWhen("unsupported"), { commentary: [{ kind: "figures", segments: [quote] }], quoted: true, sealed: true });
+    assert.deepEqual(await risksWhen("unsupported"), {
+      commentary: [{ kind: "figures", segments: [quote] }, { kind: "unverified", subject: null, text: THEME }],
+      quoted: true,
+      sealed: true,
+    }, "an unverified view cites nothing, so its quote stands on its own");
   });
 
   await t.test("a rerun reads at the original memo's cutoff, says what was on file then, and runs the current playbook", async () => {
