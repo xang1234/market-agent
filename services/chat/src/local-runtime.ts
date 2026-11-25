@@ -69,9 +69,10 @@ export const preResolveSubject = createChatSubjectPreResolver(pool, tickerDiscov
 
 // The latest fiscal years a company's filings are fetched for when a turn
 // names it with none on file; one companyfacts download stores them all.
+// Ten, as the standout-finding detectors rank up to ten (standout-findings.ts).
 // ponytail: annual statements only (as Analyze hydrates); a quarter still
 // comes from a backfill or the symbol page's read-through.
-const TURN_SEC_READS: ReadonlyMap<string, number> = new Map([["revenue", 5]]);
+const TURN_SEC_READS: ReadonlyMap<string, number> = new Map([["revenue", 10]]);
 
 // Live mode only, as hydrateYtdBars: the turn-hydration.ts gates.
 const hydrateTurn = createTurnHydrator({

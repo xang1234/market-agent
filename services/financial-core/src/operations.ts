@@ -416,9 +416,8 @@ export function ratio(node: RatioNode, numerator: FinancialOperand, denominator:
   if ((numerator.period.kind === "instant") !== (definition.timing === "same_instant")) {
     return operationGap("incompatible_period", "The ratio requires a different period timing.");
   }
-  // ponytail: worded for cash conversion, the one approved ratio a scoped figure reaches (#743); word it per ratio once another does.
   if (numerator.measure.concept_scopes.length > 0 || denominator.measure.concept_scopes.length > 0) {
-    return operationGap("incompatible_definition", "Cash conversion divides operating cash flow including discontinued operations by net income, which includes them, and this operating cash flow is filed for continuing operations only.");
+    return operationGap("incompatible_definition", definition.scoped_operand_gap);
   }
   return quotient(node.node_id, { metric_key: definition.ratio_key, definition_version: definition.definition_version, derivations: [], concept_scopes: [] }, numerator, denominator);
 }

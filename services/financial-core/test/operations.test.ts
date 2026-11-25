@@ -433,6 +433,20 @@ test("cash conversion never reads OCF filed for continuing operations (#743)", (
   assert.match(scoped.ok ? "" : scoped.explanation, /discontinued operations/);
 });
 
+test("stock-based compensation is divided only by free cash flow from unscoped concepts, and its gap says so", () => {
+  const node: RatioNode = { node_id: "sbc_fcf", operation: "ratio", operation_version: "ratio.v1", ratio_key: "stock_based_compensation_to_free_cash_flow", numerator: "sbc", denominator: "fcf" };
+  const sbc = operand("sbc", { metric: "stock_based_compensation", value: "30", ...FY2023 });
+  const freeCash = (capex: ReturnType<typeof capexOf>) => {
+    const outcome = freeCashFlow(fcf, ocfOf("200"), capex);
+    assert.ok(outcome.ok);
+    return outcome.operand;
+  };
+  assert.equal(value(ratio(node, sbc, freeCash(capexOf("50")))), "0.2");
+  const scoped = ratio(node, sbc, freeCash(capexOf("50", { inference: PRODUCTIVE_ASSETS })));
+  assert.deepEqual(gap(scoped), ["incompatible", "incompatible_definition"]);
+  assert.match(scoped.ok ? "" : scoped.explanation, /^This free cash flow is computed from a narrower filed concept/u);
+});
+
 test("margins are exact when the quotient terminates", () => {
   const rev = operand("rev", { metric: "revenue", value: "200", ...FY2023 });
   const op = operand("op", { metric: "operating_income", value: "50", ...FY2023 });
