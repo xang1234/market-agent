@@ -4,8 +4,8 @@
 // histories and share prices are public market data, read from the market
 // service's tables.
 
-import type { FinancialUnit, FiscalPeriod } from "../../financial-core/src/index.ts";
-import { FISCAL_PERIODS, sourceClassOf } from "../../financial-core/src/index.ts";
+import type { FinancialUnit } from "../../financial-core/src/index.ts";
+import { sourceClassOf } from "../../financial-core/src/index.ts";
 import { listFinancialInputCandidates, type FinancialInputCandidate } from "../../evidence/src/financial-input-repo.ts";
 import { loadLatestPriceObservations } from "../../market/src/price-observations.ts";
 import { loadSubjectSplitHistory } from "../../market/src/split-history.ts";
@@ -41,7 +41,7 @@ export function createEvidenceFinancialPort(db: SqlExecutor): FinancialEvidenceP
         if (isDatabaseError(error)) return { status: "error", reason_code: "database_error" };
         throw error;
       }
-      return { status: "ok", candidates: page.candidates.flatMap(toInputCandidate), truncated: page.truncated };
+      return { status: "ok", candidates: page.candidates.map(toInputCandidate), truncated: page.truncated };
     },
 
     async readSplitHistory({ subject, as_of }: SplitHistoryRequest): Promise<SplitHistory> {
@@ -72,41 +72,37 @@ export function createEvidenceFinancialPort(db: SqlExecutor): FinancialEvidenceP
   };
 }
 
-/** Rows without a fiscal period the contract can express cannot be candidates. */
-function toInputCandidate(row: FinancialInputCandidate): InputCandidate[] {
-  if (row.fiscal_year === null || row.period_end === null || !isFiscalPeriod(row.fiscal_period)) return [];
-  return [
-    {
-      fact_id: row.fact_id,
-      source_id: row.source_id,
-      source_class: sourceClassOf({ kind: row.source_kind, source_id: row.source_id }, "fact"),
-      source_version_hash: row.source_version_hash,
-      metric_key: row.metric_key,
-      period: { start: row.period_start, end: row.period_end, fiscal_year: row.fiscal_year, fiscal_period: row.fiscal_period },
-      value_text: row.value_text,
-      scale_text: row.scale_text,
-      unit: financialUnit(row.unit, row.currency),
-      method: row.method,
-      verification_status: row.verification_status,
-      coverage_level: row.coverage_level,
-      reported_at: row.reported_at,
-      observed_at: row.observed_at,
-      supersedes: row.supersedes,
-      superseded_by: row.superseded_by,
-      context: row.context,
-      precision: row.precision,
-      inference: row.inference,
-      publication: row.publication.map((proof) => ({
-        attestation_id: proof.attestation_id,
-        timing: {
-          available_not_before: proof.available_not_before,
-          available_no_later_than: proof.available_no_later_than,
-          timing_precision: proof.timing_precision,
-          source_timezone: proof.source_timezone,
-        },
-      })),
-    },
-  ];
+function toInputCandidate(row: FinancialInputCandidate): InputCandidate {
+  return {
+    fact_id: row.fact_id,
+    source_id: row.source_id,
+    source_class: sourceClassOf({ kind: row.source_kind, source_id: row.source_id }, "fact"),
+    source_version_hash: row.source_version_hash,
+    metric_key: row.metric_key,
+    period: { start: row.period_start, end: row.period_end, fiscal_year: row.fiscal_year, fiscal_period: row.fiscal_period },
+    value_text: row.value_text,
+    scale_text: row.scale_text,
+    unit: financialUnit(row.unit, row.currency),
+    method: row.method,
+    verification_status: row.verification_status,
+    coverage_level: row.coverage_level,
+    reported_at: row.reported_at,
+    observed_at: row.observed_at,
+    supersedes: row.supersedes,
+    superseded_by: row.superseded_by,
+    context: row.context,
+    precision: row.precision,
+    inference: row.inference,
+    publication: row.publication.map((proof) => ({
+      attestation_id: proof.attestation_id,
+      timing: {
+        available_not_before: proof.available_not_before,
+        available_no_later_than: proof.available_no_later_than,
+        timing_precision: proof.timing_precision,
+        source_timezone: proof.source_timezone,
+      },
+    })),
+  };
 }
 
 function financialUnit(unit: string, currency: string | null): FinancialUnit | null {
@@ -115,8 +111,4 @@ function financialUnit(unit: string, currency: string | null): FinancialUnit | n
   }
   if (unit === "shares" || unit === "count") return { kind: unit };
   return null;
-}
-
-function isFiscalPeriod(value: string | null): value is FiscalPeriod {
-  return value !== null && (FISCAL_PERIODS as ReadonlyArray<string>).includes(value);
 }
