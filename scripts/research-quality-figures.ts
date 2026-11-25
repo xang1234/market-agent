@@ -2,8 +2,8 @@
 // by code, labelled by a model (what each one is and which values on file it rests on),
 // and judged by code against the frozen golden dataset. It reads app runs and bare runs
 // alike, from each completed turn as renderBlock shows it. The numerals and verdicts are
-// financial-core's figure check, shared with chat (#800); this file holds the golden
-// pointer, its labeller and the CLI.
+// financial-core's figure check, which chat's checked-prose lane is to share (#800); this
+// file holds the golden pointer, its labeller and the CLI.
 //
 //   node --experimental-strip-types scripts/research-quality-figures.ts check <run.json>...
 //
@@ -181,11 +181,18 @@ const CLAIM_AMOUNTS = enumerateNumerals(AMD_Q2_2025_RELEASE.text).filter((n) => 
 
 export type Checked = { verdict: Verdict["kind"]; expected?: number; reason?: string };
 
+// The filed charge states no sign. An operand adds or subtracts it (operating income before
+// the charge), and a share divides it. A difference with the charge alone as an operand
+// never adds it back: it would expect $934M for the right $666M (#805).
+const chargeAlone = ({ add, subtract }: Operand<GoldenRef>) => add.length + subtract.length === 1 && [...add, ...subtract][0]!.metric === "filed_claim";
+
 // The labeller's figure as the figure check reads it, or why it names nothing to check.
 function asLabel(figure: LabelledFigure): FigureLabel<GoldenRef> | string {
   const { sign, scale } = figure;
   if (figure.basis === "derived") {
-    return figure.derivation === null ? "derived, but no derivation given" : { basis: "derived", derivation: figure.derivation, operands: figure.operands, sign, scale };
+    if (figure.derivation === null) return "derived, but no derivation given";
+    if (figure.derivation === "difference" && figure.operands.some(chargeAlone)) return "a difference from the filed charge alone";
+    return { basis: "derived", derivation: figure.derivation, operands: figure.operands, sign, scale };
   }
   return figure.source === null ? { basis: "off_file", what: `${figure.metric} (${figure.period})` } : { basis: "reported", source: figure.source, sign, scale };
 }

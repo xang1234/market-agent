@@ -1,7 +1,7 @@
 // The figure check's core (#781, #800): every numeral a text states, and each one's
 // verdict against the values its label points at. Generic over the pointer R: the eval
-// points at the golden dataset, chat at its evidence packet. A labeller decides what each
-// numeral is; this module only reads numerals and compares.
+// points at the golden dataset, and chat is to point at its evidence packet. A labeller
+// decides what each numeral is; this module only reads numerals and compares.
 //
 // ponytail: float arithmetic with a precision tolerance. It judges prose against data and
 // publishes no value, so it stays off rational.ts.

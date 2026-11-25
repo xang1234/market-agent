@@ -57,10 +57,16 @@ test("each golden pointer reads its value on file, and a verdict saves its expec
   assert.deepEqual(check("75.1%", derived("n1", "margin", [q4("gross_profit"), q4("revenue")])), { verdict: "wrong", expected: 46_200 / 62_100 * 100 }, "a margin's expected value is a percent");
   assert.deepEqual(check("about 74.4%", derived("n1", "margin", [q4("gross_profit"), q4("revenue")])).verdict, "near");
   // AMD's Q2 FY2025 operating income before the filed $800M charge: -134 + 800 = 666.
-  const amd = ref("AMD", "operating_income", 2025, "Q2");
-  const beforeCharge = derived("n1", "sum", [{ add: [amd, ref("AMD", "filed_claim", 2025, "Q2")], subtract: [], over: null }]);
+  const amd = (metric: GoldenRef["metric"]) => ref("AMD", metric, 2025, "Q2");
+  const beforeCharge = derived("n1", "sum", [{ add: [amd("operating_income"), amd("filed_claim")], subtract: [], over: null }]);
   assert.deepEqual(check("$666M", beforeCharge), { verdict: "derived_ok" });
   assert.equal(check("$766M", beforeCharge).verdict, "wrong");
+  assert.deepEqual(check("$666M", derived("n1", "sum", [of(amd("operating_income")), of(amd("filed_claim"))])), { verdict: "derived_ok" }, "one operand each");
+  assert.deepEqual(check("10.4%", derived("n1", "share_of_total", [of(amd("filed_claim")), of(amd("revenue"))])), { verdict: "derived_ok" }, "the charge as a share of revenue");
+  // A difference never adds the charge back: it would expect $934M for the right $666M (#805).
+  const alone = { verdict: "not_checkable", reason: "a difference from the filed charge alone" };
+  assert.deepEqual(check("$666M", derived("n1", "difference", [of(amd("operating_income")), of(amd("filed_claim"))])), alone);
+  assert.deepEqual(check("$934M", derived("n1", "difference", [of(amd("filed_claim")), of(amd("operating_income"))])), alone, "in either order");
 });
 
 test("a figure the golden data can't settle is not checkable, with its reason", () => {

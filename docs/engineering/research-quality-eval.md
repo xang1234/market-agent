@@ -159,11 +159,11 @@ app runs and bare runs alike. Each completed turn is rendered with `renderBlock`
    (`derived`, with a margin, growth, difference, ratio, share of total or sum and its operands). An operand adds
    values, subtracts values and may divide by a sum of values, so a trailing-four-quarter total, operating expenses
    and a margin over several quarters can all be checked. The labeller's prompt lists what is on file but no values.
-3. Code gives the verdict, with the figure check in `services/financial-core/src/figure-check.ts` that chat shares
-   (#800). A reported figure is `matched` when it equals the data at the precision it shows. A derived figure is
-   `derived_ok` when its recomputed value does. A figure is `near` when it is within one and a half units of its last
-   digit, either off in that digit or hedged ("about", "roughly", "nearly", "~" right before it), since a hedged
-   figure claims no exact value. Otherwise it is `wrong`. A figure that points at nothing on file, or that the
+3. Code gives the verdict, with the figure check in `services/financial-core/src/figure-check.ts`, which chat's
+   checked-prose lane is to share (#800). A reported figure is `matched` when it equals the data at the precision
+   it shows. A derived figure is `derived_ok` when its recomputed value does. A figure is `near` when it is within one
+   and a half units of its last digit, either off in that digit or hedged ("about", "roughly", "nearly", "~" right
+   before it), since a hedged figure claims no exact value. Otherwise it is `wrong`. A figure that points at nothing on file, or that the
    labeller skipped, is `not_checkable`, with its reason.
 
 A whole number's trailing zeros count as rounding, so `$60B` matches 62.1 billion. Only a minus sign makes a number
