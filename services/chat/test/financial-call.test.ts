@@ -287,13 +287,21 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
   });
 
   // #715: the analyst agent on, a Call ask runs the Call, whether the agent's model answers or fails; the Call needs none.
-  const agentWith = (router: ControlledRouter) => analystAgentRunner({
-    financial: { pool, evidence: createEvidenceFinancialPort, resolveMention: resolve },
-    router: async () => router,
-    read: async (name) => ({ tool: name, status: "no_business_claims", truncated: false, reads: [], no_filing: [] }) as AnalystToolResult,
-    compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: "NVDA designs GPUs." }), onAnswered }),
-    asOf: () => CUTOFF,
-  });
+  // Each turn the agent is handed is kept, so a test sees it was never called rather than called and its answer dropped.
+  const agentTurns: unknown[] = [];
+  const agentWith = (router: ControlledRouter): ChatAnalystAgent => {
+    const agent = analystAgentRunner({
+      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention: resolve },
+      router: async () => router,
+      read: async (name) => ({ tool: name, status: "no_business_claims", truncated: false, reads: [], no_filing: [] }) as AnalystToolResult,
+      compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: "NVDA designs GPUs." }), onAnswered }),
+      asOf: () => CUTOFF,
+    });
+    return async (turn) => {
+      agentTurns.push(turn);
+      return agent(turn);
+    };
+  };
   const answering = (): ControlledRouter => {
     let step = 0;
     return {
@@ -311,6 +319,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     assert.equal(done.bundle_id, "financial_answer", "the Call path answers, not the agent");
     assert.equal(block.kind, "call");
     assert.equal(await calls(), before + 1);
+    assert.equal(agentTurns.length, 0, "the analyst agent receives no call");
   });
 
   await t.test("the analyst agent on with its model failing, a Call ask still makes the Call (#715)", async () => {
@@ -319,6 +328,7 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     assert.equal(done.bundle_id, "financial_answer", "the Call path answers, not the agent");
     assert.equal(block.kind, "call");
     assert.equal(await calls(), before + 1);
+    assert.equal(agentTurns.length, 0, "the analyst agent receives no call");
   });
 
   await t.test("continuing-operations OCF certifies: the Call is AAPL's, and free cash flow's basis names the continuing-operations concept (#743)", async () => {
