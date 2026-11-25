@@ -140,6 +140,27 @@ test("a 429, 5xx or overloaded stream is retried once, then is the turn's provid
   assert.deepEqual(await callMessages({}, { ...fast, fetch: resetTwice.send }), { ok: false, outcome: "provider_error", error: "the answer stream broke: Error: other side closed" });
   const cutTwice = fakeFetch([() => new Response(sse(start, opened, partial)), () => new Response(sse(start, opened, partial))]);
   assert.deepEqual(await callMessages({}, { ...fast, fetch: cutTwice.send }), { ok: false, outcome: "provider_error", error: "the answer stream ended before message_stop" });
+  const badGateway = () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("partial"));
+      controller.error(new TypeError("terminated", { cause: new Error("other side closed") }));
+    },
+  }), { status: 502 });
+  const gateway = fakeFetch([badGateway, () => new Response(answer("ok"))]);
+  assert.equal((await callMessages({}, { ...fast, fetch: gateway.send })).ok, true, "a 502 whose body breaks is still retried");
+  assert.deepEqual(await callMessages({}, { ...fast, fetch: fakeFetch([badGateway, badGateway]).send }), { ok: false, outcome: "provider_error", status: 502, error: "HTTP 502: (body unreadable: Error: other side closed)" });
+  let cancelled = 0;
+  const leftOpen = () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(sse(start, { type: "error", error: { type: "overloaded_error", message: "Overloaded" } })));
+    },
+    cancel() {
+      cancelled += 1;
+    },
+  }));
+  assert.equal((await callMessages({}, { ...fast, fetch: fakeFetch([leftOpen, () => new Response(answer("ok"))]).send })).ok, true);
+  await new Promise((done) => setImmediate(done));
+  assert.equal(cancelled, 1, "a stream left open after an error event is closed");
   const refused = fakeFetch([() => new Response("bad request", { status: 400 })]);
   assert.deepEqual(await callMessages({}, { ...fast, fetch: refused.send }), { ok: false, outcome: "provider_error", status: 400, error: "HTTP 400: bad request" });
   assert.equal(refused.sent.length, 1, "a 400 isn't retried");

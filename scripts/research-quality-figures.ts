@@ -37,8 +37,8 @@ export type Numeral = {
   // One unit of the last digit shown, scaled like value: the precision the text claims.
   step: number;
   unit: NumeralUnit;
-  // The text carries a minus sign. Parentheses don't sign a number: in prose they hold an
-  // aside ("previous close ($176.10)") far more often than an accounting negative.
+  // The text carries a sign, minus or plus. Parentheses don't sign a number: in prose they
+  // hold an aside ("previous close ($176.10)") far more often than an accounting negative.
   signed: boolean;
   // The text carries its own B/M/K scale, so a table's "in millions" doesn't apply.
   scaled: boolean;
@@ -48,7 +48,7 @@ const NUMBER = String.raw`\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+`;
 const SUFFIX = String.raw`\s?(?:%|percent\b|percentage points?\b|pp\b|ppts?\b|points?\b|bps\b|bp\b|basis points\b|trillion\b|billion\b|million\b|thousand\b|tn\b|bn\b|mn\b|mm\b|[tbmk]\b)|(?:x\b|×)`;
 const NUMERAL = new RegExp(
   String.raw`(?<date>\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z?)?)`
-  + String.raw`|(?<sign>(?<![\w.])[-−](?=(?:US)?\$?\d|\.\d))?(?:US)?\$?(?<number>${NUMBER})(?<suffix>${SUFFIX})?`,
+  + String.raw`|(?<sign>(?<![\w.])[-−+](?=(?:US)?\$?\d|\.\d))?(?:US)?\$?(?<number>${NUMBER})(?<suffix>${SUFFIX})?`,
   "giu",
 );
 const SCALES: Record<string, number> = { t: 1e12, tn: 1e12, trillion: 1e12, b: 1e9, bn: 1e9, billion: 1e9, m: 1e6, mn: 1e6, mm: 1e6, million: 1e6, k: 1e3, thousand: 1e3 };
@@ -85,7 +85,7 @@ export function enumerateNumerals(text: string): Numeral[] {
     const { unit, scale } = unitOf(suffix);
     const signed = groups.sign !== undefined;
     const magnitude = Number(digits.replaceAll(",", "")) * scale;
-    return { ...base, value: signed ? -magnitude : magnitude, step: stepOf(digits) * scale, unit, signed, scaled: scale !== 1 };
+    return { ...base, value: signed && groups.sign !== "+" ? -magnitude : magnitude, step: stepOf(digits) * scale, unit, signed, scaled: scale !== 1 };
   });
 }
 

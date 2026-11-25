@@ -180,11 +180,13 @@ async function attempt(body: Record<string, unknown>, { apiKey, fetch: send = fe
     });
     if (!response.ok) {
       const retryAfter = Number(response.headers.get("retry-after"));
+      // A body that breaks mid-read still leaves the status, which decides the retry.
+      const detail = await response.text().then((text) => text.slice(0, 500), (error: Error) => `(body unreadable: ${String(error.cause ?? error)})`);
       return {
         ok: false,
         outcome: "provider_error",
         status: response.status,
-        error: `HTTP ${response.status}: ${(await response.text()).slice(0, 500)}`,
+        error: `HTTP ${response.status}: ${detail}`,
         transient: response.status === 429 || response.status >= 500,
         ...(retryAfter > 0 ? { retryAfterMs: Math.min(retryAfter, 60) * 1000 } : {}),
       };
@@ -229,25 +231,31 @@ async function readStream(response: Response): Promise<Attempt> {
     return undefined;
   };
   const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
-  for (;;) {
-    let next: ReadableStreamReadResult<string>;
-    // Only the read is caught: a transport failure mid-stream is the provider's, like a
-    // dropped connection before it, while a parse or programming error keeps its stack.
-    try {
-      next = await reader.read();
-    } catch (error) {
-      if ((error as Error).name === "TimeoutError") return { ok: false, outcome: "timeout", error: "the answer stream timed out", transient: false };
-      return { ok: false, outcome: "provider_error", error: `the answer stream broke: ${String((error as Error).cause ?? error)}`, transient: true };
+  try {
+    for (;;) {
+      let next: ReadableStreamReadResult<string>;
+      // Only the read is caught: a transport failure mid-stream is the provider's, like a
+      // dropped connection before it, while a parse or programming error keeps its stack.
+      try {
+        next = await reader.read();
+      } catch (error) {
+        if ((error as Error).name === "TimeoutError") return { ok: false, outcome: "timeout", error: "the answer stream timed out", transient: false };
+        return { ok: false, outcome: "provider_error", error: `the answer stream broke: ${String((error as Error).cause ?? error)}`, transient: true };
+      }
+      if (next.done) break;
+      buffer += next.value;
+      let end: number;
+      while ((end = buffer.indexOf("\n\n")) !== -1) {
+        const data = buffer.slice(0, end).split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("");
+        buffer = buffer.slice(end + 2);
+        const failed = data === "" ? undefined : handle(JSON.parse(data));
+        if (failed) return failed;
+      }
     }
-    if (next.done) break;
-    buffer += next.value;
-    let end: number;
-    while ((end = buffer.indexOf("\n\n")) !== -1) {
-      const data = buffer.slice(0, end).split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("");
-      buffer = buffer.slice(end + 2);
-      const failed = data === "" ? undefined : handle(JSON.parse(data));
-      if (failed) return failed;
-    }
+  } finally {
+    // An early return or a throw leaves the connection open, so close it. Its own failure
+    // only means the stream already broke, which the result above reports.
+    void reader.cancel().catch(() => undefined);
   }
   if (!stopped) return { ok: false, outcome: "provider_error", error: "the answer stream ended before message_stop", transient: true };
   const text = content.filter((block) => block.type === "text").map((block) => block.text as string).join("").trim();

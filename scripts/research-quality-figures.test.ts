@@ -96,6 +96,10 @@ test("a sign comes from the text, then from its words; with neither only the siz
   const q1 = (metric: DataRef["metric"]) => of(ref("NVDA", metric, 2026, "Q1"));
   assert.deepEqual(check("60.5%", derived("n1", "margin", [q1("gross_profit"), q1("revenue")], { sign: "-" })), { verdict: "derived_ok" }, "gross margin fell to 60.5%: a level keeps its own sign");
   assert.equal(check("-60.5%", derived("n1", "margin", [q1("gross_profit"), q1("revenue")])).verdict, "wrong", "the text's own minus sign still counts");
+  const q2 = (metric: DataRef["metric"]) => of(ref("AMD", metric, 2025, "Q2"));
+  assert.deepEqual([numeral("+1.7%").value, numeral("+1.7%").signed], [1.7, true]);
+  assert.equal(check("+1.7%", derived("n1", "margin", [q2("operating_income"), q2("revenue")], { sign: "+" })).verdict, "wrong", "a written plus sign on a negative margin");
+  assert.deepEqual(check("-1.7%", derived("n1", "margin", [q2("operating_income"), q2("revenue")])), { verdict: "derived_ok" });
 });
 
 test("each derivation is recomputed from its operands", () => {
