@@ -312,7 +312,7 @@ test("a failed or cut-off judge call is an error for every inference; with no in
   assert.deepEqual([none, called], [{ outcome: "not_called", reason: "no inference to judge" }, false]);
 });
 
-test("a worded amount is hidden in an analyst answer, shows no higher than unverified in an engine answer's commentary, and goes to repair; contradicted hides and goes to repair; an error hides and does not (#398, #509)", () => {
+test("a worded amount is hidden in an analyst or agent answer, shows no higher than unverified in an engine answer's commentary, and goes to repair; contradicted hides and goes to repair; an error hides and does not (#398, #509, #793)", () => {
   const rows = [
     { index: 0, verdict: "entailed" as const, worded_amount: false },
     { index: 0, verdict: "entailed" as const, worded_amount: true },
@@ -322,14 +322,14 @@ test("a worded amount is hidden in an analyst answer, shows no higher than unver
     { index: 0, verdict: "contradicted" as const, worded_amount: true },
     { index: 0, verdict: "error" as const, reason: "timeout" },
   ];
-  // [analyst answer, engine answer's commentary, sent to repair]
-  assert.deepEqual(rows.map((row) => [shownAs(row, "analyst"), shownAs(row, "engine"), sentToRepair(row)]), [
-    ["shown", "shown", false],
-    ["hidden", "unverified", true],
-    ["unverified", "unverified", false],
-    ["hidden", "unverified", true],
-    ["hidden", "hidden", true],
-    ["hidden", "hidden", true],
-    ["hidden", "hidden", false],
+  // [analyst answer, engine answer's commentary, agent answer, sent to repair]
+  assert.deepEqual(rows.map((row) => [shownAs(row, "analyst"), shownAs(row, "engine"), shownAs(row, "agent"), sentToRepair(row)]), [
+    ["shown", "shown", "shown", false],
+    ["hidden", "unverified", "hidden", true],
+    ["unverified", "unverified", "unverified", false],
+    ["hidden", "unverified", "hidden", true],
+    ["hidden", "hidden", "hidden", true],
+    ["hidden", "hidden", "hidden", true],
+    ["hidden", "hidden", "hidden", false],
   ]);
 });
