@@ -3,8 +3,9 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { evaluateBoundPlan } from "../src/bound-evaluation.ts";
 import { presentFinancialUnit } from "../src/presentation.ts";
-import { aapl, AAPL, balance, balancePlan, gapOf, plan, publish, USD, valueOf, type Node } from "./balance-fixtures.ts";
+import { aapl, AAPL, balance, balancePlan, gapOf, plan, publish, slotBindings, USD, valueOf, type Node } from "./balance-fixtures.ts";
 
 test("AAPL FY2026: net cash is 56,824,000,000 and total debt 80,111,000,000, exactly", () => {
   const results = publish();
@@ -23,6 +24,19 @@ test("a component that is reported but unusable, or unread, blocks the figure in
     const results = publish(aapl({ marketable_securities_noncurrent: reason, long_term_debt_current: reason }));
     assert.deepEqual([gapOf(results.net_cash), gapOf(results.total_debt)], [["blocked_dependency", "blocked_by_dependency"], ["blocked_dependency", "blocked_by_dependency"]], reason);
   }
+});
+
+test("a component whose absence the store can't prove blocks both figures and says why (#792)", () => {
+  const bindings = slotBindings(aapl({ commercial_paper: "absence_unverified" }));
+  const results = publish(aapl({ commercial_paper: "absence_unverified" }));
+  assert.deepEqual([gapOf(results.net_cash), gapOf(results.total_debt)], [["blocked_dependency", "blocked_by_dependency"], ["blocked_dependency", "blocked_by_dependency"]]);
+  assert.deepEqual(evaluateBoundPlan(plan(), bindings).nodes.get("commercial_paper"), {
+    status: "gap",
+    disposition: "missing",
+    reason_code: "absence_unverified",
+    explanation: "No filing in the store reports this balance for the period, though an earlier 10-K public before the knowledge cutoff did, so the store may have missed it; it is not taken as absent.",
+    cause: "evidence",
+  });
 });
 
 test("no cash and equivalents is a missing input for net cash; total debt still computes", () => {

@@ -65,10 +65,14 @@ export function aapl(inputs: Inputs = {}, values: Record<string, string> = AAPL)
   return Object.fromEntries([...CASH, ...DEBT].map((key) => [key, inputs[key] ?? (values[key] === undefined ? "missing_input" : balance(key, values[key]!))]));
 }
 
-export function publish(inputs: Inputs = aapl()): Record<string, ExpectedResult> {
-  const bindings = new Map<LocalId, SlotBinding>(Object.entries(inputs).map(([slot, input]) => [slot, typeof input === "string"
+export function slotBindings(inputs: Inputs = aapl()): Map<LocalId, SlotBinding> {
+  return new Map<LocalId, SlotBinding>(Object.entries(inputs).map(([slot, input]) => [slot, typeof input === "string"
     ? { status: "gap", reason_code: input, candidate_set_digest: DIGEST }
     : { status: "bound", input, payload_hash: hashCanonical("bound_input", input), candidate_set_digest: DIGEST }]));
+}
+
+export function publish(inputs: Inputs = aapl()): Record<string, ExpectedResult> {
+  const bindings = slotBindings(inputs);
   const built = plan();
   const evaluation = evaluateBoundPlan(built, bindings);
   const publication = unitPublication(built, evaluation, nodeLineageHashes(built, evaluation, bindings), "balance");
