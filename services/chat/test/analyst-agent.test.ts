@@ -1445,9 +1445,10 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
 
   // The financial lane's claim reads a cash-resilience ask first, and finds it the analyst's; the agent reuses that reading.
   const claimed = createChatFinancialRuntime({ pool, planningModel: null, resolveMention, evidence: createEvidenceFinancialPort });
+  const askingGuidance: ScopeProposal = { ...NO_ASKS, asks: new Set(["guidance"]), companies: { kind: "as_named", names: ["AAA"] } };
   for (const [name, userIntent, reading, financialRuntime] of [
     ["", "AAA revenue and what it sells", null, undefined],
-    [", when the financial lane's claim made it", "Why did AAA's cash resilience drop?", { ...NO_ASKS, asks: new Set(["guidance"]), companies: { kind: "as_named", names: ["AAA"] } }, claimed],
+    [", when the financial lane's claim made it", "Why did AAA's cash resilience drop?", askingGuidance, claimed],
   ] as const) await t.test(`the turn's reading of its question is one of its eight model calls${name}`, async () => {
     made.readings = 0;
     const planner = revenueModel(["AAA"]);
@@ -1492,7 +1493,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
       persistAssistantMessage: persist,
       readQuestion: async () => {
         await new Promise((resolve) => setTimeout(resolve, READ_MS));
-        return { ...NO_ASKS, asks: new Set(["guidance"] as const), companies: { kind: "as_named", names: ["AAA"] } };
+        return askingGuidance;
       },
       runner: async (context) => {
         context.emit("turn.completed", {});
