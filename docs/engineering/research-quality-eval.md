@@ -156,23 +156,25 @@ app runs and bare runs alike. Each completed turn is rendered with `renderBlock`
    ISO dates.
 2. One call per turn to `anthropic/claude-opus-5-5` labels each numeral by id. A label is a year, a quarter, a date,
    a count or part of a name. A figure names the values on file it states (`reported`) or is computed from
-   (`derived`, with a margin, growth, difference, ratio or share of total and its operands). The labeller's prompt
-   lists what is on file but no values.
+   (`derived`, with a margin, growth, difference, ratio, share of total or sum and its operands). An operand adds
+   values, subtracts values and may divide by a sum of values, so a trailing-four-quarter total, operating expenses
+   and a margin over several quarters can all be checked. The labeller's prompt lists what is on file but no values.
 3. Code gives the verdict, with the figure check in `services/financial-core/src/figure-check.ts` that chat shares
-   (#800). A reported figure is `matched` when it equals the data at the precision it shows. A
-   derived figure is `derived_ok` when its recomputed value does. Otherwise it is `wrong`. A figure that points at
-   nothing on file, or that the labeller skipped, is `not_checkable`, with its reason.
+   (#800). A reported figure is `matched` when it equals the data at the precision it shows. A derived figure is
+   `derived_ok` when its recomputed value does. A figure is `near` when it is within one and a half units of its last
+   digit, either off in that digit or hedged ("about", "roughly", "nearly", "~" right before it), since a hedged
+   figure claims no exact value. Otherwise it is `wrong`. A figure that points at nothing on file, or that the
+   labeller skipped, is `not_checkable`, with its reason.
 
 A whole number's trailing zeros count as rounding, so `$60B` matches 62.1 billion. Only a minus sign makes a number
 negative. Parentheses don't, because in prose they hold an aside such as "previous close ($176.10)". A difference is
-compared by size, since its sign follows the operand order the labeller picks. Two operands can't express a sum, so
-a trailing-four-quarter total is `not_checkable`.
+compared by size, since its sign follows the operand order the labeller picks.
 
 The check writes `<run>.figures.json` beside the run, with each numeral's span, label and verdict per turn. It prints
 one line per run with the counts, then each wrong figure with its sentence. After a change to the verdict code, run
 `node --experimental-strip-types scripts/research-quality-figures.ts rejudge <figures.json>...`. It judges the saved
 labels again without a model call, and it refuses a turn whose numerals the enumerator no longer finds in the same
-places.
+places. A file saved before operands could sum reads each operand as one value, over one value or none.
 
 ## Held-out traps (#221)
 

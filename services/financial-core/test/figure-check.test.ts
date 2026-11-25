@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  atPrecisionOf,
   derive,
   enumerateNumerals,
   verdictFor,
@@ -20,6 +21,10 @@ const DATA: Readonly<Record<string, number>> = {
   "NVDA gross profit Q4 FY2026": 46_200e6,
   "NVDA revenue Q1 FY2026": 44_062e6,
   "NVDA gross profit Q1 FY2026": 26_668e6,
+  "NVDA revenue Q2 FY2026": 46_743e6,
+  "NVDA gross profit Q2 FY2026": 33_853e6,
+  "NVDA gross profit Q3 FY2026": 41_849e6,
+  "NVDA operating income Q4 FY2026": 40_300e6,
   "NVDA revenue Q4 FY2025": 39_331e6,
   "NVDA gross profit Q4 FY2025": 28_723e6,
   "NVDA revenue FY2026": 209_911e6,
@@ -33,7 +38,8 @@ const DATA: Readonly<Record<string, number>> = {
 };
 const valueOf: ValueOf<string> = (ref) => (ref in DATA ? { kind: "amount", value: DATA[ref]! } : undefined);
 
-const of = (value: string, over: string | null = null): Operand<string> => ({ value, over });
+const of = (value: string, over: string | null = null): Operand<string> => ({ add: [value], subtract: [], over: over === null ? null : [over] });
+const total = (add: string[], subtract: string[] = [], over: string[] | null = null): Operand<string> => ({ add, subtract, over });
 const reported = (source: string, extra: Partial<Pick<FigureLabel<string> & { basis: "reported" }, "sign" | "scale">> = {}): FigureLabel<string> =>
   ({ basis: "reported", source, sign: null, scale: null, ...extra });
 const derived = (derivation: Derivation, operands: Operand<string>[], extra: Partial<Pick<FigureLabel<string> & { basis: "derived" }, "sign" | "scale">> = {}) =>
@@ -45,7 +51,7 @@ const numeral = (text: string) => {
   return found!;
 };
 const check = (text: string, label: FigureLabel<string>) => verdictFor(numeral(text), label, valueOf);
-const wrong = (value: number, lastDigit = false) => ({ kind: "wrong", expected: { kind: "amount", value }, lastDigit });
+const amount = (value: number) => ({ kind: "amount", value }) as const;
 
 test("every numeral is found with its span, value, precision, unit and sign", () => {
   const text = "NVDA's revenue was **$62.1B** in Q4 FY2026 (ended 2026-01-25), up 9% from $57,006 million; operating income of -$134.0M; "
@@ -80,8 +86,8 @@ test("a figure matches the data at the precision it shows", () => {
   const revenue = "NVDA revenue Q4 FY2026";
   assert.deepEqual(check("$62.1B", reported(revenue)), { kind: "matched" });
   assert.deepEqual(check("$62,100 million", reported(revenue)), { kind: "matched" });
-  assert.deepEqual(check("$62.2B", reported(revenue)), wrong(62_100e6, true), "one unit of the last digit off");
-  assert.deepEqual(check("$62.3B", reported(revenue)), wrong(62_100e6), "two units off is a misstatement");
+  assert.deepEqual(check("$62.2B", reported(revenue)), { kind: "near", expected: amount(62_100e6) }, "one unit of the last digit off is near");
+  assert.deepEqual(check("$62.3B", reported(revenue)), { kind: "wrong", expected: amount(62_100e6) }, "two units off is a misstatement");
   assert.deepEqual(check("$60B", reported(revenue)), { kind: "matched" }, "a round number is read at its last significant digit");
   assert.deepEqual(check("62,100", reported(revenue, { scale: "millions" })), { kind: "matched" }, "a table in $ millions");
   assert.equal(check("62,100", reported(revenue)).kind, "wrong");
@@ -110,7 +116,8 @@ test("each derivation is recomputed from its operands", () => {
   const q4 = [of("NVDA gross profit Q4 FY2026"), of("NVDA revenue Q4 FY2026")];
   // 46,200 / 62,100 = 74.396%
   assert.deepEqual(check("74.4%", derived("margin", q4)), { kind: "derived_ok" });
-  assert.equal(check("74.5%", derived("margin", q4)).kind, "wrong");
+  assert.equal(check("74.5%", derived("margin", q4)).kind, "near", "one unit of the last digit off");
+  assert.equal(check("74.6%", derived("margin", q4)).kind, "wrong");
   assert.deepEqual(check("74.4", derived("margin", q4)), { kind: "derived_ok" }, "a table cell in percent");
   // (62,100 - 57,006) / 57,006 = 8.936%
   const growth = [of("NVDA revenue Q3 FY2026"), of("NVDA revenue Q4 FY2026")];
@@ -128,7 +135,8 @@ test("each derivation is recomputed from its operands", () => {
   // 209,911 / 34,669 = 6.055x
   const scale = [of("NVDA revenue FY2026"), of("AMD revenue FY2025")];
   assert.deepEqual(check("6.1x", derived("ratio", scale)), { kind: "derived_ok" });
-  assert.equal(check("6.0x", derived("ratio", scale)).kind, "wrong");
+  assert.equal(check("6.0x", derived("ratio", scale)).kind, "near");
+  assert.equal(check("5.9x", derived("ratio", scale)).kind, "wrong");
   // 55,200 / 62,100 = 88.889%
   assert.deepEqual(check("88.9%", derived("share_of_total", [of("NVDA Data Center revenue Q4 FY2026"), of("NVDA revenue Q4 FY2026")])), { kind: "derived_ok" });
   assert.equal(derive(derived("difference", [margin("Q1 FY2026"), of("NVDA revenue Q1 FY2026")]), valueOf), "a difference between a ratio and an amount");
@@ -141,4 +149,49 @@ test("anything the data can't settle is not checkable, with its reason", () => {
   assert.deepEqual(check("$2.1B", derived("growth", [of("AMD revenue Q1 FY2024"), of("AMD revenue Q1 FY2025")])), { kind: "not_checkable", reason: "an operand isn't in the data" });
   assert.deepEqual(check("74.4%", reported("NVDA gross profit Q4 FY2026")), { kind: "not_checkable", reason: "a reported amount shown as percent" }, "a margin labelled as a reported amount");
   assert.deepEqual(check("2026-01-25", reported("NVDA revenue Q4 FY2026")), { kind: "not_checkable", reason: "a date labelled as a figure" });
+});
+
+const QUARTERS = ["Q1", "Q2", "Q3", "Q4"].map((quarter) => `${quarter} FY2026`);
+const each = (metric: string) => QUARTERS.map((quarter) => `NVDA ${metric} ${quarter}`);
+
+test("a sum adds its operands, and an operand adds and subtracts values", () => {
+  // 44,062 + 46,743 + 57,006 + 62,100 = 209,911: a trailing four-quarter total.
+  assert.deepEqual(check("$209.9B", derived("sum", [total(each("revenue"))])), { kind: "derived_ok" });
+  assert.equal(check("$219.9B", derived("sum", [total(each("revenue"))])).kind, "wrong");
+  assert.deepEqual(check("$209.9B", derived("sum", each("revenue").map((quarter) => of(quarter)))), { kind: "derived_ok" }, "one operand per quarter");
+  // Operating expenses: 46,200 - 40,300 = 5,900.
+  assert.deepEqual(check("$5.9B", derived("sum", [total(["NVDA gross profit Q4 FY2026"], ["NVDA operating income Q4 FY2026"])])), { kind: "derived_ok" });
+  // 148,570 / 209,911 = 70.778%: a trailing four-quarter margin, as two sums or as one over the other.
+  assert.deepEqual(check("70.8%", derived("margin", [total(each("gross profit")), total(each("revenue"))])), { kind: "derived_ok" });
+  assert.deepEqual(check("70.8%", derived("margin", [total(each("gross profit"), [], each("revenue"))])), { kind: "derived_ok" });
+  assert.equal(derive(derived("sum", []), valueOf), "sum needs an operand");
+  assert.equal(derive(derived("sum", [of("NVDA revenue Q4 FY2026"), of("NVDA gross profit Q4 FY2026", "NVDA revenue Q4 FY2026")]), valueOf), "a sum of ratios and amounts");
+  assert.equal(derive(derived("sum", [total(["NVDA revenue Q4 FY2026", "AMD revenue Q1 FY2024"])]), valueOf), "an operand isn't in the data");
+});
+
+test("a hedged figure is near within one and a half units of its last digit, and wrong further off", () => {
+  const found = enumerateNumerals("about $62.1B, roughly 75%, ~9%, nearly 41%, ≈ $5B, approximately 6x, almost 3, around 2026 and $62.1B; up 9% about.");
+  assert.deepEqual(found.map((n) => [n.text, n.hedged]), [
+    ["$62.1B", true], ["75%", true], ["9%", true], ["41%", true], ["$5B", true], ["6x", true], ["3", true], ["2026", true], ["$62.1B", false], ["9%", false],
+  ]);
+  const revenue = reported("NVDA revenue Q4 FY2026");
+  const hedged = (text: string) => verdictFor(enumerateNumerals(`about ${text}`)[0]!, revenue, valueOf);
+  assert.deepEqual(hedged("$62.1B"), { kind: "near", expected: amount(62_100e6) }, "a hedged figure never claims the exact value");
+  assert.deepEqual(hedged("$62.2B"), { kind: "near", expected: amount(62_100e6) });
+  assert.deepEqual(hedged("$62.3B"), { kind: "wrong", expected: amount(62_100e6) }, "two units off is wrong, hedged or not");
+  assert.deepEqual(check("$62.1B", revenue), { kind: "matched" });
+});
+
+test("the data's value is written at the precision and in the form the figure used", () => {
+  const at = (text: string, expected: Parameters<typeof atPrecisionOf>[1], scale: Parameters<typeof atPrecisionOf>[2] = null) => atPrecisionOf(numeral(text), expected, scale);
+  assert.equal(at("41%", { kind: "fraction", value: 0.3445 }), "34%", "not 34.45%");
+  assert.equal(at("$13.9B", amount(12_934e6)), "$12.9B");
+  assert.equal(at("$57,006 million", amount(62_100e6)), "$62,100 million");
+  assert.equal(at("6.0x", { kind: "ratio", value: 6.0547 }), "6.1x");
+  assert.equal(at("13.5 points", { kind: "fraction", value: -0.12505 }), "12.5 points", "an unsigned figure gives the size; its words carry the sign");
+  assert.equal(at("−1,350 bps", { kind: "fraction", value: -0.12505 }), "−1,250 bps");
+  assert.equal(at("-$134.0M", amount(666e6)), "$666.0M");
+  assert.equal(at("+1.7%", { kind: "fraction", value: -0.01744 }), "-1.7%");
+  assert.equal(at("62,500", amount(62_100e6), "millions"), "62,100", "a table in $ millions");
+  assert.equal(at("$60B", amount(74_396e6)), "$70B", "a round figure's data is rounded the same way");
 });

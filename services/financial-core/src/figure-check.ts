@@ -28,6 +28,8 @@ export type Numeral = Readonly<{
   signed: boolean;
   // The text carries its own B/M/K scale, so a table's "in millions" doesn't apply.
   scaled: boolean;
+  // A hedge right before it ("about", "roughly", "nearly", "~"): it claims no exact value.
+  hedged: boolean;
 }>;
 
 const NUMBER = String.raw`\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+`;
@@ -37,6 +39,9 @@ const NUMERAL = new RegExp(
   + String.raw`|(?<sign>(?<![\w.])[-−+](?=(?:US)?\$?\d|\.\d))?(?:US)?\$?(?<number>${NUMBER})(?<suffix>${SUFFIX})?`,
   "giu",
 );
+// ponytail: these words only. "Over" and "more than" are bounds, which the trailing-zero
+// rule already reads loosely ("over $60B" matches 62.1 billion).
+const HEDGE = /(?:\b(?:about|approximately|around|roughly|nearly|almost|close to)\s+|[~≈]\s?)$/iu;
 const SCALES: Record<string, number> = { t: 1e12, tn: 1e12, trillion: 1e12, b: 1e9, bn: 1e9, billion: 1e9, m: 1e6, mn: 1e6, mm: 1e6, million: 1e6, k: 1e3, thousand: 1e3 };
 
 function unitOf(suffix: string): { unit: NumeralUnit; scale: number } {
@@ -64,7 +69,13 @@ function stepOf(digits: string): number {
 export function enumerateNumerals(text: string): Numeral[] {
   return [...text.matchAll(NUMERAL)].map((match, i) => {
     const groups = match.groups!;
-    const base = { id: `n${i + 1}` as NumeralId, text: match[0], start: match.index, end: match.index + match[0].length };
+    const base = {
+      id: `n${i + 1}` as NumeralId,
+      text: match[0],
+      start: match.index,
+      end: match.index + match[0].length,
+      hedged: HEDGE.test(text.slice(Math.max(0, match.index - 24), match.index)),
+    };
     if (groups.date) return { ...base, value: Number.NaN, step: Number.NaN, unit: "date" as const, signed: false, scaled: false };
     const digits = groups.number!;
     const { unit, scale } = unitOf(groups.suffix ?? "");
@@ -79,10 +90,13 @@ export function enumerateNumerals(text: string): Numeral[] {
 // A value as the data holds it: an amount (dollars, shares), a fraction (a margin, a
 // growth rate, a share) or a ratio (a multiple).
 export type Quantity = Readonly<{ kind: "amount" | "fraction" | "ratio"; value: number }>;
-export const DERIVATIONS = ["margin", "growth", "difference", "ratio", "share_of_total"] as const;
+export const DERIVATIONS = ["margin", "growth", "difference", "ratio", "share_of_total", "sum"] as const;
 export type Derivation = (typeof DERIVATIONS)[number];
-// One value, or one divided by another (a margin, as an operand of a margin change).
-export type Operand<R> = Readonly<{ value: R; over: R | null }>;
+// The values in add, less those in subtract, over the sum of those in over when it is
+// given. One value is add [it]; a trailing four-quarter total adds four quarters; operating
+// expenses are add [gross profit] subtract [operating income]; a margin, as an operand of
+// a margin change, has its revenue in over.
+export type Operand<R> = Readonly<{ add: ReadonlyArray<R>; subtract: ReadonlyArray<R>; over: ReadonlyArray<R> | null }>;
 export type Sign = "+" | "-" | null;
 export type Scale = "thousands" | "millions" | "billions" | null;
 export type FigureLabel<R> =
@@ -97,9 +111,10 @@ export type ValueOf<R> = (ref: R) => Quantity | undefined;
 export type Verdict =
   | Readonly<{ kind: "matched" }>
   | Readonly<{ kind: "derived_ok" }>
-  // lastDigit: within one and a half units of the last digit shown, a rounding slip told
-  // apart from a misstatement.
-  | Readonly<{ kind: "wrong"; expected: Quantity; lastDigit: boolean }>
+  // Within one and a half units of the last digit shown, and either off in that digit or
+  // hedged ("about 25%"): linked, never sent back for a rewrite.
+  | Readonly<{ kind: "near"; expected: Quantity }>
+  | Readonly<{ kind: "wrong"; expected: Quantity }>
   | Readonly<{ kind: "not_checkable"; reason: string }>;
 
 // The numbers a quantity reads as in a unit. A fraction (margin, growth, share, a change
@@ -117,19 +132,40 @@ export function writtenAs({ kind, value }: Quantity, unit: NumeralUnit): number[
 export const withinPrecision = (shown: number, actual: number, step: number) =>
   Math.abs(shown - actual) <= step / 2 + 1e-9 * Math.max(Math.abs(shown), Math.abs(actual), step);
 
-function operandValue<R>(operand: Operand<R>, valueOf: ValueOf<R>): Quantity | undefined {
-  const value = valueOf(operand.value);
-  if (value === undefined || operand.over === null) return value;
-  const over = valueOf(operand.over);
-  return over === undefined || over.value === 0 ? undefined : { kind: "fraction", value: value.value / over.value };
+const oneKind = (values: ReadonlyArray<Quantity>) => new Set(values.map((value) => value.kind)).size <= 1;
+
+function operandValue<R>(operand: Operand<R>, valueOf: ValueOf<R>): Quantity | string {
+  const read = (refs: ReadonlyArray<R>) => refs.map(valueOf);
+  const [add, subtract, over] = [read(operand.add), read(operand.subtract), read(operand.over ?? [])];
+  const known = (values: ReadonlyArray<Quantity | undefined>): values is Quantity[] => values.every((value) => value !== undefined);
+  if (add.length === 0 || !known(add) || !known(subtract) || !known(over)) return "an operand isn't in the data";
+  if (!oneKind([...add, ...subtract]) || !oneKind(over)) return "an operand mixes amounts and ratios";
+  const value = add.reduce((sum, term) => sum + term.value, 0) - subtract.reduce((sum, term) => sum + term.value, 0);
+  if (over.length === 0) return { kind: add[0]!.kind, value };
+  const denominator = over.reduce((sum, term) => sum + term.value, 0);
+  return denominator === 0 ? "it divides by zero" : { kind: "fraction", value: value / denominator };
 }
 
-// A derived figure recomputed from its two operands, in their order.
+// A derived figure recomputed from its operands: two, in their order; any number for a sum;
+// one for a margin, share or ratio whose operand already has its denominator in over.
 export function derive<R>(label: Extract<FigureLabel<R>, { basis: "derived" }>, valueOf: ValueOf<R>): Quantity | string {
   const { derivation, operands } = label;
+  const values = operands.map((operand) => operandValue(operand, valueOf));
+  const failed = values.find((value) => typeof value === "string");
+  const quantities = values.filter((value): value is Quantity => typeof value !== "string");
+  if (derivation === "sum") {
+    if (operands.length === 0) return "sum needs an operand";
+    if (failed !== undefined) return failed;
+    if (!oneKind(quantities)) return "a sum of ratios and amounts";
+    return { kind: quantities[0]!.kind, value: quantities.reduce((sum, term) => sum + term.value, 0) };
+  }
+  const level = derivation === "margin" || derivation === "share_of_total" || derivation === "ratio";
+  if (level && operands.length === 1 && operands[0]!.over?.length) {
+    return failed ?? { kind: derivation === "ratio" ? "ratio" : "fraction", value: quantities[0]!.value };
+  }
   if (operands.length !== 2) return `${derivation} needs two operands, got ${operands.length}`;
-  const [a, b] = operands.map((operand) => operandValue(operand, valueOf));
-  if (!a || !b) return "an operand isn't in the data";
+  if (failed !== undefined) return failed;
+  const [a, b] = quantities as [Quantity, Quantity];
   if (derivation === "difference" && a.kind !== b.kind) return "a difference between a ratio and an amount";
   const result: Quantity = {
     margin: { kind: "fraction", value: a.value / b.value },
@@ -142,6 +178,7 @@ export function derive<R>(label: Extract<FigureLabel<R>, { basis: "derived" }>, 
 }
 
 const SCALE_WORDS = { thousands: 1e3, millions: 1e6, billions: 1e9 } as const;
+const tableScale = (numeral: Numeral, scale: Scale) => (numeral.unit === "amount" && !numeral.scaled && scale ? SCALE_WORDS[scale] : 1);
 
 // One numeral's verdict. The text's own sign wins; failing that the sign its words give;
 // with neither, only the size is compared ("a loss of $134M" against -134M). A difference is
@@ -151,7 +188,7 @@ const SCALE_WORDS = { thousands: 1e3, millions: 1e6, billions: 1e9 } as const;
 export function verdictFor<R>(numeral: Numeral, label: FigureLabel<R>, valueOf: ValueOf<R>): Verdict {
   if (numeral.unit === "date") return { kind: "not_checkable", reason: "a date labelled as a figure" };
   if (label.basis === "off_file") return { kind: "not_checkable", reason: `${label.what} isn't in the data` };
-  const scale = numeral.unit === "amount" && !numeral.scaled && label.scale ? SCALE_WORDS[label.scale] : 1;
+  const scale = tableScale(numeral, label.scale);
   const step = numeral.step * scale;
   // A margin, share or ratio is a level: "fell to 60.5%" says how it moved, not that it is
   // negative, so only the text's own sign counts. ponytail: an unsigned negative margin
@@ -164,8 +201,8 @@ export function verdictFor<R>(numeral: Numeral, label: FigureLabel<R>, valueOf: 
   const judged = (expected: Quantity, what: string, ok: "matched" | "derived_ok"): Verdict => {
     const options = writtenAs(expected, numeral.unit);
     if (options.length === 0) return { kind: "not_checkable", reason: `a ${what} shown as ${numeral.unit}` };
-    if (options.some((actual) => fits(actual))) return { kind: ok };
-    return { kind: "wrong", expected, lastDigit: options.some((actual) => fits(actual, step * 3)) };
+    if (!numeral.hedged && options.some((actual) => fits(actual))) return { kind: ok };
+    return options.some((actual) => fits(actual, step * 3)) ? { kind: "near", expected } : { kind: "wrong", expected };
   };
   if (label.basis === "reported") {
     const actual = valueOf(label.source);
@@ -173,4 +210,22 @@ export function verdictFor<R>(numeral: Numeral, label: FigureLabel<R>, valueOf: 
   }
   const result = derive(label, valueOf);
   return typeof result === "string" ? { kind: "not_checkable", reason: result } : judged(result, label.derivation, "derived_ok");
+}
+
+// The data's value as the figure would have written it, for a request to correct it: at
+// the figure's precision, with its currency sign, scale and unit ("34%" for an answer's
+// "41%", not "34.45%"). An unsigned figure gets the size, since its words carry the sign.
+// scale is the label's, for a bare amount in a table "in millions".
+export function atPrecisionOf(numeral: Numeral, expected: Quantity, scale: Scale = null): string {
+  const [value] = writtenAs(expected, numeral.unit);
+  const digits = new RegExp(NUMBER, "u").exec(numeral.text);
+  if (value === undefined || numeral.unit === "date" || digits === null) return String(expected.value);
+  const step = stepOf(digits[0]);
+  const own = 10 ** Math.round(Math.log10(numeral.step / step));
+  const rounded = Math.round(Math.abs(value) / (own * tableScale(numeral, scale)) / step) * step;
+  const decimals = digits[0].split(".")[1]?.length ?? 0;
+  const written = rounded.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals, useGrouping: digits[0].includes(",") });
+  const minus = /^[-−]/u.test(numeral.text) ? numeral.text[0]! : "-";
+  const sign = !numeral.signed || rounded === 0 ? "" : value < 0 ? minus : numeral.text.startsWith("+") ? "+" : "";
+  return `${sign}${numeral.text.slice(numeral.signed ? 1 : 0, digits.index)}${written}${numeral.text.slice(digits.index + digits[0].length)}`;
 }

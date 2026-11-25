@@ -16,7 +16,7 @@ import {
   sentenceAt,
   summaryLines,
   verdictFor,
-  LAST_DIGIT,
+  type FiguresFile,
   type GoldenRef,
   type LabelledFigure,
   type Labeller,
@@ -25,16 +25,16 @@ import { QUESTIONS } from "./research-quality-questions.ts";
 
 const ref = (company: string, metric: GoldenRef["metric"], fiscal_year: number | null, fiscal_period: GoldenRef["fiscal_period"], extra: Partial<GoldenRef> = {}): GoldenRef =>
   ({ company, metric, fiscal_year, fiscal_period, segment: null, date: null, ...extra });
-const of = (value: GoldenRef, over: GoldenRef | null = null): Operand<GoldenRef> => ({ value, over });
+const of = (value: GoldenRef, over: GoldenRef | null = null): Operand<GoldenRef> => ({ add: [value], subtract: [], over: over === null ? null : [over] });
 const reported = (id: string, source: GoldenRef | null, extra: Partial<LabelledFigure> = {}): LabelledFigure =>
   ({ id, company: source?.company ?? null, metric: "m", period: "p", basis: "reported", source, derivation: null, operands: [], sign: null, scale: null, ...extra });
 const derived = (id: string, derivation: LabelledFigure["derivation"], operands: Operand<GoldenRef>[], extra: Partial<LabelledFigure> = {}): LabelledFigure =>
   ({ id, company: null, metric: "m", period: "p", basis: "derived", source: null, derivation, operands, sign: null, scale: null, ...extra });
 // One numeral, as the enumerator reads it.
 const numeral = (text: string) => {
-  const [found] = enumerateNumerals(text);
-  assert.equal(found?.text, text, `${text} reads as one numeral`);
-  return found!;
+  const found = enumerateNumerals(text);
+  assert.equal(found.length === 1 && text.endsWith(found[0]!.text), true, `${text} ends in its one numeral`);
+  return found[0]!;
 };
 const check = (text: string, label: LabelledFigure) => verdictFor(numeral(text), label);
 
@@ -43,17 +43,24 @@ const check = (text: string, label: LabelledFigure) => verdictFor(numeral(text),
 test("each golden pointer reads its value on file, and a verdict saves its expected value in the numeral's unit", () => {
   const revenue = ref("NVDA", "revenue", 2026, "Q4");
   assert.deepEqual(check("$62.1B", reported("n1", revenue)), { verdict: "matched" });
-  assert.deepEqual(check("$62.2B", reported("n1", revenue)), { verdict: "wrong", expected: 62_100e6, reason: LAST_DIGIT }, "one unit of the last digit off");
+  assert.deepEqual(check("$62.2B", reported("n1", revenue)), { verdict: "near", expected: 62_100e6 }, "one unit of the last digit off");
   assert.deepEqual(check("$62.3B", reported("n1", revenue)), { verdict: "wrong", expected: 62_100e6 }, "two units off is a misstatement");
   assert.deepEqual(check("$178.40", reported("n1", ref("NVDA", "quote_price", null, null))), { verdict: "matched" });
   const last = goldenDailyBars(GOLDEN_COMPANIES[2]!).at(-1)!;
   assert.deepEqual(check(`$${last.close.toFixed(2)}`, reported("n1", ref("AAPL", "bar_close", null, null, { date: last.ts.slice(0, 10) }))), { verdict: "matched" });
   assert.deepEqual(check("$55.2B", reported("n1", ref("NVDA", "segment_revenue", 2026, "Q4", { segment: "Data Center" }))), { verdict: "matched" });
   assert.deepEqual(check("$800 million", reported("n1", ref("AMD", "filed_claim", 2025, "Q2"))), { verdict: "matched" });
-  assert.equal(check("$900 million", reported("n1", ref("AMD", "filed_claim", 2025, "Q2"))).verdict, "wrong");
+  assert.equal(check("$900 million", reported("n1", ref("AMD", "filed_claim", 2025, "Q2"))).verdict, "near", "one unit of $100M off");
+  assert.equal(check("$950 million", reported("n1", ref("AMD", "filed_claim", 2025, "Q2"))).verdict, "wrong");
   const q4 = (metric: GoldenRef["metric"]) => of(ref("NVDA", metric, 2026, "Q4"));
   assert.deepEqual(check("74.4%", derived("n1", "margin", [q4("gross_profit"), q4("revenue")])), { verdict: "derived_ok" });
   assert.deepEqual(check("75.1%", derived("n1", "margin", [q4("gross_profit"), q4("revenue")])), { verdict: "wrong", expected: 46_200 / 62_100 * 100 }, "a margin's expected value is a percent");
+  assert.deepEqual(check("about 74.4%", derived("n1", "margin", [q4("gross_profit"), q4("revenue")])).verdict, "near");
+  // AMD's Q2 FY2025 operating income before the filed $800M charge: -134 + 800 = 666.
+  const amd = ref("AMD", "operating_income", 2025, "Q2");
+  const beforeCharge = derived("n1", "sum", [{ add: [amd, ref("AMD", "filed_claim", 2025, "Q2")], subtract: [], over: null }]);
+  assert.deepEqual(check("$666M", beforeCharge), { verdict: "derived_ok" });
+  assert.equal(check("$766M", beforeCharge).verdict, "wrong");
 });
 
 test("a figure the golden data can't settle is not checkable, with its reason", () => {
@@ -121,12 +128,12 @@ test("a run's completed turns are rendered, labelled and judged; a skipped numer
   assert.equal(seen.length, 1);
   assert.match(seen[0]!, /1\. Analyze NVDA's latest quarter\./u);
   assert.match(seen[0]!, /revenue was ⟦n3:\$62\.1B⟧/u);
-  assert.deepEqual(file.totals, { figures: 3, matched: 1, derived_ok: 0, wrong: 1, not_checkable: 1 });
+  assert.deepEqual(file.totals, { figures: 3, matched: 1, derived_ok: 0, near: 0, wrong: 1, not_checkable: 1 });
   const [turn] = file.turns;
   assert.deepEqual(turn!.numerals.map((n) => [n.text, n.verdict]), [["4", null], ["2026", null], ["$62.1B", "matched"], ["75.1%", "wrong"], ["$30B", "not_checkable"]]);
   assert.equal(turn!.numerals[4]!.reason, "the labeller skipped it");
   const lines = summaryLines(file);
-  assert.equal(lines[0], "2026-11-25T000000: figures 3, matched 1, derived_ok 0, wrong 1 (0 off by one in the last digit), not_checkable 1");
+  assert.equal(lines[0], "2026-11-25T000000: figures 3, matched 1, derived_ok 0, near 0, wrong 1, not_checkable 1");
   assert.equal(lines[1], "  wrong single-latest-quarter turn 1: 75.1% (data: 74.3961): Gross margin was 75.1% and free cash flow $30B.");
 });
 
@@ -138,7 +145,7 @@ test("a turn that didn't complete isn't checked, and a labeller failure leaves e
   const failed = await checkRun(runWith([
     { message: "a", outcome: "completed", blocks: text("Revenue was $62.1B."), answeredBy: "m" },
   ]), anthropicLabeller(async () => ({ ok: true, model: "claude-opus-5-5", content: [], text: "{\"labels\": [", stopReason: "max_tokens", usage: { input_tokens: 1, output_tokens: 1 } })));
-  assert.deepEqual(failed.totals, { figures: 1, matched: 0, derived_ok: 0, wrong: 0, not_checkable: 1 });
+  assert.deepEqual(failed.totals, { figures: 1, matched: 0, derived_ok: 0, near: 0, wrong: 0, not_checkable: 1 });
   assert.equal(failed.turns[0]!.labeller.error, "unreadable labels (stop reason max_tokens)");
   assert.match(summaryLines(failed)[0]!, /\(1 turns not labelled\)$/u);
 });
@@ -146,7 +153,7 @@ test("a turn that didn't complete isn't checked, and a labeller failure leaves e
 test("a checked run is judged again from its saved labels, and refused when its numerals moved", async () => {
   const label: Labeller = async () => ({ ok: true, labels: { labels: [], figures: [reported("n1", ref("NVDA", "revenue", 2026, "Q4"), { sign: "+" })] } });
   const file = await checkRun(runWith([{ message: "a", outcome: "completed", blocks: text("Revenue was $62.1B, and $1B more."), answeredBy: "m" }]), label);
-  assert.deepEqual(file.totals, { figures: 2, matched: 1, derived_ok: 0, wrong: 0, not_checkable: 1 });
+  assert.deepEqual(file.totals, { figures: 2, matched: 1, derived_ok: 0, near: 0, wrong: 0, not_checkable: 1 });
   assert.deepEqual(rejudge(JSON.parse(JSON.stringify(file))), file);
   const fixed = JSON.parse(JSON.stringify(file));
   fixed.turns[0].numerals[0].label.source.fiscal_period = "Q3";
@@ -161,4 +168,23 @@ test("a wrong figure's sentence is the one it sits in", () => {
   const body = "Revenue rose. Margin was 75.1% in Q4 FY2026, up from 73.0%.\n| x | 4.2 |";
   assert.equal(sentenceAt(body, body.indexOf("75.1"), body.indexOf("75.1") + 5), "Margin was 75.1% in Q4 FY2026, up from 73.0%.");
   assert.equal(sentenceAt(body, body.indexOf("4.2"), body.indexOf("4.2") + 3), "| x | 4.2 |");
+});
+
+test("a figures file saved before operands could sum still rejudges, its operands read as one value each", () => {
+  const nvda = (metric: GoldenRef["metric"]) => ref("NVDA", metric, 2026, "Q4");
+  const old = { value: nvda("gross_profit"), over: nvda("revenue") };
+  const saved = {
+    run: "2026-11-25T000000",
+    checkedAgainst: { datasetRevision: "d", asOf: "a" },
+    labeller: { model: "anthropic/claude-opus-5-5", effort: "medium", max_tokens: 32_000 },
+    totals: { figures: 1, matched: 0, derived_ok: 1, wrong: 0, not_checkable: 0 },
+    turns: [{
+      question: "q", turn: 1, message: "m", text: "Gross margin was 74.4%.", labeller: {},
+      numerals: [{ id: "n1", text: "74.4%", start: 17, end: 22, label: { ...derived("n1", "share_of_total", []), operands: [old] }, verdict: "derived_ok" }],
+    }],
+  } as unknown as FiguresFile;
+  const rejudged = rejudge(saved);
+  assert.deepEqual(rejudged.totals, { figures: 1, matched: 0, derived_ok: 1, near: 0, wrong: 0, not_checkable: 0 });
+  const label = rejudged.turns[0]!.numerals[0]!.label as { operands: unknown };
+  assert.deepEqual(label.operands, [{ add: [nvda("gross_profit")], subtract: [], over: [nvda("revenue")] }], "saved in the current shape");
 });
