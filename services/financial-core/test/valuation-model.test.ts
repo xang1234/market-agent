@@ -112,9 +112,9 @@ test("no positive hurdle price when V or B is not positive, and settings outside
     [
       ["outcome", "Base or bear value per share is zero or negative, so there is no positive hurdle price."],
       ["outcome", "Base or bear value per share is zero or negative, so there is no positive hurdle price."],
-      ["outcome", "A hurdle setting is outside its range: margin of safety at least 1, bear-loss limit above 0 and below 1."],
-      ["outcome", "A hurdle setting is outside its range: margin of safety at least 1, bear-loss limit above 0 and below 1."],
-      ["outcome", "A hurdle setting is outside its range: margin of safety at least 1, bear-loss limit above 0 and below 1."],
+      ["outcome", "A hurdle setting is outside its range: margin of safety at least 1, bear-loss limit above 0 and below 1, near band above 0."],
+      ["outcome", "A hurdle setting is outside its range: margin of safety at least 1, bear-loss limit above 0 and below 1, near band above 0."],
+      ["outcome", "A hurdle setting is outside its range: margin of safety at least 1, bear-loss limit above 0 and below 1, near band above 0."],
     ],
   );
 });
@@ -280,4 +280,19 @@ test("rule 3: a price at H declines, naming each move that flips it; a move out 
 test("rule 0: a bear growth at the -100% floor leaves B without a value", () => {
   const result = stance("140", {}, { ...BEAR, growth: q("-1") });
   assert.deepEqual(result.kind === "declined" && result.rule === 0 && result.outcome.outcome, "growth_out_of_range");
+});
+
+test("rule 0: a near band at or below zero is a hurdle setting out of range, not a stance", () => {
+  for (const band of ["0", "-0.5"]) {
+    const result = stance("300", { near_band: q(band) });
+    assert.deepEqual(result.kind === "declined" && result.rule === 0 && result.outcome.outcome, "hurdle_setting_out_of_range", band);
+  }
+});
+
+test("a stability move past the numeric limits is untested, not a crash", () => {
+  // An exit multiple of 10^1001 - 1 computes, but one more 1x does not fit the exact-decimal limits.
+  const huge = rationalFromDecimal({ coefficient: 10n ** 1001n - 1n, scale: 0 })!;
+  const result = callStance(at({ price: q("100") }), { ...BASE, exit_multiple: huge }, { ...BEAR, exit_multiple: huge }, HURDLE);
+  assert.ok(result.kind === "stated", JSON.stringify(result.kind));
+  assert.deepEqual(untested(result), ["exit_multiple up"]);
 });

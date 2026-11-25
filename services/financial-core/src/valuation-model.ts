@@ -29,7 +29,7 @@ export const VALUATION_OUTCOMES = {
   above_domain: { reason_code: null, text: "The price requires free cash flow per share to grow faster than 100% a year." },
   numeric_limit_exceeded: { reason_code: "numeric_limit_exceeded", text: "The calculation exceeds the exact-arithmetic limits, so no number is shown." },
   no_positive_hurdle_price: { reason_code: null, text: "Base or bear value per share is zero or negative, so there is no positive hurdle price." },
-  hurdle_setting_out_of_range: { reason_code: null, text: "A hurdle setting is outside its range: margin of safety at least 1, bear-loss limit above 0 and below 1." },
+  hurdle_setting_out_of_range: { reason_code: null, text: "A hurdle setting is outside its range: margin of safety at least 1, bear-loss limit above 0 and below 1, near band above 0." },
   no_consensus: { reason_code: null, text: "no consensus within 7 days" },
 } as const satisfies Record<string, Readonly<{ reason_code: ReasonCode | null; text: string }>>;
 
@@ -200,18 +200,32 @@ export function callStance(inputs: ValuationInputs, base: ValuationCase, bear: V
   const first = tests(inputs, base, bear, settings);
   if ("kind" in first) return first;
   const step = (value: ExactRational, by: ExactRational, up: boolean) => (up ? addRationals : subtractRationals)(value, by);
-  const moves: ReadonlyArray<readonly [StanceMove, () => Parameters<typeof tests>]> = (["up", "down"] as const).flatMap((direction) => {
+  const moves: ReadonlyArray<readonly [StanceMove, () => Parameters<typeof tests> | null]> = (["up", "down"] as const).flatMap((direction) => {
     const up = direction === "up";
-    const moved = (one: ValuationCase, key: "growth" | "share_change" | "exit_multiple", by: ExactRational) => ({ ...one, [key]: step(one[key], by, up)! });
+    // A move past the numeric limits (a null sum) is untested, as one out of range is.
+    const moved = (one: ValuationCase, key: "growth" | "share_change" | "exit_multiple", by: ExactRational): ValuationCase | null => {
+      const value = step(one[key], by, up);
+      return value === null ? null : { ...one, [key]: value };
+    };
+    const both = (key: "growth" | "share_change" | "exit_multiple", by: ExactRational): Parameters<typeof tests> | null => {
+      const [movedBase, movedBear] = [moved(base, key, by), moved(bear, key, by)];
+      return movedBase === null || movedBear === null ? null : [inputs, movedBase, movedBear, settings];
+    };
+    const requiredReturn = (): Parameters<typeof tests> | null => {
+      const value = step(inputs.required_return, POINT, up);
+      return value === null ? null : [{ ...inputs, required_return: value }, base, bear, settings];
+    };
     return [
-      [{ input: "growth", direction }, () => [inputs, moved(base, "growth", POINT), moved(bear, "growth", POINT), settings]],
-      [{ input: "share_change", direction }, () => [inputs, moved(base, "share_change", POINT), moved(bear, "share_change", POINT), settings]],
-      [{ input: "required_return", direction }, () => [{ ...inputs, required_return: step(inputs.required_return, POINT, up)! }, base, bear, settings]],
-      [{ input: "exit_multiple", direction }, () => [inputs, moved(base, "exit_multiple", ONE), moved(bear, "exit_multiple", ONE), settings]],
+      [{ input: "growth", direction }, () => both("growth", POINT)],
+      [{ input: "share_change", direction }, () => both("share_change", POINT)],
+      [{ input: "required_return", direction }, requiredReturn],
+      [{ input: "exit_multiple", direction }, () => both("exit_multiple", ONE)],
     ] as const;
   });
   const results = moves.map(([move, argumentsOf]): StanceMoveResult => {
-    const [movedInputs, movedBase, movedBear] = argumentsOf();
+    const args = argumentsOf();
+    if (args === null) return { move, result: null };
+    const [movedInputs, movedBase, movedBear] = args;
     // A growth or share change at or below -100%, a required return at or below 0, or an exit multiple at or below 0 leaves its range.
     const outOfRange = [movedBase.growth, movedBear.growth, movedBase.share_change, movedBear.share_change].some((value) => compareRationals(value, MINUS_ONE) <= 0)
       || rationalSign(movedInputs.required_return) <= 0 || rationalSign(movedBase.exit_multiple) <= 0 || rationalSign(movedBear.exit_multiple) <= 0;
@@ -232,6 +246,7 @@ function tests(inputs: ValuationInputs, base: ValuationCase, bear: ValuationCase
   if (hurdle.kind === "outcome") {
     return hurdle.outcome === "no_positive_hurdle_price" ? { kind: "declined", rule: 2, base: v.value, bear: b.value } : { kind: "declined", rule: 0, outcome: hurdle };
   }
+  if (rationalSign(settings.near_band) <= 0) return { kind: "declined", rule: 0, outcome: outcome("hurdle_setting_out_of_range") };
   const near = mul(hurdle.value, add(ONE, settings.near_band));
   if (near === null) return { kind: "declined", rule: 0, outcome: outcome("numeric_limit_exceeded") };
   const rule = compareRationals(inputs.price, hurdle.value) <= 0 ? 4 : compareRationals(inputs.price, near) <= 0 ? 5 : 6;
