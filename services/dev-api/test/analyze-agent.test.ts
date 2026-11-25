@@ -6,6 +6,8 @@ import { dockerAvailable, registerLifoCleanup } from "../../../db/test/docker-pg
 import { createMemoRun, memoDatabase, playbook } from "../../analyze/test/financial-fixtures.ts";
 import { meteredModels, statesStance } from "../../chat/src/analyst-agent.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
+import type { AnalyzeRunDetail } from "../../../web/src/analyze/runHistory.ts";
+import { analyzeThesisHandoff } from "../../../web/src/analyze/thesisHandoff.ts";
 import { LlmClientError, type LlmChatClient, type LlmChatRequest, type LlmToolCall } from "../../llm/src/router.ts";
 import { analyzeAgentWorkflow } from "../src/analyze-agent.ts";
 import type { DevApiAnalyzeWorkflowInput, DevApiAnalyzeWorkflowResult } from "../src/analyze-adapter.ts";
@@ -32,6 +34,8 @@ type Script = Readonly<{
   themes?: boolean;
   // The risks reading finds figures and no risk factor.
   risksWithoutClaims?: boolean;
+  // false: the answer quotes no claim.
+  quotes?: boolean;
   verdict?: "entailed" | "unsupported";
   onCall?: (kind: "read" | "answer" | "judge", certified: boolean) => void;
 }>;
@@ -76,7 +80,7 @@ function scriptedModel(calls: string[], script: Script = {}): () => LlmChatClien
     const figures = packet.figures.filter((figure) => figure.gap === undefined).map((figure) => figure.id);
     script.onCall?.("answer", figures.length > 0);
     const observed = figures.length > 0 ? [{ kind: "observation", text: "Revenue was reported.", evidence: figures }] : [];
-    const quoted = script.themes
+    const quoted = script.quotes === false ? [] : script.themes
       ? [{ kind: "management_attribution", text: "The 10-K says so.", evidence: packet.claims.map((claim) => claim.id) }]
       : packet.claims.map((claim) => ({ kind: "management_attribution", text: "The 10-K says so.", evidence: [claim.id] }));
     const theme = script.themes ? [observed.length] : [0];
@@ -321,7 +325,19 @@ test("the analyst agent writes an investment memo's sections from stored sources
     assert.deepEqual(await shownWhen("unsupported"), AGENT_SECTIONS.map(() => [["unverified", NEUTRAL]]), "labelled unverified, and still no stance");
   });
 
-  await t.test("a theme cites the claims it rests on, sealed with the memo, and shows unverified after its quotes when the judge does not entail it", async () => {
+  await t.test("a thesis whose only inference is unverified keeps its certified figures, so it can still be monitored", async () => {
+    const VIEW = "Demand looks durable.";
+    const judged = adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps({ ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" }, scriptedModel([], { inferences: [VIEW], verdict: "unsupported", quotes: false }))));
+    const { run_id } = await judged.analyze.createRun({ userId: IDS.owner, body: memoBody });
+    const run = await judged.analyze.getRun({ userId: IDS.owner, runId: run_id }) as unknown as AnalyzeRunDetail;
+    const thesis = sectionsOf(run.blocks).find((section) => section.data_ref.params?.playbook_section_id === "investment_thesis")!;
+    const commentary = thesis.children.flatMap((child) => (child.commentary ?? []) as Array<{ kind: string; text?: string }>);
+    assert.deepEqual(commentary.map((part) => part.kind), ["figures", "unverified"], "the figures the view rests on still show beside it");
+    const offer = analyzeThesisHandoff(run);
+    assert.deepEqual(offer?.kind === "handoff" ? offer.handoff.thesis : offer, "AAA's revenue was $383.0B in FY2023 (ended Dec 2023).", "the certified figure is what is monitored, not the unverified view");
+  });
+
+  await t.test("a theme cites the claims it rests on, sealed with the memo, and its quotes stand on their own beside an unverified view when the judge does not entail it", async () => {
     const THEME = "Industrial demand: a downturn would cut its sales.";
     const risksWhen = async (verdict: "entailed" | "unsupported") => {
       const judged = adaptersOn(analyzeAgentWorkflow(analyzeAgentDeps({ ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" }, scriptedModel([], { inferences: [THEME], themes: true, verdict }))));
