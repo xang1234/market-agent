@@ -26,10 +26,12 @@ type Spec = {
   metric?: string;
   value?: string;
   end?: string;
+  /** Ingestion records a balance's context only from a 10-K. */
+  form?: "10-K" | "10-Q";
 };
 
 function commercialPaper({
-  relation = "original", fiscalYear = 2026, publishedLocalDate = "2026-11-03", metric = "commercial_paper", value = "1997000000", end = `${fiscalYear}-09-26`,
+  relation = "original", fiscalYear = 2026, publishedLocalDate = "2026-11-03", metric = "commercial_paper", value = "1997000000", end = `${fiscalYear}-09-26`, form = "10-K",
 }: Spec = {}): InputCandidate {
   const id = `00000000-0000-4000-8000-${relation === "original" ? "000000000001" : "000000000002"}`;
   return {
@@ -49,7 +51,7 @@ function commercialPaper({
     observed_at: "2026-11-09T15:00:00.000Z",
     supersedes: relation === "original" ? null : "00000000-0000-4000-8000-0000000000ff",
     superseded_by: null,
-    context: {
+    context: form === "10-Q" ? null : {
       period_type: "instant",
       dimension_scope: "consolidated",
       dimension_members: [],
@@ -93,11 +95,13 @@ test("a balance no filing made public by the cutoff blocks both figures", () => 
   assert.deepEqual(figures([commercialPaper({ publishedLocalDate: "2026-12-01" })]), { reason: "ineligible_input", net_cash: BLOCKED, total_debt: BLOCKED });
 });
 
-test("a balance no filing reported for its fiscal year or the year before is left out of both figures", () => {
+test("a balance with no candidate for its fiscal year, which no 10-K reported the year before, is left out of both figures", () => {
   // 80.111B of debt less 1.997B of commercial paper, and 56.824B of net cash plus it.
   const absent = { reason: "missing_input", net_cash: "58821000000", total_debt: "78114000000" };
   assert.deepEqual(figures([]), absent);
   assert.deepEqual(figures([commercialPaper({ fiscalYear: 2024 })]), absent);
+  // A 10-Q's balance is stored labelled FY of its fiscal year, without a context.
+  assert.deepEqual(figures([commercialPaper({ fiscalYear: 2025, form: "10-Q" })]), absent);
 });
 
 test("a balance the 10-K for the year before reported, with none for its fiscal year, blocks both figures (#792)", () => {

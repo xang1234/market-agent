@@ -125,12 +125,19 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
     }
   };
 
-  /** Runs `body` with short-term borrowings, which AAPL's 10-K leaves out, stored for each period: a copy of its commercial paper fact. */
-  const withBorrowings = async <T>(periods: ReadonlyArray<readonly [fiscalYear: number, fiscalPeriod: string, periodEnd: string]>, body: () => Promise<T>) => {
+  /**
+   * Runs `body` with short-term borrowings, which AAPL's 10-K leaves out, stored for each period: a copy of its commercial
+   * paper fact. Ingestion records a balance's context only from a 10-K, so `form` "10-K" copies its context too.
+   */
+  const withBorrowings = async <T>(
+    periods: ReadonlyArray<readonly [fiscalYear: number, fiscalPeriod: string, periodEnd: string]>,
+    body: () => Promise<T>,
+    form: "10-K" | "10-Q" = "10-Q",
+  ) => {
     const ids: string[] = [];
     try {
       for (const [fiscalYear, fiscalPeriod, periodEnd] of periods) {
-        ids.push((await db.query<{ fact_id: string }>(
+        const id = (await db.query<{ fact_id: string }>(
           `insert into facts (subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
                               value_num, value_text, unit, currency, scale, as_of, reported_at, observed_at, source_id, method,
                               adjustment_basis, definition_version, verification_status, freshness_class, coverage_level,
@@ -141,7 +148,16 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
                   f.freshness_class, f.coverage_level, f.quality_flags, f.entitlement_channels, f.confidence
              from facts f join metrics m on m.metric_id = f.metric_id
             where m.metric_key = 'commercial_paper' and f.subject_id = $4
-           returning fact_id::text`, [periodEnd, fiscalYear, fiscalPeriod, AAPL])).rows[0]!.fact_id);
+           returning fact_id::text`, [periodEnd, fiscalYear, fiscalPeriod, AAPL])).rows[0]!.fact_id;
+        ids.push(id);
+        if (form !== "10-K") continue;
+        await db.query(
+          `insert into fact_financial_contexts (fact_id, context_version, period_type, dimension_scope, dimension_members, reporting_basis,
+                                                adjustment_basis, share_basis, fiscal_calendar_version, disclosure_relation, source_context_ref, as_filed_on)
+           select $1, c.context_version, c.period_type, c.dimension_scope, c.dimension_members, c.reporting_basis, c.adjustment_basis,
+                  c.share_basis, c.fiscal_calendar_version, c.disclosure_relation, c.source_context_ref, c.as_filed_on
+             from fact_financial_contexts c join facts f on f.fact_id = c.fact_id join metrics m on m.metric_id = f.metric_id
+            where m.metric_key = 'commercial_paper' and f.subject_id = $2`, [id, AAPL]);
       }
       return await body();
     } finally {
@@ -179,17 +195,25 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
     assert.ok(outcome.ok, JSON.stringify(!outcome.ok && outcome.failures));
   });
 
-  await t.test("short-term borrowings stored for FY2025 leave FY2026's absence unverified, so no sum leaves them out (#792)", async () => {
+  await t.test("short-term borrowings a 10-K stored for FY2025 leave FY2026's absence unverified, so no sum leaves them out (#792)", async () => {
+    for (const plan of [aaplBalancePlan(), aaplBalancePlan(FY2026)]) {
+      const { gaps, outcome } = await withBorrowings([[2025, "FY", "2025-09-27"]], () => seal(createEvidenceFinancialPort, plan), "10-K");
+      assert.deepEqual(gaps, ["debt_securities_current:missing_input", "short_term_borrowings:absence_unverified", "short_term_investments:missing_input"]);
+      assert.ok(outcome.ok, JSON.stringify(!outcome.ok && outcome.failures));
+    }
+  });
+
+  await t.test("short-term borrowings only a 10-Q stored for FY2025, with no context, leave FY2026's gap proven", async () => {
     for (const plan of [aaplBalancePlan(), aaplBalancePlan(FY2026)]) {
       const { gaps, outcome } = await withBorrowings([[2025, "FY", "2025-09-27"]], () => seal(createEvidenceFinancialPort, plan));
-      assert.deepEqual(gaps, ["debt_securities_current:missing_input", "short_term_borrowings:absence_unverified", "short_term_investments:missing_input"]);
+      assert.deepEqual(gaps, TOLERATED);
       assert.ok(outcome.ok, JSON.stringify(!outcome.ok && outcome.failures));
     }
   });
 
   await t.test("a missing_input row for short-term borrowings the FY2025 10-K reported is rejected (#792)", async () => {
     for (const plan of [aaplBalancePlan(), aaplBalancePlan(FY2026)]) {
-      const { gaps, outcome } = await withBorrowings([[2025, "FY", "2025-09-27"]], () => seal(blindToYear("short_term_borrowings", 2025), plan));
+      const { gaps, outcome } = await withBorrowings([[2025, "FY", "2025-09-27"]], () => seal(blindToYear("short_term_borrowings", 2025), plan), "10-K");
       assert.deepEqual(gaps, TOLERATED);
       assert.deepEqual(!outcome.ok && outcome.failures.map((failure) => [failure.reason_code, failure.details.input_slot, failure.details.field]), [
         ["financial_binding_mismatch", "short_term_borrowings", "gap_reason"],
