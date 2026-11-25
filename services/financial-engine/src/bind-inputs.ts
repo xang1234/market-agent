@@ -11,6 +11,7 @@ import {
   BOUND_PRICE_INPUT_SCHEMA_VERSION,
   ExecutionIntegrityError,
   hashCanonical,
+  isOptionalBalance,
   resolveMetricDefinition,
   validateBoundInput,
   type BoundFactInputV1,
@@ -179,9 +180,10 @@ async function readSlot(
   return { node, status: "read", candidates: page.candidates, truncated: page.truncated };
 }
 
-// The fiscal period a slot's read asks for, or null for every period. A share count is current only while it is the latest filing's, so every filing's is read.
+// The fiscal period a slot's read asks for, or null for every period. A share count is current only while it is the latest filing's,
+// and an optional balance is absent only when the year before did not report it either (rule 12), so every filing's is read.
 function requestedPeriod(node: ReportedMetricNode): Extract<ReportedMetricNode["period"], { kind: "fiscal_period" }> | null {
-  return node.period.kind === "fiscal_period" && !isShareCount(node.metric_key) ? node.period : null;
+  return node.period.kind === "fiscal_period" && !isShareCount(node.metric_key) && !isOptionalBalance(node.metric_key) ? node.period : null;
 }
 
 /**

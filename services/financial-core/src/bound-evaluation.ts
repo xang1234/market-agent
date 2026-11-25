@@ -236,6 +236,8 @@ function bindingGapExplanation(reason: ReasonCode): string {
       return "This figure comes only from a kind of source this request may not use.";
     case "ineligible_input":
       return "A filing reports this figure, but none of its reports is usable here: none was public before the knowledge cutoff, or it is only a restatement and the original was asked for.";
+    case "absence_unverified":
+      return "No filing in the store reports this balance for the period, though the 10-K for the year before did, so the store may have missed it; it is not taken as absent.";
     case "incompatible_period":
       return "The period filed under this fiscal label does not end the requested number of years or quarters before the latest one, so it is not the period asked for.";
     default:

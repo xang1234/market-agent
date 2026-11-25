@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ReportedMetricNode } from "../../financial-core/src/index.ts";
+import type { ReasonCode, ReportedMetricNode } from "../../financial-core/src/index.ts";
 import { aapl, FY2026, gapOf, publish, valueOf } from "../../financial-core/test/balance-fixtures.ts";
 import type { InputCandidate } from "../src/ports.ts";
 import { selectInput, type SelectionPolicy } from "../src/select-inputs.ts";
@@ -110,13 +110,15 @@ test("a balance the 10-K for the year before reported, with none for its fiscal 
 // 10-K tagged 34.621B MarketableSecuritiesCurrent and zero commercial paper,
 // and its FY2026 10-K tags no commercial paper.
 test("NVDA FY2026: lines its FY2025 10-K reported block both figures, not a net cash of 2.137B (#792)", () => {
-  const reasons = Object.fromEntries([
+  const reasons: Record<string, ReasonCode> = {};
+  for (const candidate of [
     commercialPaper({ metric: "marketable_securities_current", value: "34621000000", fiscalYear: 2025, end: "2025-01-26" }),
     commercialPaper({ metric: "commercial_paper", value: "0", fiscalYear: 2025, end: "2025-01-26" }),
-  ].map((candidate) => {
+  ]) {
     const selection = selectInput(balanceNode(candidate.metric_key), [candidate], POLICY);
-    return [candidate.metric_key, selection.status === "gap" ? selection.reason_code : "selected"];
-  }));
+    assert.ok(selection.status === "gap", candidate.metric_key);
+    reasons[candidate.metric_key] = selection.reason_code;
+  }
   assert.deepEqual(reasons, { marketable_securities_current: "absence_unverified", commercial_paper: "absence_unverified" });
   // Cash and equivalents 10.605B, long-term debt 0.999B current and 7.469B noncurrent.
   const results = publish(aapl(reasons, { cash_and_equivalents: "10605000000", long_term_debt_current: "999000000", long_term_debt_noncurrent: "7469000000" }));

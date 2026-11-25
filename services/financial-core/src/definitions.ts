@@ -205,6 +205,27 @@ export const BALANCE_SUM_SIDES: Readonly<Record<BalanceSumKind, Readonly<Partial
   total_debt: { debt: "add" },
 });
 
+/**
+ * Whether a balance is unverified absent at a fiscal year (#792): net cash and
+ * total debt leave out an optional balance no filing reports, but the store
+ * misses a line a 10-K tags with a concept it does not read, so one the 10-K
+ * for the year before reported is never taken as absent. A slot with no
+ * candidate has no end date, so the year before is found by its fiscal label;
+ * a mislabel can only add a gap, never a sum.
+ */
+export function absenceUnverified(
+  metricKey: MetricKey,
+  period: Readonly<{ fiscal_year: number; fiscal_period: string }>,
+  reported: ReadonlyArray<Readonly<{ fiscal_year: number | null; fiscal_period: string | null }>>,
+): boolean {
+  return period.fiscal_period === "FY" && isOptionalBalance(metricKey) &&
+    reported.some((prior) => prior.fiscal_year === period.fiscal_year - 1 && prior.fiscal_period === "FY");
+}
+
+export function isOptionalBalance(metricKey: MetricKey): boolean {
+  return BALANCE_COMPONENTS.some((component) => component.metric_key === metricKey && !component.required);
+}
+
 /** A balance sum's components, in table order: its plan node's dependency order. */
 export function balanceComponents(kind: BalanceSumKind): ReadonlyArray<BalanceComponent> {
   return BALANCE_COMPONENTS.filter((component) => Object.hasOwn(BALANCE_SUM_SIDES[kind], component.side));

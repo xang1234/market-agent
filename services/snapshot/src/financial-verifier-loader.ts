@@ -14,7 +14,7 @@
 // imports the engine.
 
 import { listFinancialInputCandidates } from "../../evidence/src/financial-input-repo.ts";
-import { OPERATION_REGISTRY, operationDependencies, unitClosures, validateFinancialPlan, type FinancialPlan } from "../../financial-core/src/index.ts";
+import { isOptionalBalance, OPERATION_REGISTRY, operationDependencies, unitClosures, validateFinancialPlan, type FinancialPlan } from "../../financial-core/src/index.ts";
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
 import { isDatabaseError } from "../../shared/src/database-error.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
@@ -306,7 +306,8 @@ async function readGapCandidates(db: QueryExecutor, plan: FinancialPlan, missing
   const reads: LoadedGapCandidates[] = [];
   for (const node of operations) {
     if (node.operation !== "reported_metric" || !missing.has(node.node_id)) continue;
-    const period = node.period.kind === "fiscal_period" ? node.period : null;
+    // An optional balance's year before decides whether it is absent (binding's rule 12), so every year is read.
+    const period = node.period.kind === "fiscal_period" && !isOptionalBalance(node.metric_key) ? node.period : null;
     const page = await listFinancialInputCandidates(db, {
       user_id: owner,
       channel: "app",
