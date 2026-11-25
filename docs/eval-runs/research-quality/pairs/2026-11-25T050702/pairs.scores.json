@@ -1,0 +1,328 @@
+{
+  "pairing": "2026-11-25T050702",
+  "pairs": {
+    "missing-cash-flow": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 2,
+        "decision_useful": "n/a"
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 2,
+        "decision_useful": "n/a"
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Both answers clearly state that AMD's operating cash flow, capex, and free cash flow are unavailable and do not pass off net income as FCF, with B providing accurate annual, quarterly, and TTM income-statement context."
+    },
+    "missing-segments": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 1,
+        "decision_useful": "n/a"
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 2,
+        "decision_useful": "n/a"
+      },
+      "labels": {
+        "A": [
+          "unstated_gap"
+        ],
+        "B": []
+      },
+      "notes": "B plainly states that AMD segment revenue is missing from the data on file and lists verified consolidated revenue; A returns only consolidated FY2025 revenue ($34.7B) with a generic no-10-K note without addressing the missing segment breakdown."
+    },
+    "follow-up-memory": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 1,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 1
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 1,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 2
+      },
+      "labels": {
+        "A": [
+          "weak_conclusion"
+        ],
+        "B": []
+      },
+      "notes": "B aligns overlapping Q4 quarters across all three turns, decomposes the ~50-point operating margin gap into gross margin (~20 pts) and opex (~30 pts), and contrasts AMD's filed $800M charge with NVDA's unexplained Q1 dip (lacking source links and loosely calling Jan vs. Jun 'seven months older'); A links all verified figures and flags the fiscal-year mismatch and AMD's NI > OI caveat, but leaves turn 3 thin on growth and margin drivers."
+    },
+    "single-latest-quarter": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 1,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 1,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 1
+      },
+      "labels": {
+        "A": [],
+        "B": [
+          "weak_conclusion"
+        ]
+      },
+      "notes": "A delivers full Q4 FY2026 QoQ and YoY comparisons, margin recovery from Q1, the 88.9% Data Center concentration, and data-staleness/valuation gaps (without source links); B links Q4/FY2026 figures and YTD return to sources and flags January staleness, but omits Q3 FY2026, QoQ direction, and segment mix."
+    },
+    "margin-trend-loss-quarter": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 1,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 1,
+        "figures_match_sources": 2,
+        "conclusions_justified": 1,
+        "counterarguments": 1,
+        "no_invented_numbers": 2,
+        "decision_useful": 0
+      },
+      "labels": {
+        "A": [],
+        "B": [
+          "wrong_period",
+          "weak_conclusion"
+        ]
+      },
+      "notes": "A presents all eight quarters in order, highlights Q2 FY2025's -$134M operating loss with AMD's $800M MI308 attribution and notes gross margin drove most of the expansion (without source links); B links FY2025 and Q3\u2013Q4 FY2025 margins to sources and infers earlier weakness, but hits its read limit and misses six quarters including the Q2 FY2025 loss."
+    },
+    "cause-in-evidence": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 1,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 0,
+        "counterarguments": 1,
+        "no_invented_numbers": 2,
+        "decision_useful": 0
+      },
+      "labels": {
+        "A": [],
+        "B": [
+          "weak_conclusion"
+        ]
+      },
+      "notes": "A cites and dates AMD's Q2 FY2025 8-K Exhibit 99.1 attribution (~$800M MI308 export-control charges, ~10.4% of revenue), verifies the gross margin drop and Q3 rebound, and flags line-item assumptions; B links its Q2 numbers to sources but misses the filed explanation and claims the evidence does not say why."
+    },
+    "ticker-page-compare": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 1,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 1
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 1,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 2
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "B explicitly flags the fiscal-calendar mismatch and NVDA's two missing recent quarters while adding growth rates, AAPL's TTM totals and seasonality, NVDA's 89% Data Center share, and valuation gaps (without source links); A links verified annual figures and contrasts margins with AAPL's larger operating income, but never calls out the Sep/Jan fiscal-calendar mismatch."
+    },
+    "peer-three": {
+      "A": {
+        "correct_companies": 0,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 1,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 0
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 1,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 1
+      },
+      "labels": {
+        "A": [
+          "wrong_subject",
+          "weak_conclusion"
+        ],
+        "B": []
+      },
+      "notes": "B compares all three companies across annual, quarterly, and TTM bases while calling out calendar staleness, NVDA's Q1 dip, AMD's $800M charge, and AAPL's seasonality (without source links or noting AAPL's different industry); A links verified single-quarter figures and notes the quarter mismatch and scale-vs-margin trade-off, but omits AMD completely."
+    },
+    "peer-two": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 1,
+        "figures_match_sources": 2,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 2,
+        "decision_useful": 0
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 1,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 2
+      },
+      "labels": {
+        "A": [
+          "weak_conclusion",
+          "missing_counterpoint"
+        ],
+        "B": []
+      },
+      "notes": "B compares annual, quarterly, TTM, and price trends while flagging reporting-date staleness, AMD's $800M base effect, NVDA's Q1 dip, and the quote/bar discrepancy (without source links); A links verified annual and YTD price figures to sources but hits its model-call limit before adding any synthesis, calendar caveat, or counterpoint."
+    },
+    "segment-drill-down": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 1,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 1,
+        "figures_match_sources": 2,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1,
+        "decision_useful": 0
+      },
+      "labels": {
+        "A": [],
+        "B": [
+          "weak_conclusion",
+          "missing_counterpoint",
+          "unstated_gap"
+        ]
+      },
+      "notes": "A gives the complete Q4 FY2026 segment breakdown showing 88.9% Data Center dominance (larger than Q2 FY2026 total company revenue) and plainly notes missing prior-period and profitability detail (without source links); B returns only consolidated FY2026 revenue ($209.9B) and misses the seeded Q4 segment data without stating the gap."
+    },
+    "what-changed-gross-margin": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 1,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 0
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 1,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 2
+      },
+      "labels": {
+        "A": [
+          "weak_conclusion"
+        ],
+        "B": []
+      },
+      "notes": "B gives the full 8-quarter gross margin series showing the 12.5-point Q1 FY2026 drop and Q2\u2013Q4 recovery while refusing to speculate or extrapolate from AMD's filing (without source links); A links Q1/Q4/Q1 figures to sources and notes YoY gross profit dollars still grew, but stops at Q1 FY2026 and omits the recovery."
+    },
+    "fiscal-year-trap": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 1,
+        "no_invented_numbers": 2,
+        "decision_useful": 1
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 1,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2,
+        "decision_useful": 2
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Both flag the Sep/Jan fiscal-year mismatch, with A linking both figures to sources; B quantifies the eight-month gap and NVDA's +61% FY2026 surge to $209.9B (noting AAPL FY2025 is still ~2x NVDA FY2026), though it slips once by asserting NVDA FY2025 grew over FY2024 without FY2024 on file."
+    }
+  }
+}

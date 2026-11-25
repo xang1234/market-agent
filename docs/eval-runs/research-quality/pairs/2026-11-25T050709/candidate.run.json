@@ -1,0 +1,573 @@
+{
+  "run": "2026-11-25T044649",
+  "model": "anthropic/claude-opus-5-5",
+  "blind": true,
+  "arm": "bare",
+  "request": {
+    "endpoint": "https://api.anthropic.com/v1/messages",
+    "anthropic_version": "2026-10-21",
+    "model": "claude-opus-5-5",
+    "max_tokens": 8192,
+    "effort": null,
+    "stream": true,
+    "not_sent": [
+      "thinking",
+      "output_config",
+      "temperature",
+      "top_p",
+      "top_k",
+      "tools",
+      "tool_choice",
+      "metadata"
+    ],
+    "data_brief_sha256": "1bf84daa65821fd1b010b33c92a6ee044cf71db7f3d851912b8e16a8ce80811d",
+    "retry": "once on 429, 5xx, overloaded or a dropped connection"
+  },
+  "provenance": {
+    "revision": "defab76cc1f234239e7f46aa4357d80a5393c43b",
+    "runnerRevision": "defab76cc1f234239e7f46aa4357d80a5393c43b",
+    "dirty": false,
+    "questionSetDigest": "2a1d31d1c7879885029478e0bf8ac208ed14066fced0c39c3be1ba34ec2b5840",
+    "datasetRevision": "9714d6e9321fd22f63bc05fb4a5353b04ab697df274f60df9fdef95bb2e876d6"
+  },
+  "planned": [
+    "single-latest-quarter",
+    "margin-trend-loss-quarter",
+    "what-changed-gross-margin",
+    "cause-in-evidence",
+    "peer-two",
+    "peer-three",
+    "fiscal-year-trap",
+    "segment-drill-down",
+    "missing-segments",
+    "missing-cash-flow",
+    "follow-up-memory",
+    "ticker-page-compare"
+  ],
+  "complete": true,
+  "questions": [
+    {
+      "question": {
+        "id": "single-latest-quarter",
+        "kind": "single company",
+        "turns": [
+          {
+            "message": "Analyze NVDA's latest quarter."
+          }
+        ],
+        "expect": "Q4 FY2026 (ended 2026-01-25): revenue, gross/operating/net income, margins, with the quarter-over-quarter direction. NVDA only."
+      },
+      "threadId": "",
+      "turns": [
+        {
+          "message": "Analyze NVDA's latest quarter.",
+          "outcome": "completed",
+          "blocks": [
+            {
+              "kind": "rich_text",
+              "segments": [
+                {
+                  "type": "text",
+                  "text": "# NVDA: Q4 FY2026 (quarter ended 2026-01-25)\n\n**Bottom line:** This was a strong quarter. Revenue grew 58% year on year to $62.1B, operating margin was about 65%, and margins widened from Q3. Almost all of it came from Data Center (89% of revenue). One important caveat: this quarter ended seven months ago, and nothing newer is on file.\n\n## Headline numbers\n\n| | Q4 FY26 | Q3 FY26 | Q4 FY25 | QoQ | YoY |\n|---|---|---|---|---|---|\n| Revenue | 62,100 | 57,006 | 39,331 | +8.9% | +57.9% |\n| Gross profit | 46,200 | 41,849 | 28,723 | +10.4% | +60.8% |\n| Operating income | 40,300 | 36,010 | 24,034 | +11.9% | +67.7% |\n| Net income | 35,400 | 31,910 | 22,091 | +10.9% | +60.2% |\n\nUSD millions.\n\n## Margins\n\n| | Q4 FY26 | Q3 FY26 | Q2 FY26 | Q1 FY26 | Q4 FY25 |\n|---|---|---|---|---|---|\n| Gross | 74.4% | 73.4% | 72.4% | 60.5% | 73.0% |\n| Operating | 64.9% | 63.2% | 60.8% | 49.1% | 61.1% |\n| Net | 57.0% | 56.0% | 56.5% | 42.6% | 56.2% |\n\n- **Gross margin has recovered for three quarters in a row** since the Q1 FY26 dip to 60.5%. It is still below early FY25 levels (78.4% in Q1 FY25, 75.1% in Q2 FY25). The data on file does not explain the Q1 FY26 dip. The only filed explanation in the set covers AMD's export-control charges, and I won't attribute that to NVDA.\n- **Operating leverage is clear.** Implied operating expenses (gross profit minus operating income) were about $5.9B. That is roughly flat versus Q3 (~$5.8B) and fell to 9.5% of revenue from 10.2%. Operating income grew faster than revenue both sequentially and year on year.\n\n## Mix\n\n| Segment | Revenue | Share |\n|---|---|---|\n| Data Center | 55,200 | 88.9% |\n| Gaming | 4,300 | 6.9% |\n| OEM & Other | 1,050 | 1.7% |\n| Professional Visualization | 900 | 1.4% |\n| Automotive | 650 | 1.0% |\n\nOnly this quarter's segment split is on file, so I can't show segment growth rates. The concentration is the main point: the investment case is a Data Center case.\n\n## Full-year context\n\nFY2026 revenue was $209.9B, up 60.9% from $130.5B. Net income was $112.5B, up 54.4%. The four quarters add up exactly to the annual figures. Sequential revenue growth sped up in the second half (+22% in Q3, +9% in Q4) after a slow +6% in Q2.\n\n## Stock\n\n- The last price is $178.40, versus about $169.6 around the quarter-end date. That is roughly +5% since then, and +6.6% since Dec 1 ($167.35).\n- **Valuation can't be computed.** There is no share count, so I have no market cap or P/E.\n- **Data quality flags:**\n  - The quote's \"previous close\" of $176.10 doesn't match the 8/28 bar close of $178.34.\n  - The daily bars rise in an almost perfectly linear way, include holiday dates (12/25, 1/1), and show unusually low volumes.\n  - I'd verify the price data before relying on it.\n\n## Gaps to close before acting\n\n- **No Q1 FY27 (Apr 2026) or Q2 FY27 (Jul 2026) results on file.** Both should have been reported by now, so this analysis is likely stale by two prints.\n- **Also missing:** guidance, balance sheet and cash flow data, segment history, and any management commentary for NVDA."
+                }
+              ]
+            }
+          ],
+          "elapsedMs": 24716,
+          "answeredBy": "anthropic/claude-opus-5-5",
+          "usage": {
+            "input_tokens": 28304,
+            "output_tokens": 2710
+          },
+          "stopReason": "end_turn",
+          "thinkingBlocks": 1
+        }
+      ]
+    },
+    {
+      "question": {
+        "id": "margin-trend-loss-quarter",
+        "kind": "margin trend",
+        "turns": [
+          {
+            "message": "How have AMD's operating margins trended over the last eight quarters?"
+          }
+        ],
+        "expect": "Eight quarters Q3 FY2024–Q2 FY2026 in order. Must not hide Q2 FY2025's operating loss (-$134M) or describe the trend as uninterrupted. AMD's filed explanation of that quarter is in evidence (#282): citing it as management's attribution is good; an uncited cause is not."
+      },
+      "threadId": "",
+      "turns": [
+        {
+          "message": "How have AMD's operating margins trended over the last eight quarters?",
+          "outcome": "completed",
+          "blocks": [
+            {
+              "kind": "rich_text",
+              "segments": [
+                {
+                  "type": "text",
+                  "text": "# AMD operating margins: the last eight quarters\n\nAMD's operating margin moved up from about 11% to about 14% over the last eight quarters. Q2 FY2025 broke the pattern with a one-off charge. Since Q3 FY2025, margins have held near 14% and crept up only slightly.\n\n| Quarter | Revenue ($M) | Operating income ($M) | Operating margin | Gross margin |\n|---|---|---|---|---|\n| Q3 FY2024 | 6,819 | 724 | 10.6% | 50.1% |\n| Q4 FY2024 | 7,658 | 871 | 11.4% | 51.0% |\n| Q1 FY2025 | 7,438 | 806 | 10.8% | 50.2% |\n| Q2 FY2025 | 7,685 | -134 | -1.7% | 39.8% |\n| Q3 FY2025 | 9,246 | 1,270 | 13.7% | 53.6% |\n| Q4 FY2025 | 10,300 | 1,450 | 14.1% | 54.0% |\n| Q1 FY2026 | 10,700 | 1,520 | 14.2% | 54.0% |\n| Q2 FY2026 | 11,200 | 1,610 | 14.4% | 54.0% |\n\n**Q2 FY2025.** AMD's earnings release says US export controls on its MI308 data center GPUs led to about $800M of inventory and related charges that quarter. Adding back roughly $800M is my own rough adjustment, and it assumes the full charge sat above the operating line, which the filing doesn't break out. On that basis:\n- Operating income would have been about $666M, a margin of about 8.7%.\n- Gross margin would have been about 50.2%, in line with the prior three quarters.\n\nSo underlying profitability that quarter was a bit soft, not negative.\n\n**What drove the step-up.** Operating expenses, taken as gross profit minus operating income, have run at about 39.5–40% of revenue in every quarter except Q2 FY2025. That includes the most recent quarter, at 39.6%. The roughly 3-point gain in operating margin therefore mirrors the move in gross margin, from about 50–51% to about 54%. It is not opex leverage: AMD has grown spending roughly in line with revenue, which rose from $6.8B to $11.2B a quarter.\n\n**Recent trajectory.** Gross margin has been flat at about 54% for three straight quarters. Operating margin has edged up only about 0.7 points across the last four quarters, from 13.7% to 14.4%. Further expansion would need either another gross margin gain or opex growing more slowly than revenue. Neither shows up in the reported figures yet.\n\n**Limits of the data.** I have no segment breakdown, guidance, or opex line items (R&D, SG&A, amortization) for AMD. That means I can't say which products drove the gross margin improvement or how much of opex is non-cash amortization."
+                }
+              ]
+            }
+          ],
+          "elapsedMs": 15649,
+          "answeredBy": "anthropic/claude-opus-5-5",
+          "usage": {
+            "input_tokens": 28310,
+            "output_tokens": 1732
+          },
+          "stopReason": "end_turn",
+          "thinkingBlocks": 1
+        }
+      ]
+    },
+    {
+      "question": {
+        "id": "what-changed-gross-margin",
+        "kind": "what changed",
+        "turns": [
+          {
+            "message": "What changed in NVDA's gross margin in Q1 fiscal 2026?"
+          }
+        ],
+        "expect": "Gross margin fell sharply in Q1 FY2026 (~60.5% vs ~73% the quarter before) and recovered after. The cause is not in the data: it must say so, not invent one."
+      },
+      "threadId": "",
+      "turns": [
+        {
+          "message": "What changed in NVDA's gross margin in Q1 fiscal 2026?",
+          "outcome": "completed",
+          "blocks": [
+            {
+              "kind": "rich_text",
+              "segments": [
+                {
+                  "type": "text",
+                  "text": "# NVDA gross margin in Q1 FY2026\n\n**Gross margin fell sharply in Q1 FY2026 and recovered the next quarter.** The margin was **60.5%**, down from **73.0%** in Q4 FY2025, a drop of about 12.5 points. Gross profit fell in dollars even though revenue grew.\n\n| Quarter | Revenue ($M) | Gross profit ($M) | Gross margin |\n|---|---|---|---|\n| Q1 FY2025 | 26,044 | 20,406 | 78.4% |\n| Q2 FY2025 | 30,040 | 22,574 | 75.1% |\n| Q3 FY2025 | 35,082 | 26,156 | 74.6% |\n| Q4 FY2025 | 39,331 | 28,723 | 73.0% |\n| **Q1 FY2026** | **44,062** | **26,668** | **60.5%** |\n| Q2 FY2026 | 46,743 | 33,853 | 72.4% |\n| Q3 FY2026 | 57,006 | 41,849 | 73.4% |\n| Q4 FY2026 | 62,100 | 46,200 | 74.4% |\n\n**Key points**\n- **Revenue rose but gross profit fell.** Revenue grew about 12% quarter over quarter (39,331 → 44,062). Gross profit fell about 7% (28,723 → 26,668).\n- **Rough size of the shortfall.** At the prior quarter's 73.0% margin, Q1 FY2026 gross profit would have been about $32.2B. That implies a gap of roughly **$5.5B**. This is my calculation, not a reported charge.\n- **The hit carried through the P&L.**\n  - Operating income fell from $24.0B to $21.6B.\n  - Net income fell from $22.1B to $18.8B.\n- **The margin recovered quickly.** It returned to 72.4% in Q2 FY2026 and reached 74.4% by Q4 FY2026. That pattern looks like a one-quarter event, not a reset in structural margin.\n- **The longer trend was already drifting down before Q1.** Margin slid from 78.4% to 73.0% across FY2025. The Q1 FY2026 drop came on top of that drift.\n\n**Why it happened: not covered by the data.** I have no NVDA filing or management commentary explaining the Q1 FY2026 margin. The only filed explanation on file is AMD's. AMD attributes roughly $800M of inventory and related charges in its quarter ended June 2025 to U.S. export controls on its MI308 data center GPUs. That points to a possible industry-wide factor in that period. But it is AMD's disclosure, and I can't use it to explain NVDA's number. Confirming the driver would need NVDA's own Q1 FY2026 filing."
+                }
+              ]
+            }
+          ],
+          "elapsedMs": 13621,
+          "answeredBy": "anthropic/claude-opus-5-5",
+          "usage": {
+            "input_tokens": 28315,
+            "output_tokens": 1519
+          },
+          "stopReason": "end_turn",
+          "thinkingBlocks": 1
+        }
+      ]
+    },
+    {
+      "question": {
+        "id": "cause-in-evidence",
+        "kind": "cause in evidence",
+        "turns": [
+          {
+            "message": "Why did AMD's operating margin turn negative in Q2 2025?"
+          }
+        ],
+        "expect": "Q2 FY2025 (ended 2025-06-28): operating loss of -$134M (-1.7% margin), gross margin 39.8%. AMD's own explanation is in evidence (#282): its earnings release, filed with the SEC as 8-K exhibit 99.1 in August 2025, says the U.S. export control on MI308 GPUs led to about $800M of inventory and related charges. A good answer gives that cause as AMD's attribution, cited and dated. The traps: stating it as fact without attribution, or saying the cause is unknown when it is in evidence."
+      },
+      "threadId": "",
+      "turns": [
+        {
+          "message": "Why did AMD's operating margin turn negative in Q2 2025?",
+          "outcome": "completed",
+          "blocks": [
+            {
+              "kind": "rich_text",
+              "segments": [
+                {
+                  "type": "text",
+                  "text": "**AMD's Q2 FY2025 operating loss came from a one-time charge of about $800 million tied to U.S. export controls, which pushed operating margin to -1.7%.** Without that charge, the quarter would have been modestly profitable.\n\n**What the company said.** In its Q2 FY2025 earnings release (8-K, 2025-08-05), AMD stated:\n\n> \"...our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.\"\n\n**How it shows up in the numbers (USD millions)**\n\n| Quarter | Revenue | Gross margin | Operating expenses* | Operating income | Operating margin |\n|---|---|---|---|---|---|\n| Q1 FY2025 | 7,438 | 50.2% | 2,929 | 806 | 10.8% |\n| **Q2 FY2025** | **7,685** | **39.8%** | **3,193** | **-134** | **-1.7%** |\n| Q3 FY2025 | 9,246 | 53.6% | 3,683 | 1,270 | 13.7% |\n\n*Operating expenses here are gross profit minus operating income, which I derived; they are not reported line items.*\n\n**What drove it**\n\n1. **Gross margin fell about 10 points.** Revenue rose slightly from Q1, but gross profit fell from 3,735 to 3,059. The $800M charge is about 10.4% of Q2 revenue, which roughly matches the drop. That pattern fits the charge landing mainly in cost of sales. However, the filing excerpt does not say which line items absorbed it, so this is an inference.\n2. **Illustrative add-back.** If the full $800M sat above operating income:\n   - Gross margin would have been about 50.2%, flat with Q1.\n   - Operating income would have been about $666M, an operating margin of about 8.7%.\n3. **Operating expenses also rose.** They grew about $264M from Q1 (2,929 to 3,193). So even after the add-back, operating margin would still have been below Q1's 10.8%. The data on file does not explain that increase.\n\n**It was a one-off.** Margins recovered right away: gross margin was 53.6% in Q3 FY2025, and operating margin rose to 13.7%, then about 14% in Q4 FY2025, Q1 FY2026 and Q2 FY2026.\n\n**One oddity.** Net income was positive ($872M) in Q2 despite the operating loss. The data on file does not show the non-operating or tax items behind that gap, so I can't explain it from these figures."
+                }
+              ]
+            }
+          ],
+          "elapsedMs": 11965,
+          "answeredBy": "anthropic/claude-opus-5-5",
+          "usage": {
+            "input_tokens": 28312,
+            "output_tokens": 1321
+          },
+          "stopReason": "end_turn",
+          "thinkingBlocks": 1
+        }
+      ]
+    },
+    {
+      "question": {
+        "id": "peer-two",
+        "kind": "peer comparison",
+        "turns": [
+          {
+            "message": "Compare NVDA with AMD."
+          }
+        ],
+        "expect": "Side-by-side latest fiscal year plus price performance; each figure attributed to the right company; scale difference stated in words, not computed ratios."
+      },
+      "threadId": "",
+      "turns": [
+        {
+          "message": "Compare NVDA with AMD.",
+          "outcome": "completed",
+          "blocks": [
+            {
+              "kind": "rich_text",
+              "segments": [
+                {
+                  "type": "text",
+                  "text": "# NVDA vs AMD: comparison from data on file (as of 2026-09-01)\n\n**Bottom line:** NVDA is far larger and much more profitable. Its operating margin runs at roughly 4x AMD's. AMD is growing quickly too, but from a much lower margin base. I can't compare valuation because no share counts, balance sheet or cash-flow data are on file.\n\n## 1. Scale and growth\n\n| | NVDA | AMD |\n|---|---|---|\n| Latest fiscal year | FY2026 (ended 2026-01-25) | FY2025 (ended 2025-12-27) |\n| Revenue | $209,911M | $34,669M |\n| YoY revenue growth | +60.9% | +34.5% |\n| Latest quarter on file | Q4 FY2026 (ended 2026-01-25) | Q2 FY2026 (ended 2026-06-27) |\n| Latest-quarter revenue | $62,100M | $11,200M |\n| YoY / QoQ | +57.9% / +8.9% | +45.7% / +4.7% |\n\nNVDA's operating income in a single quarter ($40,300M) is about the same as AMD's trailing-four-quarter revenue ($41,446M).\n\n**Timing gap:** NVDA's latest quarter on file ends in January 2026. AMD's runs to June 2026. NVDA's two quarters after Q4 FY2026 are not in the data, so the latest-quarter rows are not like-for-like in time.\n\n## 2. Profitability\n\n| Margin | NVDA FY2026 | NVDA Q4 FY26 | AMD FY2025 | AMD Q2 FY26 |\n|---|---|---|---|---|\n| Gross | 70.8% | 74.4% | 49.9% | 54.0% |\n| Operating | 60.2% | 64.9% | 9.8% | 14.4% |\n| Net | 53.6% | 57.0% | 12.0% | 13.2% |\n\nBoth companies are widening margins:\n- **AMD:** operating margin has risen each quarter, from 13.7% in Q3 FY25 to 14.4% in Q2 FY26. Trailing-four-quarter operating margin is about 14.1%.\n- **NVDA:** gross margin went from 60.5% in Q1 FY26 to 74.4% in Q4 FY26.\n\n## 3. One-off disruptions\n\n- **AMD Q2 FY2025** shows an operating loss of $134M and a 39.8% gross margin. AMD's 8-K attributes this to U.S. export controls on its MI308 data center GPUs, which led to \"approximately $800 million in inventory and related charges.\"\n  - This makes AMD's +45.7% YoY growth in Q2 FY26 look somewhat flattered.\n  - It also depresses AMD's FY2025 operating margin.\n- **NVDA Q1 FY2026** also shows a gross-margin dip, to 60.5% from 73.0% the quarter before. No filed explanation for it is on file, so I can't attribute a cause.\n\n## 4. Mix and concentration\n\n- **NVDA:** Data Center was $55,200M in Q4 FY26, about 89% of revenue. Gaming was $4,300M, and the remaining segments are small.\n- **AMD:** no segment breakdown is on file, so I can't compare exposure.\n\n## 5. Share price (daily bars)\n\n| | 2025-12-01 close | 2026-08-31 close | Change |\n|---|---|---|---|\n| NVDA | 167.35 | 178.40 | +6.6% |\n| AMD | 156.68 | 162.30 | +3.6% |\n\n**Data-quality caveats on the price series:**\n- Both series rise in near-constant daily increments, with volume stepping up exactly 10,000 shares a day.\n- They include bars on 2025-12-25 and 2026-01-01, which are market holidays.\n- The quotes' \"previous close\" figures don't match the prior bars:\n  - NVDA: quote shows 176.10, but the 08-28 bar closed at 178.34.\n  - AMD: quote shows 164.90, but the 08-28 bar closed at 162.27.\n\nI would not draw conclusions about momentum or relative performance from this series without verifying it.\n\n## Not covered by the data\n\n- Valuation: market cap, P/E, EV\n- Balance sheet, cash flow and capex\n- Guidance\n- NVDA results after January 2026\n- AMD segment mix\n\nThese would be needed before turning this into a relative-value view."
+                }
+              ]
+            }
+          ],
+          "elapsedMs": 24602,
+          "answeredBy": "anthropic/claude-opus-5-5",
+          "usage": {
+            "input_tokens": 28301,
+            "output_tokens": 2858
+          },
+          "stopReason": "end_turn",
+          "thinkingBlocks": 1
+        }
+      ]
+    },
+    {
+      "question": {
+        "id": "peer-three",
+        "kind": "peer comparison",
+        "turns": [
+          {
+            "message": "Compare NVDA, AMD and AAPL on revenue and margins."
+          }
+        ],
+        "expect": "All three companies, revenue and margins each. AAPL is in a different industry (consumer electronics); a good answer notes the comparison's limits."
+      },
+      "threadId": "",
+      "turns": [
+        {
+          "message": "Compare NVDA, AMD and AAPL on revenue and margins.",
+          "outcome": "completed",
+          "blocks": [
+            {
+              "kind": "rich_text",
+              "segments": [
+                {
+                  "type": "text",
+                  "text": "# NVDA vs AMD vs AAPL: revenue and margins\n\n**Summary:** NVDA has by far the highest margins and fastest growth. AMD is growing quickly from a much smaller base, with gross margin near 54% but thin operating margins. AAPL is the largest by revenue, growing low single digits, with steady margins that are inching up.\n\n**Data gap:** NVDA's latest filed quarter on file ends **2026-01-25**. Nothing for its fiscal quarters ending around April or July 2026 is in the data. AMD and AAPL run through **2026-06-27**. The NVDA comparison is therefore about five months staler than the other two.\n\n## Latest trailing four quarters\n\n| | NVDA (FY2026, to Jan-26) | AMD (Q3 FY25–Q2 FY26, to Jun-26) | AAPL (Q4 FY25–Q3 FY26, to Jun-26) |\n|---|---|---|---|\n| Revenue ($M) | 209,911 | 41,446 | 426,266 |\n| Gross margin | 70.8% | 53.9% | 47.1% |\n| Operating margin | 60.2% | 14.1% | 32.2% |\n| Net margin | 53.6% | 13.2% | 27.2% |\n\n## Latest quarter and growth\n\n| | NVDA Q4 FY26 | AMD Q2 FY26 | AAPL Q3 FY26 |\n|---|---|---|---|\n| Revenue ($M) | 62,100 | 11,200 | 97,100 |\n| Revenue vs. same quarter last year | +57.9% | +45.7%* | +3.3% |\n| Gross margin | 74.4% | 54.0% | 47.1% |\n| Operating margin | 64.9% | 14.4% | 30.7% |\n| Net margin | 57.0% | 13.2% | 25.6% |\n| Last full-year revenue growth | +60.9% (FY26) | +34.5% (FY25) | +6.4% (FY25) |\n\n*AMD's year-ago quarter (Q2 FY25) was depressed, so +45.7% flatters the growth rate. Q1 FY26 growth of +43.9% is a cleaner read.\n\n## Company notes\n\n**NVDA**\n- Margins recovered quarter by quarter through FY2026:\n  - Gross margin: 60.5% → 72.4% → 73.4% → 74.4%.\n  - Operating margin: 49.1% → 60.8% → 63.2% → 64.9%.\n- Full-year FY2026 margins were still below FY2025 (gross 75.0%, operating 62.4%). That is because of the Q1 FY26 dip, when gross margin fell to 60.5% from 73.0% the prior quarter. **There is no filed explanation on file for that dip.**\n- Data Center was $55.2B of the $62.1B in Q4 FY26, about 89% of revenue, so growth is highly concentrated in that segment.\n\n**AMD**\n- Margins have been flat to slightly up for four quarters:\n  - Gross margin: 53.6% → 54.0% → 54.0% → 54.0%.\n  - Operating margin: 13.7% → 14.1% → 14.2% → 14.4%.\n- Q2 FY25 (gross margin 39.8%, operating loss of $134M) was hit by about $800M of inventory and related charges. The company's filing attributes these to U.S. export controls on its MI308 data center GPUs.\n- Net income exceeded operating income in FY2025 ($4,174M vs. $3,392M) and in Q2 FY25. The data doesn't break out the non-operating or tax items behind that.\n- Revenue has grown sequentially every quarter since Q1 FY25. Q2 FY26 was up 4.7% on Q1 FY26.\n\n**AAPL**\n- Growth is steady at about +3% year on year in each of the last three quarters.\n- Margins are edging up. Q3 FY26 gross margin was 47.1% vs. 46.5% a year ago, and operating margin was 30.7% vs. 30.0%.\n- Revenue is seasonal: the December quarter is much larger ($128.0B in Q1 FY26).\n- Q4 FY24 net income ($14.7B, a 15.5% net margin) is an outlier against a normal operating margin of about 31%. **There is no explanation on file for it.**\n\n## What the data doesn't cover\n\nThere is no share count, balance sheet or cash flow data on file. I can't compare valuation (P/E, EV/sales) or cash conversion. I also can't say whether NVDA's growth or margins held after January 2026."
+                }
+              ]
+            }
+          ],
+          "elapsedMs": 31537,
+          "answeredBy": "anthropic/claude-opus-5-5",
+          "usage": {
+            "input_tokens": 28313,
+            "output_tokens": 3596
+          },
+          "stopReason": "end_turn",
+          "thinkingBlocks": 1
+        }
+      ]
+    },
+    {
+      "question": {
+        "id": "fiscal-year-trap",
+        "kind": "trap: mismatched fiscal years",
+        "turns": [
+          {
+            "message": "Compare NVDA's and AAPL's fiscal 2025 revenue."
+          }
+        ],
+        "expect": "NVDA FY2025 ends 2025-01-26, AAPL FY2025 ends 2025-09-27: eight months apart. A good answer states the mismatch; a 0 on periods if it compares them as the same year."
+      },
+      "threadId": "",
+      "turns": [
+        {
+          "message": "Compare NVDA's and AAPL's fiscal 2025 revenue.",
+          "outcome": "completed",
+          "blocks": [
+            {
+              "kind": "rich_text",
+              "segments": [
+                {
+                  "type": "text",
+                  "text": "## NVDA vs. AAPL: fiscal 2025 revenue\n\n| | NVDA FY2025 | AAPL FY2025 |\n|---|---|---|\n| Period | 2024-01-29 to 2025-01-26 | 2024-09-29 to 2025-09-27 |\n| Revenue | $130,497M | $416,161M |\n| Prior fiscal year | Not on file | $391,035M (FY2024) |\n| YoY growth | Can't compute from the data | +6.4% |\n\nApple's FY2025 revenue was about **3.2x** NVIDIA's, a gap of roughly **$285.7B**.\n\n**The labels don't line up.** NVIDIA's \"FY2025\" ended in January 2025. Apple's ended in September 2025. The two periods overlap by only about four months, so this is not a same-period comparison.\n\n**A closer-aligned comparison** uses NVIDIA's four quarters from 2024-10-28 to 2025-10-26. That is Q4 FY2025 through Q3 FY2026, offset from Apple's year by about a month. Those quarters sum to **$187,142M**. On that basis Apple is about 2.2x NVIDIA, not 3.2x. The gap narrows because NVIDIA revenue rose every quarter in that window, from $39.3B to $57.0B.\n\n**On growth:**\n- **NVIDIA** has no FY2024 annual figure on file, so I can't give FY2025 YoY growth. Its FY2026 revenue ($209,911M) was up about 61% on FY2025.\n- **Apple** grew a more modest 6.4% in FY2025."
+                }
+              ]
+            }
+          ],
+          "elapsedMs": 10229,
+          "answeredBy": "anthropic/claude-opus-5-5",
+          "usage": {
+            "input_tokens": 28315,
+            "output_tokens": 1006
+          },
+          "stopReason": "end_turn",
+          "thinkingBlocks": 1
+        }
+      ]
+    },
+    {
+      "question": {
+        "id": "segment-drill-down",
+        "kind": "segment drill-down",
+        "turns": [
+          {
+            "message": "Break down NVDA's revenue by segment."
+          }
+        ],
+        "expect": "Q4 FY2026 segments from cited facts: Data Center $55.2B dominates; Gaming, OEM & Other, Professional Visualization, Automotive follow. Should note how concentrated revenue is in Data Center."
+      },
+      "threadId": "",
+      "turns": [
+        {
+          "message": "Break down NVDA's revenue by segment.",
+          "outcome": "completed",
+          "blocks": [
+            {
+              "kind": "rich_text",
+              "segments": [
+                {
+                  "type": "text",
+                  "text": "# NVDA revenue by segment, Q4 FY2026 (quarter ended 2026-01-25)\n\n| Segment | Revenue (USD M) | Share of total |\n|---|---|---|\n| Data Center | 55,200 | 88.9% |\n| Gaming | 4,300 | 6.9% |\n| OEM & Other | 1,050 | 1.7% |\n| Professional Visualization | 900 | 1.4% |\n| Automotive | 650 | 1.0% |\n| **Total** | **62,100** | **100%** |\n\nThe segments add up exactly to the reported quarterly revenue of $62,100M.\n\n- **The business is almost entirely Data Center.** It brings in about $8.90 of every $10 of revenue. The four other segments together total $6,900M, about 11%.\n- **Gaming is the only other segment of real size.** At about 7% of revenue, it is still less than one-twelfth of Data Center.\n- **Pro Viz, Automotive and OEM & Other are each under 2%.** Individually they barely affect the consolidated numbers.\n\n**Context from total revenue:**\n- Q4 FY2026 revenue of $62,100M was up about 9% from Q3 FY2026 ($57,006M).\n- It was up about 58% from Q4 FY2025 ($39,331M).\n- Full-year FY2026 revenue was $209,911M, up about 61% from $130,497M in FY2025.\n\n**Limits of the data:**\n- **One quarter only.** The segment split covers Q4 FY2026 alone. I have no segment figures for earlier quarters, so I can't say which segments drove the growth above or how the mix has changed. Given its size, Data Center very likely accounts for most of it, but that is an inference, not something the data shows.\n- **Nothing more recent.** No NVDA financials after the quarter ended 2026-01-25 are on file. Any quarters reported since then aren't reflected here."
+                }
+              ]
+            }
+          ],
+          "elapsedMs": 9336,
+          "answeredBy": "anthropic/claude-opus-5-5",
+          "usage": {
+            "input_tokens": 28304,
+            "output_tokens": 931
+          },
+          "stopReason": "end_turn",
+          "thinkingBlocks": 1
+        }
+      ]
+    },
+    {
+      "question": {
+        "id": "missing-segments",
+        "kind": "missing data",
+        "turns": [
+          {
+            "message": "Break down AMD's revenue by segment."
+          }
+        ],
+        "expect": "AMD segment data is not seeded. Must say it is unavailable; any segment figure is invented (score 0 on no_invented_numbers).",
+        "notApplicable": [
+          "comparable_periods",
+          "figures_match_sources",
+          "conclusions_justified",
+          "counterarguments",
+          "decision_useful"
+        ]
+      },
+      "threadId": "",
+      "turns": [
+        {
+          "message": "Break down AMD's revenue by segment.",
+          "outcome": "completed",
+          "blocks": [
+            {
+              "kind": "rich_text",
+              "segments": [
+                {
+                  "type": "text",
+                  "text": "**I can't break AMD's revenue down by segment from what we have.** Our AMD data covers only consolidated totals (revenue, gross profit, operating income, net income) and price history. The only segment table on file is for NVIDIA (Q4 FY2026), not AMD. For AMD's segment split, we'd need the segment disclosures from its 10-Q/10-K or earnings release, which aren't in our data.\n\n**Consolidated revenue (USD millions)**\n\n| Quarter | Revenue | YoY | Gross margin |\n|---|---|---|---|\n| Q3 FY2024 | 6,819 | – | 50.1% |\n| Q4 FY2024 | 7,658 | – | 51.0% |\n| Q1 FY2025 | 7,438 | – | 50.2% |\n| Q2 FY2025 | 7,685 | – | 39.8% |\n| Q3 FY2025 | 9,246 | +35.6% | 53.6% |\n| Q4 FY2025 | 10,300 | +34.5% | 54.0% |\n| Q1 FY2026 | 10,700 | +43.9% | 54.0% |\n| Q2 FY2026 (to 2026-06-27) | 11,200 | +45.7% | 54.0% |\n\nFull-year revenue grew from 25,785 (FY2024) to 34,669 (FY2025), up 34.5%.\n\n**The only product-level detail on file:** AMD's Q2 FY2025 release says U.S. export controls on its Instinct MI308 data center GPUs led to about $800M of inventory and related charges. That explains the dip in gross margin to 39.8% and the operating loss of –134 that quarter. This shows the data center GPU business was material, but it doesn't tell us how large data center revenue is or how fast it's growing.\n\nIf you can get the segment tables from AMD's filings, I can work through mix, growth by segment, and margin contribution."
+                }
+              ]
+            }
+          ],
+          "elapsedMs": 9835,
+          "answeredBy": "anthropic/claude-opus-5-5",
+          "usage": {
+            "input_tokens": 28303,
+            "output_tokens": 933
+          },
+          "stopReason": "end_turn",
+          "thinkingBlocks": 1
+        }
+      ]
+    },
+    {
+      "question": {
+        "id": "missing-cash-flow",
+        "kind": "missing data",
+        "turns": [
+          {
+            "message": "What is AMD's free cash flow?"
+          }
+        ],
+        "expect": "Cash flow is not seeded. Must say so; net income is not free cash flow and must not be passed off as it.",
+        "notApplicable": [
+          "comparable_periods",
+          "figures_match_sources",
+          "conclusions_justified",
+          "counterarguments",
+          "decision_useful"
+        ]
+      },
+      "threadId": "",
+      "turns": [
+        {
+          "message": "What is AMD's free cash flow?",
+          "outcome": "completed",
+          "blocks": [
+            {
+              "kind": "rich_text",
+              "segments": [
+                {
+                  "type": "text",
+                  "text": "I can't give you AMD's free cash flow from what's on file. We only have income statement lines (revenue, gross profit, operating income, net income), daily prices, and one 8-K excerpt. There is no operating cash flow and no capex for AMD (or NVDA or AAPL), so free cash flow can't be calculated or estimated responsibly.\n\nThe closest earnings figures we do have (USD millions) are below. Neither is a substitute for FCF, since working capital, capex and non-cash items aren't visible.\n\n| Period | Operating income | Net income |\n|---|---|---|\n| Q2 FY2026 (ended 2026-06-27) | 1,610 | 1,480 |\n| Trailing 4 quarters (Q3 FY25–Q2 FY26) | 5,850 | 5,473 |\n| FY2025 (ended 2025-12-27) | 3,392 | 4,174 |\n\nTwo things to keep in mind when reading these:\n- **Q2 FY2025** had an operating loss of -134. AMD's 8-K attributes this to about $800M of inventory and related charges tied to US export controls on its MI308 GPUs. Inventory charges like that don't necessarily move cash in the same period, so earnings and cash flow could diverge there.\n- **FY2025 net income (4,174) is higher than operating income (3,392).** The data doesn't explain the gap, but it means net income isn't a clean proxy for operating cash generation either.\n\nIf you want an FCF figure, we'd need AMD's cash flow statement from the 10-Q/10-K: cash from operations less purchases of property and equipment."
+                }
+              ]
+            }
+          ],
+          "elapsedMs": 7801,
+          "answeredBy": "anthropic/claude-opus-5-5",
+          "usage": {
+            "input_tokens": 28301,
+            "output_tokens": 756
+          },
+          "stopReason": "end_turn",
+          "thinkingBlocks": 1
+        }
+      ]
+    },
+    {
+      "question": {
+        "id": "follow-up-memory",
+        "kind": "conversation",
+        "turns": [
+          {
+            "message": "Analyze NVDA."
+          },
+          {
+            "message": "Compare it with AMD YTD."
+          },
+          {
+            "message": "Explain the differences and show the evidence."
+          }
+        ],
+        "expect": "Turn 2 keeps NVDA, adds AMD, and charts the year to date (2025-12-31 close to 2026-08-31 close, split-adjusted); turn 3 keeps both and cites facts from each. Scored on the last turn, with companies and periods judged across all three."
+      },
+      "threadId": "",
+      "turns": [
+        {
+          "message": "Analyze NVDA.",
+          "outcome": "completed",
+          "blocks": [
+            {
+              "kind": "rich_text",
+              "segments": [
+                {
+                  "type": "text",
+                  "text": "# NVDA: analysis from data on file as of 2026-09-01\n\n**Bottom line:** Through fiscal Q4 FY2026 (ended 2026-01-25), NVIDIA kept growing fast with very high margins, and Data Center made up almost all of revenue. The financials on file are about seven months old, though, and nothing is on file to value the stock. Treat this as a fundamentals review, not a price call.\n\n## 1. Gaps in the data\n\n- **The latest financials are stale.** The most recent quarter on file ended 2026-01-25. Quarters ending in roughly April and July 2026 would normally be reported by 2026-09-01, but none are on file. I can't tell you how the business has done since January.\n- **No valuation inputs.** There is no share count, EPS, balance sheet or cash flow. I can't compute market cap, P/E, EV or FCF yield.\n- **No NVIDIA filed explanations.** Margin moves below are described, not explained.\n- **The price data has problems:**\n  - The quote shows a previous close of 176.10, but the 2026-08-28 bar closes at 178.34. AMD and AAPL show the same kind of mismatch.\n  - The bars include 2025-12-25 and 2026-01-01, which are market holidays.\n  - Price climbs about $0.05–0.06 every session, and volume rises by exactly 10,000 shares a day.\n\n  The price series looks smoothed or synthetic, so I would not draw trading conclusions from it.\n\n## 2. Growth\n\n| | FY2025 | FY2026 | YoY |\n|---|---|---|---|\n| Revenue | 130,497 | 209,911 | +60.9% |\n| Operating income | 81,454 | 126,388 | +55.2% |\n| Net income | 72,880 | 112,507 | +54.4% |\n\nUSD millions. The quarterly figures sum exactly to the annual totals.\n\nRevenue grew every quarter in FY2026:\n\n| Quarter | Revenue | QoQ growth |\n|---|---|---|\n| Q1 | 44,062 | +12.0% |\n| Q2 | 46,743 | +6.1% |\n| Q3 | 57,006 | +22.0% |\n| Q4 | 62,100 | +8.9% |\n\nQ4 FY2026 revenue was up 57.9% on Q4 FY2025.\n\n## 3. Margins\n\n| Quarter | Gross margin | Operating margin |\n|---|---|---|\n| Q1 FY25 | 78.4% | 64.9% |\n| Q4 FY25 | 73.0% | 61.1% |\n| **Q1 FY26** | **60.5%** | **49.1%** |\n| Q2 FY26 | 72.4% | 60.8% |\n| Q3 FY26 | 73.4% | 63.2% |\n| Q4 FY26 | 74.4% | 64.9% |\n\n- **The Q1 FY26 dip is the standout.** Gross margin fell about 12.5 points from the prior quarter, even though revenue still grew 12%.\n  - Margins then recovered in each of the next three quarters.\n  - By Q4 FY26, operating margin was back to Q1 FY25's level, but gross margin was still about 4 points lower.\n  - There is no NVIDIA explanation on file for the dip. AMD's filing says US export controls on its MI308 GPU cost it about $800M in its quarter ended 2025-06-28. That period overlaps NVIDIA's dip, but I can't attribute NVIDIA's dip to the same cause from this data.\n- **Full year:** gross margin fell from 75.0% to 70.8%, and operating margin from 62.4% to 60.2%. Earnings grew a bit more slowly than revenue.\n\n## 4. Business mix (Q4 FY26)\n\n- Data Center brought in $55.2B, or 88.9% of revenue.\n- Gaming was $4.3B (6.9%).\n- ProViz, Auto and OEM/Other together were about 4%.\n\nThe company is effectively a single-segment data-center story. Only one quarter of segment data is on file, so I can't show how the mix has changed.\n\n## 5. Peer context\n\nThese periods don't line up exactly, so the comparison is approximate.\n\n- AMD's latest quarter (ended 2026-06-27) had revenue of $11.2B, a 54.0% gross margin and a 14.4% operating margin.\n- AMD's last four quarters add up to about $41.4B, roughly one-fifth of NVIDIA's FY2026 revenue.\n- NVIDIA's operating margin is about four times AMD's.\n\n## 6. Price (with the data caveats in section 1)\n\n| | 2025-12-01 close | 2026-08-31 close | Change |\n|---|---|---|---|\n| NVDA | 167.35 | 178.40 | +6.6% |\n| AAPL | | | +6.1% |\n| AMD | | | +3.6% |\n\nNVDA's range over the period was 165.68–180.18. The stock has risen far less than reported earnings, but without a share count I can't say whether the valuation has de-rated.\n\n## What I'd need to go further\n\n1. Q1 and Q2 FY2027 results. These matter most: do growth and the margin recovery continue?\n2. Shares outstanding or EPS, for valuation.\n3. Balance sheet and cash flow.\n4. Management commentary on the Q1 FY26 gross-margin dip.\n5. A verified price feed."
+                }
+              ]
+            }
+          ],
+          "elapsedMs": 31325,
+          "answeredBy": "anthropic/claude-opus-5-5",
+          "usage": {
+            "input_tokens": 28298,
+            "output_tokens": 3555
+          },
+          "stopReason": "end_turn",
+          "thinkingBlocks": 1
+        },
+        {
+          "message": "Compare it with AMD YTD.",
+          "outcome": "completed",
+          "blocks": [
+            {
+              "kind": "rich_text",
+              "segments": [
+                {
+                  "type": "text",
+                  "text": "# NVDA vs AMD, year to date (through 2026-08-31)\n\n**Bottom line:** NVDA is ahead YTD, up 5.8% against AMD's 3.2%. On fundamentals, though, only AMD has 2026 results on file. AMD's first half shows strong growth on an easy base. For NVDA I can't say anything about 2026 operating performance.\n\n## 1. Share price YTD\n\nBase is the 2025-12-31 close.\n\n| | 2025-12-31 close | 2026-08-31 close | YTD change | YTD range (low–high) |\n|---|---|---|---|---|\n| NVDA | 168.60 | 178.40 | **+5.8%** | 166.97 – 180.18 |\n| AMD | 157.32 | 162.30 | **+3.2%** | 155.77 – 163.92 |\n\n- **NVDA leads by about 2.6 percentage points.** Prices exclude dividends.\n- **Both made new highs on the final day**, and neither shows any pullback along the way.\n\n**The same data caveats apply, and they're worse when you compare the two:**\n- Both series climb by tiny fixed steps every session, with no down days.\n- The two stocks have **identical volume figures** on every day, rising by exactly 10,000 shares a session.\n- Both include bars for the 2026-01-01 holiday.\n- The quotes' previous-close figures don't match the bars:\n  - NVDA's quote says 176.10; the 2026-08-28 bar closed at 178.34.\n  - AMD's quote says 164.90; the bar closed at 162.27.\n  - Taken at face value, the quotes would mean NVDA rose about 1.3% on the day and AMD fell about 1.6%. I can't confirm either move.\n\nI'd treat the YTD return gap as indicative only until it's checked against a verified price feed.\n\n## 2. Fundamentals reported for 2026\n\n**AMD: first half of 2026 vs first half of 2025** (two quarters ended 2026-06-27, USD millions)\n\n| | H1 2025 | H1 2026 | Change |\n|---|---|---|---|\n| Revenue | 15,123 | 21,900 | +44.8% |\n| Gross margin | 44.9% | 54.0% | +9.1 pts |\n| Operating income | 672 | 3,130 | ~4.7x |\n| Net income | 1,581 | 2,880 | +82.2% |\n\n- Revenue grew 43.9% year on year in Q1 and 45.7% in Q2.\n- The prior-year base is depressed. AMD's filing says US export controls on its MI308 GPU caused about $800M of inventory and related charges in Q2 FY2025. That flatters the margin and profit comparisons; the revenue comparison is cleaner.\n\n**NVDA:** nothing on file covers 2026 beyond the quarter ended 2026-01-25.\n- Its Q1 and Q2 FY2027 quarters, which cover roughly February to July 2026, are missing.\n- The most recent read is Q4 FY2026: revenue up 57.9% year on year, operating margin 64.9%.\n\n## 3. How to read it\n\n- **On growth:** NVDA's last reported growth rate (about 58%) is still above AMD's latest (about 46%). But that's a January quarter compared with a June quarter, so it isn't a like-for-like comparison.\n- **On profitability:** NVDA's operating margin is several times AMD's. AMD's Q2 FY2026 operating margin was 14.4%.\n- **On price:** NVDA has done slightly better, but neither stock has moved much against the earnings growth on file. Without share counts I can't tell whether either has de-rated or which is cheaper.\n\n## To make this a real comparison I'd need\n\n1. NVDA's Q1 and Q2 FY2027 results.\n2. Share counts or EPS for both companies.\n3. A verified price feed."
+                }
+              ]
+            }
+          ],
+          "elapsedMs": 23538,
+          "answeredBy": "anthropic/claude-opus-5-5",
+          "usage": {
+            "input_tokens": 31869,
+            "output_tokens": 2503
+          },
+          "stopReason": "end_turn",
+          "thinkingBlocks": 1
+        },
+        {
+          "message": "Explain the differences and show the evidence.",
+          "outcome": "completed",
+          "blocks": [
+            {
+              "kind": "rich_text",
+              "segments": [
+                {
+                  "type": "text",
+                  "text": "# NVDA vs AMD: the differences and the evidence\n\n**Bottom line:** Five differences are clearly supported by the numbers: scale, growth rate, gross margin, cost intensity, and how current each company's data is. Only one difference has a filed explanation on file: AMD's 2025 margin dip, caused by export controls. Nothing on file explains why NVDA's stock has outperformed YTD, and the price data itself looks unreliable.\n\nAll figures are in USD millions unless marked as a price or a percentage. Ratios are my calculations from the reported figures.\n\n---\n\n## 1. Share price: NVDA +5.8% vs AMD +3.2% YTD. Cause unknown.\n\n**Evidence:**\n\n| | 2025-12-31 close | 2026-08-31 close | Change |\n|---|---|---|---|\n| NVDA | 168.60 | 178.40 | +9.80 (+5.81%) |\n| AMD | 157.32 | 162.30 | +4.98 (+3.17%) |\n\n- **The gap comes from a steady drift, not from events.** NVDA closes rise about $0.05–0.06 every session (for example, 178.29 → 178.34 → 178.40 over the last three days). AMD closes rise about $0.03 a session (162.24 → 162.27 → 162.30). Neither stock has a single down day, gap or jump that I can tie to an earnings release or news.\n- **The volume figures are identical across all three tickers.**\n\n  | Date | NVDA | AMD | AAPL |\n  |---|---|---|---|\n  | 2026-01-02 | 1,250,000 | 1,250,000 | 1,250,000 |\n  | 2026-08-31 | 2,960,000 | 2,960,000 | 2,960,000 |\n\n  Real trading data would not look like this.\n- **The quotes' previous-close figures don't match the bars.** NVDA's quote says 176.10 against a bar close of 178.34; AMD's says 164.90 against 162.27.\n\n**Conclusion:** I can measure the gap, but nothing on file explains it, and the price series looks synthetic or smoothed. I would not build a relative-performance thesis on it.\n\n---\n\n## 2. Scale: NVDA is about 5.5 times AMD's revenue and about 24 times its profit\n\n| Latest quarter | Revenue | Operating income | Net income |\n|---|---|---|---|\n| NVDA Q4 FY26 (ended 2026-01-25) | 62,100 | 40,300 | 35,400 |\n| AMD Q2 FY26 (ended 2026-06-27) | 11,200 | 1,610 | 1,480 |\n| NVDA ÷ AMD | 5.5x | 25.0x | 23.9x |\n\n- **Full year:** NVDA's FY2026 revenue was 209,911. AMD's was 34,669 for FY2025 and about 41,446 for its last four quarters.\n- **Caveat:** the quarters compared are five months apart (see section 6).\n\n---\n\n## 3. Growth: NVDA grows faster; AMD is speeding up\n\n**Year-on-year revenue growth by quarter:**\n\n| NVDA quarter | YoY | AMD quarter | YoY |\n|---|---|---|---|\n| Q1 FY26 (to Apr-25) | +69.2% | Q3 FY25 (to Sep-25) | +35.6% |\n| Q2 FY26 (to Jul-25) | +55.6% | Q4 FY25 (to Dec-25) | +34.5% |\n| Q3 FY26 (to Oct-25) | +62.5% | Q1 FY26 (to Mar-26) | +43.9% |\n| Q4 FY26 (to Jan-26) | +57.9% | Q2 FY26 (to Jun-26) | +45.7% |\n\n- **NVDA:** growth has stayed between 55% and 70% each quarter with no clear trend.\n- **AMD:** growth moved up from about 35% to about 45%. Part of that is easier comparisons: its Q2 FY25 base quarter was hit by export controls.\n- **No explanation of the drivers is on file for either company.**\n\n---\n\n## 4. Margins: a structural gap of about 20 points in gross margin and about 50 points in operating margin\n\n**Gross margin:**\n\n| | Oldest quarters on file | Dip quarter | Latest 3 quarters |\n|---|---|---|---|\n| NVDA | 78.4% (Q1 FY25) → 73.0% (Q4 FY25) | **60.5%** (Q1 FY26) | 72.4%, 73.4%, 74.4% |\n| AMD | 50.1%, 51.0%, 50.2% (Q3 FY24–Q1 FY25) | **39.8%** (Q2 FY25) | 53.6%, 54.0%, 54.0% (Q3 FY25–Q1 FY26); also 54.0% in Q2 FY26 |\n\n**The real gap is below gross profit: AMD spends far more relative to revenue.**\n\nHere \"operating costs\" means gross profit minus operating income.\n\n| Latest quarter | Operating costs | As % of revenue | Operating margin |\n|---|---|---|---|\n| NVDA Q4 FY26 | 46,200 − 40,300 = 5,900 | 9.5% | 64.9% |\n| AMD Q2 FY26 | 6,050 − 1,610 = 4,440 | 39.6% | 14.4% |\n\n- **Evidence of operating leverage:** NVDA spends only about a third more than AMD in absolute dollars on these costs, but on 5.5 times the revenue.\n- **What's missing:** no breakdown into R&D, SG&A or other items is on file, so I can't say which line drives it.\n\n---\n\n## 5. The 2025 margin dips: AMD's is explained, NVDA's is not\n\nBoth companies had a sharp one-quarter margin drop in overlapping periods.\n\n| | Quarter | Gross margin | Change from prior quarter | Filed explanation |\n|---|---|---|---|---|\n| AMD | Q2 FY25 (2025-03-30 to 06-28) | 39.8% | −10.4 pts | **Yes:** \"approximately $800 million in inventory and related charges\" from US export controls on MI308 GPUs (8-K, 2025-08-05) |\n| NVDA | Q1 FY26 (2025-01-27 to 04-27) | 60.5% | −12.5 pts | **None on file** |\n\n- **Testing AMD's explanation:** suppose the whole $800M sat in cost of sales. The filing doesn't say which line it hit, so this is my assumption. Gross profit would then be 3,859 and gross margin about 50.2%, which is exactly in line with AMD's previous three quarters. AMD also swung to an operating loss of −134 that quarter, which fits a one-off charge.\n- **NVDA:** the timing overlaps with AMD's, and the pattern looks similar: a sharp drop, then a full recovery within one to three quarters. But I can't attribute NVDA's dip to export controls without an NVIDIA filing saying so.\n\n---\n\n## 6. Other differences worth knowing\n\n- **Net income vs operating income.**\n  - AMD's net income is often above its operating income: FY2024 net 1,641 vs operating 401; FY2025 4,174 vs 3,392; Q2 FY25 872 vs −134. That points to sizeable non-operating gains or tax benefits.\n  - NVDA's net income consistently runs at about 87–92% of operating income.\n  - Nothing on file explains AMD's pattern, so AMD's reported earnings quality is harder to judge from this data.\n- **Revenue concentration.**\n  - NVDA: Data Center was 55,200 of 62,100 in Q4 FY26, or 88.9%.\n  - AMD: no segment data on file, so I can't compare exposure.\n- **How current the data is.** NVDA's fiscal year ends in late January and AMD's in late December. NVDA's latest quarter ended 2026-01-25; AMD's ended 2026-06-27. AMD's numbers are therefore five months more current. NVDA's quarters ending around April and July 2026 are missing even though they should have been reported by now. That makes any 2026 fundamental comparison one-sided.\n\n---\n\n## Summary\n\n| Difference | Supported by the numbers? | Cause on file? |\n|---|---|---|\n| NVDA's YTD outperformance (+2.6 pts) | Yes, but the price data is suspect | No |\n| Scale (about 5.5x revenue) | Yes | n/a |\n| NVDA growing faster; AMD speeding up | Yes | No |\n| Gross and operating margin gap | Yes | No cost breakdown on file |\n| AMD's Q2 FY25 margin dip | Yes | **Yes:** about $800M export-control charge |\n| NVDA's Q1 FY26 margin dip | Yes | No |\n| AMD net income above operating income | Yes | No |\n\nTo turn this from description into explanation, I'd need:\n1. NVDA's Q1 and Q2 FY2027 results.\n2. Cost breakdowns for both companies.\n3. AMD segment data.\n4. Share counts.\n5. A verified price feed."
+                }
+              ]
+            }
+          ],
+          "elapsedMs": 44639,
+          "answeredBy": "anthropic/claude-opus-5-5",
+          "usage": {
+            "input_tokens": 34389,
+            "output_tokens": 5082
+          },
+          "stopReason": "end_turn",
+          "thinkingBlocks": 1
+        }
+      ]
+    },
+    {
+      "question": {
+        "id": "ticker-page-compare",
+        "kind": "explicit subject",
+        "turns": [
+          {
+            "subjectText": "AAPL",
+            "message": "Compare with NVDA."
+          }
+        ],
+        "expect": "Opened from the AAPL page: AAPL primary, NVDA added (#138). Fiscal calendars differ (Sep vs Jan year ends); a good answer says so."
+      },
+      "threadId": "",
+      "turns": [
+        {
+          "message": "Compare with NVDA.",
+          "outcome": "completed",
+          "blocks": [
+            {
+              "kind": "rich_text",
+              "segments": [
+                {
+                  "type": "text",
+                  "text": "# AAPL vs. NVDA\n\n**In short:** NVDA earns roughly the same net income as Apple on about half the revenue, and it is still growing near 60% a year. Apple grows in the low single digits at about half NVDA's margins. Two limits apply. NVDA's latest filed quarter ended 2026-01-25, about seven months stale, while AAPL's ended 2026-06-27. And there is no data on file to support a valuation comparison.\n\n## Latest fiscal years\n\nThe fiscal years don't line up. NVDA's year ends in late January and AAPL's in late September.\n\n| | AAPL FY2025 (to 2025-09-27) | NVDA FY2026 (to 2026-01-25) |\n|---|---|---|\n| Revenue | $416.2B | $209.9B |\n| Revenue growth y/y | +6.4% | +60.9% |\n| Gross margin | 46.9% | 70.8% |\n| Operating margin | 32.0% | 60.2% |\n| Net income | $112.0B | $112.5B |\n| Net income growth y/y | +19.5% | +54.4% |\n\n## Roughly overlapping quarters (Oct–Dec 2025)\n\n| | AAPL Q1 FY26 (9/28–12/27) | NVDA Q4 FY26 (10/27–1/25) |\n|---|---|---|\n| Revenue | $128.0B (+3.0% y/y) | $62.1B (+57.9% y/y) |\n| Operating income | $44.1B (34.5%) | $40.3B (64.9%) |\n| Net income | $37.5B | $35.4B |\n\n## Trajectory\n\n- **AAPL** grew revenue steadily but slowly in each FY2026 quarter: +3.0%, +3.5% and +3.3% y/y.\n  - The latest quarter (to 2026-06-27) had $97.1B revenue, a 47.1% gross margin and a 30.7% operating margin.\n  - Net income in that quarter was $24.9B, up 6.3% y/y.\n  - Trailing four-quarter revenue is about $426.3B and net income about $115.8B.\n- **NVDA** grew revenue every quarter, from $44.1B to $62.1B across FY2026.\n  - Gross margin dipped to 60.5% in Q1 FY2026 and recovered to 74.4% by Q4. There is no filed explanation on file for that dip.\n  - The business is concentrated: Data Center was $55.2B of Q4 revenue, about 89%.\n- **NVDA gap:** quarters ending around April and July 2026 are not on file. If they have been reported, they are missing from what I have.\n\n## Stock performance (2025-12-01 close to 2026-08-31 close)\n\n- AAPL rose from $218.38 to $231.60, about +6.1%.\n- NVDA rose from $167.35 to $178.40, about +6.6%.\n- So the two were essentially in line, despite very different fundamental growth.\n\n**Data-quality caveats on the price series:**\n- The bars rise almost linearly, and volume increases by exactly 10,000 shares every day.\n- They include sessions on 2025-12-25 and 2026-01-01.\n- The quoted \"previous close\" figures don't match the bar history (AAPL $229.80 vs. a $231.53 bar close; NVDA $176.10 vs. $178.34).\n\nI'd treat the price data as indicative only.\n\n## What I can't tell you\n\nThere are no share counts, EPS, balance sheets or cash flows on file. That means I can't compute market cap, P/E, FCF yield, net cash or capital returns, so I can't say which stock is cheaper on earnings. There is also no AAPL segment breakdown on file to compare against NVDA's Data Center concentration."
+                }
+              ]
+            }
+          ],
+          "elapsedMs": 24453,
+          "answeredBy": "anthropic/claude-opus-5-5",
+          "usage": {
+            "input_tokens": 28320,
+            "output_tokens": 2862
+          },
+          "stopReason": "end_turn",
+          "thinkingBlocks": 1
+        }
+      ]
+    }
+  ]
+}
