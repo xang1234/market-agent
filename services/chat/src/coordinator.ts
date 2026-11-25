@@ -37,6 +37,8 @@ import {
   type ChatReadMessage,
 } from "./messages.ts";
 import { readCallAsk } from "./call.ts";
+import { turnScenarioAsk } from "./eps-scenarios.ts";
+import { readPriceComparisonAsk } from "./scenario-price-comparison.ts";
 import { financialAwareRunner, offeredChoicesRunner } from "./financial-turn.ts";
 import { workSummaryRunner, type ChatWorkSummarySave } from "./work-summary.ts";
 import { companyNameIn, companyWordsIn, type CompanyChange, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
@@ -377,6 +379,15 @@ type NormalizedChatTurnInput = ChatTurnInput & {
 
 const DEFAULT_COMPLETED_TURN_RETENTION_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_COMPLETED_TURNS = 1000;
+// The fixed asks the financial lane answers with no model, read by the parsers its take reads them with, so the agent never
+// takes one (#715, #803): a Call (ADR 0005), a P/E scenario, and a price comparison. Every other message is the agent's.
+// ponytail: the scenario is read with no company resolved yet, so a one-label edit that names its company ("make AAPL bull 35") stays the agent's.
+const FINANCIAL_ASKS: ReadonlyArray<(text: string) => unknown> = [
+  readCallAsk,
+  (text) => turnScenarioAsk(text, []),
+  readPriceComparisonAsk,
+];
+
 const DEFAULT_COMPLETED_TURN_TOMBSTONE_RETENTION_MS = 60 * 60 * 1000;
 const DEFAULT_MAX_COMPLETED_TURN_TOMBSTONES = 10000;
 
@@ -416,9 +427,8 @@ export function createChatCoordinator(
   const financialLane = financialAwareRunner(subjectAware, { financialRuntime: options.financialRuntime, persistAssistantMessage });
   const agentSeat = options.analystAgent
     && analystAgentSeat({ next: subjectAware, picking: financialLane }, options.analystAgent, { persistAssistantMessage, verificationMode: options.verificationMode ?? "strict" });
-  // A Call is made only on its fixed ask (ADR 0005), which the financial lane answers with no model: the agent never takes one (#715).
   const seat: ChatTurnRunner = agentSeat
-    ? (context) => (readCallAsk(context.userIntent ?? "") ? financialLane : agentSeat)(context)
+    ? (context) => (FINANCIAL_ASKS.some((reads) => reads(context.userIntent ?? "") !== null) ? financialLane : agentSeat)(context)
     : financialLane;
   const runner = workSummaryRunner(threadTitleGenerationRunner(runActivityReportingRunner(offeredChoicesRunner(readingRunner(seat, options.readQuestion), options.financialRuntime), options.runActivity), {
     generateThreadTitle: options.generateThreadTitle,
