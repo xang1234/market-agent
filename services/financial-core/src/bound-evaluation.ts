@@ -20,18 +20,70 @@ import type {
   Sha256Hex,
   SuccessPayload,
 } from "./contracts.ts";
-import { ExecutionIntegrityError, operationDependencies, scenarioAssumption } from "./contracts.ts";
+import { balanceComponentNodes, BOUND_PRICE_INPUT_SCHEMA_VERSION, ExecutionIntegrityError, operationDependencies, scenarioAssumption } from "./contracts.ts";
 import { coverageState, evaluatePlan, type GraphEvaluation, type NodeState } from "./coverage.ts";
+import { balanceComponents } from "./definitions.ts";
 import { dependencyClosure, topologicalOrder } from "./graph.ts";
 import { NUMERIC_POLICY } from "./numeric-policy.ts";
 import { OPERATION_REGISTRY } from "./operation-registry.ts";
 import { operandFromBoundInput, operationGap } from "./operations.ts";
 import { unitClosures } from "./publication-units.ts";
+import { publicAtCutoff, type PublicationTiming } from "./public-time.ts";
 
 /** One reported-metric slot as bound: an immutable input, or an explicit gap. */
 export type SlotBinding =
   | Readonly<{ status: "bound"; input: BoundFinancialInputV1; payload_hash: Sha256Hex; candidate_set_digest: Sha256Hex }>
   | Readonly<{ status: "gap"; reason_code: ReasonCode; candidate_set_digest: Sha256Hex }>;
+
+/** A stored balance as the absence rule reads it. Ingestion records a balance's financial context only from a 10-K. */
+export type StoredBalance = Readonly<{
+  period: Readonly<{ end: string }>;
+  context: object | null;
+  publication: ReadonlyArray<Readonly<{ timing: PublicationTiming }>>;
+}>;
+
+/**
+ * The slots each net cash or total debt leaves out as absent (missing_input)
+ * that the store does not prove absent (#792). The store's balances come from
+ * SEC companyfacts, which drops a line a 10-K tags with a company concept, so
+ * an optional component is absent only while no 10-K public by the knowledge
+ * cutoff reported it on or before the sum's balance-sheet date: the end of its
+ * first bound component, cash and equivalents for net cash. With none bound,
+ * the sum is a gap already. Period ends order the reports, not fiscal labels,
+ * which a fiscal-year change skips and companyfacts can get wrong (HON's
+ * FY2021 10-K is labelled fiscal 2020). A component the definition may count
+ * as the same line, bound for the sum, explains the absence. A report of zero
+ * counts. `stored` holds each slot's balances for every period, as read.
+ */
+export function unverifiedAbsences(
+  plan: FinancialPlan,
+  bindings: ReadonlyMap<LocalId, SlotBinding>,
+  stored: ReadonlyMap<LocalId, ReadonlyArray<StoredBalance>>,
+): Set<LocalId> {
+  const unverified = new Set<LocalId>();
+  for (const node of plan.operations) {
+    if (node.operation !== "net_cash" && node.operation !== "total_debt") continue;
+    const slots = balanceComponentNodes(node);
+    const components = balanceComponents(node.operation);
+    const bound = new Map(components.flatMap((component, index) => {
+      const binding = bindings.get(slots[index]!);
+      return binding?.status === "bound" && binding.input.schema_version !== BOUND_PRICE_INPUT_SCHEMA_VERSION ? [[component.metric_key, binding.input.period.end] as const] : [];
+    }));
+    const [end] = bound.values();
+    if (end === undefined) continue;
+    for (const [index, component] of components.entries()) {
+      const slot = slots[index]!;
+      const binding = bindings.get(slot);
+      if (component.required || binding?.status !== "gap" || binding.reason_code !== "missing_input") continue;
+      if (components.some((other) => bound.has(other.metric_key) && (other.excludes?.includes(component.metric_key) || component.excludes?.includes(other.metric_key)))) continue;
+      if (stored.get(slot)?.some((balance) => balance.context !== null && balance.period.end <= end &&
+        balance.publication.some(({ timing }) => publicAtCutoff(timing, plan.time.knowledge_cutoff) === "eligible"))) {
+        unverified.add(slot);
+      }
+    }
+  }
+  return unverified;
+}
 
 /** An operand by its lineage hash, or the plan assumption a scenario reads. */
 export type InputRef = Readonly<{ node_id: LocalId; hash: Sha256Hex }> | Readonly<{ assumption_id: LocalId; hash: Sha256Hex }>;
@@ -237,7 +289,7 @@ function bindingGapExplanation(reason: ReasonCode): string {
     case "ineligible_input":
       return "A filing reports this figure, but none of its reports is usable here: none was public before the knowledge cutoff, or it is only a restatement and the original was asked for.";
     case "absence_unverified":
-      return "No filing in the store reports this balance for the period, though the 10-K for the year before did, so the store may have missed it; it is not taken as absent.";
+      return "No filing in the store reports this balance for the period, though an earlier 10-K public before the knowledge cutoff did, so the store may have missed it; it is not taken as absent.";
     case "incompatible_period":
       return "The period filed under this fiscal label does not end the requested number of years or quarters before the latest one, so it is not the period asked for.";
     default:

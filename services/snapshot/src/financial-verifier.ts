@@ -10,7 +10,6 @@
 // payloads, and source content never appear in diagnostics.
 
 import {
-  absenceUnverified,
   BOUND_PRICE_INPUT_SCHEMA_VERSION,
   canonicallyEqual,
   conceptScope,
@@ -35,6 +34,7 @@ import {
   splitReferenceDate,
   unitClosures,
   unitPublication,
+  unverifiedAbsences,
   validateBoundInput,
   validateFinancialPlan,
   type BoundFactInputV1,
@@ -400,8 +400,9 @@ function bindingsFor(plan: FinancialPlan, records: FinancialUnitRecords): Bindin
  * debt) that the store disproves. Binding's rule 11 (select-inputs.ts): a
  * slot is missing_input only when no authorized candidate reports its metric
  * for the period, so any candidate there, or a reread too long to see whole,
- * leaves the gap unproven; so does a 10-K's report of an optional balance for
- * the year before (rule 12, #792). Every component of a sum has one period selector;
+ * leaves the gap unproven; so does a 10-K public by the cutoff that reported
+ * an optional balance by the sum's balance-sheet date (rule 12,
+ * unverifiedAbsences, #792). Every component of a sum has one period selector;
  * a latest one resolved to the period of the sum's bound components. With
  * none bound, the sum is missing itself and certifies no value. A gap true
  * at bind time fails here once the store holds its fact (a 10-K ingested
@@ -416,6 +417,7 @@ function unprovenAbsences(
 ): LocalId[] {
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const reads = new Map(rereads.map((read) => [read.input_slot, read]));
+  const unverified = unverifiedAbsences(plan, bindings, new Map(rereads.map((read) => [read.input_slot, read.candidates])));
   const unproven = new Set<LocalId>();
   for (const node of plan.operations) {
     if (!closureNodes.has(node.node_id) || OPERATION_REGISTRY[node.operation].tolerates_missing_operands !== "absent_inputs") continue;
@@ -430,9 +432,8 @@ function unprovenAbsences(
       const binding = bindings.get(id);
       if (binding?.status !== "gap" || binding.reason_code !== "missing_input") continue;
       const read = reads.get(id);
-      if (!read || read.truncated || read.candidates.some((candidate) =>
-        candidate.period_end !== null && candidate.fiscal_year === period.fiscal_year && candidate.fiscal_period === period.fiscal_period) ||
-        absenceUnverified((nodes.get(id) as ReportedMetricNode).metric_key, period, read.candidates)) {
+      if (!read || read.truncated || unverified.has(id) || read.candidates.some((candidate) =>
+        candidate.period.fiscal_year === period.fiscal_year && candidate.period.fiscal_period === period.fiscal_period)) {
         unproven.add(id);
       }
     }

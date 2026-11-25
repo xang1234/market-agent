@@ -51,16 +51,16 @@
 //    as_reported, is ineligible_input, so net cash and total debt never
 //    leave out a balance a filing did report (#602).
 // 12. A store misses a line a 10-K tags with a concept it does not read, so
-//    an optional balance of net cash and total debt with no candidate for
-//    its fiscal year, which the 10-K for the year before reported (a stored
-//    balance with a context), is absence_unverified, not missing_input:
-//    never taken as absent (#792).
+//    an optional balance net cash or total debt leaves out as missing_input
+//    is absence_unverified when a 10-K public at the cutoff reported it on or
+//    before the sum's balance-sheet date, unless a key the definition may
+//    count as the same line is bound (unverifiedAbsences, #792). It reads the
+//    sum's other slots, so binding applies it once every slot is selected.
 //
 // A selection is a proven input: the chosen candidate with its proofs and
 // context narrowed to non-null, and its numerics parsed exactly once.
 
 import {
-  absenceUnverified,
   canonicalDecimalString,
   compareRationals,
   conservativeAvailability,
@@ -259,12 +259,6 @@ export function selectInput(
   if (shared !== null && "unresolved" in shared) return gap(shared.unresolved);
   const period = shared;
   const inPeriod = period === null ? requested : requested.filter((candidate) => inRequestedPeriod(candidate, period));
-  const fiscal = node.period.kind === "fiscal_period" ? node.period : period;
-  if (inPeriod.length === 0 && fiscal !== null &&
-    absenceUnverified(node.metric_key, fiscal, candidates.flatMap((candidate) =>
-      candidate.metric_key === node.metric_key ? [{ ...candidate.period, has_context: candidate.context !== null }] : []))) {
-    return gap("absence_unverified");
-  }
 
   const eligible = eligibleAmong(inPeriod, policy);
   if (typeof eligible === "string") return gap(eligible);
