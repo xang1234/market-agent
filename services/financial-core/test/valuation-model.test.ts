@@ -286,6 +286,9 @@ test("rule 0: a near band at or below zero is a hurdle setting out of range, not
   for (const band of ["0", "-0.5"]) {
     const result = stance("300", { near_band: q(band) });
     assert.deepEqual(result.kind === "declined" && result.rule === 0 && result.outcome.outcome, "hurdle_setting_out_of_range", band);
+    // Rule 0 comes ahead of rule 2: net debt that leaves no positive hurdle price does not hide the setting.
+    const indebted = stance("140", { near_band: q(band) }, BEAR, { net_cash: q("-2000") });
+    assert.deepEqual(indebted.kind === "declined" && indebted.rule === 0 && indebted.outcome.outcome, "hurdle_setting_out_of_range", band);
   }
 });
 

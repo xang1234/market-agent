@@ -238,6 +238,8 @@ export function callStance(inputs: ValuationInputs, base: ValuationCase, bear: V
 
 // Rules 2 and 4 to 6 at one set of inputs, or the outcome that leaves V or B without a value.
 function tests(inputs: ValuationInputs, base: ValuationCase, bear: ValuationCase, settings: StanceSettings): StanceTests | InputOutcome | NoHurdle {
+  // A setting out of range is rule 0, ahead of rule 2, as hurdlePrice orders the other two.
+  if (rationalSign(settings.near_band) <= 0) return { kind: "declined", rule: 0, outcome: outcome("hurdle_setting_out_of_range") };
   const v = valuePerShare(inputs, base, base.growth);
   if (v.kind === "outcome") return { kind: "declined", rule: 0, outcome: v };
   const b = valuePerShare(inputs, bear, bear.growth);
@@ -246,7 +248,6 @@ function tests(inputs: ValuationInputs, base: ValuationCase, bear: ValuationCase
   if (hurdle.kind === "outcome") {
     return hurdle.outcome === "no_positive_hurdle_price" ? { kind: "declined", rule: 2, base: v.value, bear: b.value } : { kind: "declined", rule: 0, outcome: hurdle };
   }
-  if (rationalSign(settings.near_band) <= 0) return { kind: "declined", rule: 0, outcome: outcome("hurdle_setting_out_of_range") };
   const near = mul(hurdle.value, add(ONE, settings.near_band));
   if (near === null) return { kind: "declined", rule: 0, outcome: outcome("numeric_limit_exceeded") };
   const rule = compareRationals(inputs.price, hurdle.value) <= 0 ? 4 : compareRationals(inputs.price, near) <= 0 ? 5 : 6;
