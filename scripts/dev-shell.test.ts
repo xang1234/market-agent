@@ -425,6 +425,24 @@ test("under DEV_PROFILE=chat, turning on DEV_NO_KEYS restarts the app process", 
   assert.match(noKeys, /^start:app$/m);
 });
 
+// Chat attaches the analyst agent only at start, so a change to that flag alone restarts the process that runs chat, and only that one.
+for (const [profile, restarted] of [["full", ["chat"]], ["chat", ["app"]]] as const) {
+  test(`under DEV_PROFILE=${profile}, changing only CHAT_ANALYST_AGENT restarts ${restarted.join(", ")}`, async () => {
+    const { result, trace } = await traceUp({ DEV_PROFILE: profile, CHAT_ANALYST_AGENT: "1" }, [
+      'stop_process(){ printf "stop:%s\\n" "$1" >> "$TRACE_FILE"; kill "$(cat "$PID_DIR/$1.pid")" 2>/dev/null; rm -f "$PID_DIR/$1.pid"; }',
+      "port_listening(){ return 1; }",
+      'mkdir -p "$ROOT/services/chat"',
+      "up",
+      'printf "mark:agent-off\\n" >> "$TRACE_FILE"',
+      "export CHAT_ANALYST_AGENT=0",
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    const [, agentOff] = trace.split(/mark:\S+\n/);
+    const stopped = agentOff.split("\n").filter((l) => l.startsWith("stop:")).map((l) => l.slice(5)).sort();
+    assert.deepEqual(stopped, restarted);
+  });
+}
+
 test("launch-env stamps are checksums, so LLM API keys are not copied into .dev", async () => {
   const fixture = await createShellFixture({ LLM_OPENAI_API_KEY: "sk-secret-value" });
   const result = await runBash(
