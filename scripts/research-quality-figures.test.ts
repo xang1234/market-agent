@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { enumerateNumerals, type Operand } from "../services/financial-core/src/figure-check.ts";
 import { GOLDEN_COMPANIES, goldenDailyBars } from "../services/chat/test/golden/dataset.ts";
 import { questionSetDigest, type RunRecord } from "./research-quality-eval.ts";
 import { Refusal } from "./research-quality-eval.ts";
@@ -8,8 +9,6 @@ import {
   LABELS_SCHEMA,
   anthropicLabeller,
   checkRun,
-  derive,
-  enumerateNumerals,
   labellerPrompt,
   labellerSystemPrompt,
   markNumerals,
@@ -18,20 +17,18 @@ import {
   summaryLines,
   verdictFor,
   LAST_DIGIT,
-  withinPrecision,
-  type DataRef,
-  type FigureLabel,
+  type GoldenRef,
+  type LabelledFigure,
   type Labeller,
-  type Operand,
 } from "./research-quality-figures.ts";
 import { QUESTIONS } from "./research-quality-questions.ts";
 
-const ref = (company: string, metric: DataRef["metric"], fiscal_year: number | null, fiscal_period: DataRef["fiscal_period"], extra: Partial<DataRef> = {}): DataRef =>
+const ref = (company: string, metric: GoldenRef["metric"], fiscal_year: number | null, fiscal_period: GoldenRef["fiscal_period"], extra: Partial<GoldenRef> = {}): GoldenRef =>
   ({ company, metric, fiscal_year, fiscal_period, segment: null, date: null, ...extra });
-const of = (value: DataRef, over: DataRef | null = null): Operand => ({ value, over });
-const reported = (id: string, source: DataRef | null, extra: Partial<FigureLabel> = {}): FigureLabel =>
+const of = (value: GoldenRef, over: GoldenRef | null = null): Operand<GoldenRef> => ({ value, over });
+const reported = (id: string, source: GoldenRef | null, extra: Partial<LabelledFigure> = {}): LabelledFigure =>
   ({ id, company: source?.company ?? null, metric: "m", period: "p", basis: "reported", source, derivation: null, operands: [], sign: null, scale: null, ...extra });
-const derived = (id: string, derivation: FigureLabel["derivation"], operands: Operand[], extra: Partial<FigureLabel> = {}): FigureLabel =>
+const derived = (id: string, derivation: LabelledFigure["derivation"], operands: Operand<GoldenRef>[], extra: Partial<LabelledFigure> = {}): LabelledFigure =>
   ({ id, company: null, metric: "m", period: "p", basis: "derived", source: null, derivation, operands, sign: null, scale: null, ...extra });
 // One numeral, as the enumerator reads it.
 const numeral = (text: string) => {
@@ -39,104 +36,37 @@ const numeral = (text: string) => {
   assert.equal(found?.text, text, `${text} reads as one numeral`);
   return found!;
 };
-const check = (text: string, label: FigureLabel) => verdictFor(numeral(text), label);
+const check = (text: string, label: LabelledFigure) => verdictFor(numeral(text), label);
 
-test("every numeral is found with its span, value, precision, unit and sign", () => {
-  const text = "NVDA's revenue was **$62.1B** in Q4 FY2026 (ended 2026-01-25), up 9% from $57,006 million; operating income of -$134.0M; "
-    + "margin fell 12.5 points (−1,250 bps); 3.2x; ($134M) and (10.84%); as of 2026-09-01T00:00:00.000Z; 74.40%; 1,010,000 shares at $178.40. Q3 FY2024–Q2 FY2026.";
-  const found = enumerateNumerals(text);
-  assert.deepEqual(found.map((n) => n.text), [
-    "$62.1B", "4", "2026", "2026-01-25", "9%", "$57,006 million", "-$134.0M", "12.5 points", "−1,250 bps", "3.2x", "$134M", "10.84%",
-    "2026-09-01T00:00:00.000Z", "74.40%", "1,010,000", "$178.40", "3", "2024", "2", "2026",
-  ]);
-  for (const n of found) assert.equal(text.slice(n.start, n.end), n.text);
-  const by = (t: string) => found.find((n) => n.text === t)!;
-  assert.deepEqual([by("$62.1B").value, by("$62.1B").unit, by("$62.1B").scaled, by("$62.1B").signed], [62.1e9, "amount", true, false]);
-  assert.ok(Math.abs(by("$62.1B").step - 1e8) < 1);
-  assert.deepEqual([by("$57,006 million").value, by("$57,006 million").step], [57_006e6, 1e6]);
-  assert.deepEqual([by("-$134.0M").value, by("-$134.0M").signed], [-134e6, true]);
-  assert.deepEqual([by("$134M").value, by("$134M").signed, by("10.84%").signed], [134e6, false, false], "parentheses hold an aside, not a negative");
-  assert.deepEqual([by("12.5 points").unit, by("−1,250 bps").unit, by("−1,250 bps").value, by("3.2x").unit], ["points", "bps", -1250, "multiple"]);
-  assert.equal(by("2026-01-25").unit, "date");
-  assert.equal(found.filter((n) => n.text === "2026").every((n) => !n.signed), true, "a range dash isn't a minus sign");
-  assert.deepEqual([by("74.40%").step, by("$178.40").step], [0.01, 0.01]);
-  assert.equal(by("1,010,000").step, 10_000, "a whole number's trailing zeros aren't significant");
-  assert.match(markNumerals(text, found), /^NVDA's revenue was \*\*⟦n1:\$62\.1B⟧\*\* in Q⟦n2:4⟧ FY⟦n3:2026⟧ \(ended ⟦n4:2026-01-25⟧\)/u);
-});
-
-test("a figure matches the data at the precision it shows", () => {
-  assert.equal(withinPrecision(62.1e9, 62.149e9, 1e8), true);
-  assert.equal(withinPrecision(62.1e9, 62.151e9, 1e8), false);
-  // A brief value rounded to cents sits exactly half a cent from the data.
-  const close = goldenDailyBars(GOLDEN_COMPANIES[0]!)[0]!.close;
-  assert.equal(withinPrecision(Number(close.toFixed(2)), close, 0.01), true);
+// The numerals and the verdict rules are financial-core's (test/figure-check.test.ts); these
+// cases cover what the eval adds: golden pointers, the labeller's shape and the saved verdict.
+test("each golden pointer reads its value on file, and a verdict saves its expected value in the numeral's unit", () => {
   const revenue = ref("NVDA", "revenue", 2026, "Q4");
   assert.deepEqual(check("$62.1B", reported("n1", revenue)), { verdict: "matched" });
-  assert.deepEqual(check("$62,100 million", reported("n1", revenue)), { verdict: "matched" });
   assert.deepEqual(check("$62.2B", reported("n1", revenue)), { verdict: "wrong", expected: 62_100e6, reason: LAST_DIGIT }, "one unit of the last digit off");
   assert.deepEqual(check("$62.3B", reported("n1", revenue)), { verdict: "wrong", expected: 62_100e6 }, "two units off is a misstatement");
-  assert.deepEqual(check("$60B", reported("n1", revenue)), { verdict: "matched" }, "a round number is read at its last significant digit");
-  assert.deepEqual(check("62,100", reported("n1", revenue, { scale: "millions" })), { verdict: "matched" }, "a table in $ millions");
-  assert.equal(check("62,100", reported("n1", revenue)).verdict, "wrong");
   assert.deepEqual(check("$178.40", reported("n1", ref("NVDA", "quote_price", null, null))), { verdict: "matched" });
   const last = goldenDailyBars(GOLDEN_COMPANIES[2]!).at(-1)!;
   assert.deepEqual(check(`$${last.close.toFixed(2)}`, reported("n1", ref("AAPL", "bar_close", null, null, { date: last.ts.slice(0, 10) }))), { verdict: "matched" });
   assert.deepEqual(check("$55.2B", reported("n1", ref("NVDA", "segment_revenue", 2026, "Q4", { segment: "Data Center" }))), { verdict: "matched" });
   assert.deepEqual(check("$800 million", reported("n1", ref("AMD", "filed_claim", 2025, "Q2"))), { verdict: "matched" });
   assert.equal(check("$900 million", reported("n1", ref("AMD", "filed_claim", 2025, "Q2"))).verdict, "wrong");
+  const q4 = (metric: GoldenRef["metric"]) => of(ref("NVDA", metric, 2026, "Q4"));
+  assert.deepEqual(check("74.4%", derived("n1", "margin", [q4("gross_profit"), q4("revenue")])), { verdict: "derived_ok" });
+  assert.deepEqual(check("75.1%", derived("n1", "margin", [q4("gross_profit"), q4("revenue")])), { verdict: "wrong", expected: 46_200 / 62_100 * 100 }, "a margin's expected value is a percent");
 });
 
-test("a sign comes from the text, then from its words; with neither only the size counts", () => {
-  const loss = ref("AMD", "operating_income", 2025, "Q2");
-  assert.deepEqual(check("-$134.0M", reported("n1", loss)), { verdict: "matched" });
-  assert.deepEqual(check("$134M", reported("n1", loss, { sign: "-" })), { verdict: "matched" }, "an operating loss of $134M");
-  assert.deepEqual(check("$134M", reported("n1", loss)), { verdict: "matched" });
-  assert.equal(check("$134M", reported("n1", loss, { sign: "+" })).verdict, "wrong", "operating income rose to $134M");
-  assert.equal(check("$134M", reported("n1", ref("AMD", "net_income", 2025, "Q2"), { sign: "-" })).verdict, "wrong");
-  const q1 = (metric: DataRef["metric"]) => of(ref("NVDA", metric, 2026, "Q1"));
-  assert.deepEqual(check("60.5%", derived("n1", "margin", [q1("gross_profit"), q1("revenue")], { sign: "-" })), { verdict: "derived_ok" }, "gross margin fell to 60.5%: a level keeps its own sign");
-  assert.equal(check("-60.5%", derived("n1", "margin", [q1("gross_profit"), q1("revenue")])).verdict, "wrong", "the text's own minus sign still counts");
-  const q2 = (metric: DataRef["metric"]) => of(ref("AMD", metric, 2025, "Q2"));
-  assert.deepEqual([numeral("+1.7%").value, numeral("+1.7%").signed], [1.7, true]);
-  assert.equal(check("+1.7%", derived("n1", "margin", [q2("operating_income"), q2("revenue")], { sign: "+" })).verdict, "wrong", "a written plus sign on a negative margin");
-  assert.deepEqual(check("-1.7%", derived("n1", "margin", [q2("operating_income"), q2("revenue")])), { verdict: "derived_ok" });
-});
-
-test("each derivation is recomputed from its operands", () => {
-  const nvda = (metric: DataRef["metric"], year: number, period: DataRef["fiscal_period"]) => ref("NVDA", metric, year, period);
-  const margin = (year: number, period: DataRef["fiscal_period"]) => of(nvda("gross_profit", year, period), nvda("revenue", year, period));
-  // 46,200 / 62,100 = 74.396%
-  assert.deepEqual(check("74.4%", derived("n1", "margin", [of(nvda("gross_profit", 2026, "Q4")), of(nvda("revenue", 2026, "Q4"))])), { verdict: "derived_ok" });
-  assert.equal(check("74.5%", derived("n1", "margin", [of(nvda("gross_profit", 2026, "Q4")), of(nvda("revenue", 2026, "Q4"))])).verdict, "wrong");
-  assert.deepEqual(check("74.4", derived("n1", "margin", [of(nvda("gross_profit", 2026, "Q4")), of(nvda("revenue", 2026, "Q4"))])), { verdict: "derived_ok" }, "a table cell in percent");
-  // (62,100 - 57,006) / 57,006 = 8.936%
-  assert.deepEqual(check("8.9%", derived("n1", "growth", [of(nvda("revenue", 2026, "Q3")), of(nvda("revenue", 2026, "Q4"))], { sign: "+" })), { verdict: "derived_ok" });
-  assert.equal(check("8.9%", derived("n1", "growth", [of(nvda("revenue", 2026, "Q3")), of(nvda("revenue", 2026, "Q4"))], { sign: "-" })).verdict, "wrong");
-  // 62,100 - 57,006 = 5,094
-  assert.deepEqual(check("$5.1B", derived("n1", "difference", [of(nvda("revenue", 2026, "Q4")), of(nvda("revenue", 2026, "Q3"))])), { verdict: "derived_ok" });
-  // 60.524% - 73.029% = -12.505 points
-  const fell = [margin(2026, "Q1"), margin(2025, "Q4")];
-  assert.deepEqual(check("12.5 points", derived("n1", "difference", fell, { sign: "-" })), { verdict: "derived_ok" });
-  assert.deepEqual(check("−1,250 bps", derived("n1", "difference", fell)), { verdict: "derived_ok" });
-  assert.equal(check("13.5 points", derived("n1", "difference", fell)).verdict, "wrong");
-  // "AMD's gross margin is 12.5 points lower": the operands come in either order.
-  assert.deepEqual(check("12.5 points", derived("n1", "difference", [...fell].reverse(), { sign: "-" })), { verdict: "derived_ok" });
-  // 209,911 / 34,669 = 6.055x
-  const scale = [of(nvda("revenue", 2026, "FY")), of(ref("AMD", "revenue", 2025, "FY"))];
-  assert.deepEqual(check("6.1x", derived("n1", "ratio", scale)), { verdict: "derived_ok" });
-  assert.equal(check("6.0x", derived("n1", "ratio", scale)).verdict, "wrong");
-  // 55,200 / 62,100 = 88.889%
-  assert.deepEqual(check("88.9%", derived("n1", "share_of_total", [of(ref("NVDA", "segment_revenue", 2026, "Q4", { segment: "Data Center" })), of(nvda("revenue", 2026, "Q4"))])), { verdict: "derived_ok" });
-  assert.equal(derive("difference", [margin(2026, "Q1"), of(nvda("revenue", 2026, "Q1"))]), "a difference between a ratio and an amount");
-  assert.equal(derive("growth", [of(nvda("revenue", 2026, "Q4"))]), "growth needs two operands, got 1");
-});
-
-test("anything the data can't settle is not checkable, with its reason", () => {
+test("a figure the golden data can't settle is not checkable, with its reason", () => {
   assert.deepEqual(verdictFor(numeral("$2.1B"), undefined), { verdict: "not_checkable", reason: "the labeller skipped it" });
-  assert.equal(check("$2.1B", reported("n1", null, { metric: "free cash flow" })).reason, "free cash flow (p) isn't in the data");
+  assert.deepEqual(check("$2.1B", reported("n1", null, { metric: "free cash flow" })), { verdict: "not_checkable", reason: "free cash flow (p) isn't in the data" });
+  assert.deepEqual(check("$2.1B", derived("n1", null, [])), { verdict: "not_checkable", reason: "derived, but no derivation given" });
   assert.equal(check("$6.8B", reported("n1", ref("AMD", "revenue", 2024, "Q1"))).reason, "its source isn't in the data", "a quarter that isn't seeded");
   assert.equal(check("$2.1B", derived("n1", "growth", [of(ref("AMD", "revenue", 2024, "Q1")), of(ref("AMD", "revenue", 2025, "Q1"))])).reason, "an operand isn't in the data");
-  assert.equal(check("74.4%", reported("n1", ref("NVDA", "gross_profit", 2026, "Q4"))).verdict, "not_checkable", "a margin labelled as a reported amount");
+});
+
+test("the labeller sees each numeral marked by its id", () => {
+  const text = "NVDA's revenue was **$62.1B** in Q4 FY2026 (ended 2026-01-25).";
+  assert.equal(markNumerals(text, enumerateNumerals(text)), "NVDA's revenue was **⟦n1:$62.1B⟧** in Q⟦n2:4⟧ FY⟦n3:2026⟧ (ended ⟦n4:2026-01-25⟧).");
 });
 
 test("the labeller's schema is strict JSON schema and its prompt carries no values", () => {

@@ -17,6 +17,7 @@ configuration, or feature-service imports — `test/boundaries.test.ts` enforces
 | `periods.ts`, `dimensions.ts` | Exact period identity (52/53-week aware), unit/scope/basis compatibility, typed dimensionless conversions. |
 | `operations.ts`, `predicates.ts` | The approved operations and exact threshold/peer predicates; each composes its own compatibility checks; incompatibilities are named gaps. |
 | `graph.ts`, `publication-units.ts`, `coverage.ts` | DAG validation and limits, frozen unit closures, dependency propagation, integrity isolation, and coverage. |
+| `figure-check.ts` | The figure check (#800): the numerals a text states, and each one's verdict against the values its label points at, at the precision the text shows. Generic over the pointer, so the eval and chat share it. Float arithmetic with a tolerance: it judges prose and publishes no value. Not in `index.ts`; import the module. |
 
 ## P/E scenarios (#201)
 
