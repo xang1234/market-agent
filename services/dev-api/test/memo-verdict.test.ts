@@ -42,6 +42,21 @@ test("the memo flow fails a memo no model wrote, and passes one whose every sect
   assert.equal(memoVerdict(seen("Commentary is unavailable for this answer.", "", true)).passed, false, "a figure with no answer written beside it is not a written section");
 });
 
+test("a stance word inside a quoted 10-K claim is reported from the page but passes; the report states the verdict (#798)", () => {
+  const empty = "No stored source covers this section.";
+  // NVDA's 10-K, quoted on the 2026-11-25 memo: on the page, stripped from the canvas with the other claim quotes.
+  const quote = "Source 8: All major cloud service providers, or CSPs, AI model makers, and enterprises use our data center-scale infrastructure and computing platforms to accelerate the services and offerings they deliver to billions of end users and customers, including AI solutions and assistants, AI foundation models, advertising, search, recommendation systems, social 4 Table of Contents networking, data processing, online shopping, live video, and translation.";
+  const quoted = seen(empty);
+  const { report, passed } = memoVerdict({ ...quoted, page: `${quoted.page}\n${quote}` });
+  assert.equal(passed, true);
+  assert.equal(report.passed, true, "report.json says whether the run passed, so a run without its exit code is not misread");
+  assert.deepEqual(report.stance_words, []);
+  assert.deepEqual(report.page_stance_words, ["recommendation"]);
+  const stance = memoVerdict(seen(empty, "We recommend buying NVDA."));
+  assert.equal(stance.passed, false, "a recommendation in the agent's own words still fails it");
+  assert.equal(stance.report.passed, false);
+});
+
 test("the memo flow reports each section's themes shown and what the judge did with them, from this run's log lines alone", () => {
   const RUN = "4f000000-0000-4000-8000-0000000000f1";
   const base = seen("A note.");
