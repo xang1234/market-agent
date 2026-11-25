@@ -85,7 +85,9 @@ const CONNECTORS = new Set(["case", "scenario", "scenarios", "is", "was", "were"
 const SIGNED = /\s*\d/uy;
 // The one unlabelled scenario ask: P/E and exactly three multiples, as in "P/E 20/25/30".
 const MULTIPLE = String.raw`(\d+(?:\.\d+)?)(?:\s*[x×])?`;
-const UNLABELLED_LIST = new RegExp(String.raw`(?<![\p{L}\p{N}])(?:${PE_WORDING}|multiples?)(?:\s+ratios?)?\s*(?:[:=]\s*|of\s+)?${MULTIPLE}\s*[\/,]\s*${MULTIPLE}(?:\s*[\/,]\s*(?:and\s+)?|\s+and\s+)${MULTIPLE}(?![\p{L}\p{N}]|\.\d|\s*(?:[\/,]|and\b)\s*\d)`, "u");
+// What the list writes before its first multiple: "P/E 20", "multiples of 20", "PE20".
+const LIST_OPENING = String.raw`(?<![\p{L}\p{N}])(?:${PE_WORDING}|multiples?)(?:\s+ratios?)?\s*(?:[:=]\s*|of\s+)?`;
+const UNLABELLED_LIST = new RegExp(String.raw`${LIST_OPENING}${MULTIPLE}\s*[\/,]\s*${MULTIPLE}(?:\s*[\/,]\s*(?:and\s+)?|\s+and\s+)${MULTIPLE}(?![\p{L}\p{N}]|\.\d|\s*(?:[\/,]|and\b)\s*\d)`, "u");
 const MAX_MULTIPLE_LENGTH = 32;
 
 /**
@@ -111,11 +113,13 @@ export function readScenarioAsk(text: string, company: ReadonlyArray<string>): S
   return isUnlabelledList(lower) ? { labels, ...INVALID } : null;
 }
 
-// The wording every ask needs: a label, or the P/E wording an unlabelled list
-// starts with. A company's words are cut out whole, between non-word
-// characters, leaving one space, so cutting them never makes a word; it can
-// close up only "P / E", which the slash stands for.
-const ASK_WORDING = new RegExp(String.raw`(?<![\p{L}\p{N}])(?:${SCENARIOS.join("|")}|${PE_WORDING}|multiples?)(?![\p{L}\p{N}])|\/`, "u");
+// The wording every ask needs: a label, or the opening of an unlabelled list.
+// A company's words are cut out whole, between non-word characters, leaving
+// one space. Cutting them never makes a word, so a label or a list's first
+// word is written as the parser reads it. The rest of the opening reaches the
+// first multiple, or a space or mark a company's words may follow before it.
+// A cut can close up only "P / E", which the slash stands for.
+const ASK_WORDING = new RegExp(String.raw`(?<![\p{L}\p{N}])(?:${SCENARIOS.join("|")})(?![\p{L}\p{N}])|${LIST_OPENING}(?:${MULTIPLE}|(?<![\p{L}\p{N}]))|\/`, "u");
 
 /** Whether readScenarioAsk could read an ask from the message for some company's words: false lets a caller skip resolving its companies. */
 export const mayAskScenario = (text: string): boolean => ASK_WORDING.test(text.toLowerCase());

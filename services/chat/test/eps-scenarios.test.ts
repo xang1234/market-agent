@@ -150,6 +150,13 @@ test("a message's P/E scenarios, as readScenarioAsk reads them", () => {
     ["AAPL P/E of 20, 25 and 30", invalid(0)],
     ["AAPL P/E 20, 25, and 30", invalid(0)],
     ["AAPL P/E: 20x/25X/30×", invalid(0)],
+    ["AAPL PE 20, 25, 30", invalid(0)],
+    ["AAPL PE20, 25, 30", invalid(0)],
+    ["AAPL PE20x, 25x, 30x", invalid(0)],
+    ["AAPL multiple20, 25, 30", invalid(0)],
+    ["AAPL multiples of 20, 25 and 30", invalid(0)],
+    ["AAPL price-to-earnings20, 25, 30", invalid(0)],
+    ["AAPL price to earnings ratio=20, 25, 30", invalid(0)],
     ["AAPL P/E 2023 and 2024", null],
     ["AAPL P/E 2023/2024", null],
     ["AAPL P/E 2022/2023/2024", null],
@@ -173,11 +180,27 @@ test("a message's P/E scenarios, as readScenarioAsk reads them", () => {
   assert.deepEqual(table.flatMap(([text, read]) => (read !== null && !mayAskScenario(text) ? [text] : [])), [], "every ask read has the wording mayAskScenario looks for");
 });
 
+test("mayAskScenario passes every unlabelled list the parser reads, a company cut in at any gap or not", () => {
+  const leads = ["P/E", "p / e", "PE", "price-to-earnings", "price to earnings", "multiple", "multiples"];
+  const gaps = ["", " ", " ratio ", " ratios: ", ":", "= ", " of ", "of "];
+  const lists = ["20, 25, 30", "20x/25x/30x", "20 / 25 and 30", "20×, 25×, and 30×"];
+  const missed: string[] = [];
+  for (const lead of leads) for (const gap of gaps) for (const list of lists) {
+    const written = `${lead}${gap}${list}`;
+    // AAPL before the ask, and in place of each space before the first multiple.
+    const spaces = [...`${lead}${gap}`].flatMap((char, index) => (char === " " ? [index] : []));
+    for (const text of [`AAPL ${written}`, ...spaces.map((index) => `${written.slice(0, index)} AAPL ${written.slice(index + 1)}`)]) {
+      if (readScenarioAsk(text, COMPANY) !== null && !mayAskScenario(text)) missed.push(text);
+    }
+  }
+  assert.deepEqual(missed, []);
+});
+
 test("mayAskScenario: an ask's wording, cutting a company's words out or not; an ordinary question has none", () => {
   assert.equal(mayAskScenario("make AAPL bull 35"), true);
   assert.deepEqual(readScenarioAsk("P AAPL/E 20/25/30", ["AAPL"]), invalid(0), "cutting AAPL out closes up P / E");
   assert.equal(mayAskScenario("P AAPL/E 20/25/30"), true);
-  for (const text of ["What does AAPL sell?", "How has AAPL's share price moved?", "Show AAA's cash resilience", "Is AAPL bullish?"]) assert.equal(mayAskScenario(text), false, text);
+  for (const text of ["What does AAPL sell?", "How has AAPL's share price moved?", "Show AAA's cash resilience", "Is AAPL bullish?", "How did AAPL perform?", "Who are AAPL's peers?"]) assert.equal(mayAskScenario(text), false, text);
 });
 
 test("a company's words are its resolved mention and label, each whole", () => {
