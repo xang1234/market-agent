@@ -52,8 +52,9 @@
 //    leave out a balance a filing did report (#602).
 // 12. A store misses a line a 10-K tags with a concept it does not read, so
 //    an optional balance of net cash and total debt with no candidate for
-//    its fiscal year, which the 10-K for the year before reported, is
-//    absence_unverified, not missing_input: never taken as absent (#792).
+//    its fiscal year, which the 10-K for the year before reported (a stored
+//    balance with a context), is absence_unverified, not missing_input:
+//    never taken as absent (#792).
 //
 // A selection is a proven input: the chosen candidate with its proofs and
 // context narrowed to non-null, and its numerics parsed exactly once.
@@ -260,7 +261,8 @@ export function selectInput(
   const inPeriod = period === null ? requested : requested.filter((candidate) => inRequestedPeriod(candidate, period));
   const fiscal = node.period.kind === "fiscal_period" ? node.period : period;
   if (inPeriod.length === 0 && fiscal !== null &&
-    absenceUnverified(node.metric_key, fiscal, candidates.filter((candidate) => candidate.metric_key === node.metric_key).map((candidate) => candidate.period))) {
+    absenceUnverified(node.metric_key, fiscal, candidates.flatMap((candidate) =>
+      candidate.metric_key === node.metric_key ? [{ ...candidate.period, has_context: candidate.context !== null }] : []))) {
     return gap("absence_unverified");
   }
 

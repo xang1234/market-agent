@@ -134,7 +134,7 @@ export type LoadedSubjectName = Readonly<{ kind: "issuer" | "listing"; id: strin
 /** A missing_input gap's slot that a sum leaves out, reread now as binding read it: the period of each authorized candidate. */
 export type LoadedGapCandidates = Readonly<{
   input_slot: string;
-  candidates: ReadonlyArray<Readonly<{ fiscal_year: number | null; fiscal_period: string | null; period_end: string | null }>>;
+  candidates: ReadonlyArray<Readonly<{ fiscal_year: number | null; fiscal_period: string | null; period_end: string | null; has_context: boolean }>>;
   truncated: boolean;
 }>;
 
@@ -320,7 +320,7 @@ async function readGapCandidates(db: QueryExecutor, plan: FinancialPlan, missing
     });
     reads.push({
       input_slot: node.node_id,
-      candidates: page.candidates.map(({ fiscal_year, fiscal_period, period_end }) => ({ fiscal_year, fiscal_period, period_end })),
+      candidates: page.candidates.map(({ fiscal_year, fiscal_period, period_end, context }) => ({ fiscal_year, fiscal_period, period_end, has_context: context !== null })),
       truncated: page.truncated,
     });
   }

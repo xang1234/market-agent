@@ -209,17 +209,19 @@ export const BALANCE_SUM_SIDES: Readonly<Record<BalanceSumKind, Readonly<Partial
  * Whether a balance is unverified absent at a fiscal year (#792): net cash and
  * total debt leave out an optional balance no filing reports, but the store
  * misses a line a 10-K tags with a concept it does not read, so one the 10-K
- * for the year before reported is never taken as absent. A slot with no
- * candidate has no end date, so the year before is found by its fiscal label;
- * a mislabel can only add a gap, never a sum.
+ * for the year before reported is never taken as absent. Ingestion records a
+ * balance's financial context only from a 10-K, so a stored balance without
+ * one (a 10-Q's, labelled FY) is not that report. A slot with no candidate
+ * has no end date, so the year before is found by its fiscal label; a
+ * mislabel can only add a gap, never a sum.
  */
 export function absenceUnverified(
   metricKey: MetricKey,
   period: Readonly<{ fiscal_year: number; fiscal_period: string }>,
-  reported: ReadonlyArray<Readonly<{ fiscal_year: number | null; fiscal_period: string | null }>>,
+  stored: ReadonlyArray<Readonly<{ fiscal_year: number | null; fiscal_period: string | null; has_context: boolean }>>,
 ): boolean {
   return period.fiscal_period === "FY" && isOptionalBalance(metricKey) &&
-    reported.some((prior) => prior.fiscal_year === period.fiscal_year - 1 && prior.fiscal_period === "FY");
+    stored.some((prior) => prior.has_context && prior.fiscal_year === period.fiscal_year - 1 && prior.fiscal_period === "FY");
 }
 
 export function isOptionalBalance(metricKey: MetricKey): boolean {
