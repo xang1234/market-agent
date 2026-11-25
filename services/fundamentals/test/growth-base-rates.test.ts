@@ -72,6 +72,20 @@ test("a filer whose year-5 10-K lacks the tracked figures reached year 5, so its
   assert.deepEqual(result(filerWindows(subsequent, 2016), 2016).revenue, { outcome: "ended_early" });
 });
 
+test("a 10-K's forward schedule, a period ending after it was filed, never dates the filer into a later year", () => {
+  // FY2020's 10-K, filed 2021-02-15, tags its 2021 lease payments as a 365-day period ending 2021-12-31.
+  const forward = sample([{ concept: "LesseeOperatingLeaseLiabilityPaymentsDueNextTwelveMonths", year: 2021, value: 40, filedIn: 2020 }]);
+  assert.deepEqual(result(filerWindows(forward, 2016), 2016), { revenue: { outcome: "ended_early" }, fcf: { outcome: "ended_early" }, fcf_per_share: { outcome: "ended_early" } });
+  // Nor is a figure for a period not yet ended when its 10-K was filed the year's own figure, though filed first.
+  const actual = 1_000_000_000 * 1.1 ** 5;
+  const projected = sample([
+    { concept: "Revenues", year: 2020, value: 9_999_999_999, filedIn: 2019, accn: "p-2019" },
+    { concept: "Revenues", year: 2020, value: actual, filedIn: 2020 },
+    { concept: "Revenues", year: 2020, value: actual, filedIn: 2021 },
+  ]);
+  assert.ok(Math.abs(growth(result(filerWindows(projected, 2015), 2015).revenue) - 0.1) < 1e-12);
+});
+
 test("cash flow and capex covering different periods in one year are mismatched_period, at either end, never subtracted", () => {
   const mismatched = { outcome: "mismatched_period" };
   // FY2020's operating cash flow is for the year to September; its capex is for the calendar year.

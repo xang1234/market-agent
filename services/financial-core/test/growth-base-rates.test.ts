@@ -71,6 +71,9 @@ test("a table out of order, with a count that is not its points', or with a poin
   // A Call rounds the growth it counts to the stored places, so a point stored past them would be miscounted.
   assert.equal(parseGrowthBaseRates(raw([bucket("x", "0", null, ["0.10001"])])), null);
   assert.ok(parseGrowthBaseRates(raw([bucket("x", "0", null, ["0.1000"])])));
+  // Text that is not JSON, such as a truncated file, is not a table either.
+  assert.equal(parseGrowthBaseRates(raw([bucket("x", "0", null, ["0.1000"])]).slice(0, -2)), null);
+  assert.equal(parseGrowthBaseRates(""), null);
 });
 
 test("every committed table parses and is named by its text's sha256, CURRENT names one, and every bucket of it gives free cash flow and per share a base rate", () => {

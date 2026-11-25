@@ -85,7 +85,14 @@ export function growthBaseRate(table: GrowthBaseRates, metric: BaseRateMetric, s
 
 /** The table a data/growth-base-rates/ file's text holds, or null when any part of it is not what the builder writes. */
 export function parseGrowthBaseRates(text: string): GrowthBaseRates | null {
-  const json: unknown = JSON.parse(text);
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch (error) {
+    // Text that is not JSON (a truncated file) is not a table; anything else is a bug and propagates.
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
   if (!isRecord(json) || json.version !== "growth_base_rates.v1" || !isRecord(json.archive) || !isRecord(json.start_years) || !Array.isArray(json.buckets)) return null;
   const { file, date, sha256 } = json.archive;
   if (typeof file !== "string" || typeof date !== "string" || typeof sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(sha256)) return null;

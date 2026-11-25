@@ -13,6 +13,9 @@
 // earliest-filed 10-K stating that annual period (350 to 380 days, dated by the
 // period, never by the `fy` label, which some filers mislabel: #617). Its year
 // is the year the period ends in, a week early, as fcf-backtest.ts counts it.
+// A fact whose period ends after its 10-K was filed is a forward schedule
+// (future lease payments, amortization), never a reported figure, and is read
+// nowhere: not as a year's figure and not to date a 10-K.
 //
 // - Free cash flow is operating cash flow less capex, with the engine's concept
 //   choices: NetCashProvidedByUsedInOperatingActivities, else the
@@ -86,10 +89,13 @@ const DAY_MS = 86_400_000;
 
 const endYear = (end: string): number => new Date(Date.parse(`${end}T00:00:00Z`) - 7 * DAY_MS).getUTCFullYear();
 
+// A fact a 10-K reports: one in a 10-K whose period ended by the day it was filed.
+const reported = (entry: Entry): boolean => entry.form === "10-K" && entry.end <= entry.filed;
+
 function annual(facts: Companyfacts, concept: string, unit: string): Series {
   const years = new Map<number, Year>();
   for (const entry of facts.facts?.["us-gaap"]?.[concept]?.units?.[unit] ?? []) {
-    if (entry.form !== "10-K" || entry.start === undefined || !Number.isFinite(entry.val)) continue;
+    if (!reported(entry) || entry.start === undefined || !Number.isFinite(entry.val)) continue;
     const days = (Date.parse(entry.end) - Date.parse(entry.start)) / DAY_MS;
     if (days < 350 || days > 380) continue;
     const key = endYear(entry.end);
@@ -129,7 +135,7 @@ function lastFiledYear(facts: Companyfacts): number {
   for (const concept of Object.values(facts.facts?.["us-gaap"] ?? {})) {
     for (const entries of Object.values(concept.units ?? {})) {
       for (const entry of entries) {
-        if (entry.form !== "10-K") continue;
+        if (!reported(entry)) continue;
         const filing = ends.get(entry.accn) ?? ends.set(entry.accn, { annual: null, instant: null }).get(entry.accn)!;
         if (entry.start === undefined) {
           if (filing.instant === null || entry.end > filing.instant) filing.instant = entry.end;
@@ -362,7 +368,7 @@ export function* zipEntries(path: string): Generator<Readonly<{ name: string; te
 }
 
 // ponytail: the window code is these functions' text and the window constants; a helper added outside this list is not in the key.
-const WINDOWS_CODE = createHash("sha256").update(JSON.stringify([[endYear, annual, firstOf, lastFiledYear, filerWindows].map(String), HORIZON_YEARS, LAST_START])).digest("hex");
+const WINDOWS_CODE = createHash("sha256").update(JSON.stringify([[endYear, reported, annual, firstOf, lastFiledYear, filerWindows].map(String), HORIZON_YEARS, LAST_START])).digest("hex");
 
 export type WindowsCache = Readonly<{ archive_sha256: string; windows_code: string; filers: number; windows: Window[] }>;
 
