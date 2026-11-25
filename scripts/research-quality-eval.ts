@@ -326,7 +326,9 @@ export function renderReport(
     ...rubricLines(),
   ];
   for (const { question, threadId, turns, traces } of answered) {
-    lines.push("", `## ${question.id} (${question.kind})`, "", `Thread: ${base}/chat/${threadId}`);
+    lines.push("", `## ${question.id} (${question.kind})`);
+    // A bare-arm run (research-quality-bare.ts) asks the model directly, with no thread.
+    if (threadId) lines.push("", `Thread: ${base}/chat/${threadId}`);
     if (traces?.length) lines.push(...traces.map((trace) => `Trace: ${trace}`));
     lines.push("", `**Expect:** ${question.expect}`);
     if (question.notApplicable?.length) lines.push("", `N/A: ${question.notApplicable.join(", ")}`);
