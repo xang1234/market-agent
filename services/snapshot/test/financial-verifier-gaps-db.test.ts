@@ -1,6 +1,8 @@
 // Net cash and total debt leave out a balance the 10-K does not report
 // (#602), so a missing_input gap row changes a certified sum. The seal must
-// prove each such gap from the evidence store, not take the row's word (#607).
+// prove each such gap from the evidence store, not take the row's word (#607),
+// and a balance the 10-K for the year before reported is not proven absent
+// (#792).
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -64,6 +66,21 @@ function blindTo(hidden: string) {
       ...port,
       listInputCandidates: async (request) =>
         request.metric_key === hidden ? { status: "ok", candidates: [], truncated: false } : port.listInputCandidates(request),
+    };
+  };
+}
+
+/** The engine's evidence port, blind to `hidden` in fiscal `year`: like a binder that never read the year before (#792). */
+function blindToYear(hidden: string, year: number) {
+  return (executor: SqlExecutor): FinancialEvidencePort => {
+    const port = createEvidenceFinancialPort(executor);
+    return {
+      ...port,
+      listInputCandidates: async (request) => {
+        const page = await port.listInputCandidates(request);
+        return request.metric_key !== hidden || page.status !== "ok" ? page
+          : { ...page, candidates: page.candidates.filter((candidate) => candidate.period.fiscal_year !== year) };
+      },
     };
   };
 }
@@ -148,12 +165,6 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
     ]);
   });
 
-  await t.test("short-term borrowings stored for FY2025 leave FY2026's gap proven", async () => {
-    const { gaps, outcome } = await withBorrowings([[2025, "FY", "2025-09-27"]], () => seal(createEvidenceFinancialPort));
-    assert.deepEqual(gaps, TOLERATED);
-    assert.ok(outcome.ok, JSON.stringify(!outcome.ok && outcome.failures));
-  });
-
   await t.test("short-term borrowings stored for FY2026 Q1 leave the FY2026 gap proven", async () => {
     const { gaps, outcome } = await withBorrowings([[2026, "Q1", "2025-12-27"]], () => seal(createEvidenceFinancialPort));
     assert.deepEqual(gaps, TOLERATED);
@@ -166,6 +177,24 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
     const { gaps, outcome } = await seal(createEvidenceFinancialPort, aaplBalancePlan(FY2026));
     assert.deepEqual(gaps, TOLERATED);
     assert.ok(outcome.ok, JSON.stringify(!outcome.ok && outcome.failures));
+  });
+
+  await t.test("short-term borrowings stored for FY2025 leave FY2026's absence unverified, so no sum leaves them out (#792)", async () => {
+    for (const plan of [aaplBalancePlan(), aaplBalancePlan(FY2026)]) {
+      const { gaps, outcome } = await withBorrowings([[2025, "FY", "2025-09-27"]], () => seal(createEvidenceFinancialPort, plan));
+      assert.deepEqual(gaps, ["debt_securities_current:missing_input", "short_term_borrowings:absence_unverified", "short_term_investments:missing_input"]);
+      assert.ok(outcome.ok, JSON.stringify(!outcome.ok && outcome.failures));
+    }
+  });
+
+  await t.test("a missing_input row for short-term borrowings the FY2025 10-K reported is rejected (#792)", async () => {
+    for (const plan of [aaplBalancePlan(), aaplBalancePlan(FY2026)]) {
+      const { gaps, outcome } = await withBorrowings([[2025, "FY", "2025-09-27"]], () => seal(blindToYear("short_term_borrowings", 2025), plan));
+      assert.deepEqual(gaps, TOLERATED);
+      assert.deepEqual(!outcome.ok && outcome.failures.map((failure) => [failure.reason_code, failure.details.input_slot, failure.details.field]), [
+        ["financial_binding_mismatch", "short_term_borrowings", "gap_reason"],
+      ]);
+    }
   });
 
   await t.test("a plan that names FY2026 rejects a missing_input row for commercial paper the store holds", async () => {
