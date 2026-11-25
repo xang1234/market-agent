@@ -51,6 +51,13 @@ test("each golden pointer reads its value on file, and a verdict saves its expec
   assert.deepEqual(check("$55.2B", reported("n1", ref("NVDA", "segment_revenue", 2026, "Q4", { segment: "Data Center" }))), { verdict: "matched" });
   assert.deepEqual(check("$800 million", reported("n1", ref("AMD", "filed_claim", 2025, "Q2"))), { verdict: "matched" });
   assert.equal(check("$900 million", reported("n1", ref("AMD", "filed_claim", 2025, "Q2"))).verdict, "wrong");
+  // Operating income before the charge, -$134M + $800M = $666M, has no derivation. Labelled a
+  // difference, it would expect $934M and call the right $666M wrong (#805).
+  const amd = (metric: GoldenRef["metric"]) => ref("AMD", metric, 2025, "Q2");
+  const charge = { verdict: "not_checkable", reason: "an operand isn't in the data" };
+  assert.deepEqual(check("$666M", derived("n1", "difference", [of(amd("operating_income")), of(amd("filed_claim"))])), charge);
+  assert.deepEqual(check("$934M", derived("n1", "difference", [of(amd("filed_claim")), of(amd("operating_income"))])), charge, "in either order");
+  assert.deepEqual(check("12.0%", derived("n1", "difference", [of(amd("gross_profit"), amd("revenue")), of(amd("operating_income"), amd("filed_claim"))])), charge, "over it too");
   const q4 = (metric: GoldenRef["metric"]) => of(ref("NVDA", metric, 2026, "Q4"));
   assert.deepEqual(check("74.4%", derived("n1", "margin", [q4("gross_profit"), q4("revenue")])), { verdict: "derived_ok" });
   assert.deepEqual(check("75.1%", derived("n1", "margin", [q4("gross_profit"), q4("revenue")])), { verdict: "wrong", expected: 46_200 / 62_100 * 100 }, "a margin's expected value is a percent");

@@ -2,8 +2,8 @@
 // by code, labelled by a model (what each one is and which values on file it rests on),
 // and judged by code against the frozen golden dataset. It reads app runs and bare runs
 // alike, from each completed turn as renderBlock shows it. The numerals and verdicts are
-// financial-core's figure check, shared with chat (#800); this file holds the golden
-// pointer, its labeller and the CLI.
+// financial-core's figure check, which chat's checked-prose lane is to share (#800); this
+// file holds the golden pointer, its labeller and the CLI.
 //
 //   node --experimental-strip-types scripts/research-quality-figures.ts check <run.json>...
 //
@@ -178,6 +178,11 @@ export type Checked = { verdict: Verdict["kind"]; expected?: number; reason?: st
 // apart from a misstatement in the summary.
 export const LAST_DIGIT = "off by one in the last digit";
 
+// The filed charge states no sign, so only a reported figure reads it. Adding it back
+// (operating income before the charge) needs a sum, which no derivation is: a difference
+// would expect $934M for the right $666M (#805).
+const operandValueOf: ValueOf<GoldenRef> = (ref) => (ref.metric === "filed_claim" ? undefined : valueOf(ref));
+
 // The labeller's figure as the figure check reads it, or why it names nothing to check.
 function asLabel(figure: LabelledFigure): FigureLabel<GoldenRef> | string {
   const { sign, scale } = figure;
@@ -192,7 +197,7 @@ function asLabel(figure: LabelledFigure): FigureLabel<GoldenRef> | string {
 export function verdictFor(numeral: Numeral, figure: LabelledFigure | undefined): Checked {
   if (!figure) return { verdict: "not_checkable", reason: "the labeller skipped it" };
   const label = asLabel(figure);
-  const verdict: Verdict = typeof label === "string" ? { kind: "not_checkable", reason: label } : judge(numeral, label, valueOf);
+  const verdict: Verdict = typeof label === "string" ? { kind: "not_checkable", reason: label } : judge(numeral, label, label.basis === "derived" ? operandValueOf : valueOf);
   switch (verdict.kind) {
     case "wrong":
       return { verdict: "wrong", expected: writtenAs(verdict.expected, numeral.unit)[0], ...(verdict.lastDigit ? { reason: LAST_DIGIT } : {}) };
