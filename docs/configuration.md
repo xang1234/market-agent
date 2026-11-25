@@ -49,7 +49,7 @@ With `LLM_USAGE_LOG=true`, which `DEV_MODE=analyst` sets, each model call writes
 
 | Variable | Effect |
 |---|---|
-| `CHAT_ANALYST_AGENT=1` | Answers chat through the analyst agent's tool loop on `AGENT_LITELLM_MODEL`. A Call ask still runs the Call, and a turn the agent gives back, or whose model fails, falls back to the analyst path. `.env.dev.example` sets it. Unset, or any other value, chat runs without the agent. |
+| `CHAT_ANALYST_AGENT=1` | Answers chat through the analyst agent's tool loop on `AGENT_LITELLM_MODEL`. The asks the financial lane computes with no model still run there: a Call, a P/E scenario, a price comparison after one, and cash resilience. A turn the agent gives back, or whose model fails, falls back to the analyst path. `.env.dev.example` sets it. Unset, or any other value, chat runs without the agent. |
 | `CHAT_SCOPE_PROPOSAL=off` | Skips the short model call that picks which metrics and facets a question asks for. A follow-up then keeps the previous scope, except for any period it names. |
 | `CHAT_TRACE_DIR` | Writes a trace of each answer turn, including the judge's verdicts, to this directory. Each judged turn also logs one `[chat] judge` line. |
 | `CHAT_VERIFICATION_MODE=display_unverified` | Shows answers that fail verification, labelled **Unverified** with the reasons, and never saves them. The default, `strict`, shows only an error. The chat server refuses this value when `NODE_ENV=production`. |
