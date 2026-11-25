@@ -13,7 +13,7 @@
 
 import { inferenceNote, type ContinuingOperationsOcfV1, type DecimalString, type GapDisposition, type IsoDate, type IsoDateTime, type LocalId, type ProductiveAssetsCapexV1, type ReasonCode, type Sha256Hex, type UUID } from "./contracts.ts";
 import { balanceComponents } from "./definitions.ts";
-import { growthBaseRate, MIN_BASE_RATE_WINDOWS, type BaseRateBucket, type GrowthBaseRates } from "./growth-base-rates.ts";
+import { BASE_RATE_POINT_PLACES, growthBaseRate, MIN_BASE_RATE_WINDOWS, type BaseRateBucket, type GrowthBaseRates } from "./growth-base-rates.ts";
 import { canonicalDecimalString, parseFinancialDecimal, type ExactDecimal } from "./exact-decimal.ts";
 import { localDateOf } from "./public-time.ts";
 import type { RecordedSplit } from "./split-adjustment.ts";
@@ -237,6 +237,8 @@ export type CallContent = Readonly<{
   subject: Readonly<{ issuer_id: UUID; label: string }>;
   settings: CallSettings;
   inputs: CallInputsRef;
+  /** The sha256 of the base-rate table the Call read (its data/growth-base-rates/ file), or null when none was loaded; the seal reads the same one. */
+  base_rate_table: Sha256Hex | null;
   /** Row 1: facts used, each cited. */
   facts: ReadonlyArray<CallRow>;
   /** Row 2: assumptions, each with its kind and basis. */
@@ -247,10 +249,10 @@ export type CallContent = Readonly<{
 }>;
 
 /** A Call as #604 sealed it, before the exit multiple was anchored (#605): three assumptions and two requires rows. */
-export type CallContentV1 = Omit<CallContent, "version"> & Readonly<{ version: "call.v1" }>;
+export type CallContentV1 = Omit<CallContent, "version" | "base_rate_table"> & Readonly<{ version: "call.v1" }>;
 
 /** A Call as #605 sealed it, before its base rate: no revenue fact and no base-rate row. */
-export type CallContentV2 = Omit<CallContent, "version"> & Readonly<{ version: "call.v2" }>;
+export type CallContentV2 = Omit<CallContent, "version" | "base_rate_table"> & Readonly<{ version: "call.v2" }>;
 
 /** What a call.v2 Call was assembled from: no revenue and no base-rate table. */
 export type CallEvidenceV2 = Omit<CallEvidence, "figures" | "citations" | "base_rates"> & Readonly<{
@@ -291,7 +293,7 @@ export type CallEvidence = Readonly<{
   closes: CallCloses | null;
   /** The listing's splits, or null when its split history is unknown. */
   splits: ReadonlyArray<RecordedSplit> | null;
-  /** The committed base-rate table (data/growth-base-rates.json), or null when none is loaded. */
+  /** The base-rate table (data/growth-base-rates/), or null when none is loaded. */
   base_rates: GrowthBaseRates | null;
 }>;
 
@@ -435,6 +437,7 @@ export function assembleCall(evidence: CallEvidence): CallContent {
     subject: evidence.subject,
     settings: evidence.settings,
     inputs: evidence.inputs,
+    base_rate_table: evidence.base_rates?.table_sha256 ?? null,
     facts,
     assumptions,
     requires,
@@ -505,7 +508,7 @@ function anchoredCases(evidence: CallEvidence, anchor: Anchor, valueAt: ModelFig
     return {
       kind: "anchored",
       growth,
-      text: `Growth ${percent(growth, 1)}% a year at ${multipleText(anchor.value)}x: ${name} value USD ${value.text} per share`,
+      text: `Growth ${percent(growth, BASE_RATE_POINT_PLACES - 2)}% a year at ${multipleText(anchor.value)}x: ${name} value USD ${value.text} per share`,
       basis: `anchored: growth is the ${percentile}, at rank ${rank} of ${rates.n}, of total free cash flow growth over five-year windows that began at ${bucketText(rates.bucket)}, `
         + `from SEC's companyfacts archive of ${table.archive.date} (sha256 ${table.archive.sha256}). It is a frequency of reported history, not a probability. `
         + "Total, not per share: buybacks are left out of g, as d leaves them out. The exit multiple is the anchored exit multiple and the share change is d",
@@ -611,21 +614,24 @@ function baseRateRow(evidence: CallEvidence, causes: ReadonlyArray<Cause>, growt
   if (revenue.kind === "gap") return row(basis, not(revenue.disposition, `revenue is not certified (${revenue.disposition}, ${revenue.reason_code}).`, revenue.reason_code));
   if (revenue.currency !== "USD") return row(basis, not("incompatible_currency", "revenue is not in USD; nothing is converted.", "incompatible_currency"));
   const start = rational(revenue.value);
-  const total = growthBaseRate(table, "fcf", start, required);
+  // The points are stored to BASE_RATE_POINT_PLACES, so the growth counted against them is rounded to those places and stated as counted.
+  const cutoff = rationalFromDecimal(roundRational(required, BASE_RATE_POINT_PLACES))!;
+  const total = growthBaseRate(table, "fcf", start, cutoff);
   if (total.kind === "outcome") {
     return row(basis, total.outcome === "no_bucket"
       ? not("no_bucket", "no size bucket holds a starting revenue that is not positive.")
       : not("thin_bucket", `only ${total.n} windows began in ${bucketText(total.bucket!)}, fewer than the ${MIN_BASE_RATE_WINDOWS} a base rate needs.`));
   }
-  const sales = growthBaseRate(table, "revenue", start, required);
+  const sales = growthBaseRate(table, "revenue", start, cutoff);
   const { outcomes } = total;
   // Total free cash flow reads no share count, so no window lacks one.
   const uncounted = [
     [outcomes.ended_early, "that ended early (the filer stopped filing before year 5)"], [outcomes.missing_end, "with no year-5 figure"],
     [outcomes.incompatible_definition, "whose two ends use different capex or cash flow concepts"],
+    [outcomes.mismatched_period, "whose cash flow and capex at one end cover different periods"],
     [outcomes.non_positive_base, "that started at zero or negative free cash flow"],
   ] as const;
-  const rate = `${percent(required, 1)}% a year`;
+  const rate = `${percent(cutoff, BASE_RATE_POINT_PLACES - 2)}% a year`;
   return row(
     `${basis}. Not among the ${total.n}: ${LIST.format(uncounted.map(([count, text]) => `${count} ${text}`))}. ${total.non_positive_end} of the ${total.n} ended at or below zero and count as -100%`,
     {
@@ -651,7 +657,7 @@ function bucketText(bucket: BaseRateBucket): string {
  * inputs, so its seal still holds.
  */
 export function assembleCallV2(evidence: CallEvidenceV2): CallContentV2 {
-  const call = assembleCall({
+  const { base_rate_table: _table, ...call } = assembleCall({
     ...evidence,
     figures: { ...evidence.figures, revenue: { kind: "gap", disposition: "missing", reason_code: "missing_input" } },
     citations: { ...evidence.citations, revenue: [] },

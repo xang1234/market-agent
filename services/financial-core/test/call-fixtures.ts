@@ -5,8 +5,9 @@
 import { readFileSync } from "node:fs";
 import { DEFAULT_CALL_SETTINGS, parseGrowthBaseRates, type CallEvidence, type CallHistoryYear, type GrowthBaseRates } from "../src/index.ts";
 
-/** The committed base-rate table, as the seal loads it. */
-export const BASE_RATES: GrowthBaseRates = parseGrowthBaseRates(JSON.parse(readFileSync(new URL("../data/growth-base-rates.json", import.meta.url), "utf8")))!;
+const TABLES = new URL("../data/growth-base-rates/", import.meta.url);
+/** The base-rate table CURRENT names, which a new Call reads. */
+export const BASE_RATES: GrowthBaseRates = parseGrowthBaseRates(readFileSync(new URL(`${readFileSync(new URL("CURRENT", TABLES), "utf8").trim()}.json`, TABLES), "utf8"))!;
 
 export const TEN_K = "00000000-0000-4000-8000-0000000000a1";
 export const PRICE_SOURCE = "00000000-0000-4000-8000-0000000000b1";

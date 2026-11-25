@@ -193,9 +193,14 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
     ]);
     // A separate float bisection of ADR 0006's V(g) at X = 52/3 and d = 0.277% gives 22.46%.
     assert.deepEqual([row(call, "exit_multiple").figure.text, row(call, "required_growth").figure.text, row(call, "required_growth_anchored").figure.text], ["36.15x", "7.3% a year", "22.5% a year"]);
-    // The cases: FY2026 revenue puts AAPL in the top bucket, whose total free cash flow growth has a median of 4.2% and a 25th percentile of -5.2% a year.
-    assert.deepEqual(row(call, "base_case").figure, { kind: "value", text: "Growth 4.2% a year at 17.33x: base value USD 165.86 per share" });
-    assert.deepEqual(row(call, "bear_case").figure, { kind: "value", text: "Growth -5.2% a year at 17.33x: bear value USD 110.55 per share" });
+    // The cases: FY2026 revenue puts AAPL in the top bucket, whose total free cash flow growth has a median of 4.24% and a 25th percentile of -4.93% a year.
+    assert.deepEqual(row(call, "base_case").figure, { kind: "value", text: "Growth 4.24% a year at 17.33x: base value USD 165.86 per share" });
+    assert.deepEqual(row(call, "bear_case").figure, { kind: "value", text: "Growth -4.93% a year at 17.33x: bear value USD 111.73 per share" });
+    // The same Call sets today's required growth against that bucket: revenue and ten years of history, read together.
+    assert.deepEqual(row(call, "base_rate").figure, {
+      kind: "value",
+      text: "Of 430 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 168 (39.1%) delivered free cash flow growth of at least 7.33% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%).",
+    });
     assert.ok(call.stance.kind === "stated");
     assert.deepEqual([call.stance.rule, call.stance.text, call.stance.reasons[2]!.text], [
       6, "Falls short of your hurdle.", "The hurdle price H is USD 132.68, the lower of the two. The price, USD 342.37, is above H × (1 + your 10% near band) = USD 145.95.",

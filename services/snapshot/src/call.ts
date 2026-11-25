@@ -8,7 +8,7 @@
 // A Call is an opinion, never evidence: no read awards it a proof
 // (block-proof.ts), and nothing here writes a fact or a source.
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 
 import {
@@ -38,6 +38,7 @@ import {
   type CallSettings,
   type CallSource,
   type FinancialPlan,
+  type GrowthBaseRates,
   type UUID,
 } from "../../financial-core/src/index.ts";
 import { loadSubjectSplitHistory } from "../../market/src/split-history.ts";
@@ -77,9 +78,27 @@ const CITED_SLOTS: Readonly<Record<CallFactId, ReadonlyArray<string>>> = {
   revenue: ["revenue"],
 };
 
-// The committed base-rate table (growth-base-rates.ts): a file that does not parse is a build error, so it fails here, at load.
-const BASE_RATES = parseGrowthBaseRates(JSON.parse(readFileSync(new URL("../../financial-core/data/growth-base-rates.json", import.meta.url), "utf8")));
-if (BASE_RATES === null) throw new Error("services/financial-core/data/growth-base-rates.json is not a growth_base_rates.v1 table");
+/** Every committed base-rate table by its sha256, and the one CURRENT names, which a new Call reads. */
+export type BaseRateTables = Readonly<{ current: GrowthBaseRates; bySha: ReadonlyMap<string, GrowthBaseRates> }>;
+
+/**
+ * The tables in a data/growth-base-rates/ directory (growth-base-rates.ts). A
+ * file that does not parse, or whose name is not its text's sha256, is a build
+ * error, so it fails here, at load, as does a CURRENT naming no table.
+ */
+export function loadBaseRateTables(directory: URL): BaseRateTables {
+  const bySha = new Map<string, GrowthBaseRates>();
+  for (const name of readdirSync(directory).filter((entry) => entry.endsWith(".json"))) {
+    const table = parseGrowthBaseRates(readFileSync(new URL(name, directory), "utf8"));
+    if (table === null || name !== `${table.table_sha256}.json`) throw new Error(`${name} is not a growth_base_rates.v1 table named by its sha256`);
+    bySha.set(table.table_sha256, table);
+  }
+  const current = bySha.get(readFileSync(new URL("CURRENT", directory), "utf8").trim());
+  if (current === undefined) throw new Error(`${directory.pathname}CURRENT names no table there`);
+  return { current, bySha };
+}
+
+const BASE_RATE_TABLES = loadBaseRateTables(new URL("../../financial-core/data/growth-base-rates/", import.meta.url));
 
 type Binding = Readonly<{ input_slot: string; binding_status: string; gap_reason: string | null; payload_hash: string | null; bound_payload: Record<string, unknown> | null; canonical_url: string | null }>;
 
@@ -89,7 +108,7 @@ type Binding = Readonly<{ input_slot: string; binding_status: string; gap_reason
  * of the plan Calls had before the anchor (#605) regenerates as call.v1, and
  * one of the plan before the base rate's revenue node as call.v2.
  */
-export async function generateCall(db: QueryExecutor, request: CallRequest): Promise<GeneratedCall | null> {
+export async function generateCall(db: QueryExecutor, request: CallRequest, baseRates: GrowthBaseRates = BASE_RATE_TABLES.current): Promise<GeneratedCall | null> {
   if (!UUID_TEXT.test(request.inputs_snapshot_id) || !UUID_TEXT.test(request.thread_id)) return null;
   const certificates = (await db.query<{ run_id: string; unit_id: string; result_ids: unknown; plan: FinancialPlan }>(
     `select c.run_id::text as run_id, c.unit_id, c.result_ids, p.plan
@@ -206,7 +225,7 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     splits,
   };
   return generated(current
-    ? assembleCall({ ...evidence, figures: figures as CallEvidence["figures"], citations, base_rates: BASE_RATES })
+    ? assembleCall({ ...evidence, figures: figures as CallEvidence["figures"], citations, base_rates: baseRates })
     : assembleCallV2(evidence));
 }
 
@@ -344,17 +363,19 @@ export async function recordCall(db: QueryExecutor, block: CallBlock): Promise<v
   );
 }
 
-export type CallSealFailure = Readonly<{ block_id: string; reason: "unverifiable" | "request" | "inputs" | "block" }>;
+export type CallSealFailure = Readonly<{ block_id: string; reason: "unverifiable" | "request" | "base_rates" | "inputs" | "block" }>;
 
 /**
- * Each Call block, generated again from the certificate and settings it names
- * through the seal's transaction client, and rebuilt whole under its id and
- * snapshot: every field must be what generation gives.
+ * Each Call block, generated again from the certificate, settings and
+ * base-rate table it names through the seal's transaction client, and rebuilt
+ * whole under its id and snapshot: every field must be what generation gives.
+ * A call.v3 naming no committed table fails as base_rates.
  */
 export async function verifyCalls(
   blocks: ReadonlyArray<{ id: string; snapshot_id: string; call?: unknown }>,
   threadId: string | null,
   db: QueryExecutor | undefined,
+  tables: BaseRateTables = BASE_RATE_TABLES,
 ): Promise<CallSealFailure[]> {
   const failures: CallSealFailure[] = [];
   for (const block of blocks) {
@@ -370,7 +391,14 @@ export async function verifyCalls(
       fail("request");
       continue;
     }
-    const generated = await generateCall(db, { thread_id: threadId, inputs_snapshot_id: inputs, settings });
+    // Only a call.v3 reads a table; an earlier version is generated without one.
+    const named = !isRecord(call) || call.version !== "call.v3" ? tables.current
+      : typeof call.base_rate_table === "string" ? tables.bySha.get(call.base_rate_table) : undefined;
+    if (named === undefined) {
+      fail("base_rates");
+      continue;
+    }
+    const generated = await generateCall(db, { thread_id: threadId, inputs_snapshot_id: inputs, settings }, named);
     if (generated === null) {
       fail("inputs");
       continue;

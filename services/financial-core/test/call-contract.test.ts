@@ -43,6 +43,8 @@ test("a Call that falls short of your hurdle, one declined under rule 0 and one 
   for (const candidate of blocks) assert.ok(validate(candidate), JSON.stringify(validate.errors));
   assert.equal(validate({ ...blocks[0], title: "Buy" }), false, "no title field");
   assert.equal(validate({ ...blocks[0], call: { ...blocks[0]!.call, verified: true } }), false, "no field beyond the contract");
+  const { base_rate_table: _table, ...unnamed } = blocks[0]!.call as CallContent;
+  assert.equal(validate({ ...blocks[0], call: unnamed }), false, "a call.v3 names the base-rate table it read");
   const stance = blocks[0]!.call.stance;
   assert.equal(stance.kind, "stated", "AAPL states a stance");
   const withStance = (change: Record<string, unknown>) => validate({ ...blocks[0], call: { ...blocks[0]!.call, stance: { ...stance, ...change } } });

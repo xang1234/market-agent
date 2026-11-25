@@ -555,6 +555,8 @@ export type CallContent = {
   subject: { issuer_id: string; label: string }
   settings: { required_return: string; margin_of_safety: string; bear_loss_limit: string; near_band: string }
   inputs: { snapshot_id: string; run_id: string; unit_id: string; fingerprint: string }
+  /** call.v3 only: the sha256 of the base-rate table the Call read. */
+  base_rate_table?: string | null
   facts: ReadonlyArray<CallRow>
   assumptions: ReadonlyArray<CallRow>
   requires: ReadonlyArray<CallRow>

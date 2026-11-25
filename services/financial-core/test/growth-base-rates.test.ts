@@ -2,7 +2,8 @@
 // how many of its windows delivered a growth, and its 25th and 50th percentiles.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 import { growthBaseRate, MIN_BASE_RATE_WINDOWS, parseFinancialDecimal, parseGrowthBaseRates, rationalFromDecimal, roundRational, canonicalDecimalString, type ExactRational, type GrowthBaseRates } from "../src/index.ts";
 
@@ -13,7 +14,7 @@ function exact(text: string): ExactRational {
 }
 const text = (value: ExactRational) => canonicalDecimalString(roundRational(value, 4));
 
-const outcomes = { non_positive_base: 3, ended_early: 4, missing_end: 0, incompatible_definition: 0, missing_shares: 2 };
+const outcomes = { non_positive_base: 3, ended_early: 4, missing_end: 0, incompatible_definition: 0, mismatched_period: 1, missing_shares: 2 };
 const rates = (points: ReadonlyArray<string>) => ({ n: points.length, points, non_positive_end: 1, outcomes });
 const bucket = (id: string, min: string, max: string | null, points: ReadonlyArray<string>) => ({
   id, revenue_min: min, revenue_max: max, filers: 9, metrics: { fcf_per_share: rates(points), fcf: rates(points), revenue: rates([]) },
@@ -22,11 +23,11 @@ const bucket = (id: string, min: string, max: string | null, points: ReadonlyArr
 const ladder = Array.from({ length: MIN_BASE_RATE_WINDOWS }, (_, index) => (index / 1000).toFixed(4));
 
 function table(buckets: ReadonlyArray<ReturnType<typeof bucket>>): GrowthBaseRates {
-  const parsed = parseGrowthBaseRates({
+  const parsed = parseGrowthBaseRates(JSON.stringify({
     version: "growth_base_rates.v1",
     archive: { file: "companyfacts-2026-11-24.zip", date: "2026-11-24", sha256: "a".repeat(64) },
     horizon_years: 5, start_years: { first: 2009, last: 2020 }, filers_read: 1, unbucketed: {}, buckets,
-  });
+  }));
   assert.ok(parsed);
   return parsed;
 }
@@ -63,14 +64,29 @@ test("an empty or thin bucket, or a revenue no bucket holds, declines with the c
   assert.equal(above.kind === "outcome" && above.outcome, "no_bucket", "an upper edge belongs to the bucket above");
 });
 
-test("a table out of order, or with a count that is not its points', does not parse", () => {
-  const raw = (buckets: unknown) => ({ version: "growth_base_rates.v1", archive: { file: "f", date: "2026-11-24", sha256: "a".repeat(64) }, horizon_years: 5, start_years: { first: 2009, last: 2020 }, buckets });
+test("a table out of order, with a count that is not its points', or with a point past 4 places, does not parse", () => {
+  const raw = (buckets: unknown) => JSON.stringify({ version: "growth_base_rates.v1", archive: { file: "f", date: "2026-11-24", sha256: "a".repeat(64) }, horizon_years: 5, start_years: { first: 2009, last: 2020 }, buckets });
   assert.equal(parseGrowthBaseRates(raw([bucket("x", "0", null, ["0.2000", "0.1000"])])), null);
   assert.equal(parseGrowthBaseRates(raw([{ ...bucket("x", "0", null, ladder), metrics: { ...bucket("x", "0", null, ladder).metrics, fcf: { ...rates(ladder), n: 3 } } }])), null);
+  // A Call rounds the growth it counts to the stored places, so a point stored past them would be miscounted.
+  assert.equal(parseGrowthBaseRates(raw([bucket("x", "0", null, ["0.10001"])])), null);
+  assert.ok(parseGrowthBaseRates(raw([bucket("x", "0", null, ["0.1000"])])));
 });
 
-test("the committed table parses, and every bucket gives free cash flow per share a base rate", () => {
-  const committed = parseGrowthBaseRates(JSON.parse(readFileSync(new URL("../data/growth-base-rates.json", import.meta.url), "utf8")));
-  assert.ok(committed);
-  for (const entry of committed.buckets) assert.ok(entry.metrics.fcf_per_share.points.length >= MIN_BASE_RATE_WINDOWS, entry.id);
+test("every committed table parses and is named by its text's sha256, CURRENT names one, and every bucket of it gives free cash flow and per share a base rate", () => {
+  const directory = new URL("../data/growth-base-rates/", import.meta.url);
+  const names = readdirSync(directory).filter((name) => name.endsWith(".json"));
+  for (const name of names) {
+    const text = readFileSync(new URL(name, directory), "utf8");
+    const table = parseGrowthBaseRates(text);
+    assert.ok(table, name);
+    assert.equal(name, `${createHash("sha256").update(text).digest("hex")}.json`);
+    assert.equal(table.table_sha256, name.slice(0, -5));
+  }
+  const current = readFileSync(new URL("CURRENT", directory), "utf8").trim();
+  assert.ok(names.includes(`${current}.json`));
+  const table = parseGrowthBaseRates(readFileSync(new URL(`${current}.json`, directory), "utf8"))!;
+  for (const entry of table.buckets) {
+    for (const metric of ["fcf", "fcf_per_share"] as const) assert.ok(entry.metrics[metric].points.length >= MIN_BASE_RATE_WINDOWS, `${entry.id} ${metric}`);
+  }
 });

@@ -1,7 +1,8 @@
 // The base rates a Call's required growth is set against: how often a
 // company's five-year growth reached a given rate, among windows that began at
 // a similar size. It reads SEC's bulk companyfacts.zip from a local copy and
-// writes services/financial-core/data/growth-base-rates.json. Offline and dev
+// writes services/financial-core/data/growth-base-rates/<sha256>.json, named by
+// the sha256 of its text, and points CURRENT at it. Offline and dev
 // only: it makes no network request, writes nothing to a database, and nothing
 // it writes is certified. The figures are a frequency of reported history, not
 // a probability.
@@ -18,6 +19,9 @@
 //   continuing-operations line (#743); PaymentsToAcquirePropertyPlantAndEquipment,
 //   else PaymentsToAcquireProductiveAssets (#731). A window whose two ends use
 //   different concepts is incompatible_definition, as the backtest has it.
+//   The two must cover one annual period, as financial-core's free_cash_flow
+//   requires (periodMismatch): an end whose two figures cover different
+//   periods is mismatched_period.
 // - Per share divides by diluted weighted-average shares. A split restates the
 //   comparatives in the next 10-K, so each year's count is carried to the next
 //   year's basis by the ratio of the next 10-K's figure for it to its own, and
@@ -31,6 +35,8 @@
 // Every window with a starting figure is counted: those with a growth go into
 // the sorted points, and the rest are named outcomes beside them, so a filer
 // that stopped filing before year 5 (ended_early) is never silently dropped.
+// Whether a filer reached year 5 is read from its 10-Ks, any us-gaap fact, not
+// from the tracked series: a year-5 10-K without the figure is missing_end.
 // A positive start and a zero or negative end is a growth of -100%, the floor,
 // counted as a point and also as non_positive_end.
 //
@@ -43,12 +49,15 @@
 //     > ../../docs/eval-runs/growth-base-rates/<date>.table.md
 //
 // It reads the archive itself (zipEntries), prints the bucket table the results
-// doc quotes, and with --windows <file> caches every filer's windows there, so
-// a change of buckets re-reads the cache instead of the archive.
+// doc quotes, leaves every earlier table in place (a saved Call regenerates from
+// the one it names), and with --windows <file> caches every filer's windows there, so
+// a change of buckets re-reads the cache instead of the archive. The cache
+// holds the archive's sha256 and a hash of the window code, and a cache with
+// either different is read again from the archive and rewritten.
 
 import { createHash } from "node:crypto";
 import { closeSync, createReadStream, existsSync, fstatSync, openSync, readFileSync, readSync, writeFileSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
 import { inflateRawSync } from "node:zlib";
 
@@ -59,7 +68,7 @@ export const LAST_START = 2020;
 export const BUCKET_EDGES = [0, 100_000_000, 1_000_000_000, 10_000_000_000, 50_000_000_000] as const;
 export const METRICS = ["fcf_per_share", "fcf", "revenue"] as const;
 export type Metric = (typeof METRICS)[number];
-export const OUTCOMES = ["non_positive_base", "ended_early", "missing_end", "incompatible_definition", "missing_shares"] as const;
+export const OUTCOMES = ["non_positive_base", "ended_early", "missing_end", "incompatible_definition", "mismatched_period", "missing_shares"] as const;
 export type Outcome = (typeof OUTCOMES)[number];
 
 type Entry = Readonly<{ start?: string; end: string; val: number; accn: string; form: string; filed: string }>;
@@ -99,12 +108,44 @@ function annual(facts: Companyfacts, concept: string, unit: string): Series {
 }
 
 // The first concept with a figure for the year, and whether it is the preferred one.
-function firstOf(series: ReadonlyArray<Series>, key: number): Readonly<{ value: number; preferred: boolean }> | null {
+function firstOf(series: ReadonlyArray<Series>, key: number): Readonly<{ entry: Entry; preferred: boolean }> | null {
   for (const [index, one] of series.entries()) {
     const year = one.get(key);
-    if (year !== undefined) return { value: year.own.val, preferred: index === 0 };
+    if (year !== undefined) return { entry: year.own, preferred: index === 0 };
   }
   return null;
+}
+
+/**
+ * The year the filer's latest 10-K is for, read from every us-gaap fact: each
+ * 10-K's period ends with its latest annual period, or, when it states none,
+ * its latest instant. -Infinity when it filed no 10-K fact. An instant never
+ * outranks an annual period: of the archive's 95,867 10-Ks, 1,372 state an
+ * instant within 120 days after their latest annual period, a subsequent
+ * event, against 228 a year after it (measured 2026-11-25).
+ */
+function lastFiledYear(facts: Companyfacts): number {
+  const ends = new Map<string, { annual: string | null; instant: string | null }>();
+  for (const concept of Object.values(facts.facts?.["us-gaap"] ?? {})) {
+    for (const entries of Object.values(concept.units ?? {})) {
+      for (const entry of entries) {
+        if (entry.form !== "10-K") continue;
+        const filing = ends.get(entry.accn) ?? ends.set(entry.accn, { annual: null, instant: null }).get(entry.accn)!;
+        if (entry.start === undefined) {
+          if (filing.instant === null || entry.end > filing.instant) filing.instant = entry.end;
+          continue;
+        }
+        const days = (Date.parse(entry.end) - Date.parse(entry.start)) / DAY_MS;
+        if (days >= 350 && days <= 380 && (filing.annual === null || entry.end > filing.annual)) filing.annual = entry.end;
+      }
+    }
+  }
+  let last = -Infinity;
+  for (const { annual, instant } of ends.values()) {
+    const end = annual ?? instant;
+    if (end !== null) last = Math.max(last, endYear(end));
+  }
+  return last;
 }
 
 /** Every window a filer's companyfacts give, from its first fiscal year to LAST_START. */
@@ -116,12 +157,15 @@ export function filerWindows(facts: Companyfacts, lastStart = LAST_START): Windo
   const all = [...revenue, ...ocf, ...capex, shares];
   const keys = all.flatMap((series) => [...series.keys()]);
   if (keys.length === 0) return [];
-  const lastYear = Math.max(...keys);
+  const lastYear = lastFiledYear(facts);
 
-  const freeCashFlow = (key: number) => {
+  // Operating cash flow less capex when both cover one annual period, as free_cash_flow requires.
+  const freeCashFlow = (key: number): Readonly<{ value: number; scope: string }> | "mismatched_period" | null => {
     const flow = firstOf(ocf, key);
     const spend = firstOf(capex, key);
-    return flow === null || spend === null ? null : { value: flow.value - spend.value, scope: `${flow.preferred}/${spend.preferred}` };
+    if (flow === null || spend === null) return null;
+    if (flow.entry.start !== spend.entry.start || flow.entry.end !== spend.entry.end) return "mismatched_period";
+    return { value: flow.entry.val - spend.entry.val, scope: `${flow.preferred}/${spend.preferred}` };
   };
   // The end count over the start count, the start carried to each next 10-K's basis in turn.
   const shareRatio = (start: number): number | null => {
@@ -135,6 +179,18 @@ export function filerWindows(facts: Companyfacts, lastStart = LAST_START): Windo
     const end = shares.get(start + HORIZON_YEARS)?.own.val;
     return count === undefined || end === undefined || count <= 0 || end <= 0 ? null : end / count;
   };
+  // Free cash flow's end over its start, the outcome that keeps a window from one, or null with no start figure.
+  const cashRatio = (start: number, end: number): number | Outcome | null => {
+    const first = freeCashFlow(start);
+    if (first === null) return null;
+    if (first === "mismatched_period") return first;
+    if (first.value <= 0) return "non_positive_base";
+    if (lastYear < end) return "ended_early";
+    const last = freeCashFlow(end);
+    if (last === null) return "missing_end";
+    if (last === "mismatched_period") return last;
+    return last.scope === first.scope ? last.value / first.value : "incompatible_definition";
+  };
   const grown = (ratio: number): WindowResult => ratio <= 0
     ? { growth: -1, non_positive_end: true }
     : { growth: ratio ** (1 / HORIZON_YEARS) - 1, non_positive_end: false };
@@ -145,27 +201,22 @@ export function filerWindows(facts: Companyfacts, lastStart = LAST_START): Windo
     const end = start + HORIZON_YEARS;
     const results: Partial<Record<Metric, WindowResult>> = {};
     const ended = lastYear < end;
-    const sales = firstOf(revenue, start);
-    if (sales !== null) {
+    const sales = firstOf(revenue, start)?.entry.val;
+    if (sales !== undefined) {
       const later = firstOf(revenue, end);
-      results.revenue = sales.value <= 0 ? { outcome: "non_positive_base" }
+      results.revenue = sales <= 0 ? { outcome: "non_positive_base" }
         : ended ? { outcome: "ended_early" }
         : later === null ? { outcome: "missing_end" }
-        : grown(later.value / sales.value);
+        : grown(later.entry.val / sales);
     }
-    const cash = freeCashFlow(start);
-    if (cash !== null) {
-      const later = freeCashFlow(end);
-      const common: WindowResult | null = cash.value <= 0 ? { outcome: "non_positive_base" }
-        : ended ? { outcome: "ended_early" }
-        : later === null ? { outcome: "missing_end" }
-        : later.scope !== cash.scope ? { outcome: "incompatible_definition" }
-        : null;
-      results.fcf = common ?? grown(later!.value / cash.value);
-      const ratio = common === null ? shareRatio(start) : null;
-      results.fcf_per_share = common ?? (ratio === null ? { outcome: "missing_shares" } : grown(later!.value / cash.value / ratio));
+    const cash = cashRatio(start, end);
+    if (typeof cash === "string") results.fcf = results.fcf_per_share = { outcome: cash };
+    else if (cash !== null) {
+      results.fcf = grown(cash);
+      const ratio = shareRatio(start);
+      results.fcf_per_share = ratio === null ? { outcome: "missing_shares" } : grown(cash / ratio);
     }
-    if (Object.keys(results).length > 0) windows.push({ cik: facts.cik, start_year: start, revenue: sales?.value ?? null, results });
+    if (Object.keys(results).length > 0) windows.push({ cik: facts.cik, start_year: start, revenue: sales ?? null, results });
   }
   return windows;
 }
@@ -310,14 +361,30 @@ export function* zipEntries(path: string): Generator<Readonly<{ name: string; te
   }
 }
 
+// ponytail: the window code is these functions' text and the window constants; a helper added outside this list is not in the key.
+const WINDOWS_CODE = createHash("sha256").update(JSON.stringify([[endYear, annual, firstOf, lastFiledYear, filerWindows].map(String), HORIZON_YEARS, LAST_START])).digest("hex");
+
+export type WindowsCache = Readonly<{ archive_sha256: string; windows_code: string; filers: number; windows: Window[] }>;
+
+/** The cached windows when the cache was built from this archive by this window code, else null. */
+export function readWindowsCache(path: string, archiveSha256: string): WindowsCache | null {
+  if (!existsSync(path)) return null;
+  const cache = JSON.parse(readFileSync(path, "utf8")) as Partial<WindowsCache>;
+  return cache.archive_sha256 === archiveSha256 && cache.windows_code === WINDOWS_CODE ? cache as WindowsCache : null;
+}
+
+export function writeWindowsCache(path: string, archiveSha256: string, filers: number, windows: Window[]): void {
+  writeFileSync(path, JSON.stringify({ archive_sha256: archiveSha256, windows_code: WINDOWS_CODE, filers, windows } satisfies WindowsCache));
+}
+
 async function main(): Promise<void> {
   const { values } = parseArgs({ options: { archive: { type: "string" }, out: { type: "string" }, windows: { type: "string" } } });
   const archive = values.archive;
   const date = archive === undefined ? null : /^companyfacts-(\d{4}-\d{2}-\d{2})\.zip$/u.exec(basename(archive))?.[1];
   if (archive === undefined || date == null) throw new Error("--archive must name a cached companyfacts-<YYYY-MM-DD>.zip");
-  const out = values.out ?? new URL("../../financial-core/data/growth-base-rates.json", import.meta.url).pathname;
-  // --windows caches every filer's windows, so a change of buckets re-reads the cache, not the archive.
-  const cached = values.windows !== undefined && existsSync(values.windows) ? JSON.parse(readFileSync(values.windows, "utf8")) as Readonly<{ filers: number; windows: Window[] }> : null;
+  const out = values.out ?? new URL("../../financial-core/data/growth-base-rates/", import.meta.url).pathname;
+  const archiveSha256 = await sha256(archive);
+  const cached = values.windows === undefined ? null : readWindowsCache(values.windows, archiveSha256);
   let filers = cached?.filers ?? 0;
   const windows: Window[] = cached?.windows ?? [];
   if (cached === null) {
@@ -326,10 +393,14 @@ async function main(): Promise<void> {
       filers += 1;
       if (filers % 2000 === 0) process.stderr.write(`${filers} filers read\n`);
     }
-    if (values.windows !== undefined) writeFileSync(values.windows, JSON.stringify({ filers, windows }));
+    if (values.windows !== undefined) writeWindowsCache(values.windows, archiveSha256, filers, windows);
   }
-  const table = baseRateTable(windows, { file: basename(archive), date, sha256: await sha256(archive) }, filers);
-  writeFileSync(out, `${JSON.stringify(table)}\n`);
+  const table = baseRateTable(windows, { file: basename(archive), date, sha256: archiveSha256 }, filers);
+  const text = `${JSON.stringify(table)}\n`;
+  const name = createHash("sha256").update(text).digest("hex");
+  writeFileSync(join(out, `${name}.json`), text);
+  writeFileSync(join(out, "CURRENT"), `${name}\n`);
+  process.stderr.write(`table ${name}\n`);
   process.stdout.write(renderTable(table));
 }
 

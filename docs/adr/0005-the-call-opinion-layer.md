@@ -132,7 +132,7 @@ The owner decided the bear case's anchor on 2026-11-24:
 
 - **Bear growth.** The 25th percentile of five-year free cash flow growth, among windows that began at a comparable size (by starting revenue). The bear exit multiple is the anchored exit multiple (#605), and the share change is `d`.
 - **Measured quantity.** Decided as free cash flow per share on 2026-11-24, and changed to total free cash flow on 2026-11-25 (see "Base case"). Revenue growth is shown beside it and never fed into the model.
-- **Source.** One download of SEC's bulk `companyfacts.zip`, cached with its sha256 and never fetched again. `services/fundamentals/src/growth-base-rates.ts` builds `services/financial-core/data/growth-base-rates.json` from it, offline.
+- **Source.** One download of SEC's bulk `companyfacts.zip`, cached with its sha256 and never fetched again. `services/fundamentals/src/growth-base-rates.ts` builds a table from it, offline, as `services/financial-core/data/growth-base-rates/<sha256>.json`, named by the sha256 of its text. `CURRENT` names the table a new Call reads. A Call records the table it read (`base_rate_table`), and the seal regenerates it from that table, so a rebuilt table never breaks a saved Call. A Call naming no committed table fails the seal (`base_rates`).
 
 **What a base rate is.** It is a frequency of reported history: of N five-year windows that began at a similar size, K delivered at least a given growth. It is not an assigned probability, and a Call never calls it one. A window whose filer stopped filing before year 5 is a named outcome beside N (`ended_early`), never dropped. A window that ended at or below zero counts at −100%.
 
@@ -143,7 +143,7 @@ The owner decided the bear case's anchor on 2026-11-24:
 The owner decided the base case on 2026-11-25, with three decisions:
 
 1. **Base growth.** The median (nearest-rank 50th percentile) of five-year growth among windows that began at a similar size: the bear case's table and bucket.
-2. **Both cases read total free cash flow growth** (`fcf` in `growth-base-rates.json`), not growth per share. The bear case moves from `fcf_per_share` to `fcf`, and so does the base-rate row's "share at or above".
+2. **Both cases read total free cash flow growth** (`fcf` in the base-rate table), not growth per share. The bear case moves from `fcf_per_share` to `fcf`, and so does the base-rate row's "share at or above".
 3. **Base exit multiple.** The anchored exit multiple, as for the bear case. The share change is `d`.
 
 **Why total, not per share.** ADR 0006's `g` is free cash flow growth before dilution. The model applies only `d`, the share change that stock-based compensation implies, and leaves buybacks out, because they are paid from the free cash flow already valued. A filer's history per share includes its buybacks. Fed in as `g`, it would count them a second time, on top of the cash flow that paid for them. In the USD 50B and up bucket the gap is 2.5 points: a median of 6.7% per share against 4.2% in total (`docs/eval-runs/growth-base-rates/2026-11-24.md`). `fcf_per_share` and `revenue` stay in the table.

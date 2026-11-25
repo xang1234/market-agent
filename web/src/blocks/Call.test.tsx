@@ -68,11 +68,11 @@ test('rows read in ADR 0005 order, each with its kind and basis, and the stance 
     ['exit_multiple', '36.15x', 'Deterministic result', true],
     ['anchored_exit_multiple', '17.33x', 'Agent assumption', true],
     ['share_change', '0.277% a year', 'Agent assumption', true],
-    ['base_case', 'Growth 4.2% a year at 17.33x: base value USD 165.86 per share', 'Agent assumption', true],
-    ['bear_case', 'Growth -5.2% a year at 17.33x: bear value USD 110.55 per share', 'Agent assumption', true],
+    ['base_case', 'Growth 4.24% a year at 17.33x: base value USD 165.86 per share', 'Agent assumption', true],
+    ['bear_case', 'Growth -4.93% a year at 17.33x: bear value USD 111.73 per share', 'Agent assumption', true],
     ['required_growth', '7.3% a year', 'Deterministic result', true],
     ['required_growth_anchored', '22.5% a year', 'Deterministic result', true],
-    ['base_rate', 'Of 431 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 168 (39.0%) delivered free cash flow growth of at least 7.3% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%).', 'Deterministic result', true],
+    ['base_rate', 'Of 430 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 168 (39.1%) delivered free cash flow growth of at least 7.33% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%).', 'Deterministic result', true],
     ['consensus', '8.18%', 'Attributed consensus', true],
   ])
   assert.match(document.querySelector('[data-row="anchored_exit_multiple"]')?.textContent ?? '', /FY2017: 17\.48x, \(close 38\.53 on 2017-09-29 × 21,006,768,000 shares/)

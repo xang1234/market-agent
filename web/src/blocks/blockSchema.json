@@ -3045,6 +3045,18 @@
           },
           "additionalProperties": false
         },
+        "base_rate_table": {
+          "description": "The sha256 of the base-rate table file the Call read, or null when none was loaded. The seal regenerates the Call from that table.",
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "facts": {
           "type": "array",
           "items": {
@@ -3316,6 +3328,9 @@
           "$ref": "#/$defs/CallContent"
         },
         {
+          "required": [
+            "base_rate_table"
+          ],
           "properties": {
             "version": {
               "const": "call.v3"

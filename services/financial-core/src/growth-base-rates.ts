@@ -2,20 +2,26 @@
 // windows that began at a similar size (by starting revenue), how many
 // delivered a growth, and the 25th and 50th percentiles of what they
 // delivered (the bear and base cases' growth). The
-// table is data/growth-base-rates.json, built offline from SEC's bulk
-// companyfacts archive (services/fundamentals/src/growth-base-rates.ts). It is
-// a frequency of reported history, not a probability, and never certified.
+// tables are data/growth-base-rates/<sha256>.json, each built offline from
+// SEC's bulk companyfacts archive (services/fundamentals/src/growth-base-rates.ts)
+// and named by the sha256 of its own text, so a Call names the table it read.
+// It is a frequency of reported history, not a probability, and never certified.
+
+import { createHash } from "node:crypto";
 
 import { parseFinancialDecimal } from "./exact-decimal.ts";
 import { compareRationals, rationalFromDecimal, rationalSign, type ExactRational } from "./rational.ts";
 
 export const BASE_RATE_METRICS = ["fcf_per_share", "fcf", "revenue"] as const;
 export type BaseRateMetric = (typeof BASE_RATE_METRICS)[number];
-export const BASE_RATE_OUTCOMES = ["non_positive_base", "ended_early", "missing_end", "incompatible_definition", "missing_shares"] as const;
+export const BASE_RATE_OUTCOMES = ["non_positive_base", "ended_early", "missing_end", "incompatible_definition", "mismatched_period", "missing_shares"] as const;
 export type BaseRateOutcome = (typeof BASE_RATE_OUTCOMES)[number];
 
 /** A bucket needs at least this many windows with a growth before it gives a base rate. */
 export const MIN_BASE_RATE_WINDOWS = 100;
+
+/** The decimal places a point's growth fraction is stored to; a growth set against the points is rounded to these first. */
+export const BASE_RATE_POINT_PLACES = 4;
 
 export type BaseRateMetricTable = Readonly<{
   /** Each window's five-year annual growth, ascending; -1 is the floor for an end at or below zero. */
@@ -33,6 +39,8 @@ export type BaseRateBucket = Readonly<{
 }>;
 
 export type GrowthBaseRates = Readonly<{
+  /** The sha256 of the table's own text: its file's name, and the table a Call names. */
+  table_sha256: string;
   archive: Readonly<{ file: string; date: string; sha256: string }>;
   horizon_years: number;
   start_years: Readonly<{ first: number; last: number }>;
@@ -75,8 +83,9 @@ export function growthBaseRate(table: GrowthBaseRates, metric: BaseRateMetric, s
     p50: points[Math.ceil(points.length / 2) - 1]!, non_positive_end, outcomes };
 }
 
-/** The table data/growth-base-rates.json holds, or null when any part of it is not what the builder writes. */
-export function parseGrowthBaseRates(json: unknown): GrowthBaseRates | null {
+/** The table a data/growth-base-rates/ file's text holds, or null when any part of it is not what the builder writes. */
+export function parseGrowthBaseRates(text: string): GrowthBaseRates | null {
+  const json: unknown = JSON.parse(text);
   if (!isRecord(json) || json.version !== "growth_base_rates.v1" || !isRecord(json.archive) || !isRecord(json.start_years) || !Array.isArray(json.buckets)) return null;
   const { file, date, sha256 } = json.archive;
   if (typeof file !== "string" || typeof date !== "string" || typeof sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(sha256)) return null;
@@ -88,7 +97,7 @@ export function parseGrowthBaseRates(json: unknown): GrowthBaseRates | null {
     if (bucket === null) return null;
     buckets.push(bucket);
   }
-  return { archive: { file, date, sha256 }, horizon_years: json.horizon_years as number, start_years: { first: first as number, last: last as number }, buckets };
+  return { table_sha256: createHash("sha256").update(text).digest("hex"), archive: { file, date, sha256 }, horizon_years: json.horizon_years as number, start_years: { first: first as number, last: last as number }, buckets };
 }
 
 function parseBucket(entry: unknown): BaseRateBucket | null {
@@ -100,7 +109,7 @@ function parseBucket(entry: unknown): BaseRateBucket | null {
   for (const metric of BASE_RATE_METRICS) {
     const rates = entry.metrics[metric];
     if (!isRecord(rates) || !Array.isArray(rates.points) || rates.n !== rates.points.length || !Number.isInteger(rates.non_positive_end) || !isRecord(rates.outcomes)) return null;
-    const points = (rates.points as unknown[]).map((point) => typeof point === "string" ? exact(point) : null);
+    const points = (rates.points as unknown[]).map((point) => typeof point === "string" ? exact(point, BASE_RATE_POINT_PLACES) : null);
     if (points.some((point, index) => point === null || (index > 0 && compareRationals(points[index - 1]!, point) > 0))) return null;
     const outcomes = Object.fromEntries(BASE_RATE_OUTCOMES.map((name) => [name, (rates.outcomes as Record<string, unknown>)[name]]));
     if (Object.values(outcomes).some((count) => !Number.isInteger(count))) return null;
@@ -109,9 +118,9 @@ function parseBucket(entry: unknown): BaseRateBucket | null {
   return { id: entry.id, revenue_min: min, revenue_max: max, filers: entry.filers as number, metrics: metrics as Record<BaseRateMetric, BaseRateMetricTable> };
 }
 
-function exact(text: string): ExactRational | null {
+function exact(text: string, places = Infinity): ExactRational | null {
   const parsed = parseFinancialDecimal(text);
-  return parsed.ok ? rationalFromDecimal(parsed.value) : null;
+  return parsed.ok && parsed.value.scale <= places ? rationalFromDecimal(parsed.value) : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

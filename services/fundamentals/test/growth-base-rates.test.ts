@@ -2,19 +2,23 @@
 // and the table those windows make.
 
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
-import { baseRateTable, filerWindows, type Companyfacts, type Window } from "../src/growth-base-rates.ts";
+import { baseRateTable, filerWindows, readWindowsCache, writeWindowsCache, type Companyfacts, type Window } from "../src/growth-base-rates.ts";
 
-// A null value removes the concept's year.
-type Row = Readonly<{ concept: string; unit?: string; year: number; value: number | null; filedIn: number }>;
+// A null value removes the concept's year. `period` replaces the calendar year's [start, end]; a null start is an instant.
+type Row = Readonly<{ concept: string; unit?: string; year: number; value: number | null; filedIn: number; period?: readonly [string | null, string]; accn?: string }>;
 
 // Each fiscal year is a calendar year; filing `a-Y` is FY Y's 10-K, filed the next February.
 function companyfacts(rows: ReadonlyArray<Row>): Companyfacts {
   const usGaap: Record<string, { units: Record<string, unknown[]> }> = {};
-  for (const { concept, unit = "USD", year, value, filedIn } of rows) {
+  for (const { concept, unit = "USD", year, value, filedIn, period = [`${year}-01-01`, `${year}-12-31`], accn = `a-${filedIn}` } of rows) {
     if (value === null) continue;
     const units = (usGaap[concept] ??= { units: {} }).units;
-    (units[unit] ??= []).push({ start: `${year}-01-01`, end: `${year}-12-31`, val: value, accn: `a-${filedIn}`, form: "10-K", filed: `${filedIn + 1}-02-15` });
+    const [start, end] = period;
+    (units[unit] ??= []).push({ ...(start === null ? {} : { start }), end, val: value, accn, form: "10-K", filed: `${filedIn + 1}-02-15` });
   }
   return { cik: 7, facts: { "us-gaap": usGaap } } as Companyfacts;
 }
@@ -55,6 +59,40 @@ test("a filer whose last 10-K is before year 5 ended early, and its window is an
   assert.deepEqual(result(windows, 2016), { revenue: { outcome: "ended_early" }, fcf: { outcome: "ended_early" }, fcf_per_share: { outcome: "ended_early" } });
 });
 
+test("a filer whose year-5 10-K lacks the tracked figures reached year 5, so its window is missing_end, not ended_early", () => {
+  const missing = { revenue: { outcome: "missing_end" }, fcf: { outcome: "missing_end" }, fcf_per_share: { outcome: "missing_end" } };
+  // FY2021's 10-K states only total assets, a balance at the year's end, and no annual period.
+  const balanceOnly = sample([{ concept: "Assets", year: 2021, value: 5000, filedIn: 2021, period: [null, "2021-12-31"], accn: "b-2021" }]);
+  assert.deepEqual(result(filerWindows(balanceOnly, 2016), 2016), missing);
+  // Or only a figure the builder does not track.
+  const untracked = sample([{ concept: "NetIncomeLoss", year: 2021, value: 70, filedIn: 2021 }]);
+  assert.deepEqual(result(filerWindows(untracked, 2016), 2016), missing);
+  // A balance dated after a 10-K's latest annual period is a subsequent event, not a later year.
+  const subsequent = sample([{ concept: "Assets", year: 2021, value: 5000, filedIn: 2021, period: [null, "2021-02-10"] }]);
+  assert.deepEqual(result(filerWindows(subsequent, 2016), 2016).revenue, { outcome: "ended_early" });
+});
+
+test("cash flow and capex covering different periods in one year are mismatched_period, at either end, never subtracted", () => {
+  const mismatched = { outcome: "mismatched_period" };
+  // FY2020's operating cash flow is for the year to September; its capex is for the calendar year.
+  const atEnd = sample([{ concept: "NetCashProvidedByUsedInOperatingActivities", year: 2020, value: 2100, filedIn: 2020, period: ["2019-10-01", "2020-09-30"] }]);
+  const end = result(filerWindows(atEnd, 2015), 2015);
+  assert.deepEqual([end.fcf, end.fcf_per_share], [mismatched, mismatched]);
+  assert.equal(typeof growth(end.revenue), "number", "revenue reads no cash flow");
+  const atStart = sample([{ concept: "PaymentsToAcquirePropertyPlantAndEquipment", year: 2015, value: 100, filedIn: 2015, period: ["2014-10-01", "2015-09-30"] }]);
+  const start = result(filerWindows(atStart, 2015), 2015);
+  assert.deepEqual([start.fcf, start.fcf_per_share], [mismatched, mismatched]);
+});
+
+test("the windows cache is read only for the archive it was built from", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "growth-windows-")), "windows.json");
+  const windows = filerWindows(sample(), 2015);
+  writeWindowsCache(path, "a".repeat(64), 1, windows);
+  assert.deepEqual(readWindowsCache(path, "a".repeat(64))?.windows, windows);
+  assert.equal(readWindowsCache(path, "b".repeat(64)), null, "another archive reads the archive again");
+  assert.equal(readWindowsCache(join(path, "..", "absent.json"), "a".repeat(64)), null);
+});
+
 test("ends in different capex concepts are incompatible_definition; a missing link in the share chain is missing_shares", () => {
   const productive = sample([
     { concept: "PaymentsToAcquireProductiveAssets", year: 2020, value: 100, filedIn: 2020 },
@@ -90,7 +128,7 @@ test("starting revenue picks the bucket, an edge belonging to the bucket above, 
   assert.deepEqual(below!.metrics.fcf_per_share.points, ["0.2000"]);
   assert.deepEqual(at!.metrics.fcf_per_share, {
     n: 2, points: ["-1.0000", "0.0500"], non_positive_end: 1,
-    outcomes: { non_positive_base: 0, ended_early: 1, missing_end: 0, incompatible_definition: 0, missing_shares: 0 },
+    outcomes: { non_positive_base: 0, ended_early: 1, missing_end: 0, incompatible_definition: 0, mismatched_period: 0, missing_shares: 0 },
   });
   assert.equal(table.unbucketed.fcf_per_share, 1);
 });

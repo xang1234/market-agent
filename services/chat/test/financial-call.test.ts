@@ -5,9 +5,12 @@
 // under rule 0 instead. A factual answer never carries a Call or its wording.
 
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
@@ -22,15 +25,30 @@ import { secCompanyFetcher } from "../../fundamentals/test/fakes.ts";
 import { mergeIssuerAway } from "../../fundamentals/test/issuer-merge-fixture.ts";
 import { aaplCallInputs } from "../../fundamentals/test/sec-call-inputs-fixture.ts";
 import { POLYGON_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
-import { callBlockHash, verifyCalls, type CallBlock } from "../../snapshot/src/call.ts";
+import { callBlockHash, generateCall, loadBaseRateTables, verifyCalls, type CallBlock } from "../../snapshot/src/call.ts";
 import { publishCall } from "../src/call.ts";
 import { chatAuthority } from "../src/financial-runtime.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { chatDatabase, chatHarness, completed, resolveMention } from "./financial-fixtures.ts";
 
-// AAPL's FY2026 revenue puts it in the top bucket of data/growth-base-rates.json.
-const BASE_RATE = "Of 431 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 168 (39.0%) delivered free cash flow growth of at least 7.3% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%).";
+// The committed base-rate tables, and a copy of them with one more table made CURRENT, as a rebuild would add one:
+// the current table with one more filer counted in each bucket, so every count a Call reads matches and only its name differs.
+const TABLES = fileURLToPath(new URL("../../financial-core/data/growth-base-rates/", import.meta.url));
+function withSecondTable(): Readonly<{ directory: URL; added: string }> {
+  const directory = mkdtempSync(join(tmpdir(), "growth-base-rates-"));
+  for (const name of readdirSync(TABLES)) copyFileSync(join(TABLES, name), join(directory, name));
+  const table = JSON.parse(readFileSync(join(TABLES, `${readFileSync(join(TABLES, "CURRENT"), "utf8").trim()}.json`), "utf8"));
+  for (const bucket of table.buckets) bucket.filers += 1;
+  const text = `${JSON.stringify(table)}\n`;
+  const added = createHash("sha256").update(text).digest("hex");
+  writeFileSync(join(directory, `${added}.json`), text);
+  writeFileSync(join(directory, "CURRENT"), `${added}\n`);
+  return { directory: pathToFileURL(`${directory}/`), added };
+}
+
+// AAPL's FY2026 revenue puts it in the top bucket of the current base-rate table.
+const BASE_RATE = "Of 430 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 168 (39.1%) delivered free cash flow growth of at least 7.33% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%).";
 
 // Monday 10:00 in New York: Friday 2026-11-06's close is the latest.
 const CUTOFF = "2026-11-09T15:00:00.000Z";
@@ -194,6 +212,15 @@ test("the Call in chat", { timeout: 600_000 }, async (t) => {
     const stored = (await db.query(`select call_date::text, settings, inputs_fingerprint, content_hash from calls where snapshot_id = $1`, [block.snapshot_id])).rows;
     assert.deepEqual(stored, [{ call_date: "2026-11-09", settings: call.settings, inputs_fingerprint: call.inputs.fingerprint, content_hash: callBlockHash(block) }]);
     assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the stored block");
+    // Another table, added and made current, is what a new Call reads; the sealed Call still regenerates from the one it names.
+    const second = withSecondTable();
+    const tables = loadBaseRateTables(second.directory);
+    assert.notEqual((call as CallContent).base_rate_table, second.added);
+    assert.deepEqual(await verifyCalls([block], threadId, pool, tables), [], "the seal reads the table the Call names");
+    const fresh = await generateCall(pool, { thread_id: threadId, inputs_snapshot_id: call.inputs.snapshot_id, settings: call.settings }, tables.current);
+    assert.equal((fresh!.content as CallContent).base_rate_table, second.added);
+    const without = { current: tables.current, bySha: new Map([[second.added, tables.current]]) };
+    assert.deepEqual(await verifyCalls([block], threadId, pool, without), [{ block_id: block.id, reason: "base_rates" }], "a Call naming no committed table fails closed");
     const text = JSON.stringify(call).replaceAll(/required return/giu, "");
     assert.equal(ADVICE_WORDS.test(text), false, `advice wording: ${ADVICE_WORDS.exec(text)?.[0]}`);
   });
