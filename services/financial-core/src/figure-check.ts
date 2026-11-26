@@ -86,10 +86,11 @@ export function enumerateNumerals(text: string): Numeral[] {
 }
 
 // The figures a source's text states, in order: its numerals but dates and the digits of a
-// name ("MI308", "FY2026", "Q2"), which no answer cites as a figure. A claim's k-th figure
-// is entry k - 1, in chat's evidence packet and at the seal (#800).
+// name ("MI308", "FY2026", "Q2"), which no answer cites as a figure. A currency prefix may
+// end in a letter ("HK$3.1B"), so only a numeral that opens on a digit can be a name's.
+// A claim's k-th figure is entry k - 1, in chat's evidence packet and at the seal (#800).
 export const statedFigures = (text: string): Numeral[] =>
-  enumerateNumerals(text).filter((numeral) => numeral.unit !== "date" && !/\p{L}$/u.test(text.slice(0, numeral.start)));
+  enumerateNumerals(text).filter((numeral) => numeral.unit !== "date" && !(/^\d/u.test(numeral.text) && /\p{L}$/u.test(text.slice(0, numeral.start))));
 
 // --- labels ------------------------------------------------------------------------
 

@@ -210,6 +210,10 @@ test("a text's figures are its numerals but dates and the digits of a name", () 
   assert.deepEqual(statedFigures(text).map((figure) => figure.text), ["$800 million", "10.4%"]);
 });
 
+test("a currency whose prefix ends in a letter still states its figure", () => {
+  assert.deepEqual(statedFigures("Sales of HK$3.1B and a S$400M loss").map((figure) => figure.text), ["$3.1B", "$400M"]);
+});
+
 test("a numeral states the quantity writtenAs would write it as", () => {
   const stated = (text: string) => statedQuantity(numeral(text));
   assert.deepEqual(stated("$800 million"), amount(800e6));
