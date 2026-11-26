@@ -2,7 +2,12 @@
 // Friday's close, and FY2017 to FY2026 as the engine certifies them from AAPL's 10-Ks with the closes a dev capture
 // took (services/chat/test/financial-call-anchor.test.ts runs the same history through the engine).
 
-import { DEFAULT_CALL_SETTINGS, type CallEvidence, type CallHistoryYear } from "../src/index.ts";
+import { readFileSync } from "node:fs";
+import { DEFAULT_CALL_SETTINGS, parseGrowthBaseRates, type CallEvidence, type CallHistoryYear, type GrowthBaseRates } from "../src/index.ts";
+
+const TABLES = new URL("../data/growth-base-rates/", import.meta.url);
+/** The base-rate table CURRENT names, which a new Call reads. */
+export const BASE_RATES: GrowthBaseRates = parseGrowthBaseRates(readFileSync(new URL(`${readFileSync(new URL("CURRENT", TABLES), "utf8").trim()}.json`, TABLES), "utf8"))!;
 
 export const TEN_K = "00000000-0000-4000-8000-0000000000a1";
 export const PRICE_SOURCE = "00000000-0000-4000-8000-0000000000b1";
@@ -50,6 +55,7 @@ export const AAPL: CallEvidence = {
     shares_outstanding: { kind: "value", value: "14532182000", currency: null },
     share_price: { kind: "value", value: "342.37", currency: "USD" },
     market_cap: { kind: "value", value: "4975383151340", currency: "USD" },
+    revenue: { kind: "value", value: "478834000000", currency: "USD" },
   },
   citations: {
     free_cash_flow: [filing("2026-09-26")],
@@ -57,6 +63,7 @@ export const AAPL: CallEvidence = {
     stock_based_compensation: [filing("2026-09-26")],
     shares_outstanding: [filing("2026-10-23")],
     share_price: [{ source_id: PRICE_SOURCE, accession: null, period_end: null, date: "2026-11-06" }],
+    revenue: [filing("2026-09-26")],
   },
   fiscal_year_end: "2026-09-26",
   price_date: "2026-11-06",
@@ -72,4 +79,5 @@ export const AAPL: CallEvidence = {
     closes: YEARS.map(([, , , , , trade_date, close_text]) => ({ trade_date, close_text })).reverse(),
   },
   splits: [{ execution_date: "2020-08-31", split_from: "1", split_to: "4" }],
+  base_rates: BASE_RATES,
 };

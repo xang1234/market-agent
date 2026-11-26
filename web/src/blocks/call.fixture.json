@@ -19,7 +19,7 @@
       }
     ],
     "call": {
-      "version": "call.v2",
+      "version": "call.v3",
       "call_date": "2026-11-09",
       "subject": {
         "issuer_id": "00000000-0000-4000-8000-0000000000d1",
@@ -37,6 +37,7 @@
         "unit_id": "call",
         "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
       },
+      "base_rate_table": "26286bd73e9600ec4b70ad553e318626cb58cf8158084d5835724621e2af162c",
       "facts": [
         {
           "id": "free_cash_flow",
@@ -134,6 +135,26 @@
               "period_end": null,
               "date": "2026-11-06",
               "text": "Close on 2026-11-06"
+            }
+          ],
+          "from": []
+        },
+        {
+          "id": "revenue",
+          "label": "Revenue",
+          "kind": "reported_fact",
+          "basis": "Reported in the latest 10-K; it picks the base rate's size bucket and is never a model input",
+          "figure": {
+            "kind": "value",
+            "text": "USD 478,834,000,000"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-09-26",
+              "date": "2026-11-03",
+              "text": "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03"
             }
           ],
           "from": []
@@ -279,18 +300,36 @@
           ]
         },
         {
+          "id": "base_case",
+          "label": "Base case",
+          "kind": "agent_assumption",
+          "basis": "anchored: growth is the median, at rank 215 of 430, of total free cash flow growth over five-year windows that began at starting revenue USD 50.0B and up, from SEC's companyfacts archive of 2026-11-24 (sha256 72bc1c52670fe57a3d701f13cbab55763c122388b314d1eaca921bb18ddfbacd). It is a frequency of reported history, not a probability. Total, not per share: buybacks are left out of g, as d leaves them out. The exit multiple is the anchored exit multiple and the share change is d",
+          "figure": {
+            "kind": "value",
+            "text": "Growth 4.24% a year at 17.33x: base value USD 165.86 per share"
+          },
+          "citations": [],
+          "from": [
+            "revenue",
+            "anchored_exit_multiple",
+            "share_change"
+          ]
+        },
+        {
           "id": "bear_case",
           "label": "Bear case",
           "kind": "agent_assumption",
-          "basis": "None is assumed: rule 1 needs an anchored bear case before a bear value per share, a hurdle price or a stance is stated",
+          "basis": "anchored: growth is the 25th percentile, at rank 108 of 430, of total free cash flow growth over five-year windows that began at starting revenue USD 50.0B and up, from SEC's companyfacts archive of 2026-11-24 (sha256 72bc1c52670fe57a3d701f13cbab55763c122388b314d1eaca921bb18ddfbacd). It is a frequency of reported history, not a probability. Total, not per share: buybacks are left out of g, as d leaves them out. The exit multiple is the anchored exit multiple and the share change is d",
           "figure": {
-            "kind": "outcome",
-            "outcome": "unanchored",
-            "reason_code": null,
-            "text": "Not anchored"
+            "kind": "value",
+            "text": "Growth -4.93% a year at 17.33x: bear value USD 111.73 per share"
           },
           "citations": [],
-          "from": []
+          "from": [
+            "revenue",
+            "anchored_exit_multiple",
+            "share_change"
+          ]
         }
       ],
       "requires": [
@@ -335,6 +374,21 @@
           ]
         },
         {
+          "id": "base_rate",
+          "label": "How often similar-sized companies delivered it",
+          "kind": "deterministic_result",
+          "basis": "A frequency of reported history, not a probability. Each window is one 10-K filer's annual growth over five fiscal years in total free cash flow, before any change in share count, as the model's g is, grouped by starting revenue. Starts FY2003 to FY2020, from SEC's companyfacts archive of 2026-11-24 (sha256 72bc1c52670fe57a3d701f13cbab55763c122388b314d1eaca921bb18ddfbacd). Revenue's base rate is shown beside it and is never an input. Not among the 430: 38 that ended early (the filer stopped filing before year 5), 6 with no year-5 figure, 95 whose two ends use different capex or cash flow concepts, 1 whose cash flow and capex at one end cover different periods and 45 that started at zero or negative free cash flow. 37 of the 430 ended at or below zero and count as -100%",
+          "figure": {
+            "kind": "value",
+            "text": "Of 430 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 168 (39.1%) delivered free cash flow growth of at least 7.33% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%)."
+          },
+          "citations": [],
+          "from": [
+            "required_growth",
+            "revenue"
+          ]
+        },
+        {
           "id": "consensus",
           "label": "Attributed consensus: Finviz EPS growth, next 5 years",
           "kind": "attributed_consensus",
@@ -356,13 +410,47 @@
         }
       ],
       "stance": {
-        "kind": "declined",
-        "rule": 1,
-        "text": "Declined under rule 1: the exit multiple is anchored, but the bear case is not, so no stance is stated.",
+        "kind": "stated",
+        "rule": 6,
+        "text": "Falls short of your hurdle.",
         "reasons": [
           {
+            "cites": "base_case",
+            "text": "The base value V is USD 165.86 per share. The value test holds up to V ÷ your margin of safety 1.25 = USD 132.68."
+          },
+          {
             "cites": "bear_case",
-            "text": "No bear case is anchored yet, so the bear value per share is not computed."
+            "text": "The bear value B is USD 111.73 per share. The bear-loss test holds up to B ÷ (1 − your 25% bear-loss limit) = USD 148.97."
+          },
+          {
+            "cites": "share_price",
+            "text": "The hurdle price H is USD 132.68, the lower of the two. The price, USD 342.37, is above H × (1 + your 10% near band) = USD 145.95."
+          },
+          {
+            "cites": "base_case",
+            "text": "Growth one point in the base and bear cases together: higher, H USD 138.36; lower, H USD 127.21. No tested move changes the stance."
+          },
+          {
+            "cites": "share_change",
+            "text": "The share change one point in both cases: higher, H USD 127.06; lower, H USD 138.65. No tested move changes the stance."
+          },
+          {
+            "cites": "required_return",
+            "text": "Your required return one point: higher, H USD 127.54; lower, H USD 138.11. No tested move changes the stance."
+          },
+          {
+            "cites": "anchored_exit_multiple",
+            "text": "The exit multiple 1x in both cases: higher, H USD 138.33; lower, H USD 127.04. No tested move changes the stance."
+          }
+        ],
+        "not_shown": [
+          {
+            "part": "skew",
+            "text": "ADR 0005 and ADR 0006 define no bull case, so the difference from a bull value is not shown."
+          },
+          {
+            "part": "falsifiers",
+            "text": "ADR 0005 and ADR 0006 define no falsifiers, so what would change the stance is not shown."
           }
         ]
       }
@@ -388,7 +476,7 @@
       }
     ],
     "call": {
-      "version": "call.v2",
+      "version": "call.v3",
       "call_date": "2026-11-09",
       "subject": {
         "issuer_id": "00000000-0000-4000-8000-0000000000d1",
@@ -406,6 +494,7 @@
         "unit_id": "call",
         "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
       },
+      "base_rate_table": "26286bd73e9600ec4b70ad553e318626cb58cf8158084d5835724621e2af162c",
       "facts": [
         {
           "id": "free_cash_flow",
@@ -508,6 +597,26 @@
             }
           ],
           "from": []
+        },
+        {
+          "id": "revenue",
+          "label": "Revenue",
+          "kind": "reported_fact",
+          "basis": "Reported in the latest 10-K; it picks the base rate's size bucket and is never a model input",
+          "figure": {
+            "kind": "value",
+            "text": "USD 478,834,000,000"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-09-26",
+              "date": "2026-11-03",
+              "text": "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03"
+            }
+          ],
+          "from": []
         }
       ],
       "assumptions": [
@@ -578,18 +687,40 @@
           ]
         },
         {
+          "id": "base_case",
+          "label": "Base case",
+          "kind": "agent_assumption",
+          "basis": "Growth at the median of total free cash flow growth among five-year windows that began at a similar size, at the anchored exit multiple and the share change d",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "blocked_dependency",
+            "reason_code": "blocked_by_dependency",
+            "text": "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)"
+          },
+          "citations": [],
+          "from": [
+            "revenue",
+            "anchored_exit_multiple",
+            "share_change"
+          ]
+        },
+        {
           "id": "bear_case",
           "label": "Bear case",
           "kind": "agent_assumption",
-          "basis": "None is assumed: rule 1 needs an anchored bear case before a bear value per share, a hurdle price or a stance is stated",
+          "basis": "Growth at the 25th percentile of total free cash flow growth among five-year windows that began at a similar size, at the anchored exit multiple and the share change d",
           "figure": {
             "kind": "outcome",
-            "outcome": "unanchored",
-            "reason_code": null,
-            "text": "Not anchored"
+            "outcome": "blocked_dependency",
+            "reason_code": "blocked_by_dependency",
+            "text": "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)"
           },
           "citations": [],
-          "from": []
+          "from": [
+            "revenue",
+            "anchored_exit_multiple",
+            "share_change"
+          ]
         }
       ],
       "requires": [
@@ -635,6 +766,23 @@
             "required_return",
             "anchored_exit_multiple",
             "share_change"
+          ]
+        },
+        {
+          "id": "base_rate",
+          "label": "How often similar-sized companies delivered it",
+          "kind": "deterministic_result",
+          "basis": "A frequency of reported history, not a probability. Each window is one 10-K filer's annual growth over five fiscal years in total free cash flow, before any change in share count, as the model's g is, grouped by starting revenue. Starts FY2003 to FY2020, from SEC's companyfacts archive of 2026-11-24 (sha256 72bc1c52670fe57a3d701f13cbab55763c122388b314d1eaca921bb18ddfbacd). Revenue's base rate is shown beside it and is never an input",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "blocked_dependency",
+            "reason_code": "blocked_by_dependency",
+            "text": "Not computed. Free cash flow: Not certified: blocked_dependency (blocked_by_dependency)"
+          },
+          "citations": [],
+          "from": [
+            "required_growth",
+            "revenue"
           ]
         },
         {
@@ -685,7 +833,7 @@
       }
     ],
     "call": {
-      "version": "call.v2",
+      "version": "call.v3",
       "call_date": "2026-11-09",
       "subject": {
         "issuer_id": "00000000-0000-4000-8000-0000000000d1",
@@ -703,6 +851,7 @@
         "unit_id": "call",
         "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
       },
+      "base_rate_table": "26286bd73e9600ec4b70ad553e318626cb58cf8158084d5835724621e2af162c",
       "facts": [
         {
           "id": "free_cash_flow",
@@ -803,6 +952,26 @@
             }
           ],
           "from": []
+        },
+        {
+          "id": "revenue",
+          "label": "Revenue",
+          "kind": "reported_fact",
+          "basis": "Reported in the latest 10-K; it picks the base rate's size bucket and is never a model input",
+          "figure": {
+            "kind": "value",
+            "text": "USD 478,834,000,000"
+          },
+          "citations": [
+            {
+              "source_id": "00000000-0000-4000-8000-0000000000a1",
+              "accession": "0000320193-26-000026",
+              "period_end": "2026-09-26",
+              "date": "2026-11-03",
+              "text": "10-K 0000320193-26-000026, period ended 2026-09-26, public by 2026-11-03"
+            }
+          ],
+          "from": []
         }
       ],
       "assumptions": [
@@ -869,18 +1038,40 @@
           ]
         },
         {
-          "id": "bear_case",
-          "label": "Bear case",
+          "id": "base_case",
+          "label": "Base case",
           "kind": "agent_assumption",
-          "basis": "None is assumed: rule 1 needs an anchored bear case before a bear value per share, a hurdle price or a stance is stated",
+          "basis": "Growth at the median of total free cash flow growth among five-year windows that began at a similar size, at the anchored exit multiple and the share change d",
           "figure": {
             "kind": "outcome",
             "outcome": "unanchored",
             "reason_code": null,
-            "text": "Not anchored"
+            "text": "Not anchored: both cases use the anchored exit multiple, which is not anchored."
           },
           "citations": [],
-          "from": []
+          "from": [
+            "revenue",
+            "anchored_exit_multiple",
+            "share_change"
+          ]
+        },
+        {
+          "id": "bear_case",
+          "label": "Bear case",
+          "kind": "agent_assumption",
+          "basis": "Growth at the 25th percentile of total free cash flow growth among five-year windows that began at a similar size, at the anchored exit multiple and the share change d",
+          "figure": {
+            "kind": "outcome",
+            "outcome": "unanchored",
+            "reason_code": null,
+            "text": "Not anchored: both cases use the anchored exit multiple, which is not anchored."
+          },
+          "citations": [],
+          "from": [
+            "revenue",
+            "anchored_exit_multiple",
+            "share_change"
+          ]
         }
       ],
       "requires": [
@@ -927,6 +1118,21 @@
           ]
         },
         {
+          "id": "base_rate",
+          "label": "How often similar-sized companies delivered it",
+          "kind": "deterministic_result",
+          "basis": "A frequency of reported history, not a probability. Each window is one 10-K filer's annual growth over five fiscal years in total free cash flow, before any change in share count, as the model's g is, grouped by starting revenue. Starts FY2003 to FY2020, from SEC's companyfacts archive of 2026-11-24 (sha256 72bc1c52670fe57a3d701f13cbab55763c122388b314d1eaca921bb18ddfbacd). Revenue's base rate is shown beside it and is never an input. Not among the 430: 38 that ended early (the filer stopped filing before year 5), 6 with no year-5 figure, 95 whose two ends use different capex or cash flow concepts, 1 whose cash flow and capex at one end cover different periods and 45 that started at zero or negative free cash flow. 37 of the 430 ended at or below zero and count as -100%",
+          "figure": {
+            "kind": "value",
+            "text": "Of 430 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 168 (39.1%) delivered free cash flow growth of at least 7.33% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%)."
+          },
+          "citations": [],
+          "from": [
+            "required_growth",
+            "revenue"
+          ]
+        },
+        {
           "id": "consensus",
           "label": "Attributed consensus: Finviz EPS growth, next 5 years",
           "kind": "attributed_consensus",
@@ -958,7 +1164,7 @@
           },
           {
             "cites": "bear_case",
-            "text": "No bear case is anchored yet, so the bear value per share is not computed."
+            "text": "Both cases use the anchored exit multiple, which is not anchored."
           }
         ]
       }

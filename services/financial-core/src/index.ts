@@ -25,4 +25,5 @@ export * from "./presentation.ts";
 export * from "./value-text.ts";
 export * from "./scenario-price-comparison.ts";
 export * from "./valuation-model.ts";
+export * from "./growth-base-rates.ts";
 export * from "./call.ts";
