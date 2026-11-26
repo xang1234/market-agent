@@ -151,3 +151,20 @@ test('a quote resting on several sources copies once with each citation, and eac
     '[1] Industry source\n[2] AMD market cap source',
   ].join('\n\n'))
 })
+
+test('a linked figure copies as the answer wrote it, and a struck one struck with its reason (#800)', () => {
+  const source = { ref_kind: 'result', ref_id: '91111111-1111-4111-9111-111111111111', format: '$62.1B', period: 'Q4 FY2026' } as const
+  assert.equal(
+    answerText([{
+      ...richTextFixture,
+      segments: [
+        { type: 'text', text: 'Revenue was ' },
+        { type: 'figure', text: 'about $62B', sources: [source], near: true },
+        { type: 'text', text: ', not ' },
+        { type: 'struck', text: '$72.1B', reason: 'the sources give $62.1B', sources: [source] },
+        { type: 'text', text: '.' },
+      ],
+    }]),
+    'Revenue was about $62B, not ~~$72.1B~~ (the sources give $62.1B).',
+  )
+})

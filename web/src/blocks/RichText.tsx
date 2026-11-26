@@ -1,7 +1,8 @@
 import { useContext, type ReactElement } from 'react'
 import { InspectableRef } from '../evidence/InspectableRef.tsx'
 import { InspectableResult } from '../evidence/InspectableResult.tsx'
-import type { CitationRef, CommentaryPart, RefSegment, RichTextBlock, RichTextSegment, TextSegmentTone } from './types.ts'
+import { LinkedFigure, REF_CLASS } from '../evidence/SourceLink.tsx'
+import type { CitationRef, CommentaryPart, RefSegment, RichTextBlock, RichTextSegment, StruckSegment, TextSegmentTone } from './types.ts'
 import { citationNumbers, citesQuoteBefore, commentaryCard, isCitationRef, isRefSegment, refSegmentText, type Takeaway } from './richText.ts'
 import { Markdown } from './Markdown.tsx'
 import { OpenClarificationContext } from './openClarification.ts'
@@ -71,9 +72,22 @@ function markdownParts(block: RichTextBlock, segments: ReadonlyArray<RichTextSeg
         />
       )
     }
+    if (segment.type === 'figure') return <LinkedFigure snapshotId={block.snapshot_id} figure={segment} />
+    if (segment.type === 'struck') return <Struck snapshotId={block.snapshot_id} segment={segment} />
     if (segment.tone === undefined || segment.tone === 'neutral') return segment.text
     return { inline: <span data-tone={segment.tone} className={TONE_CLASS[segment.tone]}>{segment.text}</span> }
   })
+}
+
+// A figure the sources contradict: struck, then the reason that names what they give, linked to it (#800).
+function Struck({ snapshotId, segment }: { snapshotId: string; segment: StruckSegment }): ReactElement {
+  const { text, reason, sources } = segment
+  return (
+    <>
+      <del><span className="sr-only">struck: </span>{text}</del>
+      {' ('}{sources?.length ? <LinkedFigure snapshotId={snapshotId} figure={{ text: reason, sources }} /> : reason})
+    </>
+  )
 }
 
 // Each takeaway's badge: what the judge found of it.
@@ -172,10 +186,6 @@ type RefSegmentSpanProps = {
   index: number | string
   segment: Exclude<RefSegment, { ref_kind: 'result' }>
 }
-
-// A value as the text reads it, with no padding or fill: either would show as a
-// space before the punctuation after it (#303).
-const REF_CLASS = 'rounded text-left text-fg-soft underline decoration-dotted underline-offset-2'
 
 function RefSegmentSpan({ snapshotId, blockId, index, segment }: RefSegmentSpanProps): ReactElement {
   return (

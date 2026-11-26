@@ -38,8 +38,11 @@ function collectBlockRefs(block: Record<string, unknown>, refs: InspectableBlock
 
   if (block.kind === 'rich_text') {
     for (const segment of arrayValue(block.segments)) {
-      if (isRecord(segment) && segment.type === 'ref' && isInspectionKind(segment.ref_kind)) {
-        push(segment.ref_kind, segment.ref_id)
+      if (!isRecord(segment)) continue
+      // A linked or struck figure cites each of its sources (#800).
+      const cited = segment.type === 'ref' ? [segment] : segment.type === 'figure' || segment.type === 'struck' ? arrayValue(segment.sources).filter(isRecord) : []
+      for (const ref of cited) {
+        if (isInspectionKind(ref.ref_kind)) push(ref.ref_kind, ref.ref_id)
       }
     }
   }

@@ -83,6 +83,8 @@ function segmentText(segments: ReadonlyArray<RichTextSegment>, numbers: Readonly
   return segments.map((segment, index) => {
     if (isCitationRef(segment)) return citesQuoteBefore(segments, index) ? ` [${numbers.get(segment.ref_id)}]` : `“${literal(refSegmentText(segment))}” [${numbers.get(segment.ref_id)}]`
     if (isRefSegment(segment)) return literal(refSegmentText(segment))
+    if (segment.type === 'figure') return literal(segment.text)
+    if (segment.type === 'struck') return `~~${literal(segment.text)}~~ (${literal(segment.reason)})`
     return segment.tone === undefined || segment.tone === 'neutral' ? segment.text : literal(segment.text)
   }).join('')
 }

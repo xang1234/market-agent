@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 
 import { FinancialResultInspector } from '../blocks/renderers/FinancialResultInspector.tsx'
 import { financialHeading } from '../blocks/financialInspection.ts'
+import type { FigureDerivation, FigureSegment } from '../blocks/types.ts'
 import { Skeleton } from '../ui/Skeleton.tsx'
 import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from './evidenceInspectorContext.ts'
 import type {
@@ -13,6 +14,7 @@ import type {
 } from './inspectionTypes.ts'
 import type { InspectorPage, InspectorStack } from './inspectorStack.ts'
 import { InspectableRef } from './InspectableRef.tsx'
+import { SourceLink } from './SourceLink.tsx'
 import { Details, Facts, ReadableValue } from './Readable.tsx'
 import { humanize, isIdentifier, readableDate } from './readable.ts'
 
@@ -37,6 +39,15 @@ const DATE_ROWS: ReadonlyArray<readonly [label: string, shown: string]> = [
 
 const LINK_CLASS = 'text-accent-ink underline underline-offset-2'
 
+const DERIVATION_NAMES: Readonly<Record<FigureDerivation, string>> = {
+  margin: 'Margin',
+  growth: 'Growth',
+  difference: 'Difference',
+  ratio: 'Ratio',
+  share_of_total: 'Share of total',
+  sum: 'Sum',
+}
+
 /**
  * The inspector docked beside the main column. It shows the top page of the
  * stack; Back and the breadcrumb step down it. Refs opened from inside the
@@ -55,7 +66,7 @@ export function EvidenceInspectorPanel({
 }) {
   const page = stack[stack.length - 1]
   const headingRef = useRef<HTMLHeadingElement>(null)
-  const pageKey = page.kind === 'block' ? page.inspection : page.request
+  const pageKey = page.kind === 'block' ? page.inspection : page.kind === 'figure' ? page.figure : page.request
 
   useEffect(() => {
     headingRef.current?.focus()
@@ -131,6 +142,7 @@ function PageBody({ page }: { page: InspectorPage }) {
     return <FinancialResultInspector load={page.load} shown={page.shown} />
   }
   if (page.kind === 'block') return <BlockInspectionBody inspection={page.inspection} />
+  if (page.kind === 'figure') return <FigureSources snapshotId={page.snapshotId} figure={page.figure} />
   if (page.load.kind === 'loading') return <Skeleton label="Loading evidence" className="h-40" />
   if (page.load.kind === 'error') return <p className="text-sm text-fg-soft">{page.load.message}</p>
   return <InspectionBody inspection={page.load.inspection} />
@@ -139,6 +151,7 @@ function PageBody({ page }: { page: InspectorPage }) {
 function pageTitle(page: InspectorPage): string {
   if (page.kind === 'financial') return heading(page).title
   if (page.kind === 'block') return page.inspection.title
+  if (page.kind === 'figure') return page.figure.text
   if (page.shownAs) return page.shownAs
   return page.load.kind === 'ready' ? page.load.inspection.title : REF_KIND_NAMES[page.ref.kind]
 }
@@ -146,6 +159,11 @@ function pageTitle(page: InspectorPage): string {
 function pageSubtitle(page: InspectorPage): string {
   if (page.kind === 'financial') return heading(page).subtitle
   if (page.kind === 'block') return joinParts(['Block', datePart(page.inspection.rows)])
+  if (page.kind === 'figure') {
+    const { derivation, sources } = page.figure
+    const from = `computed from ${sources.length} source${sources.length === 1 ? '' : 's'}`
+    return derivation ? `${DERIVATION_NAMES[derivation]}, ${from}` : `${from[0]!.toUpperCase()}${from.slice(1)}`
+  }
   if (page.load.kind !== 'ready') return REF_KIND_NAMES[page.ref.kind]
   const { inspection } = page.load
   const provider = inspection.rows.find((row) => row.label === 'Provider')?.value ??
@@ -173,6 +191,24 @@ function shortDate(value: string): string {
 
 function joinParts(parts: ReadonlyArray<string | null>): string {
   return parts.filter((part): part is string => part !== null).join(' · ')
+}
+
+// A computed figure's sources, in the order its derivation reads them, each opening its own page.
+function FigureSources({ snapshotId, figure }: { snapshotId: string; figure: FigureSegment }) {
+  return (
+    <ol aria-label="Sources" className="flex list-decimal flex-col gap-2 pl-5 text-sm">
+      {figure.sources.map((source, index) => {
+        const shown = source.format ?? source.ref_kind
+        return (
+          <li key={index}>
+            <SourceLink snapshotId={snapshotId} source={source} text={shown}>
+              {source.period ? `${shown}, ${source.period}` : shown}
+            </SourceLink>
+          </li>
+        )
+      })}
+    </ol>
+  )
 }
 
 function InspectionBody({ inspection }: { inspection: EvidenceInspection }) {

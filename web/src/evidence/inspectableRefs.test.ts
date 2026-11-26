@@ -108,3 +108,19 @@ test('extractInspectableRefs opens a rich text series chip as a series ref', () 
 
   assert.deepEqual(refs.map((ref) => `${ref.ref.kind}:${ref.ref.id}`), [`series:${SERIES_REF}`])
 })
+
+test('extractInspectableRefs reads each source of a linked or struck figure, as the seal does (#800)', () => {
+  const refs = extractInspectableRefs({
+    id: 'rt-figures',
+    kind: 'rich_text',
+    snapshot_id: SNAPSHOT_ID,
+    data_ref: { kind: 'rich_text', id: 'rt-figures' },
+    source_refs: [],
+    as_of: '2026-05-29T00:00:00.000Z',
+    segments: [
+      { type: 'figure', text: '58%', sources: [{ ref_kind: 'result', ref_id: DELTA_FACT_ID }, { ref_kind: 'claim', ref_id: CLAIM_ID, numeral: 1 }], derivation: 'growth', operands: [] },
+      { type: 'struck', text: '$72.1B', reason: 'the sources give $62.1B', sources: [{ ref_kind: 'fact', ref_id: FACT_ID }] },
+    ],
+  })
+  assert.deepEqual(refs.map((ref) => `${ref.ref.kind}:${ref.ref.id}`), [`claim:${CLAIM_ID}`, `fact:${FACT_ID}`])
+})
