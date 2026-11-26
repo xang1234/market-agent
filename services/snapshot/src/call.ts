@@ -8,12 +8,14 @@
 // A Call is an opinion, never evidence: no read awards it a proof
 // (block-proof.ts), and nothing here writes a fact or a source.
 
+import { readdirSync, readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 
 import {
   ANCHOR_FISCAL_YEARS,
   assembleCall,
   assembleCallV1,
+  assembleCallV2,
   balanceComponents,
   CALL_FIGURE_NODES,
   callHistoryNodes,
@@ -24,9 +26,11 @@ import {
   localDateOf,
   parseCallSettings,
   parseFinancialDecimal,
+  parseGrowthBaseRates,
   type CallCloses,
   type CallContent,
   type CallContentV1,
+  type CallContentV2,
   type CallEngineFigure,
   type CallEvidence,
   type CallEvidenceV1,
@@ -34,6 +38,7 @@ import {
   type CallSettings,
   type CallSource,
   type FinancialPlan,
+  type GrowthBaseRates,
   type UUID,
 } from "../../financial-core/src/index.ts";
 import { loadSubjectSplitHistory } from "../../market/src/split-history.ts";
@@ -48,7 +53,7 @@ export type CallRequest = Readonly<{
   settings: CallSettings;
 }>;
 
-export type GeneratedCall = Readonly<{ content: CallContent | CallContentV1; as_of: string; source_ids: ReadonlyArray<string> }>;
+export type GeneratedCall = Readonly<{ content: CallContent | CallContentV2 | CallContentV1; as_of: string; source_ids: ReadonlyArray<string> }>;
 
 export type CallBlock = Readonly<{
   id: string;
@@ -58,7 +63,7 @@ export type CallBlock = Readonly<{
   source_refs: ReadonlyArray<string>;
   as_of: string;
   subject_refs: ReadonlyArray<Readonly<{ kind: "issuer"; id: string }>>;
-  call: CallContent | CallContentV1;
+  call: CallContent | CallContentV2 | CallContentV1;
 }>;
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -70,16 +75,40 @@ const CITED_SLOTS: Readonly<Record<CallFactId, ReadonlyArray<string>>> = {
   stock_based_compensation: ["stock_based_compensation"],
   shares_outstanding: ["market_cap_shares"],
   share_price: ["market_cap_px"],
+  revenue: ["revenue"],
 };
+
+/** Every committed base-rate table by its sha256, and the one CURRENT names, which a new Call reads. */
+export type BaseRateTables = Readonly<{ current: GrowthBaseRates; bySha: ReadonlyMap<string, GrowthBaseRates> }>;
+
+/**
+ * The tables in a data/growth-base-rates/ directory (growth-base-rates.ts). A
+ * file that does not parse, or whose name is not its text's sha256, is a build
+ * error, so it fails here, at load, as does a CURRENT naming no table.
+ */
+export function loadBaseRateTables(directory: URL): BaseRateTables {
+  const bySha = new Map<string, GrowthBaseRates>();
+  for (const name of readdirSync(directory).filter((entry) => entry.endsWith(".json"))) {
+    const table = parseGrowthBaseRates(readFileSync(new URL(name, directory), "utf8"));
+    if (table === null || name !== `${table.table_sha256}.json`) throw new Error(`${name} is not a growth_base_rates.v1 table named by its sha256`);
+    bySha.set(table.table_sha256, table);
+  }
+  const current = bySha.get(readFileSync(new URL("CURRENT", directory), "utf8").trim());
+  if (current === undefined) throw new Error(`${directory.pathname}CURRENT names no table there`);
+  return { current, bySha };
+}
+
+const BASE_RATE_TABLES = loadBaseRateTables(new URL("../../financial-core/data/growth-base-rates/", import.meta.url));
 
 type Binding = Readonly<{ input_slot: string; binding_status: string; gap_reason: string | null; payload_hash: string | null; bound_payload: Record<string, unknown> | null; canonical_url: string | null }>;
 
 /**
  * The Call on the certified run a thread's snapshot holds, or null when no
  * certificate of a Call inputs plan in this thread is sealed with it. A run
- * of the plan Calls had before the anchor (#605) regenerates as call.v1.
+ * of the plan Calls had before the anchor (#605) regenerates as call.v1, and
+ * one of the plan before the base rate's revenue node as call.v2.
  */
-export async function generateCall(db: QueryExecutor, request: CallRequest): Promise<GeneratedCall | null> {
+export async function generateCall(db: QueryExecutor, request: CallRequest, baseRates: GrowthBaseRates = BASE_RATE_TABLES.current): Promise<GeneratedCall | null> {
   if (!UUID_TEXT.test(request.inputs_snapshot_id) || !UUID_TEXT.test(request.thread_id)) return null;
   const certificates = (await db.query<{ run_id: string; unit_id: string; result_ids: unknown; plan: FinancialPlan }>(
     `select c.run_id::text as run_id, c.unit_id, c.result_ids, p.plan
@@ -93,7 +122,8 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
   const [{ run_id, unit_id, result_ids, plan }] = certificates as [typeof certificates[number]];
   const [member] = plan.subjects.members;
   if (plan.subjects.members.length !== 1 || member?.subject_ref.kind !== "issuer") return null;
-  const anchored = isPlan(plan, callInputOperations(member.slot_id));
+  const current = isPlan(plan, callInputOperations(member.slot_id));
+  const anchored = current || isPlan(plan, callInputOperations(member.slot_id).filter((node) => node.node_id !== "revenue"));
   if (!anchored && !isPlan(plan, callModelOperations(member.slot_id))) return null;
   const issuer = member.subject_ref.id;
   const listing = await subjectListing(db, issuer, plan.time.knowledge_cutoff);
@@ -106,7 +136,8 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     `select result_id::text as result_id, node_id, disposition, payload from financial_results where run_id = $1 and unit_id = $2`,
     [run_id, unit_id],
   )).rows.filter((row) => certified.has(row.result_id)).map((row) => [row.node_id, row]));
-  const figures = Object.fromEntries(Object.entries(CALL_FIGURE_NODES).map(([id, node]) => [id, engineFigure(results.get(node))]));
+  // Only a current plan has a revenue node.
+  const figures = Object.fromEntries(Object.entries(CALL_FIGURE_NODES).filter(([id]) => current || id !== "revenue").map(([id, node]) => [id, engineFigure(results.get(node))]));
   if (Object.values(figures).some((figure) => figure === null)) return null;
   const yearFigures = Array.from({ length: ANCHOR_FISCAL_YEARS }, (_, offset) => {
     const nodes = callHistoryNodes(offset);
@@ -127,7 +158,7 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     const row = bound.get(slot);
     return row === undefined ? [] : [citation(row, localDate)];
   }));
-  const citations = Object.fromEntries(Object.entries(CITED_SLOTS).map(([id, slots]) => [id, cited(slots)])) as Record<CallFactId, CallSource[]>;
+  const citations = Object.fromEntries(Object.entries(CITED_SLOTS).filter(([id]) => current || id !== "revenue").map(([id, slots]) => [id, cited(slots)])) as Record<CallFactId, CallSource[]>;
   const period = (slot: string) => {
     const payload = bound.get(slot)?.bound_payload;
     return isRecord(payload?.period) && typeof payload.period.end === "string" ? payload.period.end : null;
@@ -160,7 +191,7 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     ocf_scope: ocfScope("operating_cash_flow"),
     consensus: await consensusCaptures(db, issuer, callDate, plan.time.knowledge_cutoff),
   };
-  const generated = (content: CallContent | CallContentV1): GeneratedCall => {
+  const generated = (content: CallContent | CallContentV2 | CallContentV1): GeneratedCall => {
     const sources = [...content.facts, ...content.assumptions, ...content.requires].flatMap((row) => row.citations.map((entry) => entry.source_id));
     return { content, as_of: new Date(plan.time.knowledge_cutoff).toISOString(), source_ids: [...new Set(sources)] };
   };
@@ -186,13 +217,16 @@ export async function generateCall(db: QueryExecutor, request: CallRequest): Pro
     : null;
   const closes = splitHistory.status === "ok" ? await closeCapture(db, splitHistory.listing_id, plan.time.knowledge_cutoff) : null;
 
-  return generated(assembleCall({
+  const evidence = {
     ...evidenceV1,
     inputs: { ...evidenceV1.inputs, fingerprint: hashCanonical("call_inputs", { bindings: bindingsHashed, closes, splits }) },
     history,
     closes,
     splits,
-  }));
+  };
+  return generated(current
+    ? assembleCall({ ...evidence, figures: figures as CallEvidence["figures"], citations, base_rates: baseRates })
+    : assembleCallV2(evidence));
 }
 
 // Whether a plan's operations are exactly these.
@@ -329,17 +363,19 @@ export async function recordCall(db: QueryExecutor, block: CallBlock): Promise<v
   );
 }
 
-export type CallSealFailure = Readonly<{ block_id: string; reason: "unverifiable" | "request" | "inputs" | "block" }>;
+export type CallSealFailure = Readonly<{ block_id: string; reason: "unverifiable" | "request" | "base_rates" | "inputs" | "block" }>;
 
 /**
- * Each Call block, generated again from the certificate and settings it names
- * through the seal's transaction client, and rebuilt whole under its id and
- * snapshot: every field must be what generation gives.
+ * Each Call block, generated again from the certificate, settings and
+ * base-rate table it names through the seal's transaction client, and rebuilt
+ * whole under its id and snapshot: every field must be what generation gives.
+ * A call.v3 naming no committed table fails as base_rates.
  */
 export async function verifyCalls(
   blocks: ReadonlyArray<{ id: string; snapshot_id: string; call?: unknown }>,
   threadId: string | null,
   db: QueryExecutor | undefined,
+  tables: BaseRateTables = BASE_RATE_TABLES,
 ): Promise<CallSealFailure[]> {
   const failures: CallSealFailure[] = [];
   for (const block of blocks) {
@@ -355,7 +391,14 @@ export async function verifyCalls(
       fail("request");
       continue;
     }
-    const generated = await generateCall(db, { thread_id: threadId, inputs_snapshot_id: inputs, settings });
+    // Only a call.v3 reads a table; an earlier version is generated without one.
+    const named = !isRecord(call) || call.version !== "call.v3" ? tables.current
+      : typeof call.base_rate_table === "string" ? tables.bySha.get(call.base_rate_table) : undefined;
+    if (named === undefined) {
+      fail("base_rates");
+      continue;
+    }
+    const generated = await generateCall(db, { thread_id: threadId, inputs_snapshot_id: inputs, settings }, named);
     if (generated === null) {
       fail("inputs");
       continue;

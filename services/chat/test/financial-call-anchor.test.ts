@@ -1,7 +1,7 @@
 // The exit multiple's anchor in chat (#605): AAPL's FY2017 to FY2026 10-Ks,
 // trimmed from a real companyfacts download, and yfinance's split-adjusted
-// closes give an anchored exit multiple, sealed with the Call. The Call still
-// declines under rule 1, now for the bear case alone. A year whose capex is
+// closes give an anchored exit multiple, sealed with the Call, and with the
+// base and bear cases anchored the Call states its stance. A year whose capex is
 // filed as productive assets (#731), or whose operating cash flow is filed for
 // continuing operations (#743), still anchors, so a ten-year window across a
 // change of scope is anchored (operator, 2026-11-21); a year with no capex, or
@@ -14,7 +14,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
-import type { CallContent, CallContentV1 } from "../../financial-core/src/index.ts";
+import type { CallContent, CallContentV1, CallContentV2 } from "../../financial-core/src/index.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
 import { IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { backfillSecStatements } from "../../fundamentals/src/sec-statements-backfill-cli.ts";
@@ -129,7 +129,7 @@ async function seedIssuer(db: Client, pool: FinancialPool, company: Issuer, fact
   );
 }
 
-const row = (call: CallContent | CallContentV1, id: string) => [...call.facts, ...call.assumptions, ...call.requires].find((entry) => entry.id === id)!;
+const row = (call: CallContent | CallContentV2 | CallContentV1, id: string) => [...call.facts, ...call.assumptions, ...call.requires].find((entry) => entry.id === id)!;
 
 test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -163,7 +163,7 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
     return { threadId, block: (message.blocks as unknown as CallBlock[])[0]! };
   };
 
-  await t.test("AAPL: FY2017 to FY2026 EV/FCF anchors the exit multiple at the 17.33x cap, and rule 1 now names only the bear case", async () => {
+  await t.test("AAPL: FY2017 to FY2026 EV/FCF anchors the exit multiple at the 17.33x cap, and the Call falls short of your hurdle", async () => {
     const { threadId, block } = await ask("Make a Call on AAPL");
     const call = block.call;
     const anchored = row(call, "anchored_exit_multiple");
@@ -193,13 +193,18 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
     ]);
     // A separate float bisection of ADR 0006's V(g) at X = 52/3 and d = 0.277% gives 22.46%.
     assert.deepEqual([row(call, "exit_multiple").figure.text, row(call, "required_growth").figure.text, row(call, "required_growth_anchored").figure.text], ["36.15x", "7.3% a year", "22.5% a year"]);
-    assert.deepEqual(row(call, "bear_case").figure, { kind: "outcome", outcome: "unanchored", reason_code: null, text: "Not anchored" });
-    assert.deepEqual(call.stance, {
-      kind: "declined",
-      rule: 1,
-      text: "Declined under rule 1: the exit multiple is anchored, but the bear case is not, so no stance is stated.",
-      reasons: [{ cites: "bear_case", text: "No bear case is anchored yet, so the bear value per share is not computed." }],
+    // The cases: FY2026 revenue puts AAPL in the top bucket, whose total free cash flow growth has a median of 4.24% and a 25th percentile of -4.93% a year.
+    assert.deepEqual(row(call, "base_case").figure, { kind: "value", text: "Growth 4.24% a year at 17.33x: base value USD 165.86 per share" });
+    assert.deepEqual(row(call, "bear_case").figure, { kind: "value", text: "Growth -4.93% a year at 17.33x: bear value USD 111.73 per share" });
+    // The same Call sets today's required growth against that bucket: revenue and ten years of history, read together.
+    assert.deepEqual(row(call, "base_rate").figure, {
+      kind: "value",
+      text: "Of 430 five-year windows that began at a similar size (starting revenue USD 50.0B and up), 168 (39.1%) delivered free cash flow growth of at least 7.33% a year. Beside it, revenue grew at least that fast in 180 of 650 (27.7%).",
     });
+    assert.ok(call.stance.kind === "stated");
+    assert.deepEqual([call.stance.rule, call.stance.text, call.stance.reasons[2]!.text], [
+      6, "Falls short of your hurdle.", "The hurdle price H is USD 132.68, the lower of the two. The price, USD 342.37, is above H × (1 + your 10% near band) = USD 145.95.",
+    ]);
     assert.deepEqual(await verifyCalls([block], threadId, pool), [], "the seal regenerates the anchor");
     // A split known only after the Call, executing after its date, is not one the Call could have read.
     await db.query(`insert into listing_splits (listing_id, execution_date, split_from, split_to, source_id) values ($1, '2027-01-15', 1, 2, $2)`, [AAPL.listing, POLYGON_MARKET_SOURCE_ID]);
@@ -236,7 +241,7 @@ test("the exit multiple's anchor in chat", { timeout: 600_000 }, async (t) => {
 
   await t.test("closes captured at 01:00 UTC on a split's day are dated the evening before in New York, so the split puts the counts back on their basis", async () => {
     // The engine states SPLT's counts after the split, twice AAPL's; the closes are before it, as AAPL's are.
-    const computed = (call: CallContent | CallContentV1) => row(call, "anchored_exit_multiple").citations.flatMap((citation) => /^FY\d{4}: [\d.]+x, /u.test(citation.text) ? [citation.text.split("; ")[0]] : []);
+    const computed = (call: CallContent | CallContentV2 | CallContentV1) => row(call, "anchored_exit_multiple").citations.flatMap((citation) => /^FY\d{4}: [\d.]+x, /u.test(citation.text) ? [citation.text.split("; ")[0]] : []);
     const [split, aapl] = [(await ask("Make a Call on SPLT")).block.call, (await ask("Make a Call on AAPL")).block.call];
     assert.equal(computed(split).length, 10);
     assert.deepEqual([computed(split), row(split, "anchored_exit_multiple").basis], [computed(aapl), row(aapl, "anchored_exit_multiple").basis]);
