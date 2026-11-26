@@ -1,0 +1,217 @@
+# Each sentence of release-figure-sentences.tsv and the figures statedFigures numbers in it, in order.
+Adjusted diluted EPS was $1.20. -> $1.20
+Apple posted quarterly revenue of $95.4 billion, up 5 percent year over year from $90.8 billion, and quarterly earnings per diluted share of $1.65. -> $95.4 billion | 5 percent | $90.8 billion | $1.65
+As adjusted, gross margin was 72.0%. -> 72.0%
+Basic and diluted earnings per share were $1.02 and $1.00, respectively. -> $1.02 | $1.00
+Cash flow from operating activities was $15.2 billion. -> $15.2 billion
+Comparable store sales were $7.7 billion. -> $7.7 billion
+Core diluted EPS was $1.45, up 12% from $1.29 in the prior year. -> $1.45 | 12% | $1.29
+Core first-quarter total revenue was $1.9 billion. -> $1.9 billion
+Core operating income was $2.0 billion, and diluted EPS was $1.50. -> $2.0 billion | $1.50
+Diluted EPS is expected to be $1.10, plus or minus $300 million. -> $1.10 | $300 million
+Diluted EPS was $1.85 (core). -> $1.85
+Diluted earnings per share was $1.00 ($1.25 on a non-GAAP basis). -> $1.00 | $1.25
+Diluted earnings per share was $3.30 and increased 10%, compared with $3.00 in the prior year. -> $3.30 | 10% | $3.00
+Excluding the $4.5 billion charge, Q1 gross margin would have been 71.3%. -> $4.5 billion | 71.3%
+First quarter revenue was $10.3 billion, gross margin was 53%, operating income was $1.5 billion, net income was $1.4 billion and diluted earnings per share was $0.84. -> $10.3 billion | 53% | $1.5 billion | $1.4 billion | $0.84
+For the first quarter of 2026, AMD expects revenue to be approximately $9.8 billion, plus or minus $300 million, including approximately $100 million of AMD Instinct MI308 sales to China. -> 2026 | $9.8 billion | $300 million | $100 million
+For the fourth quarter of 2025, AMD expects revenue to be approximately $9.6 billion, plus or minus $300 million. -> 2025 | $9.6 billion | $300 million
+For the fourth quarter of 2026, AMD expects revenue to be approximately $17 billion, plus or minus 3%. -> 2026 | $17 billion | 3%
+For the quarter, GAAP and non-GAAP gross margins were 72.4% and 72.7%, respectively. -> 72.4% | 72.7%
+For the quarter, GAAP and non-GAAP gross margins were 73.4% and 73.6%, respectively. -> 73.4% | 73.6%
+For the quarter, GAAP and non-GAAP gross margins were 74.8% and 74.9%, respectively. -> 74.8% | 74.9%
+For the quarter, GAAP and non-GAAP gross margins were 74.9% and 75.0%, respectively. -> 74.9% | 75.0%
+For the quarter, GAAP and non-GAAP gross margins were 75.0% and 75.2%, respectively. -> 75.0% | 75.2%
+For the quarter, GAAP and non-GAAP gross margins were both 75.0%. -> 75.0%
+For the quarter, on a non-GAAP basis, gross margin was 54%. -> 54%
+For the second quarter of 2025, AMD expects revenue to be approximately $7.4 billion, plus or minus $300 million. -> 2025 | $7.4 billion | $300 million
+For the second quarter of 2026, AMD expects revenue to be approximately $11.2 billion, plus or minus $300 million. -> 2026 | $11.2 billion | $300 million
+For the third quarter of 2024, AMD expects revenue to be approximately $6.7 billion, plus or minus $300 million. -> 2024 | $6.7 billion | $300 million
+For the third quarter of 2025, AMD expects revenue to be approximately $8.7 billion, plus or minus $300 million, up 28% from $6.8 billion a year ago. -> 2025 | $8.7 billion | $300 million | 28% | $6.8 billion
+For the third quarter of 2025, AMD expects revenue to be approximately $8.7 billion, plus or minus $300 million. -> 2025 | $8.7 billion | $300 million
+For the third quarter of 2026, AMD expects revenue to be approximately $13 billion, plus or minus $300 million. -> 2026 | $13 billion | $300 million
+Fourth quarter revenue was a record $10.3 billion, gross margin was 54%, operating income was $1.8 billion, net income was $1.5 billion and diluted earnings per share was $0.92. -> $10.3 billion | 54% | $1.8 billion | $1.5 billion | $0.92
+Free cash flow is expected to be approximately $1.0 billion. -> $1.0 billion
+Free cash flow was $1.2 billion. -> $1.2 billion
+Free cash flow was -$1.2 billion. -> -$1.2 billion
+Free cash flow was -$150 million. -> -$150 million
+GAAP and non-GAAP financial measures are discussed below, and GAAP gross margin was 70.0%. -> 70.0%
+GAAP and non-GAAP gross margins are expected to be 70.6% and 71.0%, respectively, plus or minus 50 basis points. -> 70.6% | 71.0% | 50 basis points
+GAAP and non-GAAP gross margins are expected to be 71.0% and 72.0%. -> 71.0% | 72.0%
+GAAP and non-GAAP gross margins are expected to be 71.8% and 72.0%, respectively, plus or minus 50 basis points, compared with 60.5% in Q1. -> 71.8% | 72.0% | 50 basis points | 60.5%
+GAAP and non-GAAP gross margins are expected to be 71.8% and 72.0%, respectively, plus or minus 50 basis points. -> 71.8% | 72.0% | 50 basis points
+GAAP and non-GAAP gross margins are expected to be 73.0% and 73.5%, respectively, plus or minus 50 basis points. -> 73.0% | 73.5% | 50 basis points
+GAAP and non-GAAP gross margins are expected to be 73.3% and 73.5%, respectively, plus or minus 50 basis points. -> 73.3% | 73.5% | 50 basis points
+GAAP and non-GAAP gross margins are expected to be 74.0%, plus or minus 50 basis points. -> 74.0% | 50 basis points
+GAAP and non-GAAP gross margins are expected to be 74.8% and 75.0%, respectively, plus or minus 50 basis points. -> 74.8% | 75.0% | 50 basis points
+GAAP and non-GAAP gross margins are expected to be 74.9% and 75.0%, respectively, plus or minus 50 basis points, inclusive of a 0.1% impact from stock-based compensation expense. -> 74.9% | 75.0% | 50 basis points | 0.1%
+GAAP and non-GAAP gross margins are expected to be 74.9% and 75.0%, respectively, plus or minus 50 basis points. -> 74.9% | 75.0% | 50 basis points
+GAAP and non-GAAP gross margins are expected to be between 71.0% and 72.0%. -> 71.0% | 72.0%
+GAAP and non-GAAP gross margins were 60.5% and 61.0%, respectively. -> 60.5% | 61.0%
+GAAP and non-GAAP operating expenses are expected to be approximately $11.0 billion and $10.7 billion, respectively. -> $11.0 billion | $10.7 billion
+GAAP and non-GAAP operating expenses are expected to be approximately $4.8 billion and $3.4 billion, respectively. -> $4.8 billion | $3.4 billion
+GAAP and non-GAAP operating expenses are expected to be approximately $5.2 billion and $3.6 billion, respectively. -> $5.2 billion | $3.6 billion
+GAAP and non-GAAP operating expenses are expected to be approximately $5.7 billion and $4.0 billion, respectively. -> $5.7 billion | $4.0 billion
+GAAP and non-GAAP operating expenses are expected to be approximately $5.9 billion and $4.2 billion, respectively. -> $5.9 billion | $4.2 billion
+GAAP and non-GAAP operating expenses are expected to be approximately $6.7 billion and $5.0 billion, respectively. -> $6.7 billion | $5.0 billion
+GAAP and non-GAAP operating expenses are expected to be approximately $7.7 billion and $7.5 billion, respectively, inclusive of $1.9 billion of stock-based compensation expense. -> $7.7 billion | $7.5 billion | $1.9 billion
+GAAP and non-GAAP operating expenses are expected to be approximately $8.5 billion and $8.3 billion, respectively. -> $8.5 billion | $8.3 billion
+GAAP and non-GAAP operating expenses are expected to be approximately $9.2 billion and $9.0 billion, respectively. -> $9.2 billion | $9.0 billion
+GAAP diluted EPS was ($0.50). -> $0.50
+GAAP gross margin was 35.4%, down 3.3 percentage points compared with 38.7% in Q2 2024, while non-GAAP gross margin was 38.7%. -> 35.4% | 3.3 percentage points | 38.7% | 2024 | 38.7%
+GAAP gross margin was 60.5%, and GAAP diluted earnings per share was $0.76. -> 60.5% | $0.76
+GAAP gross margin was 60.5%, including a $4.5 billion H20 charge, and non-GAAP gross margin was 61.0%. -> 60.5% | $4.5 billion | 61.0%
+Gross margin (compared with non-GAAP gross margin of 72.0%) was 70.0%. -> 72.0% | 70.0%
+Gross margin ex SBC was 72.0%. -> 72.0%
+Gross margin excl. H20 charges was 71.3%. -> 71.3%
+Gross margin excluding stock-based compensation was 72.0%. -> 72.0%
+Gross margin guidance is 71.0 to 72.0% GAAP. -> 71.0 | 72.0%
+Gross margin is expected to be 70.0% or 72.0%, plus or minus 50 basis points. -> 70.0% | 72.0% | 50 basis points
+Gross margin is expected to be 72%, plus or minus 50 basis points, and operating margin 30%, up 2% year over year. -> 72% | 50 basis points | 30% | 2%
+Gross margin is expected to be 72.0% on a non-GAAP basis, and operating expenses are expected to be $3.5 billion. -> 72.0% | $3.5 billion
+Gross margin is expected to be 72.0%, and operating margin 30.0%, plus or minus 50 basis points. -> 72.0% | 30.0% | 50 basis points
+Gross margin is expected to be 72.0%, up 50 basis points from Q1. -> 72.0% | 50 basis points
+Gross margin on a non-GAAP basis was 43%, revenue was $7.7 billion. -> 43% | $7.7 billion
+Gross margin was 40% (non-GAAP gross margin was 43%). -> 40% | 43%
+Gross margin was 43% on a non-GAAP basis, and revenue was $7.7 billion. -> 43% | $7.7 billion
+Gross margin was 43% on a non-GAAP basis, revenue was $7.7 billion. -> 43% | $7.7 billion
+Gross margin was 61.5% (normalized). -> 61.5%
+Gross margin was 70.0% (72.0% on a non-GAAP basis). -> 70.0% | 72.0%
+Gross margin was 70.0% on an unadjusted basis. -> 70.0%
+Gross margin was 71.3% on a GAAP excluding H20 basis. -> 71.3%
+Gross margin was 72.0%, as adjusted. -> 72.0%
+In constant currency, revenue grew 5%, and revenue was $7.7 billion. -> 5% | $7.7 billion
+Intel Core revenue was $7.7 billion. -> $7.7 billion
+Like-for-like sales were $7.7 billion. -> $7.7 billion
+Net income without one-time tax benefits was $1.2 billion. -> $1.2 billion
+Non-GAAP gross margin (excluding stock-based compensation of $200 million) was 72.0%. -> $200 million | 72.0%
+Non-GAAP gross margin (incl. Q1 adjustments) was 72.0%. -> 72.0%
+Non-GAAP gross margin (see Exh. 99.1) was 72.0%. -> 99.1 | 72.0%
+Non-GAAP gross margin 43% $7.7 billion -> 43% | $7.7 billion
+Non-GAAP gross margin excl. China was 71.3%. -> 71.3%
+Non-GAAP gross margin for Q1 vs. Q2 was 72.0%. -> 72.0%
+Non-GAAP gross margin is estimated to be 43% inclusive of approximately $800 million in charges for inventory and related reserves due to the new export controls as previously disclosed in AMD's Current Report on Form 8-K filed on April 16, 2025. -> 43% | $800 million | 8 | 16 | 2025
+Non-GAAP gross margin is expected to be 54.0% +/- 50 bps. -> 54.0% | 50 bps
+Non-GAAP gross margin is expected to be approximately 53.5%. -> 53.5%
+Non-GAAP gross margin is expected to be approximately 54%. -> 54%
+Non-GAAP gross margin is expected to be approximately 54.5%. -> 54.5%
+Non-GAAP gross margin is expected to be approximately 55%. -> 55%
+Non-GAAP gross margin is expected to be approximately 56%. -> 56%
+Non-GAAP gross margin was 43% and GAAP gross margin was 41%. -> 43% | 41%
+Non-GAAP gross margin was 43% and revenue was $7.7 billion. -> 43% | $7.7 billion
+Non-GAAP gross margin was 43%, and revenue was $7.7 billion. -> 43% | $7.7 billion
+Non-GAAP gross margin was 43%, revenue was $7.7 billion. -> 43% | $7.7 billion
+Non-GAAP gross margin was 72.0%. -> 72.0%
+Non-GAAP gross margin was 72.5%. -> 72.5%
+Non-GAAP net income for fiscal 2025 was $3.5 billion, or $2.09 per diluted share. -> 2025 | $3.5 billion | $2.09
+Non-GAAP net income was $1.8 billion or $1.09 per diluted share. -> $1.8 billion | $1.09
+Non-GAAP net income was $1.8 billion, or $1.09 per diluted share, up 18% from $0.92 a year ago. -> $1.8 billion | $1.09 | 18% | $0.92
+Non-GAAP operating income (exc. Corp. items) was $2.2 billion. -> $2.2 billion
+Non-GAAP results improved significantly and revenue was $7.7 billion. -> $7.7 billion
+Non-GAAP revenue in the U.S. Data Center segment was $5.0 billion. -> $5.0 billion
+Non-GAAP revenue was $7.7 billion, gross margin was 54%, and diluted EPS was $1.09. -> $7.7 billion | 54% | $1.09
+Non-GAAP(1) gross margin was 54.0%, compared with 52.0% in Q1 2024. -> 1 | 54.0% | 52.0% | 2024
+Normalized capex was $500 million. -> $500 million
+Normalized revenue was $7.7 billion. -> $7.7 billion
+On a GAAP basis, free cash flow was $1.2 billion. -> $1.2 billion
+On a GAAP basis, gross margin was 50%. -> 50%
+On a non-GAAP (*) basis, gross margin was 43%, operating income was $897 million, net income was $781 million and diluted earnings per share was $0.48. -> 43% | $897 million | $781 million | $0.48
+On a non-GAAP (*) basis, gross margin was 54%, operating income was $1.7 billion, net income was $1.5 billion and diluted earnings per share was $0.92. -> 54% | $1.7 billion | $1.5 billion | $0.92
+On a non-GAAP (*) basis, gross margin was 54%, operating income was $2.2 billion, net income was $2 billion and diluted earnings per share was $1.20. -> 54% | $2.2 billion | $2 billion | $1.20
+On a non-GAAP (*) basis, gross margin was 57%, operating income was $2.9 billion, net income was $2.5 billion, and diluted earnings per share was $1.53. -> 57% | $2.9 billion | $2.5 billion | $1.53
+On a non-GAAP (*) basis, gross margin was 57%, operating income was a record $2.9 billion, net income was a record $2.5 billion and diluted earnings per share was a record $1.53. -> 57% | $2.9 billion | $2.5 billion | $1.53
+On a non-GAAP basis, gross margin was 54%, and operating income was $1.7 billion. -> 54% | $1.7 billion
+On a non-GAAP basis, gross margin was 54%, operating income was $1.7 billion and diluted EPS was $1.09. -> 54% | $1.7 billion | $1.09
+On a non-GAAP basis, gross margin was 54%, operating income was $1.7 billion, and cash flow from operations was $2.1 billion. -> 54% | $1.7 billion | $2.1 billion
+On a non-GAAP basis, gross margin was 54%, operating income was $1.7 billion, and diluted EPS was $1.09. -> 54% | $1.7 billion | $1.09
+On a non-GAAP basis, gross margin was 54%, up 200 basis points, and revenue was $7.7 billion. -> 54% | 200 basis points | $7.7 billion
+On a non-GAAP basis, net income was $1.8 billion, or $1.09 per diluted share, and revenue was $7.7 billion. -> $1.8 billion | $1.09 | $7.7 billion
+On a non-GAAP constant currency basis, revenue was $65.6 billion. -> $65.6 billion
+On a non-GAAP(*) basis, gross margin was 55%, operating income was $2.5 billion, net income was $2.3 billion and diluted earnings per share was $1.37. -> 55% | $2.5 billion | $2.3 billion | $1.37
+On a non-GAAP(*) basis, gross margin was 56%, operating income was $3.1 billion, net income was $2.8 billion and diluted earnings per share was $1.66. -> 56% | $3.1 billion | $2.8 billion | $1.66
+On a non-GAAP(*) basis, gross margin was 56%, operating income was $3.9 billion, net income was $3.5 billion and diluted earnings per share was $2.09. -> 56% | $3.9 billion | $3.5 billion | $2.09
+On a non-GAAP* basis, operating income was $2.2 billion. -> $2.2 billion
+Operating expenses were negative $50 million. -> $50 million
+Operating expenses, which exclude stock-based compensation, were $1.0 billion. -> $1.0 billion
+Operating income (ex. Corp. items) was $2.2 billion. -> $2.2 billion
+Operating income (exc Corp. items) was $2.2 billion. -> $2.2 billion
+Operating income (exc. Corp. items) was $2.2 billion. -> $2.2 billion
+Operating income (excl Corp. items) was $2.2 billion. -> $2.2 billion
+Operating income (excl. Corp. items) was $2.2 billion. -> $2.2 billion
+Operating income (up 15% on a non-GAAP basis) was $2.5 billion. -> 15% | $2.5 billion
+Operating income (w/o Corp. items) was $2.2 billion. -> $2.2 billion
+Operating income before amortization was $2.2 billion. -> $2.2 billion
+Operating income less acquisition-related costs was $2.2 billion. -> $2.2 billion
+Operating income was $1.5 billion while on a non-GAAP basis operating income was $1.8 billion. -> $1.5 billion | $1.8 billion
+Operating income was $30.6 billion on a GAAP constant currency basis. -> $30.6 billion
+Operating income was ($50 million). -> $50 million
+Organic revenue was $7.7 billion. -> $7.7 billion
+Plus or minus 2%, revenue is expected to be $45.0 billion. -> 2% | $45.0 billion
+Pro forma revenue was $7.7 billion. -> $7.7 billion
+Pro-forma revenue was $7.7 billion. -> $7.7 billion
+Quarterly net income was $24.8 billion, or $1.65 per diluted share, compared with net income of $23.6 billion, or $1.53 per diluted share, in the year-ago quarter. -> $24.8 billion | $1.65 | $23.6 billion | $1.53
+Revenue ex-53rd week was $7.7 billion. -> 53 | $7.7 billion
+Revenue ex-China was $7.7 billion. -> $7.7 billion
+Revenue for the first quarter was $44.1 billion, up 69% from a year ago and up 12% sequentially. -> $44.1 billion | 69% | 12%
+Revenue for the first quarter was a record $81.6 billion, up 85% from a year ago and up 20% sequentially. -> $81.6 billion | 85% | 20%
+Revenue for the fourth quarter was a record $68.1 billion, up 73% from a year ago and up 20% sequentially. -> $68.1 billion | 73% | 20%
+Revenue for the second quarter was $46.7 billion, up 56% from a year ago and up 6% sequentially. -> $46.7 billion | 56% | 6%
+Revenue for the third quarter was a record $115.8 billion, up 103% from a year ago and up 20% sequentially. -> $115.8 billion | 103% | 20%
+Revenue from Intel Core processors was $7.7 billion. -> $7.7 billion
+Revenue from Organic Valley was $7.7 billion. -> $7.7 billion
+Revenue from our core business was $7.7 billion. -> $7.7 billion
+Revenue is expected to be $108.0 billion, plus or minus 2%. -> $108.0 billion | 2%
+Revenue is expected to be $130.0 billion, plus or minus 3%. -> $130.0 billion | 3%
+Revenue is expected to be $37.5 billion, plus or minus 2%. -> $37.5 billion | 2%
+Revenue is expected to be $43.0 billion, plus or minus 2%. -> $43.0 billion | 2%
+Revenue is expected to be $44.0 billion to $46.0 billion, plus or minus 2%. -> $44.0 billion | $46.0 billion | 2%
+Revenue is expected to be $45 billion, up 2% year over year. -> $45 billion | 2%
+Revenue is expected to be $45.0 billion and operating expenses $4.0 billion, plus or minus $100 million. -> $45.0 billion | $4.0 billion | $100 million
+Revenue is expected to be $45.0 billion, down 3% sequentially. -> $45.0 billion | 3%
+Revenue is expected to be $45.0 billion, plus 2%. -> $45.0 billion | 2%
+Revenue is expected to be $45.0 billion, plus or minus 2%, reflecting an $8.0 billion loss in H20 revenue. -> $45.0 billion | 2% | $8.0 billion
+Revenue is expected to be $45.0 billion, plus or minus 2%. -> $45.0 billion | 2%
+Revenue is expected to be $45.0 billion, plus or minus approximately 2%. -> $45.0 billion | 2%
+Revenue is expected to be $45.0 billion, up 2% year over year. -> $45.0 billion | 2%
+Revenue is expected to be $45.0 billion, ±2%. -> $45.0 billion | 2%
+Revenue is expected to be $54.0 billion, plus or minus 2%. -> $54.0 billion | 2%
+Revenue is expected to be $65.0 billion, plus or minus 2%. -> $65.0 billion | 2%
+Revenue is expected to be $78.0 billion, plus or minus 2%. -> $78.0 billion | 2%
+Revenue is expected to be $8.7 billion, plus/minus $300 million. -> $8.7 billion | $300 million
+Revenue is expected to be $91.0 billion, plus or minus 2%. -> $91.0 billion | 2%
+Revenue was $3.8 billion like-for-like. -> $3.8 billion
+Revenue was $45.0 Billion. -> $45.0 Billion
+Revenue was $65.6 billion ($66.0 billion in constant currency). -> $65.6 billion | $66.0 billion
+Revenue was $65.6 billion (in constant currency, up 10% year over year). -> $65.6 billion | 10%
+Revenue was $65.6 billion (normalized for $100 million of divestitures). -> $65.6 billion | $100 million
+Revenue was $65.6 billion and increased 16% (up 16% in constant currency). -> $65.6 billion | 16% | 16%
+Revenue was $65.6 billion in constant-currency. -> $65.6 billion
+Revenue was $7.7 billion (excluding $2.0 billion from China). -> $7.7 billion | $2.0 billion
+Revenue was $7.7 billion (in constant currency). -> $7.7 billion
+Revenue was $7.7 billion and core EPS was $1.45. -> $7.7 billion | $1.45
+Revenue was $7.7 billion before the shares went ex-dividend. -> $7.7 billion
+Revenue was $7.7 billion on a constant currency basis. -> $7.7 billion
+Revenue was $7.7 billion on a pro forma non-GAAP basis. -> $7.7 billion
+Revenue was $7.7 billion on an as-adjusted basis. -> $7.7 billion
+Revenue was $7.7 billion on an organic basis. -> $7.7 billion
+Revenue was $7.7 billion, and comparable sales grew 3%. -> $7.7 billion | 3%
+Revenue was $7.7 billion, as underlying trends improved. -> $7.7 billion
+Revenue was $7.7 billion, compared with $7.0 billion in the comparable quarter. -> $7.7 billion | $7.0 billion
+Revenue was $7.7 billion, driven by our core business. -> $7.7 billion
+Revenue was $7.7 billion, reflecting strong underlying demand. -> $7.7 billion
+Revenue was $7.7 billion, up 5% from the comparable period last year. -> $7.7 billion | 5%
+Second quarter revenue was $11.5 billion, gross margin was 54%, operating income was $2.0 billion, net income was $2.3 billion and diluted earnings per share was $1.38. -> $11.5 billion | 54% | $2.0 billion | $2.3 billion | $1.38
+Second quarter revenue was $7.7 billion. -> $7.7 billion
+Second quarter revenue was a record $7.7 billion, gross margin was 40%, operating loss was $134 million, net income was $872 million and diluted earnings per share was $ 0.54 . -> $7.7 billion | 40% | $134 million | $872 million | 0.54
+Third quarter revenue was $13.4 billion, gross margin was 54%, operating income was $2.8 billion, net income was $2.4 billion and diluted earnings per share was $1.46. -> $13.4 billion | 54% | $2.8 billion | $2.4 billion | $1.46
+Third quarter revenue was a record $9.2 billion, gross margin was 52%, operating income was $1.3 billion, net income was $1.2 billion and diluted earnings per share was $ 0.75 . -> $9.2 billion | 52% | $1.3 billion | $1.2 billion | 0.75
+Third-quarter 2025 revenue is expected to be $12.6 billion to $13.6 billion, GAAP gross margin of 34.1% and non-GAAP gross margin of 36.0%, and GAAP EPS of $(0.24) and non-GAAP EPS of $0.00. -> 2025 | $12.6 billion | $13.6 billion | 34.1% | 36.0% | 0.24 | $0.00
+Underlying operating income was $2.1 billion, up 8% year over year. -> $2.1 billion | 8%
+Underlying operating income was $2.1 billion. -> $2.1 billion
+We adjusted our full-year outlook and Q3 revenue is expected to be $45.0 billion. -> $45.0 billion
+We expect gross margin to be 71.0 to 72.0%. -> 71.0 | 72.0%
+We expect gross margin to be between 46.0% and 47.0%, including $900 million of tariff-related costs. -> 46.0% | 47.0% | $900 million
+We expect non-GAAP gross margin to be 71.0 to 72.0%. -> 71.0 | 72.0%
+We report GAAP and non-GAAP results and revenue was $7.7 billion. -> $7.7 billion
+We report GAAP and non-GAAP results, and revenue was $7.7 billion. -> $7.7 billion
+We report GAAP and non-GAAP results; non-GAAP gross margin was 72.0%. -> 72.0%
