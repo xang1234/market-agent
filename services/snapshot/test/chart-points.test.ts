@@ -368,6 +368,30 @@ test("a close chip showing the close its line ends on, in its range's currency, 
   ]);
 });
 
+// A figure segment on a series reads the value its source's format names: the line's
+// return or the close it ends on (#800).
+function withFigures(input: SnapshotVerificationInput, figures: Array<[string, string, string]>): SnapshotVerificationInput {
+  const answer = {
+    id: "answer",
+    kind: "rich_text",
+    snapshot_id: snapshotId,
+    data_ref: { kind: "rich_text", id: "answer" },
+    source_refs: [sourceId],
+    as_of: AS_OF,
+    segments: figures.map(([ref_id, format, text]) => ({ type: "figure", text, sources: [{ ref_kind: "series", ref_id, format }] })),
+  } as VerifierBlock;
+  return { ...input, blocks: [answer, ...input.blocks] };
+}
+
+test("a figure on a series seals at its line's return or close, and fails at another value (#800)", async () => {
+  const input = sealInput(WEEK, { window: WEEK_WINDOW, closes: CLOSES });
+  assert.deepEqual(await verifySnapshotSeal(withFigures(input, [[nvdaSeries, "$120.00", "$120"], [amdSeries, "20%", "20.0%"]]), barsDb(WEEK.bars)), { ok: true, failures: [] });
+  const wrong = await verifySnapshotSeal(withFigures(input, [[nvdaSeries, "$120.00", "$125"], [amdSeries, "20%", "25%"]]), barsDb(WEEK.bars));
+  assert.deepEqual(failures(wrong).map(([code, details]) => [code, (details as { text: string }).text]), [["figure_text_mismatch", "$125"], ["figure_text_mismatch", "25%"]]);
+  const misread = await verifySnapshotSeal(withFigures(input, [[nvdaSeries, "$121.00", "$121"]]), barsDb(WEEK.bars));
+  assert.deepEqual(failures(misread).map(([code]) => code), ["series_ref_format_mismatch", "figure_text_mismatch"], "a source the chart does not show, as a chip");
+});
+
 test("a series spec whose end close is not its bars', or whose currency is not its range's, fails (#678)", async () => {
   const close = await verifySnapshotSeal(sealInput(WEEK, { window: WEEK_WINDOW, closes: [{ end_close: 121, currency: "USD" }, CLOSES[1]!] }), barsDb(WEEK.bars));
   assert.deepEqual(pointsFailures(close), [{ block_id: "perf", series_ref: nvdaSeries, reason: "close" }]);

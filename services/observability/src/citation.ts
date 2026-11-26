@@ -150,10 +150,18 @@ function extractBlockRefs(
 
   if (block.kind === "rich_text") {
     for (const segment of block.segments ?? []) {
-      if (!isRecord(segment) || segment.type !== "ref") {
+      if (!isRecord(segment)) {
         continue;
       }
-      pushRef(refs, segment.ref_kind, segment.ref_id);
+      // A linked or struck figure cites each of its sources (#800).
+      const cited = segment.type === "ref"
+        ? [segment]
+        : (segment.type === "figure" || segment.type === "struck") && Array.isArray(segment.sources)
+        ? segment.sources.filter(isRecord)
+        : [];
+      for (const ref of cited) {
+        pushRef(refs, ref.ref_kind, ref.ref_id);
+      }
     }
   }
 

@@ -352,6 +352,166 @@
       },
       "additionalProperties": false
     },
+    "SourceRef": {
+      "description": "A source a figure segment links (#800): a ref as a RefSegment states it, plus the claim figure it reads.",
+      "type": "object",
+      "required": [
+        "ref_kind",
+        "ref_id"
+      ],
+      "properties": {
+        "ref_kind": {
+          "type": "string",
+          "enum": [
+            "result",
+            "fact",
+            "series",
+            "claim"
+          ]
+        },
+        "ref_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "format": {
+          "type": "string"
+        },
+        "period": {
+          "description": "A result source's period, as its financial answer labels it.",
+          "type": "string"
+        },
+        "numeral": {
+          "description": "A claim source's figure: the k-th its text states, counted from 1.",
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "FigureOperand": {
+      "description": "The sources added, less those subtracted, over the sum of those in over when it is given, each an index into the figure's sources.",
+      "type": "object",
+      "required": [
+        "add",
+        "subtract",
+        "over"
+      ],
+      "properties": {
+        "add": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "subtract": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "over": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "FigureSegment": {
+      "description": "A figure the prose states, linked to the sources it was checked against; the seal recomputes its verdict from them (#800).",
+      "type": "object",
+      "required": [
+        "type",
+        "text",
+        "sources"
+      ],
+      "properties": {
+        "type": {
+          "const": "figure"
+        },
+        "text": {
+          "description": "The figure as the prose wrote it.",
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          }
+        },
+        "derivation": {
+          "description": "How the figure is computed from its sources; absent, it reports its one source.",
+          "type": "string",
+          "enum": [
+            "margin",
+            "growth",
+            "difference",
+            "ratio",
+            "share_of_total",
+            "sum"
+          ]
+        },
+        "operands": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/FigureOperand"
+          }
+        },
+        "near": {
+          "description": "Its last digit differs from the data's, or it is hedged; the inspector gives the exact value.",
+          "const": true
+        }
+      },
+      "dependentRequired": {
+        "derivation": [
+          "operands"
+        ],
+        "operands": [
+          "derivation"
+        ]
+      },
+      "additionalProperties": false
+    },
+    "StruckSegment": {
+      "description": "A figure the sources contradict, shown struck with the reason, which names what they give (#800).",
+      "type": "object",
+      "required": [
+        "type",
+        "text",
+        "reason"
+      ],
+      "properties": {
+        "type": {
+          "const": "struck"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "RichText": {
       "allOf": [
         {
@@ -372,6 +532,12 @@
                   },
                   {
                     "$ref": "#/$defs/RefSegment"
+                  },
+                  {
+                    "$ref": "#/$defs/FigureSegment"
+                  },
+                  {
+                    "$ref": "#/$defs/StruckSegment"
                   }
                 ]
               }

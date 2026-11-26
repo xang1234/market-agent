@@ -6,6 +6,8 @@
 // ponytail: float arithmetic with a precision tolerance. It judges prose against data and
 // publishes no value, so it stays off rational.ts.
 
+import type { PresentedPayload } from "./presentation.ts";
+
 // --- numerals ----------------------------------------------------------------------
 
 export type NumeralId = string & { readonly brand: "NumeralId" };
@@ -96,6 +98,29 @@ export const statedFigures = (text: string): Numeral[] =>
 // A value as the data holds it: an amount (dollars, shares), a fraction (a margin, a
 // growth rate, a share) or a ratio (a multiple).
 export type Quantity = Readonly<{ kind: "amount" | "fraction" | "ratio"; value: number }>;
+
+// An engine result's value as the figure check reads it, in chat's packet and at the seal.
+// A ratio reads as a multiple exactly when the presentation wrote it as one
+// (readsAsMultiple, so "3.5x" in full); the plan that decides it can be absent here. A
+// percent moves its decimal point ("74.4e-2"), so 74.4% reads as the double nearest 0.744,
+// not 74.4 / 100.
+export function presentedQuantity(presented: Extract<PresentedPayload, { kind: "value" }>): Quantity {
+  const value = Number(presented.value);
+  switch (presented.unit.kind) {
+    case "ratio":
+      return { kind: presented.full_text.endsWith("x") ? "ratio" : "fraction", value };
+    case "percent":
+    case "percentage_points":
+      return { kind: "fraction", value: Number(`${presented.value}e-2`) };
+    case "basis_points":
+      return { kind: "fraction", value: Number(`${presented.value}e-4`) };
+    case "currency":
+    case "currency_per_share":
+    case "shares":
+    case "count":
+      return { kind: "amount", value };
+  }
+}
 export const DERIVATIONS = ["margin", "growth", "difference", "ratio", "share_of_total", "sum"] as const;
 export type Derivation = (typeof DERIVATIONS)[number];
 // The values in add, less those in subtract, over the sum of those in over when it is
@@ -260,3 +285,29 @@ export function atPrecisionOf(numeral: Numeral, expected: Quantity, scale: Scale
   const sign = !numeral.signed || rounded === 0 ? "" : value < 0 ? minus : numeral.text.startsWith("+") ? "+" : "";
   return `${sign}${numeral.text.slice(numeral.signed ? 1 : 0, digits.index)}${written}${numeral.text.slice(digits.index + digits[0].length)}`;
 }
+
+// --- linked figures ------------------------------------------------------------------
+
+// A figure as a rich_text figure segment links it (#800): its text as the answer wrote it,
+// and, when derived, its derivation over its sources by index. Without a derivation it
+// reports its one source. Chat links a figure only when this verdict lets it, and the seal
+// recomputes it from the values it verifies.
+export type LinkedFigure = Readonly<{ text: string; sources: ReadonlyArray<unknown>; derivation?: Derivation; operands?: ReadonlyArray<Operand<number>>; near?: boolean }>;
+
+export function linkedVerdict(figure: LinkedFigure, valueOf: ValueOf<number>): Verdict {
+  const numerals = enumerateNumerals(figure.text);
+  if (numerals.length !== 1) return { kind: "not_checkable", reason: `its text states ${numerals.length} figures` };
+  const { derivation, operands } = figure;
+  if (derivation === undefined) {
+    if (operands !== undefined) return { kind: "not_checkable", reason: "operands without a derivation" };
+    if (figure.sources.length !== 1) return { kind: "not_checkable", reason: `a reported figure has one source, not ${figure.sources.length}` };
+    return verdictFor(numerals[0]!, { basis: "reported", source: 0, sign: null, scale: null }, valueOf);
+  }
+  if (operands === undefined) return { kind: "not_checkable", reason: "a derivation without operands" };
+  return verdictFor(numerals[0]!, { basis: "derived", derivation, operands, sign: null, scale: null }, valueOf);
+}
+
+// Whether a verdict lets a figure show as verified: equal at its precision, or near
+// (a last digit off, or hedged) when the figure says so.
+export const linksAs = (figure: Pick<LinkedFigure, "near">, verdict: Verdict) =>
+  verdict.kind === "matched" || verdict.kind === "derived_ok" || (verdict.kind === "near" && figure.near === true);

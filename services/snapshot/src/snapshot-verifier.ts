@@ -22,6 +22,9 @@ import {
 import { validateSnapshotTransformManifest } from "./snapshot-transform.ts";
 import { verifyChartPoints, type DrawnChart } from "./chart-points.ts";
 import type { FinancialSealClaim } from "./financial-verifier-loader.ts";
+import { figureSegmentFailures, segmentRefs } from "./figure-segments.ts";
+import type { Quantity } from "../../financial-core/src/figure-check.ts";
+import type { FinancialAnswerContent } from "../../financial-core/src/index.ts";
 import type { FinancialVerification, FinancialVerifierReasonCode } from "./financial-verifier.ts";
 import { isRecord, type QueryExecutor } from "../../shared/src/http.ts";
 
@@ -57,6 +60,8 @@ export type VerifierFact = {
 export type VerifierClaim = {
   claim_id: string;
   source_id?: string | null;
+  // Its text, which a figure segment's claim source reads its k-th stated figure from.
+  text?: string;
 };
 
 export type VerifierEvent = {
@@ -164,6 +169,10 @@ export type SnapshotVerificationInput = {
   // A financial publication unit this seal certifies. Verified against the
   // ledger through the transaction client; never against caller arrays.
   financial?: FinancialSealClaim | null;
+  // The certified engine answers the message shows beside its prose (its
+  // financial_answer blocks, each sealed under its own certificate), which a
+  // figure segment's result source reads its value from (#800).
+  financial_answers?: ReadonlyArray<FinancialAnswerContent>;
 };
 
 export type SnapshotVerifierReasonCode =
@@ -181,6 +190,8 @@ export type SnapshotVerifierReasonCode =
   | "block_after_snapshot_as_of"
   | "fact_binding_mismatch"
   | "fact_ref_format_mismatch"
+  | "result_ref_format_mismatch"
+  | "figure_text_mismatch"
   | "missing_required_disclosure"
   | "series_points_mismatch"
   | "series_ref_format_mismatch"
@@ -262,7 +273,12 @@ export async function verifySnapshotSeal(
     verifyManifestRefs(normalized, addFailure);
     verifyBlockBindings(normalized, addFailure);
     verifyFactRefFormats(normalized, addFailure);
-    verifySeriesRefFormats(normalized, addFailure);
+    const series = shownSeries(normalized);
+    verifySeriesRefFormats(normalized, series, addFailure);
+    const claims = new Map(normalized.claims.flatMap((claim) => (claim.text === undefined ? [] : [[claim.claim_id, claim.text] as const])));
+    for (const failure of figureSegmentFailures(flattenBlocks(normalized.blocks), { answers: normalized.financial_answers, series, claims })) {
+      addFailure(failure.reason_code, failure.details);
+    }
     verifyDisclosures(normalized, addFailure);
     verifyApprovals(normalized, addFailure);
   } catch (error) {
@@ -403,6 +419,8 @@ function normalizeInput(input: SnapshotVerificationInput): NormalizedInput {
     derivedDisclosures,
     normalizedSuppliedDisclosures,
   );
+  const financialAnswers = input.financial_answers ?? [];
+  assertArray<FinancialAnswerContent>(financialAnswers, "verifySnapshotSeal.financial_answers");
 
   return Object.freeze({
     thread_id:
@@ -427,6 +445,7 @@ function normalizeInput(input: SnapshotVerificationInput): NormalizedInput {
       (input.pending_actions ?? []).map((action, index) => normalizePendingAction(action, index)),
     ),
     financial: input.financial == null ? null : normalizeFinancialClaim(input.financial),
+    financial_answers: Object.freeze([...financialAnswers]),
   });
 }
 
@@ -760,6 +779,7 @@ function normalizeClaim(claim: VerifierClaim, index: number): VerifierClaim {
   return Object.freeze({
     claim_id: assertUuidV4(claim.claim_id, `verifySnapshotSeal.claims[${index}].claim_id`),
     ...(claim.source_id == null ? {} : { source_id: assertUuidV4(claim.source_id, `verifySnapshotSeal.claims[${index}].source_id`) }),
+    ...(claim.text == null ? {} : { text: assertNonEmptyString(claim.text, `verifySnapshotSeal.claims[${index}].text`) }),
   });
 }
 
@@ -1371,8 +1391,8 @@ function verifyFactRefFormats(
   }
   for (const block of blocks) {
     if (block.kind !== "rich_text") continue;
-    for (const segment of block.segments ?? []) {
-      if (!isRecord(segment) || segment.type !== "ref" || segment.ref_kind !== "fact") continue;
+    for (const segment of (block.segments ?? []).flatMap(segmentRefs)) {
+      if (segment.ref_kind !== "fact") continue;
       if (typeof segment.ref_id !== "string" || typeof segment.format !== "string") continue;
       const formats = shown.get(segment.ref_id);
       if (formats === undefined || formats.has(segment.format)) continue;
@@ -1386,48 +1406,53 @@ function verifyFactRefFormats(
   }
 }
 
-// A series chip in prose is a price return: the last point of the line its
-// series draws in the message's price charts, as the chart labels it; or the
+// What the message's price charts show for each sealed series, by label: the
+// last point of the line its series draws, as the chart labels it, and the
 // close that line ends on, when its spec states one (#678). The points and the
-// close are checked against the stored bars (chart-points.ts), so a chip no
-// chart draws has nothing verified to show and fails.
-function verifySeriesRefFormats(
-  input: NormalizedInput,
-  addFailure: (reason: SnapshotVerifierReasonCode, details: JsonObject) => void,
-): void {
-  const blocks = flattenBlocks(input.blocks);
+// close are checked against the stored bars (chart-points.ts).
+function shownSeries(input: NormalizedInput): Map<string, Map<string, Quantity>> {
   const closes = new Map((input.manifest.series_specs ?? []).flatMap((spec) =>
     isRecord(spec) && typeof spec.series_ref === "string" && typeof spec.end_close === "number" && typeof spec.currency === "string"
-      ? [[spec.series_ref, closeLabel(spec.end_close, spec.currency)] as const]
+      ? [[spec.series_ref, { end_close: spec.end_close, currency: spec.currency }] as const]
       : []
   ));
-  const shown = new Map<string, Set<string>>();
-  for (const block of blocks) {
+  const shown = new Map<string, Map<string, Quantity>>();
+  for (const block of flattenBlocks(input.blocks)) {
     if (block.kind !== "perf_comparison") continue;
     const refs = dataRefSeriesRefs(block.data_ref.params);
     for (const [index, line] of (block.series ?? []).entries()) {
       const points = isRecord(line) && Array.isArray(line.points) ? line.points : [];
       const last = points.at(-1);
       if (refs[index] === undefined || !isRecord(last) || typeof last.y !== "number") continue;
-      const labels = shown.get(refs[index]) ?? new Set<string>();
-      labels.add(returnLabel(last.y));
+      const labels = shown.get(refs[index]) ?? new Map<string, Quantity>();
+      labels.set(returnLabel(last.y), { kind: "fraction", value: last.y / 100 });
       const close = closes.get(refs[index]);
-      if (close !== undefined) labels.add(close);
+      if (close !== undefined) labels.set(closeLabel(close.end_close, close.currency), { kind: "amount", value: close.end_close });
       shown.set(refs[index], labels);
     }
   }
-  for (const block of blocks) {
+  return shown;
+}
+
+// A series chip in prose is a price return or a close, as a chart shows it
+// (shownSeries), so a chip no chart draws has nothing verified to show and fails.
+function verifySeriesRefFormats(
+  input: NormalizedInput,
+  shown: ReadonlyMap<string, ReadonlyMap<string, Quantity>>,
+  addFailure: (reason: SnapshotVerifierReasonCode, details: JsonObject) => void,
+): void {
+  for (const block of flattenBlocks(input.blocks)) {
     if (block.kind !== "rich_text") continue;
-    for (const segment of block.segments ?? []) {
-      if (!isRecord(segment) || segment.type !== "ref" || segment.ref_kind !== "series") continue;
+    for (const segment of (block.segments ?? []).flatMap(segmentRefs)) {
+      if (segment.ref_kind !== "series") continue;
       if (typeof segment.ref_id !== "string") continue;
-      const labels = shown.get(segment.ref_id) ?? new Set<string>();
+      const labels = shown.get(segment.ref_id) ?? new Map<string, Quantity>();
       if (typeof segment.format === "string" && labels.has(segment.format)) continue;
       addFailure("series_ref_format_mismatch", {
         block_id: block.id,
         series_ref: segment.ref_id,
         format: typeof segment.format === "string" ? segment.format : null,
-        shown: [...labels],
+        shown: [...labels.keys()],
       });
     }
   }
@@ -1626,8 +1651,7 @@ export function extractBlockRefs(block: VerifierBlock): ReadonlyArray<ExtractedB
   const refs: ExtractedBlockRef[] = [];
 
   if (block.kind === "rich_text") {
-    for (const segment of block.segments ?? []) {
-      if (!isRecord(segment) || segment.type !== "ref") continue;
+    for (const segment of (block.segments ?? []).flatMap(segmentRefs)) {
       pushTypedRef(refs, segment.ref_kind, segment.ref_id);
     }
   }

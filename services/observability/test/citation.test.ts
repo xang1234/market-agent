@@ -94,6 +94,23 @@ test("writeCitationLog rejects a snapshot_id that does not exist (FK enforced)",
   );
 });
 
+test("citationLogInputsForBlocks logs each source a linked or struck figure cites (#800)", () => {
+  const snapshot_id = randomUUID();
+  const [result_id, claim_id, fact_id] = [randomUUID(), randomUUID(), randomUUID()];
+  const rows = citationLogInputsForBlocks([
+    {
+      id: "summary",
+      kind: "rich_text",
+      snapshot_id,
+      segments: [
+        { type: "figure", text: "58%", sources: [{ ref_kind: "result", ref_id: result_id }, { ref_kind: "claim", ref_id: claim_id, numeral: 1 }], derivation: "growth" },
+        { type: "struck", text: "$72.1B", reason: "the sources give $62.1B", sources: [{ ref_kind: "fact", ref_id: fact_id }] },
+      ],
+    },
+  ]);
+  assert.deepEqual(rows.map((row) => [row.ref_kind, row.ref_id]), [["result", result_id], ["claim", claim_id], ["fact", fact_id]]);
+});
+
 test("citationLogInputsForBlocks extracts one row per block citation ref", () => {
   const snapshot_id = randomUUID();
   const source_id = randomUUID();
