@@ -15,6 +15,7 @@ import { ANALYST_AGENT_BUNDLE_ID } from "./bundle-routing.ts";
 import { judgeCases, judgeInferences, judgeMessages, verdictsOf, type JudgeCase, type JudgeRecord, type ModelRecord } from "./inference-judge.ts";
 import { repairRequests, repairRound, requestRepair, type RepairRequest, type RepairTrace } from "./inference-repair.ts";
 import { sentToRepair, shownAs, verdictText, type AnswerPath, type InferenceVerdict, type ShownAs } from "./verdicts.ts";
+import type { CheckedProse } from "./checked-prose.ts";
 import { composeAnalystBlocksWithLlm, renderedAnswer, restated, turnPacket, type AnswerBlocks, type AnswerUsage, type DroppedClaims, type InferenceState, type Inferences, type ModelDeadlines } from "./llm-runtime.ts";
 
 export type AnswerTraceInput = Omit<
@@ -54,6 +55,8 @@ export type TurnTrace = {
   // when none was asked for. Absent from traces recorded before it, which
   // replay with none.
   repair?: RepairTrace | null;
+  // A checked-prose turn's draft, checks, rewrite and kept sentences (#800); it has no exchange or assertions.
+  checked?: CheckedProse;
   blocks: ReadonlyArray<Record<string, unknown>>;
 };
 

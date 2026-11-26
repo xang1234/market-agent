@@ -7,6 +7,8 @@ export type ChatRuntimeEnv = {
   CHAT_VERIFICATION_MODE?: string;
   // "1" answers chat with the analyst agent (analyst-agent.ts) in the financial lane's seat.
   CHAT_ANALYST_AGENT?: string;
+  // "1" writes the agent's answer as checked prose (checked-prose.ts); it needs CHAT_ANALYST_AGENT=1.
+  CHAT_CHECKED_PROSE?: string;
   NODE_ENV?: string;
 };
 
@@ -17,6 +19,9 @@ export async function loadChatServerOptionsFromEnv(
 ): Promise<ChatServerOptions> {
   // Validated even when unset; only a non-default mode is passed on (the coordinator defaults to strict).
   const verificationMode = readChatVerificationMode(env);
+  if (env.CHAT_CHECKED_PROSE?.trim() === "1" && env.CHAT_ANALYST_AGENT?.trim() !== "1") {
+    throw new Error("CHAT_CHECKED_PROSE=1 needs CHAT_ANALYST_AGENT=1: checked prose is written from the analyst agent's evidence");
+  }
   const options: ChatServerOptions = verificationMode === "strict" ? {} : { verificationMode };
   if (!(env.CHAT_DATABASE_URL ?? env.DATABASE_URL)) {
     return options;

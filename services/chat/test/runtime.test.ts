@@ -62,6 +62,18 @@ test("only CHAT_ANALYST_AGENT=1 hands the server the analyst agent", async () =>
   assert.deepEqual(await Promise.all([undefined, "0", "true", "1"].map(agentOf)), [undefined, undefined, undefined, runtime.analystAgent]);
 });
 
+test("CHAT_CHECKED_PROSE=1 without CHAT_ANALYST_AGENT=1 refuses to start, since the lane writes from the agent's packet (#800)", async () => {
+  let loaded = false;
+  const load = async () => {
+    loaded = true;
+    return { financialRuntime: { assertReady: async () => {} } } as never;
+  };
+  await assert.rejects(() => loadChatServerOptionsFromEnv({ CHAT_CHECKED_PROSE: "1" }, load), /CHAT_CHECKED_PROSE=1 needs CHAT_ANALYST_AGENT=1/u);
+  await assert.rejects(() => loadChatServerOptionsFromEnv({ DATABASE_URL: "postgres://golden.invalid/market_agent", CHAT_CHECKED_PROSE: "1", CHAT_ANALYST_AGENT: "0" }, load), /CHAT_CHECKED_PROSE=1 needs CHAT_ANALYST_AGENT=1/u);
+  assert.equal(loaded, false, "refused before the runtime loads");
+  await loadChatServerOptionsFromEnv({ DATABASE_URL: "postgres://golden.invalid/market_agent", CHAT_CHECKED_PROSE: "1", CHAT_ANALYST_AGENT: "1" }, load);
+});
+
 test("in-repo chat runtime runs without the local stub tool executor mode", async () => {
   const previous = process.env.CHAT_LOCAL_TOOL_EXECUTOR;
   delete process.env.CHAT_LOCAL_TOOL_EXECUTOR;

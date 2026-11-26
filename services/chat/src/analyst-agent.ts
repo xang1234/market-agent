@@ -12,11 +12,12 @@ import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier
 import { createTurnToolPolicy, loadToolRegistry, type ToolRegistry } from "../../tools/src/index.ts";
 import { isPricePeriod, PERIOD_WORDS, PRICE_PERIODS, type PricePeriod } from "../../market/src/ytd-window.ts";
 import { CLAIM_PREDICATES, isAnalystToolName, type AnalystToolName, type AnalystToolResult } from "./analyst-tools.ts";
-import { answerPath, answerTurn, type AnsweredTurn, type AnswerTraceInput, type TurnTrace } from "./answer-trace.ts";
+import { answerPath, answerTurn, writeTurnTrace, type AnsweredTurn, type AnswerTraceInput, type TurnTrace } from "./answer-trace.ts";
 import { isUuid, noteBlock } from "./chat-ids.ts";
 import { COMMENTARY_UNAVAILABLE } from "./engine-commentary.ts";
 import { ANALYST_AGENT_BUNDLE_ID } from "./bundle-routing.ts";
 import { labelList, MAX_TURN_SUBJECTS, type ChatAnalystAgent, type ChatAnalystToolRuntimeResult, type ChatAnalystToolRuntimeToolCall, type ChatTurnEmit, type ChatTurnRunContext } from "./coordinator.ts";
+import { checkedProse, proseSegments, quotedClaims, type CheckedProseModels, type ProseStep } from "./checked-prose.ts";
 import { mergePackets, type EvidencePacket } from "./evidence-packet.ts";
 import {
   certifiedFinancials,
@@ -32,11 +33,14 @@ import {
 import { perfDisclosureBlocks, requestedListingsOf } from "./perf-block.ts";
 import { PRICE_RULES, PRICE_TOOL, readPrices, type Priced } from "./price-tool.ts";
 import { claimSources } from "./render-assertions.ts";
+import { createSealer } from "./prose-refs.ts";
+import { segmentRefs } from "../../snapshot/src/figure-segments.ts";
 import { ANSWER_DEADLINES, renderedAnswer, withDeadlines, type AnswerInput, type DroppedClaims } from "./llm-runtime.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS, LATEST, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 import { turnStopSignal } from "./turn-stop.ts";
 import { isFinding, noFindingNote, runDetectors, type DetectorOutcome } from "./standout-findings.ts";
 import { shownAs } from "./verdicts.ts";
+import { statesStance } from "./stance.ts";
 import type { AssertionReport } from "./assertions.ts";
 
 const MAX_STEPS = 4;
@@ -44,6 +48,10 @@ const TURN_CALLS = 8;
 const ANSWER_CALLS = 3;
 const SECTION_CALLS = MAX_STEPS + ANSWER_CALLS;
 const DEADLINES = { readMs: 75_000, turnMs: 120_000 };
+// Checked prose (#800) makes up to six calls, the draft, two checks, the rewrite and its two checks, so
+// its turn reserves six where an assertion answer reserves three, and runs to 180 s.
+const PROSE_CALLS = 6;
+const PROSE_DEADLINES = { ...DEADLINES, turnMs: 180_000 };
 
 type AgentModels = Readonly<{
   // Each model-facing dep calls beforeModelCall before every model attempt it makes; it throws once the turn has made its calls.
@@ -51,6 +59,8 @@ type AgentModels = Readonly<{
   planner?: (beforeModelCall: () => void) => PlanningModel;
   read: (name: AnalystToolName, args: Readonly<Record<string, JsonValue>>, turn: { as_of: string; user_id: string | null }) => Promise<AnalystToolResult>;
   compose: (input: AnswerTraceInput, turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">, onAnswered: (deployment: string) => void, beforeModelCall: () => void) => Promise<AnsweredTurn>;
+  // With it, the answer is written as checked prose (checked-prose.ts) instead of an assertion list.
+  prose?: (beforeModelCall: () => void) => CheckedProseModels & Readonly<{ traceDir?: string }>;
   registry?: ToolRegistry;
   deadlines?: Readonly<{ readMs: number; turnMs: number }>;
 }>;
@@ -133,6 +143,10 @@ type AgentAsk = Readonly<{
   // A certified call's cutoff, read when it is made, so a company's filings fetched earlier in the turn are in it.
   clock: () => string;
   meter: Meter;
+  // The model calls the answer reserves: gather may not take them.
+  answerCalls: number;
+  // What is left of the turn's time, in ms.
+  remainingMs: () => number;
   snapshotId: string;
   scopedKey: (name: string) => string;
   noFilingAsOfCutoff: boolean;
@@ -165,11 +179,12 @@ type Answered = Pick<ChatAnalystToolRuntimeResult, "blocks"> & Readonly<{
 }>;
 
 export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
-  const agentTurn = async (context: ChatTurnRunContext, signal: AbortSignal): ReturnType<ChatAnalystAgent> => {
+  const answerCalls = deps.prose ? PROSE_CALLS : ANSWER_CALLS;
+  const agentTurn = async (context: ChatTurnRunContext, signal: AbortSignal, remainingMs: () => number): ReturnType<ChatAnalystAgent> => {
     if (!context.userId || !isUuid(context.threadId)) return null;
     const question = context.userIntent ?? "";
-    const meter = callMeter(TURN_CALLS);
-    const reading = context.reading?.(meter(ANSWER_CALLS)) ?? Promise.resolve(null);
+    const meter = callMeter(TURN_CALLS - ANSWER_CALLS + answerCalls);
+    const reading = context.reading?.(meter(answerCalls)) ?? Promise.resolve(null);
     const companies = await requestedSubjects(deps.financial, context, question, true);
     const named = companies.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject] : []);
     if (companies.clarify || companies.subjects.some((subject) => subject.resolution.status === "ambiguous")) return "pick_company";
@@ -196,6 +211,8 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       asOf: deps.asOf(),
       clock: deps.asOf,
       meter,
+      answerCalls,
+      remainingMs,
       snapshotId: randomUUID(),
       scopedKey: (name) => name,
       noFilingAsOfCutoff: false,
@@ -224,7 +241,7 @@ export function analystAgentRunner(deps: AnalystAgentDeps): ChatAnalystAgent {
       ...(scope ? { research_scope: { ...scope, companies: gathered.covered.map((id) => (namedIds.has(id) ? { issuer_id: id, label: gathered.labelOf(id) } : { issuer_id: id })) } } : {}),
     };
   };
-  return (context) => withTurnDeadline(deps, (signal) => agentTurn(context, signal));
+  return (context) => withTurnDeadline(deps, (signal, remainingMs) => agentTurn(context, signal, remainingMs));
 }
 
 export type AnalystSectionInput = Readonly<{
@@ -249,7 +266,7 @@ export type AnalystSection = Readonly<{
 }>;
 
 export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystSectionInput) => Promise<AnalystSection> {
-  const section = async (input: AnalystSectionInput, signal: AbortSignal): Promise<AnalystSection> => {
+  const section = async (input: AnalystSectionInput, signal: AbortSignal, remainingMs: () => number): Promise<AnalystSection> => {
     const issuer = input.subject.issuer_id.toLowerCase();
     const job: AgentAsk = {
       question: input.goal,
@@ -265,6 +282,8 @@ export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystS
       asOf: input.asOf,
       clock: () => input.asOf,
       meter: callMeter(SECTION_CALLS),
+      answerCalls: ANSWER_CALLS,
+      remainingMs,
       snapshotId: input.snapshotId,
       scopedKey: (name) => `${input.sectionId}:${name}`,
       noFilingAsOfCutoff: true,
@@ -285,16 +304,18 @@ export function analystSectionRunner(deps: AnalystSectionDeps): (input: AnalystS
     const answered = await write(deps, job, gathered);
     return { status: answered.failed ? "unwritten" : "written", blocks: answered.blocks, packet: gathered.packet, assertions: answered.assertions };
   };
-  return (input) => withTurnDeadline(deps, (signal) => section(input, signal));
+  return (input) => withTurnDeadline(deps, (signal, remainingMs) => section(input, signal, remainingMs));
 }
 
-async function withTurnDeadline<T>(deps: Pick<AgentModels, "deadlines">, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+async function withTurnDeadline<T>(deps: Pick<AgentModels, "deadlines" | "prose">, run: (signal: AbortSignal, remainingMs: () => number) => Promise<T>): Promise<T> {
   const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(new TurnDeadline()), (deps.deadlines ?? DEADLINES).turnMs);
+  const { turnMs } = deps.deadlines ?? (deps.prose ? PROSE_DEADLINES : DEADLINES);
+  const endsAt = performance.now() + turnMs;
+  const timer = setTimeout(() => deadline.abort(new TurnDeadline()), turnMs);
   const stop = turnStopSignal();
   const signal = stop ? AbortSignal.any([stop, deadline.signal]) : deadline.signal;
   try {
-    return await withLlmAbortSignal(signal, () => run(signal));
+    return await withLlmAbortSignal(signal, () => run(signal, () => endsAt - performance.now()));
   } finally {
     clearTimeout(timer);
   }
@@ -304,7 +325,7 @@ let defaultRegistry: ToolRegistry | undefined;
 
 async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Promise<Gathered | null> {
   let loopRefused = false;
-  const router = await deps.router(job.meter(ANSWER_CALLS, () => {
+  const router = await deps.router(job.meter(job.answerCalls, () => {
     loopRefused = true;
   }));
   if (!router) return null;
@@ -361,7 +382,7 @@ async function gather(deps: AgentCore, job: AgentAsk, signal: AbortSignal): Prom
       const { clarificationAnswer: _picked, ...turn } = context;
       let plannerRefused = false;
       // A planner call leaves one for the loop's next step, beside the answer's.
-      const planningModel = deps.planner?.(meter(ANSWER_CALLS + 1, () => {
+      const planningModel = deps.planner?.(meter(job.answerCalls + 1, () => {
         plannerRefused = true;
       })) ?? null;
       const outcome = await certifiedFinancials({ ...deps.financial, planningModel, clock: () => new Date(job.clock()) }, {
@@ -570,27 +591,51 @@ async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promis
     ...withFindingsRule(WRITING[job.writing](figured), packet),
   };
   const { emit } = job.planningContext;
+  let quoted: ReadonlyArray<string> = [];
   try {
-    written = await inStep(emit, { tool_call_id: randomUUID(), tool_name: "write_answer", label: "Writing the answer" }, () => deps.compose(input, { ...job.trace, question }, (deployment) => {
-      answeredBy = deployment;
-    }, job.meter(0, () => {
-      answerRefused = true;
-    })));
-    const { judging } = written;
-    if (judging) {
-      const judged = await inStep(emit, { tool_call_id: randomUUID(), tool_name: "judge_answer", label: "Checking the answer's inferences" }, () => judging.done);
-      written = { ...written, assertions: judged.assertions };
+    if (deps.prose) {
+      const prose = deps.prose(job.meter(0, () => {
+        answerRefused = true;
+      }));
+      const step: ProseStep = (tool, label, run) => inStep(emit, { tool_call_id: randomUUID(), tool_name: tool, label }, run);
+      const checked = await checkedProse({ question, conversation, packet, remainingMs: job.remainingMs }, prose, step);
+      if (checked === null) {
+        console.warn("[chat] the analyst agent's checked prose could not be drafted; the turn answers with what it read alone");
+        failed = true;
+        written = UNWRITTEN;
+      } else {
+        const cardOf = (dropped?: DroppedClaims) => {
+          const sealer = createSealer(noted);
+          const segments = proseSegments(checked, packet, sealer, dropped);
+          return { ...card, segments, source_refs: sealer.sealed().source_refs };
+        };
+        written = { assertions: null, blocks: [cardOf()], without: (dropped) => ({ blocks: [cardOf(dropped)] }) };
+        answeredBy = checked.written_by;
+        quoted = quotedClaims(checked);
+        await writeTurnTrace(prose.traceDir, { version: 2, ...job.trace, question, recorded_at: new Date().toISOString(), input, exchange: null, assertions: null, blocks: written.blocks, checked });
+      }
+    } else {
+      written = await inStep(emit, { tool_call_id: randomUUID(), tool_name: "write_answer", label: "Writing the answer" }, () => deps.compose(input, { ...job.trace, question }, (deployment) => {
+        answeredBy = deployment;
+      }, job.meter(0, () => {
+        answerRefused = true;
+      })));
+      const { judging } = written;
+      if (judging) {
+        const judged = await inStep(emit, { tool_call_id: randomUUID(), tool_name: "judge_answer", label: "Checking the answer's inferences" }, () => judging.done);
+        written = { ...written, assertions: judged.assertions };
+      }
+      if (written.assertions) written = withoutStance(input, packet, written.assertions) ?? written;
     }
-    if (written.assertions) written = withoutStance(input, packet, written.assertions) ?? written;
   } catch (reason) {
     if (!isModelFailure(reason)) throw reason;
     console.warn("[chat] the analyst agent's answer could not be written; the turn answers with what it read alone", reason);
     failed = true;
-    written = { assertions: null, blocks: [], without: () => ({ blocks: [] }) };
+    written = UNWRITTEN;
   }
 
   const claims = analyst.flatMap((result) => (result.status === "ok" && "claims" in result ? result.claims : []));
-  const cited = citedSources(written.assertions, packet);
+  const cited = citedSources([...(written.assertions?.accepted ?? []).flatMap((entry) => entry.evidence), ...quoted], packet);
   const certifiedBlocks = certified.map((entry, i) => ({ ...entry.block, id: `${entry.block.id}-${job.scopedKey(String(i + 1))}` }) as Record<string, unknown>);
   const charts = priced.map((entry) => entry.chart);
   const priceBlocks = [...charts, ...perfDisclosureBlocks(...charts)];
@@ -600,7 +645,7 @@ async function write(deps: AgentCore, job: AgentAsk, gathered: Gathered): Promis
     tool_call_ids: readCalls,
   }];
   const turnBlocks = (blocks: ReadonlyArray<Record<string, unknown>>) => {
-    const shown = blocks.filter(rendered).map((block) => ({ ...withRefs(block, claims, cited), tool_call_ids: readCalls }));
+    const shown = blocks.filter(deps.prose ? hasSegments : rendered).map((block) => ({ ...withRefs(block, claims, cited), tool_call_ids: readCalls }));
     const spent = answerRefused && shown.length > 0 ? [{ ...noteBlock({ snapshotId, asOf }, job.scopedKey("agent:calls-spent"), ANALYSIS_LEFT_OUT), subject_refs: subjectRefs, tool_call_ids: readCalls }] : [];
     const own = [...shown, ...(failed ? unwritten : []), ...noted, ...spent];
     return [...certifiedBlocks, ...priceBlocks, ...(own.length > 0 ? own : unwritten)];
@@ -662,22 +707,7 @@ function withFindingsRule<W extends { instructions: ReadonlyArray<string> }>(wri
 
 const QUIET = (() => undefined) as unknown as ChatTurnRunContext["emit"];
 
-// ADR 0005. Buy, sell and hold are stance only as a rating, so "customers buy in bulk" is not one.
-const RATING = String.raw`(?:strong\s+)?(?:buy|sell|hold)\b(?!-)`;
-const STANCE = new RegExp([
-  String.raw`\b(?:overweight|underweight|outperform|underperform|conviction|upgrade|downgrade)\b`,
-  String.raw`\b(?:raise[sd]?|raising|lift(?:s|ed)?|lower(?:s|ed|ing)?|cut(?:s|ting)?|set(?:s|ting)?|reiterate[sd]?|maintain(?:s|ed)?|boost(?:s|ed)?|trim(?:s|med)?|increase[sd]?|reduce[sd]?)\b(?:\s+\S+){0,3}?\s+price targets?\b`,
-  String.raw`\bprice targets?\s+(?:raise|cut|increase|hike|reduction)s?\b`,
-  String.raw`\b(?:a|an|the|our|my)\s+${RATING}`,
-  String.raw`\brate[ds]?\s+(?:a\s+|an\s+)?${RATING}`,
-  String.raw`\brate[ds]?\s+(?:\S+\s+){0,3}?as\s+(?:a\s+|an\s+)?${RATING}`,
-  String.raw`\bstrong\s+(?:buy|sell|hold)\b(?!-)`,
-  String.raw`\b(?:buy|sell|hold)\s+(?:rating|recommendation)s?\b`,
-  String.raw`\b(?:rating|recommendation)s?\s+(?:of\s+)?(?:buy|sell|hold)\b(?!-)`,
-  String.raw`\brecommend(?:s|ed|ing)?\s+(?:buy|sell|hold)(?:ing)?\b`,
-].join("|"), "iu");
-
-export const statesStance = (text: string) => STANCE.test(text);
+export { statesStance } from "./stance.ts";
 
 function withoutStance(input: AnswerInput & Pick<AnswerTraceInput, "context">, packet: EvidencePacket, report: AssertionReport): Pick<AnsweredTurn, "assertions" | "blocks" | "without"> | null {
   const stance = report.accepted.filter((entry) => entry.kind === "analyst_inference" && statesStance(entry.text));
@@ -1068,10 +1098,15 @@ function statusOf(content: string): string {
   }
 }
 
-const rendered = (block: Record<string, unknown>) => Array.isArray(block.commentary) && block.commentary.length > 0;
+const UNWRITTEN: Pick<AnsweredTurn, "assertions" | "blocks" | "without"> = { assertions: null, blocks: [], without: () => ({ blocks: [] }) };
 
-function citedSources(report: AnsweredTurn["assertions"], packet: EvidencePacket): ReadonlyArray<string> {
-  const cited = new Set((report?.accepted ?? []).flatMap((entry) => entry.evidence));
+const rendered = (block: Record<string, unknown>) => Array.isArray(block.commentary) && block.commentary.length > 0;
+// Checked prose is shown as its segments, with no commentary parts.
+const hasSegments = (block: Record<string, unknown>) => Array.isArray(block.segments) && block.segments.length > 0;
+
+// The sources of the claims an answer cites by packet id that have no claim row to seal.
+function citedSources(ids: ReadonlyArray<string>, packet: EvidencePacket): ReadonlyArray<string> {
+  const cited = new Set(ids);
   return packet.claims.filter((claim) => cited.has(claim.id) && !isUuid(claim.claim_id) && isUuid(claim.source_id))
     .flatMap((claim) => claimSources(claim).map((source) => source.source_id).filter(isUuid));
 }
@@ -1081,8 +1116,9 @@ function withRefs(
   claims: ReadonlyArray<{ claim_id: string; document_id: string; source_id: string }>,
   sources: ReadonlyArray<string>,
 ): Record<string, unknown> {
-  const segments = Array.isArray(block.segments) ? block.segments as Array<{ type?: unknown; ref_kind?: unknown; ref_id?: unknown }> : [];
-  const quoted = new Set(segments.flatMap((segment) => (segment.type === "ref" && segment.ref_kind === "claim" && typeof segment.ref_id === "string" ? [segment.ref_id] : [])));
+  // A claim a figure reads is cited as its quote is (#800).
+  const refs = (Array.isArray(block.segments) ? block.segments : []).flatMap(segmentRefs);
+  const quoted = new Set(refs.flatMap((segment) => (segment.ref_kind === "claim" && typeof segment.ref_id === "string" ? [segment.ref_id] : [])));
   const used = claims.filter((claim) => quoted.has(claim.claim_id));
   const own = Array.isArray(block.source_refs) ? block.source_refs.filter((id): id is string => typeof id === "string") : [];
   return {

@@ -93,7 +93,8 @@ type ClaimEvidenceRow = {
 type VerifierRows = {
   sources: ReadonlyArray<{ source_id: string }>;
   documents: ReadonlyArray<{ document_id: string; source_id: string }>;
-  claims: ReadonlyArray<{ claim_id: string; source_id: string }>;
+  // Each with its text, which a figure segment's claim source is checked against (#800).
+  claims: ReadonlyArray<{ claim_id: string; source_id: string; text: string }>;
 };
 
 export async function loadLocalRuntimeEvidence(
@@ -882,10 +883,11 @@ export async function loadVerifierRowsForRefs(
   // supersede, fra-28yi), and dropping it here would cause verifier missing_claim_ref.
   // Fresh subject->claims selection (matching_claims, above) filters it; this must not.
   const claims = claimIds.length === 0
-    ? { rows: [] as Array<{ claim_id: string; source_id: string }> }
-    : await db.query<{ claim_id: string; source_id: string }>(
+    ? { rows: [] as Array<{ claim_id: string; source_id: string; text: string }> }
+    : await db.query<{ claim_id: string; source_id: string; text: string }>(
       `select claim_id::text as claim_id,
-              c.reported_by_source_id::text as source_id
+              c.reported_by_source_id::text as source_id,
+              c.text_canonical as text
          from claims c
          join sources s
            on s.source_id = c.reported_by_source_id
@@ -899,7 +901,7 @@ export async function loadVerifierRowsForRefs(
     documents: Object.freeze(
       documents.rows.map((row) => Object.freeze({ document_id: row.document_id, source_id: row.source_id })),
     ),
-    claims: Object.freeze(claims.rows.map((row) => Object.freeze({ claim_id: row.claim_id, source_id: row.source_id }))),
+    claims: Object.freeze(claims.rows.map((row) => Object.freeze({ claim_id: row.claim_id, source_id: row.source_id, text: row.text }))),
   });
 }
 

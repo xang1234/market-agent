@@ -38,6 +38,7 @@ JUDGE_LITELLM_MODEL=anthropic/claude-haiku-5-5
 | `ANALYZE_LITELLM_MODEL` | The same tool loop writing an Analyze memo's sections. Falls back to `AGENT_LITELLM_MODEL`, then `LITELLM_MODEL`. |
 | `EXTRACTION_LITELLM_MODEL` | SEC 8-K and earnings-release extraction, analyst-grid reader columns, and chat's metric scope proposal. Falls back to `LITELLM_MODEL`. |
 | `JUDGE_LITELLM_MODEL` | The judge that checks each analyst inference in a chat answer. It has no fallback. When it is unset, chat shows figures but no inferences. |
+| `CHECK_LITELLM_MODEL` | Checked prose's figure labeller and relation check (`CHAT_CHECKED_PROSE=1`). When set, it has no fallback. When unset, they use `LITELLM_MODEL` and its fallbacks. |
 
 With `LLM_USAGE_LOG=true`, which `DEV_MODE=analyst` sets, each model call writes one log line with its channel, model, latency, and token counts. The numbers here are an example:
 
@@ -50,6 +51,7 @@ With `LLM_USAGE_LOG=true`, which `DEV_MODE=analyst` sets, each model call writes
 | Variable | Effect |
 |---|---|
 | `CHAT_SCOPE_PROPOSAL=off` | Skips the short model call that picks which metrics and facets a question asks for. A follow-up then keeps the previous scope, except for any period it names. |
+| `CHAT_CHECKED_PROSE=1` | Writes the analyst agent's answer as checked prose: free Markdown whose figures are checked against the evidence after it is written, each verified figure linked to its source (see [Architecture](architecture.md#how-a-chat-answer-is-built)). It needs `CHAT_ANALYST_AGENT=1`, and the chat server refuses to start without it. Such a turn may run 180 seconds and make six model calls after reading. |
 | `CHAT_TRACE_DIR` | Writes a trace of each answer turn, including the judge's verdicts, to this directory. Each judged turn also logs one `[chat] judge` line. |
 | `CHAT_VERIFICATION_MODE=display_unverified` | Shows answers that fail verification, labelled **Unverified** with the reasons, and never saves them. The default, `strict`, shows only an error. The chat server refuses this value when `NODE_ENV=production`. |
 

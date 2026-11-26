@@ -372,7 +372,7 @@ function rechecked(report: AssertionReport, packet: EvidencePacket): AssertionRe
   };
 }
 
-function droppedNotes(dropped: DroppedClaims): string[] {
+export function droppedNotes(dropped: DroppedClaims): string[] {
   const one = (ids: ReadonlyArray<string>) => ids.length === 1;
   return [
     ...(dropped.withdrawn.length === 0 ? [] : [one(dropped.withdrawn)
