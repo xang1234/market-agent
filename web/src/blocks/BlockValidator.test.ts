@@ -35,7 +35,7 @@ test('validateBlock accepts a linked figure and a struck one, and a derivation o
     ],
   }
   assert.deepEqual(validateBlock(block), { valid: true, block })
-  const { operands: _operands, ...unexplained } = growth
+  const unexplained = { type: 'figure', text: growth.text, sources: growth.sources, derivation: growth.derivation }
   assert.equal(validateBlock({ ...block, segments: [unexplained] }).valid, false)
   assert.equal(validateBlock({ ...block, segments: [{ ...growth, derivation: 'average' }] }).valid, false)
   assert.equal(validateBlock({ ...block, segments: [{ type: 'figure', text: '$62.1B', sources: [] }] }).valid, false)
