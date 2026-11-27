@@ -290,6 +290,18 @@ test("a correction whose labels leave a numeral out keeps the checked draft", as
   assert.equal(shown(segments), "Revenue reached ~~$72.1B~~ (the sources give $62.1B).");
 });
 
+// Codex on #814: a label the figure check cannot evaluate settles nothing either.
+test("a correction whose figure cannot be checked keeps the checked draft", async () => {
+  const { checked, segments } = await lane({
+    draft: "Revenue reached $72.1B.",
+    labels: { "$72.1B": reported(REVENUE) },
+    edits: () => [{ sentence: "s1", text: "Revenue came to $72.1B." }],
+    recheck: { labels: { "$72.1B": derived("growth", [REVENUE]) } },
+  });
+  assert.equal(checked.rewrite?.recheck?.versions.s1?.numerals[0]?.verdict?.kind, "not_checkable");
+  assert.equal(shown(segments), "Revenue reached ~~$72.1B~~ (the sources give $62.1B).");
+});
+
 // Codex on #814: a contradicted comparison is struck whole, over a figure inside its quote.
 test("a standing relation quote that holds a linked figure is still struck with its correction", async () => {
   const { segments } = await lane({

@@ -119,13 +119,13 @@ export async function checkedProse(input: CheckedProseInput, models: CheckedPros
     checkRound(models, packet, input.question, lead, parts, { ...texts, ...edits }, edited, draft.labelled.ok));
   // A check that failed on the corrections but not on the draft found nothing because it
   // read nothing, so every edit keeps the checked draft; so does an edit with a numeral the
-  // labeller left out.
+  // checks did not settle.
   const unchecked = recheck !== null && ((draft.labelled.ok && !recheck.labelled.ok) || (draft.related.ok && !recheck.related.ok));
   const final = parts.map((part) => {
     const before = draft.versions[part.id]!;
     const after = recheck?.versions[part.id];
-    const unlabelled = draft.labelled.ok && after?.numerals.some((numeral) => numeral.label === null);
-    return kept(after === undefined || unchecked || unlabelled || problemCount(after) > problemCount(before) ? before : after);
+    const unsettled = draft.labelled.ok && after?.numerals.some(isUnsettled);
+    return kept(after === undefined || unchecked || unsettled || problemCount(after) > problemCount(before) ? before : after);
   });
   return { written_by, lead, sentences, draft, rewrite: { request, edits, recheck }, final };
 }
@@ -227,6 +227,9 @@ async function checkRound(
 
 const isWrong = (numeral: CheckedNumeral) => numeral.verdict?.kind === "wrong";
 const isUntraced = (numeral: CheckedNumeral) => numeral.label?.kind === "figure" && numeral.label.label.basis === "off_file";
+// Neither a name nor a verdict: no label (the labeller left it out), or a label the figure
+// check cannot evaluate. An untraced figure is settled, as a problem.
+const isUnsettled = (numeral: CheckedNumeral) => numeral.label === null || (numeral.verdict?.kind === "not_checkable" && !isUntraced(numeral));
 const problemCount = (version: Version) =>
   version.numerals.filter((numeral) => isWrong(numeral) || isUntraced(numeral)).length + version.findings.length + (version.stance ? 1 : 0);
 // ADR 0005: a sentence still stating a stance is left out.
