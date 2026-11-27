@@ -54,7 +54,7 @@ type RewriteSentence = { id: string; text: string; problems: string[] };
 type Script = {
   draft: string;
   // Each figure's label by the text it is marked with; any other marked number is a name.
-  labels?: Readonly<Record<string, object>> | Error;
+  labels?: Readonly<Record<string, object>> | Error | "omitted";
   findings?: ReadonlyArray<object> | Error;
   edits?: ((sentences: RewriteSentence[]) => ReadonlyArray<object>) | Error;
   // The replies to the second label and relation calls, when they differ from the first.
@@ -88,6 +88,7 @@ function scripted(script: Script) {
         return { text: script.draft };
       case "label": {
         failed(labels);
+        if (labels === "omitted") return { text: fence("labels", { labels: [], figures: [] }) };
         const table = (labels ?? {}) as Record<string, object>;
         const numbers = marked(request);
         return { text: fence("labels", {
@@ -276,6 +277,17 @@ test("a correction whose labelling or relation check fails keeps the checked dra
     assert.deepEqual(kinds(), ["draft", "label", "relation", "rewrite", "label", "relation"]);
     assert.equal(shown(segments), "Revenue reached ~~$72.1B~~ (the sources give $62.1B).", Object.keys(recheck)[0]);
   }
+});
+
+// Codex on #814: a numeral the labeller leaves out of the corrections is unchecked, not clean.
+test("a correction whose labels leave a numeral out keeps the checked draft", async () => {
+  const { segments } = await lane({
+    draft: "Revenue reached $72.1B.",
+    labels: { "$72.1B": reported(REVENUE) },
+    edits: () => [{ sentence: "s1", text: "Revenue came to $72.1B." }],
+    recheck: { labels: "omitted" },
+  });
+  assert.equal(shown(segments), "Revenue reached ~~$72.1B~~ (the sources give $62.1B).");
 });
 
 // Codex on #814: a contradicted comparison is struck whole, over a figure inside its quote.

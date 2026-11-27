@@ -118,12 +118,14 @@ export async function checkedProse(input: CheckedProseInput, models: CheckedPros
   const recheck = edited.size === 0 ? null : await step("check_corrections", "Checking the corrections", () =>
     checkRound(models, packet, input.question, lead, parts, { ...texts, ...edits }, edited, draft.labelled.ok));
   // A check that failed on the corrections but not on the draft found nothing because it
-  // read nothing, so every edit keeps the checked draft.
+  // read nothing, so every edit keeps the checked draft; so does an edit with a numeral the
+  // labeller left out.
   const unchecked = recheck !== null && ((draft.labelled.ok && !recheck.labelled.ok) || (draft.related.ok && !recheck.related.ok));
   const final = parts.map((part) => {
     const before = draft.versions[part.id]!;
     const after = recheck?.versions[part.id];
-    return kept(after === undefined || unchecked || problemCount(after) > problemCount(before) ? before : after);
+    const unlabelled = draft.labelled.ok && after?.numerals.some((numeral) => numeral.label === null);
+    return kept(after === undefined || unchecked || unlabelled || problemCount(after) > problemCount(before) ? before : after);
   });
   return { written_by, lead, sentences, draft, rewrite: { request, edits, recheck }, final };
 }
