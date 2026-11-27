@@ -318,6 +318,8 @@ function labellerRequest(question: string, marked: string, packet: EvidencePacke
           "margin [profit, revenue]; share_of_total [part, total]; growth [earlier, later]; difference [first, the value subtracted from it], so a change from A to B is [B, A];",
           "ratio [numerator, denominator]; sum, one operand adding them all. An operand is the ids in add, less those in subtract, over the sum of those in over",
           "when it compares two margins or ratios (else over null). One entry is add [its id], subtract [], over null;",
+          "a difference of two percents is a change in points, so a cost or remainder stated as a share of revenue (\"operating costs were 9.5% of revenue\")",
+          "is a margin whose first operand adds and subtracts the amounts (gross profit, subtract operating income), never a difference of two margins;",
           "- sign \"-\" for a loss or a change stated as a decline, \"+\" for one stated as a gain, null otherwise; a level (\"fell to 60.5%\") has sign null;",
           "- scale when the number has no B, M or K of its own but its table puts it in thousands, millions or billions, else null.",
           "Point at what the sentence says, even where you think it is wrong. A figure about something no entry holds has source null and what: a few words on what it is.",

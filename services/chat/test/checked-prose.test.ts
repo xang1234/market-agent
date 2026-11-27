@@ -162,6 +162,24 @@ test("a wrong figure goes back once, naming the data at the answer's precision, 
   assert.deepEqual(steps, ["Writing the answer", "Checking 1 figure and the comparisons", "Correcting 1 sentence", "Checking the corrections"]);
 });
 
+// #812: a change between two percents is in points, so a percent there goes back named in
+// points; a share of revenue labelled as a margin over amounts stays a percent and links.
+test("a gap between two margins stated as a percent goes back in points, and a share of revenue links", async () => {
+  const OPERATING_MARGIN = idOf("Operating margin (operating income / revenue)", "Q4 FY2026");
+  const [GROSS_PROFIT, OPERATING_INCOME] = [idOf("Gross profit", "Q4 FY2026"), idOf("Operating income", "Q4 FY2026")];
+  const costs = { basis: "derived", derivation: "margin", operands: [{ add: [GROSS_PROFIT], subtract: [OPERATING_INCOME], over: null }, { add: [REVENUE], subtract: [], over: null }], sign: null, scale: null };
+  const { segments, calls } = await lane({
+    draft: "Gross margin ran 9.5% above operating margin.",
+    labels: { "9.5%": derived("difference", [GROSS_MARGIN], [OPERATING_MARGIN]), "9.5 percentage points": derived("difference", [GROSS_MARGIN], [OPERATING_MARGIN]) },
+    edits: () => [{ sentence: "s1", text: "Gross margin ran 9.5 percentage points above operating margin." }],
+  });
+  const sent = JSON.parse(calls[3]!.request.messages[1]!.content) as { sentences: RewriteSentence[] };
+  assert.deepEqual(sent.sentences.map((sentence) => [sentence.id, sentence.problems]), [["s1", ["9.5% is not what the sources give: they give 9.5 percentage points."]]]);
+  assert.equal(shown(segments), "Gross margin ran {9.5 percentage points} above operating margin.");
+  const share = await lane({ draft: "Operating costs were 9.5% of revenue.", labels: { "9.5%": costs } });
+  assert.equal(shown(share.segments), "Operating costs were {9.5%} of revenue.");
+});
+
 test("a near figure, a last digit off or hedged, is linked as near and never sent back", async () => {
   const { segments, kinds } = await lane({ draft: "Revenue reached $62.2B, or about $62B.", labels: { "$62.2B": reported(REVENUE), "$62B": reported(REVENUE) } });
   assert.deepEqual(kinds(), ["draft", "label", "relation"]);
