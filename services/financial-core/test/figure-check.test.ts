@@ -6,6 +6,7 @@ import {
   derive,
   enumerateNumerals,
   linkedVerdict,
+  presentedQuantity,
   statedFigures,
   statedQuantity,
   verdictFor,
@@ -14,6 +15,7 @@ import {
   type Derivation,
   type FigureLabel,
   type Operand,
+  type Quantity,
   type ValueOf,
 } from "../src/figure-check.ts";
 
@@ -216,7 +218,7 @@ test("a numeral states the quantity writtenAs would write it as", () => {
   assert.deepEqual(stated("$800 million"), amount(800e6));
   assert.deepEqual(stated("-$134.0M"), amount(-134e6));
   assert.deepEqual(stated("12.5%"), { kind: "fraction", value: 0.125 });
-  assert.deepEqual(stated("3.1 points"), { kind: "fraction", value: 0.031 });
+  assert.deepEqual(stated("3.1 points"), { kind: "points", value: 0.031 }, "a change in points (#812)");
   assert.deepEqual(stated("120 bps"), { kind: "fraction", value: 0.012 });
   assert.deepEqual(stated("6.1x"), { kind: "ratio", value: 6.1 });
   assert.equal(stated("2026-01-25"), undefined, "a date states no quantity");
@@ -226,7 +228,7 @@ test("a numeral states the quantity writtenAs would write it as", () => {
 });
 
 // Devin on #812: a linked difference took "+3.3 percentage points" for operands that
-// subtract to -3.3.
+// subtract to -3.3, and "3.3%" for a change between 38.7% and 35.4%.
 test("a difference honours its text's own sign, and leaves its words to the relation check", () => {
   const fell = [of("NVDA gross profit Q1 FY2026", "NVDA revenue Q1 FY2026"), of("NVDA gross profit Q4 FY2025", "NVDA revenue Q4 FY2025")];
   assert.equal(check("+12.5 points", derived("difference", fell)).kind, "wrong", "60.5% less 73.0% is -12.5 points");
@@ -237,4 +239,31 @@ test("a difference honours its text's own sign, and leaves its words to the rela
     linkedVerdict({ text, sources: margins, derivation: "difference", operands: order.map((index) => ({ add: [index], subtract: [], over: null })) }, (index) => margins[index]);
   assert.deepEqual(change("+3.3 percentage points", [0, 1]), { kind: "derived_ok" });
   assert.equal(change("+3.3 percentage points", [1, 0]).kind, "wrong");
+});
+
+test("a change between two percents is in points, so a percent there is wrong and its data is written in points", () => {
+  const fell = [of("NVDA gross profit Q1 FY2026", "NVDA revenue Q1 FY2026"), of("NVDA gross profit Q4 FY2025", "NVDA revenue Q4 FY2025")];
+  const expected = derive(derived("difference", fell), valueOf);
+  assert.equal(typeof expected === "object" && expected.kind, "points");
+  assert.deepEqual(check("12.5%", derived("difference", fell)), { kind: "wrong", expected });
+  assert.deepEqual(verdictFor(enumerateNumerals("about 12%")[0]!, derived("difference", fell), valueOf), { kind: "wrong", expected }, "hedged or not");
+  assert.deepEqual(check("12.5 percentage points", derived("difference", fell)), { kind: "derived_ok" });
+  assert.deepEqual(check("1,250 bps", derived("difference", fell)), { kind: "derived_ok" });
+  assert.equal(atPrecisionOf(numeral("12.5%"), expected as Quantity), "12.5 percentage points");
+  assert.equal(atPrecisionOf(numeral("-12.5 percent"), expected as Quantity), "-12.5 percentage points");
+  const margins = [{ kind: "fraction", value: 0.387 }, { kind: "fraction", value: 0.354 }] as const;
+  const linked = linkedVerdict({ text: "3.3%", sources: margins, derivation: "difference", operands: [0, 1].map((index) => ({ add: [index], subtract: [], over: null })) }, (index) => margins[index]);
+  assert.equal(linked.kind, "wrong");
+  assert.deepEqual(check("8.9%", derived("growth", [of("NVDA revenue Q3 FY2026"), of("NVDA revenue Q4 FY2026")])), { kind: "derived_ok" }, "growth stays a percent");
+  // 46,200 / 62,100 less 40,300 / 62,100 = 9.5% of revenue, as 21 saved eval runs label it.
+  const costs = [of("NVDA gross profit Q4 FY2026", "NVDA revenue Q4 FY2026"), of("NVDA operating income Q4 FY2026", "NVDA revenue Q4 FY2026")];
+  assert.deepEqual(check("9.5%", derived("difference", costs)), { kind: "derived_ok" }, "two shares of one total differ by a share of it");
+});
+
+test("an engine result in percentage points and a claim's points are points too", () => {
+  const points = presentedQuantity({ kind: "value", text: "+3.3 pts", unit: { kind: "percentage_points" }, exact: true, value: "3.3", full_text: "3.3 percentage points" } as Parameters<typeof presentedQuantity>[0]);
+  assert.deepEqual(points, { kind: "points", value: 0.033 });
+  assert.deepEqual(verdictFor(numeral("3.3%"), { basis: "reported", source: "r", sign: null, scale: null }, () => points), { kind: "wrong", expected: points });
+  assert.deepEqual(verdictFor(numeral("3.3 points"), { basis: "reported", source: "r", sign: null, scale: null }, () => points), { kind: "matched" });
+  assert.deepEqual(statedQuantity(numeral("3.1 points")), { kind: "points", value: 0.031 });
 });
