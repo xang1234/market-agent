@@ -22,9 +22,8 @@ import {
 import { validateSnapshotTransformManifest } from "./snapshot-transform.ts";
 import { verifyChartPoints, type DrawnChart } from "./chart-points.ts";
 import type { FinancialSealClaim } from "./financial-verifier-loader.ts";
-import { figureSegmentFailures, segmentRefs } from "./figure-segments.ts";
+import { figureSegmentFailures, loadLedgerSources, segmentRefs } from "./figure-segments.ts";
 import type { Quantity } from "../../financial-core/src/figure-check.ts";
-import type { FinancialAnswerContent } from "../../financial-core/src/index.ts";
 import type { FinancialVerification, FinancialVerifierReasonCode } from "./financial-verifier.ts";
 import { isRecord, type QueryExecutor } from "../../shared/src/http.ts";
 
@@ -60,8 +59,6 @@ export type VerifierFact = {
 export type VerifierClaim = {
   claim_id: string;
   source_id?: string | null;
-  // Its text, which a figure segment's claim source reads its k-th stated figure from.
-  text?: string;
 };
 
 export type VerifierEvent = {
@@ -169,10 +166,12 @@ export type SnapshotVerificationInput = {
   // A financial publication unit this seal certifies. Verified against the
   // ledger through the transaction client; never against caller arrays.
   financial?: FinancialSealClaim | null;
-  // The certified engine answers the message shows beside its prose (its
+  // The engine answers the message shows beside its prose (the content of its
   // financial_answer blocks, each sealed under its own certificate), which a
-  // figure segment's result source reads its value from (#800).
-  financial_answers?: ReadonlyArray<FinancialAnswerContent>;
+  // figure segment's result source reads its value from (#800). Each counts
+  // only when a certificate of this thread holds its presentation hash
+  // (figure-segments.ts), so a caller's answer is never taken at its word.
+  financial_answers?: ReadonlyArray<unknown>;
 };
 
 export type SnapshotVerifierReasonCode =
@@ -192,6 +191,7 @@ export type SnapshotVerifierReasonCode =
   | "fact_ref_format_mismatch"
   | "result_ref_format_mismatch"
   | "figure_text_mismatch"
+  | "figure_source_unverified"
   | "missing_required_disclosure"
   | "series_points_mismatch"
   | "series_ref_format_mismatch"
@@ -269,14 +269,15 @@ export async function verifySnapshotSeal(
     failures.push(Object.freeze({ reason_code, details: Object.freeze(details) }));
   };
 
+  // A figure's result and claim sources read what the ledger holds (#812).
+  const ledger = await loadLedgerSources(flattenBlocks(normalized.blocks), { thread_id: normalized.thread_id, answers: normalized.financial_answers }, db);
   try {
     verifyManifestRefs(normalized, addFailure);
     verifyBlockBindings(normalized, addFailure);
     verifyFactRefFormats(normalized, addFailure);
     const series = shownSeries(normalized);
     verifySeriesRefFormats(normalized, series, addFailure);
-    const claims = new Map(normalized.claims.flatMap((claim) => (claim.text === undefined ? [] : [[claim.claim_id, claim.text] as const])));
-    for (const failure of figureSegmentFailures(flattenBlocks(normalized.blocks), { answers: normalized.financial_answers, series, claims })) {
+    for (const failure of figureSegmentFailures(flattenBlocks(normalized.blocks), { ...ledger, series })) {
       addFailure(failure.reason_code, failure.details);
     }
     verifyDisclosures(normalized, addFailure);
@@ -420,7 +421,7 @@ function normalizeInput(input: SnapshotVerificationInput): NormalizedInput {
     normalizedSuppliedDisclosures,
   );
   const financialAnswers = input.financial_answers ?? [];
-  assertArray<FinancialAnswerContent>(financialAnswers, "verifySnapshotSeal.financial_answers");
+  assertArray<unknown>(financialAnswers, "verifySnapshotSeal.financial_answers");
 
   return Object.freeze({
     thread_id:
@@ -779,7 +780,6 @@ function normalizeClaim(claim: VerifierClaim, index: number): VerifierClaim {
   return Object.freeze({
     claim_id: assertUuidV4(claim.claim_id, `verifySnapshotSeal.claims[${index}].claim_id`),
     ...(claim.source_id == null ? {} : { source_id: assertUuidV4(claim.source_id, `verifySnapshotSeal.claims[${index}].source_id`) }),
-    ...(claim.text == null ? {} : { text: assertNonEmptyString(claim.text, `verifySnapshotSeal.claims[${index}].text`) }),
   });
 }
 

@@ -7,7 +7,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { DERIVATIONS } from "../../financial-core/src/figure-check.ts";
-import type { FinancialAnswerContent } from "../../financial-core/src/index.ts";
+import { presentationHash, type FinancialAnswerContent } from "../../financial-core/src/index.ts";
+import type { QueryExecutor } from "../../shared/src/http.ts";
 import { extractBlockRefs, verifySnapshotSeal, type SnapshotVerificationInput, type VerifierBlock } from "../src/snapshot-verifier.ts";
 
 // NVIDIA's latest-quarter answer on the golden data, recorded from a real stack with
@@ -20,6 +21,7 @@ const ANSWER = REPLAY.exchanges
   .find((block) => block.kind === "financial_answer")!.financial!;
 
 const snapshotId = "00000000-0000-4000-8000-000000000001";
+const threadId = "00000000-0000-4000-8000-000000000009";
 const subjectId = "00000000-0000-4000-8000-000000000002";
 const claimId = "00000000-0000-4000-8000-000000000004";
 const sourceId = "00000000-0000-4000-8000-000000000006";
@@ -38,7 +40,27 @@ const REVENUE_YEAR_AGO = result("Revenue", "Q4 FY2025");
 const GROSS_PROFIT = result("Gross profit", "Q4 FY2026");
 const CLAIM_SOURCE = (numeral: number) => ({ ref_kind: "claim", ref_id: claimId, format: CLAIM_TEXT, numeral });
 
-function seal(segments: ReadonlyArray<object>, input: Partial<SnapshotVerificationInput> = {}) {
+// The seal's transaction as the ledger holds it: the answer's certificate in this thread,
+// and each claim's stored text.
+type Certificate = { run_id: string; unit_id: string; presentation_hash: string; result_ids: string[] };
+const CERTIFICATE: Certificate = { run_id: ANSWER.run_id, unit_id: ANSWER.unit_id, presentation_hash: presentationHash(ANSWER), result_ids: ANSWER.results.map((entry) => entry.result_id) };
+function ledger({ certificates = [CERTIFICATE], claims = [{ claim_id: claimId, text: CLAIM_TEXT }] }: { certificates?: Certificate[]; claims?: Array<{ claim_id: string; text: string }> } = {}): QueryExecutor & { sql: string[] } {
+  const sql: string[] = [];
+  return {
+    sql,
+    query: (async (text: string, params?: unknown[]) => {
+      sql.push(text);
+      if (text.includes("from snapshot_financial_runs")) {
+        assert.deepEqual(params?.[0], threadId, "certificates are read for this thread");
+        return { rows: certificates };
+      }
+      if (text.includes("from claims")) return { rows: claims.filter((claim) => (params?.[0] as string[]).includes(claim.claim_id)) };
+      return { rows: [] };
+    }) as QueryExecutor["query"],
+  };
+}
+
+function seal(segments: ReadonlyArray<object>, input: Partial<SnapshotVerificationInput> = {}, db: QueryExecutor | null = ledger()) {
   const block = {
     id: "answer",
     kind: "rich_text",
@@ -60,13 +82,14 @@ function seal(segments: ReadonlyArray<object>, input: Partial<SnapshotVerificati
   };
   return verifySnapshotSeal({
     snapshot_id: snapshotId,
+    thread_id: threadId,
     manifest: { subject_refs: [{ kind: "listing", id: subjectId }], fact_refs: [], claim_refs: [claimId], event_refs: [], document_refs: [], source_ids: [sourceId], as_of: AS_OF, basis: "reported", normalization: "raw" },
     blocks: [block, disclosure],
-    claims: [{ claim_id: claimId, source_id: sourceId, text: CLAIM_TEXT }],
+    claims: [{ claim_id: claimId, source_id: sourceId }],
     sources: [{ source_id: sourceId }],
     financial_answers: [ANSWER],
     ...input,
-  });
+  }, db ?? undefined);
 }
 const SEALED = { ok: true, failures: [] };
 const codes = async (sealed: ReturnType<typeof seal>) => (await sealed).failures.map((failure) => failure.reason_code);
@@ -99,7 +122,37 @@ test("a result source whose format or period differs from its result fails, as a
 });
 
 test("a figure on a result no certified answer of the message holds cannot be checked, so it fails", async () => {
-  assert.deepEqual(await codes(seal([{ type: "figure", text: "$62.1B", sources: [REVENUE] }], { financial_answers: [] })), ["result_ref_format_mismatch", "figure_text_mismatch"]);
+  assert.equal(CERTIFICATE.presentation_hash, "543aa19e82c323c17187b0a1e856163b172d9f7fcacb0240e3f0896fec14bd01", "the hash the golden answer was sealed with");
+  const unverified = (reason: string, source = REVENUE) => [{ reason_code: "figure_source_unverified", details: { block_id: "answer", ref_kind: source.ref_kind, ref_id: source.ref_id, reason } }];
+  assert.deepEqual((await seal([{ type: "figure", text: "$62.1B", sources: [REVENUE] }], { financial_answers: [] })).failures, unverified("not_certified"));
+  assert.deepEqual((await seal([{ type: "figure", text: "$62.1B", sources: [REVENUE] }], {}, ledger({ certificates: [] }))).failures, unverified("not_certified"), "no certificate in this thread");
+  assert.deepEqual((await seal([{ type: "figure", text: "$62.1B", sources: [REVENUE] }], {}, ledger({ certificates: [{ ...CERTIFICATE, result_ids: [] }] }))).failures, unverified("not_certified"), "a result its certificate does not hold");
+  assert.deepEqual((await seal([{ type: "figure", text: "$62.1B", sources: [REVENUE] }], {}, null)).failures, unverified("no_transaction_client"));
+  assert.deepEqual((await seal([{ type: "struck", text: "$72.1B", reason: "the sources give $62.1B", sources: [REVENUE] }], {}, null)).failures, unverified("no_transaction_client"), "a struck figure's result source too");
+});
+
+// Codex on #812: the seal took the caller's answer at its word, so an answer altered in
+// both its presentation and the figure sealed. Its values count only when a certificate of
+// this thread holds the answer's presentation hash.
+test("an answer altered after its certificate verifies no figure, with a client or without", async () => {
+  const altered: FinancialAnswerContent = {
+    ...ANSWER,
+    results: ANSWER.results.map((entry) =>
+      entry.result_id === REVENUE.ref_id && entry.presented.kind === "value"
+        ? { ...entry, presented: { ...entry.presented, text: "$72.1B", value: "72100000000", full_text: "USD 72100000000" } }
+        : entry
+    ),
+  };
+  const figure = { type: "figure", text: "$72.1B", sources: [{ ...REVENUE, format: "$72.1B" }] };
+  const failures = async (db: QueryExecutor | null) => (await seal([figure], { financial_answers: [altered] }, db)).failures;
+  assert.deepEqual(await failures(ledger()), [{ reason_code: "figure_source_unverified", details: { block_id: "answer", ref_kind: "result", ref_id: REVENUE.ref_id, reason: "not_certified" } }]);
+  assert.deepEqual(await failures(null), [{ reason_code: "figure_source_unverified", details: { block_id: "answer", ref_kind: "result", ref_id: REVENUE.ref_id, reason: "no_transaction_client" } }]);
+});
+
+test("a seal with no figure on a result or a claim reads neither certificates nor claims", async () => {
+  const db = ledger();
+  assert.deepEqual(await seal([{ type: "text", text: "nothing linked" }], {}, db), SEALED);
+  assert.deepEqual(db.sql.filter((text) => text.includes("snapshot_financial_runs") || text.includes("from claims")), []);
 });
 
 test("a derived figure seals on what its sources recompute to", async () => {
@@ -119,7 +172,14 @@ test("a figure on a claim's stated figure reads the sealed claim's text", async 
   assert.deepEqual(await seal([{ type: "figure", text: "66%", sources: [CLAIM_SOURCE(2)] }]), SEALED);
   assert.deepEqual(await codes(seal([{ type: "figure", text: "$51.2B", sources: [CLAIM_SOURCE(2)] }])), ["figure_text_mismatch"]);
   assert.deepEqual(await codes(seal([{ type: "figure", text: "$51.2B", sources: [CLAIM_SOURCE(3)] }])), ["figure_text_mismatch"], "a claim states two figures");
-  assert.deepEqual(await codes(seal([{ type: "figure", text: "$51.2B", sources: [CLAIM_SOURCE(1)] }], { claims: [{ claim_id: claimId, source_id: sourceId }] })), ["figure_text_mismatch"], "the seal holds no text for the claim");
+  assert.deepEqual(await codes(seal([{ type: "figure", text: "$51.2B", sources: [CLAIM_SOURCE(1)] }], {}, ledger({ claims: [] }))), ["figure_source_unverified"], "no stored claim");
+  assert.deepEqual(await codes(seal([{ type: "figure", text: "$51.2B", sources: [CLAIM_SOURCE(1)] }], {}, null)), ["figure_source_unverified"], "no client to read it with");
+});
+
+test("a claim source reads the claim's stored text, never the caller's", async () => {
+  const stored = ledger({ claims: [{ claim_id: claimId, text: "Data center revenue was a record $41.2 billion, up 66% from a year ago." }] });
+  const callerText = { claims: [{ claim_id: claimId, source_id: sourceId, text: CLAIM_TEXT } as never] };
+  assert.deepEqual(await codes(seal([{ type: "figure", text: "$51.2B", sources: [CLAIM_SOURCE(1)] }], callerText, stored)), ["figure_text_mismatch"]);
 });
 
 test("a figure's sources bind like refs: a claim the snapshot did not seal fails", async () => {
@@ -128,7 +188,7 @@ test("a figure's sources bind like refs: a claim the snapshot did not seal fails
     { ref_kind: "claim", ref_id: unsealedClaim },
     { ref_kind: "fact", ref_id: factId },
   ]);
-  assert.deepEqual(await codes(seal([figure])), ["missing_claim_ref", "figure_text_mismatch"]);
+  assert.deepEqual(await codes(seal([figure])), ["missing_claim_ref", "figure_source_unverified"]);
 });
 
 test("a figure whose text states no one figure fails", async () => {
