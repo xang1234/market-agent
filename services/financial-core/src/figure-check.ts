@@ -237,10 +237,10 @@ const SCALE_WORDS = { thousands: 1e3, millions: 1e6, billions: 1e9 } as const;
 const tableScale = (numeral: Numeral, scale: Scale) => (numeral.unit === "amount" && !numeral.scaled && scale ? SCALE_WORDS[scale] : 1);
 
 // One numeral's verdict. The text's own sign wins; failing that the sign its words give;
-// with neither, only the size is compared ("a loss of $134M" against -134M). A difference is
-// compared by size: its sign follows the operand order, which is the labeller's guess.
-// ponytail: so "margin rose 12.5 points" passes for a fall; check direction when a
-// labeller orders differences reliably.
+// with neither, only the size is compared ("a loss of $134M" against -134M). A difference
+// honours only its text's own sign ("+3.3 points"), its operands being [first, the value
+// subtracted from it]. Its words' sign is left to the relation check, since "AMD's margin is
+// 12.5 points lower" names the operands in either order.
 export function verdictFor<R>(numeral: Numeral, label: FigureLabel<R>, valueOf: ValueOf<R>): Verdict {
   if (numeral.unit === "date") return { kind: "not_checkable", reason: "a date labelled as a figure" };
   if (label.basis === "off_file") return { kind: "not_checkable", reason: `${label.what} isn't in the data` };
@@ -252,7 +252,7 @@ export function verdictFor<R>(numeral: Numeral, label: FigureLabel<R>, valueOf: 
   const derivation = label.basis === "derived" ? label.derivation : null;
   const sign = derivation === "margin" || derivation === "share_of_total" || derivation === "ratio" ? null : label.sign;
   const shown = numeral.value * scale * (!numeral.signed && sign === "-" ? -1 : 1);
-  const bySign = (numeral.signed || sign !== null) && derivation !== "difference";
+  const bySign = numeral.signed || (sign !== null && derivation !== "difference");
   const fits = (actual: number, places = step) => withinPrecision(bySign ? shown : Math.abs(shown), bySign ? actual : Math.abs(actual), places);
   const judged = (expected: Quantity, what: string, ok: "matched" | "derived_ok"): Verdict => {
     const options = writtenAs(expected, numeral.unit);

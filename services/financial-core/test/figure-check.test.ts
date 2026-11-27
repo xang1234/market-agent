@@ -5,6 +5,7 @@ import {
   atPrecisionOf,
   derive,
   enumerateNumerals,
+  linkedVerdict,
   statedFigures,
   statedQuantity,
   verdictFor,
@@ -222,4 +223,18 @@ test("a numeral states the quantity writtenAs would write it as", () => {
   for (const text of ["$800 million", "12.5%", "120 bps", "6.1x"]) {
     assert.ok(withinPrecision(numeral(text).value, writtenAs(stated(text)!, numeral(text).unit)[0]!, 1e-9), text);
   }
+});
+
+// Devin on #812: a linked difference took "+3.3 percentage points" for operands that
+// subtract to -3.3.
+test("a difference honours its text's own sign, and leaves its words to the relation check", () => {
+  const fell = [of("NVDA gross profit Q1 FY2026", "NVDA revenue Q1 FY2026"), of("NVDA gross profit Q4 FY2025", "NVDA revenue Q4 FY2025")];
+  assert.equal(check("+12.5 points", derived("difference", fell)).kind, "wrong", "60.5% less 73.0% is -12.5 points");
+  assert.deepEqual(check("-12.5 points", derived("difference", fell)), { kind: "derived_ok" });
+  assert.deepEqual(check("12.5 points", derived("difference", fell, { sign: "+" })), { kind: "derived_ok" }, "\"rose 12.5 points\" is the relation check's to judge");
+  const margins = [{ kind: "fraction", value: 0.387 }, { kind: "fraction", value: 0.354 }] as const;
+  const change = (text: string, order: [number, number]) =>
+    linkedVerdict({ text, sources: margins, derivation: "difference", operands: order.map((index) => ({ add: [index], subtract: [], over: null })) }, (index) => margins[index]);
+  assert.deepEqual(change("+3.3 percentage points", [0, 1]), { kind: "derived_ok" });
+  assert.equal(change("+3.3 percentage points", [1, 0]).kind, "wrong");
 });
