@@ -96,8 +96,9 @@ export const statedFigures = (text: string): Numeral[] =>
 // --- labels ------------------------------------------------------------------------
 
 // A value as the data holds it: an amount (dollars, shares), a fraction (a margin, a
-// growth rate, a share) or a ratio (a multiple).
-export type Quantity = Readonly<{ kind: "amount" | "fraction" | "ratio"; value: number }>;
+// growth rate, a share), points (a change between two fractions, as a fraction: a margin
+// up 3.3 points is 0.033, never a percent) or a ratio (a multiple).
+export type Quantity = Readonly<{ kind: "amount" | "fraction" | "points" | "ratio"; value: number }>;
 
 // An engine result's value as the figure check reads it, in chat's packet and at the seal.
 // A ratio reads as a multiple exactly when the presentation wrote it as one
@@ -110,8 +111,9 @@ export function presentedQuantity(presented: Extract<PresentedPayload, { kind: "
     case "ratio":
       return { kind: presented.full_text.endsWith("x") ? "ratio" : "fraction", value };
     case "percent":
-    case "percentage_points":
       return { kind: "fraction", value: Number(`${presented.value}e-2`) };
+    case "percentage_points":
+      return { kind: "points", value: Number(`${presented.value}e-2`) };
     case "basis_points":
       return { kind: "fraction", value: Number(`${presented.value}e-4`) };
     case "currency":
@@ -148,9 +150,10 @@ export type Verdict =
   | Readonly<{ kind: "wrong"; expected: Quantity }>
   | Readonly<{ kind: "not_checkable"; reason: string }>;
 
-// The numbers a quantity reads as in a unit. A fraction (margin, growth, share, a change
-// between margins) reads as percent or points; a ratio as a multiple; an amount only as an
-// amount. A bare table number may be a percent or a plain fraction, so it's read both ways.
+// The numbers a quantity reads as in a unit. A fraction (margin, growth, share) or points
+// read as percent, points or basis points (verdictFor refuses points as a percent); a
+// ratio as a multiple; an amount only as an amount. A bare table number may be a percent or
+// a plain fraction, so it's read both ways.
 export function writtenAs({ kind, value }: Quantity, unit: NumeralUnit): number[] {
   if (kind === "amount") return unit === "amount" ? [value] : [];
   if (unit === "percent" || unit === "points") return [value * 100];
@@ -166,8 +169,11 @@ export function statedQuantity({ unit, value }: Numeral): Quantity | undefined {
     case "date":
       return undefined;
     case "percent":
-    case "points":
       return { kind: "fraction", value: value / 100 };
+    case "points":
+      return { kind: "points", value: value / 100 };
+    // ponytail: basis points state a level as often as a change (a 150 bps spread), so they
+    // stay a fraction; a percent on a claim's bps change then matches.
     case "bps":
       return { kind: "fraction", value: value / 10_000 };
     case "multiple":
@@ -223,12 +229,17 @@ export function derive<R>(label: Extract<FigureLabel<R>, { basis: "derived" }>, 
   if (failed !== undefined) return failed;
   const [a, b] = quantities as [Quantity, Quantity];
   if (derivation === "difference" && a.kind !== b.kind) return "a difference between a ratio and an amount";
+  // A difference between two fractions is a change, in points, unless both are shares of one
+  // total: gross margin less operating margin is operating costs' share of revenue.
+  const total = (operand: Operand<R>) => operand.over?.reduce((sum, ref) => sum + valueOf(ref)!.value, 0);
+  const [over0, over1] = [total(operands[0]!), total(operands[1]!)];
+  const share = over0 !== undefined && over1 !== undefined && withinPrecision(over0, over1, 0);
   const result: Quantity = {
     margin: { kind: "fraction", value: a.value / b.value },
     share_of_total: { kind: "fraction", value: a.value / b.value },
     growth: { kind: "fraction", value: (b.value - a.value) / Math.abs(a.value) },
     ratio: { kind: "ratio", value: a.value / b.value },
-    difference: { kind: a.kind, value: a.value - b.value },
+    difference: { kind: a.kind === "fraction" && !share ? "points" : a.kind, value: a.value - b.value },
   }[derivation] as Quantity;
   return Number.isFinite(result.value) ? result : "it divides by zero";
 }
@@ -237,10 +248,11 @@ const SCALE_WORDS = { thousands: 1e3, millions: 1e6, billions: 1e9 } as const;
 const tableScale = (numeral: Numeral, scale: Scale) => (numeral.unit === "amount" && !numeral.scaled && scale ? SCALE_WORDS[scale] : 1);
 
 // One numeral's verdict. The text's own sign wins; failing that the sign its words give;
-// with neither, only the size is compared ("a loss of $134M" against -134M). A difference is
-// compared by size: its sign follows the operand order, which is the labeller's guess.
-// ponytail: so "margin rose 12.5 points" passes for a fall; check direction when a
-// labeller orders differences reliably.
+// with neither, only the size is compared ("a loss of $134M" against -134M). A difference
+// honours only its text's own sign ("+3.3 points"), its operands being [first, the value
+// subtracted from it]. Its words' sign is left to the relation check, since "AMD's margin is
+// 12.5 points lower" names the operands in either order. A change in points shown as a
+// percent is wrong at any value, so its correction names points.
 export function verdictFor<R>(numeral: Numeral, label: FigureLabel<R>, valueOf: ValueOf<R>): Verdict {
   if (numeral.unit === "date") return { kind: "not_checkable", reason: "a date labelled as a figure" };
   if (label.basis === "off_file") return { kind: "not_checkable", reason: `${label.what} isn't in the data` };
@@ -252,11 +264,12 @@ export function verdictFor<R>(numeral: Numeral, label: FigureLabel<R>, valueOf: 
   const derivation = label.basis === "derived" ? label.derivation : null;
   const sign = derivation === "margin" || derivation === "share_of_total" || derivation === "ratio" ? null : label.sign;
   const shown = numeral.value * scale * (!numeral.signed && sign === "-" ? -1 : 1);
-  const bySign = (numeral.signed || sign !== null) && derivation !== "difference";
+  const bySign = numeral.signed || (sign !== null && derivation !== "difference");
   const fits = (actual: number, places = step) => withinPrecision(bySign ? shown : Math.abs(shown), bySign ? actual : Math.abs(actual), places);
   const judged = (expected: Quantity, what: string, ok: "matched" | "derived_ok"): Verdict => {
     const options = writtenAs(expected, numeral.unit);
     if (options.length === 0) return { kind: "not_checkable", reason: `a ${what} shown as ${numeral.unit}` };
+    if (expected.kind === "points" && numeral.unit === "percent") return { kind: "wrong", expected };
     if (!numeral.hedged && options.some((actual) => fits(actual))) return { kind: ok };
     return options.some((actual) => fits(actual, step * 3)) ? { kind: "near", expected } : { kind: "wrong", expected };
   };
@@ -271,7 +284,8 @@ export function verdictFor<R>(numeral: Numeral, label: FigureLabel<R>, valueOf: 
 // The data's value as the figure would have written it, for a request to correct it: at
 // the figure's precision, with its currency sign, scale and unit ("34%" for an answer's
 // "41%", not "34.45%"). An unsigned figure gets the size, since its words carry the sign.
-// scale is the label's, for a bare amount in a table "in millions".
+// scale is the label's, for a bare amount in a table "in millions". Points shown as a
+// percent are written in points ("3.3 percentage points" for "3.3%").
 export function atPrecisionOf(numeral: Numeral, expected: Quantity, scale: Scale = null): string {
   const value = writtenLike(numeral, expected);
   const digits = new RegExp(NUMBER, "u").exec(numeral.text);
@@ -283,7 +297,8 @@ export function atPrecisionOf(numeral: Numeral, expected: Quantity, scale: Scale
   const written = rounded.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals, useGrouping: digits[0].includes(",") });
   const minus = /^[-−]/u.test(numeral.text) ? numeral.text[0]! : "-";
   const sign = !numeral.signed || rounded === 0 ? "" : value < 0 ? minus : numeral.text.startsWith("+") ? "+" : "";
-  return `${sign}${numeral.text.slice(numeral.signed ? 1 : 0, digits.index)}${written}${numeral.text.slice(digits.index + digits[0].length)}`;
+  const unit = expected.kind === "points" && numeral.unit === "percent" ? " percentage points" : numeral.text.slice(digits.index + digits[0].length);
+  return `${sign}${numeral.text.slice(numeral.signed ? 1 : 0, digits.index)}${written}${unit}`;
 }
 
 // --- linked figures ------------------------------------------------------------------

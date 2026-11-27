@@ -781,11 +781,37 @@ test('a struck figure renders deleted, its reason read after it and linked to th
   ])
   const text = await clickThrough(block, recordingInspector(opened), [`[data-inspect-result="${RESULT}"]`])
   assert.equal(text, 'Revenue was struck: $72.1B (the sources give $62.1B), and margins struck: doubled (the filing says they rose 4 points).')
-  assert.deepEqual(opened, [['result', [RESULT, { subject: null, measure: null, period: 'Q4 FY2026', value: 'the sources give $62.1B' }]]])
+  assert.deepEqual(opened, [['result', [RESULT, { subject: null, measure: null, period: 'Q4 FY2026', value: '$62.1B' }]]], 'the inspector shows the value its source gives, not the sentence (#813)')
   const doc = await renderDocument(block)
   assert.deepEqual([...doc.querySelectorAll('del')].map((del) => [del.textContent, del.querySelector('.sr-only')?.textContent]), [
     ['struck: $72.1B', 'struck: '],
     ['struck: doubled', 'struck: '],
   ])
   assert.equal(doc.querySelector('[aria-hidden="true"]'), null, 'nothing a struck figure says is hidden from screen readers')
+})
+
+// Devin on #813: a struck figure with several sources opened them as the inputs of a
+// calculation, though a struck segment has none. Each is now its own citation.
+test('a struck figure cites each of several sources plainly, never as a calculation', async () => {
+  const opened: Opened = []
+  const block = richTextBlock('rt-struck-cited', [
+    { type: 'struck', text: '68%', reason: 'the sources give 58%', sources: [YEAR_AGO_SOURCE, REVENUE_SOURCE] },
+  ])
+  const text = await clickThrough(block, recordingInspector(opened), [`[data-inspect-result="${FACT_B}"]`, `[data-inspect-result="${RESULT}"]`])
+  assert.equal(text, 'struck: 68% (the sources give 58% [1] [2])')
+  assert.deepEqual(opened, [
+    ['result', [FACT_B, { subject: null, measure: null, period: 'Q4 FY2025', value: '$39.3B' }]],
+    ['result', [RESULT, { subject: null, measure: null, period: 'Q4 FY2026', value: '$62.1B' }]],
+  ])
+  const doc = await renderDocument(block, recordingInspector([]))
+  assert.equal(doc.querySelector('[data-inspect-figure]'), null)
+  assert.deepEqual([...doc.querySelectorAll('[data-inspect-result]')].map((button) => button.getAttribute('aria-label')), [
+    'Inspect the verified calculation for $39.3B, Q4 FY2025',
+    'Inspect the verified calculation for $62.1B, Q4 FY2026',
+  ])
+  const claim = { ref_kind: 'claim', ref_id: FACT_A, format: 'Revenue rose 58% from a year ago.', numeral: 1 } as const
+  const cited = await renderDocument(richTextBlock('rt-struck-claim', [{ type: 'struck', text: '68%', reason: 'the sources give 58%', sources: [REVENUE_SOURCE, claim] }]), recordingInspector([]))
+  assert.equal(cited.querySelector('[data-inspection-kind="claim"]')!.getAttribute('aria-label'), 'Source 2: Revenue rose 58% from a year ago.', 'a citation number is named by what it opens')
+  const reported = await renderDocument(richTextBlock('rt-two-sources', [{ type: 'figure', text: '$62.1B', sources: [REVENUE_SOURCE, claim] }]), recordingInspector([]))
+  assert.equal(reported.querySelector('[data-inspect-figure]')!.getAttribute('aria-label'), 'Inspect the sources of $62.1B', 'a figure with no derivation is not called computed')
 })
