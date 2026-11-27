@@ -31,6 +31,10 @@ export function SourceLink({ snapshotId, source, text, children }: { snapshotId:
   )
 }
 
+// A source as a figure page or a citation names it: what it shows, and its period.
+export const sourceText = (source: SourceRef) => source.format ?? source.ref_kind
+export const sourceLabel = (source: SourceRef) => (source.period ? `${sourceText(source)}, ${source.period}` : sourceText(source))
+
 // A figure as the answer wrote it, linked to what it was checked against: its one
 // source, or, when computed from several, a page naming the derivation and each source.
 export function LinkedFigure({ snapshotId, figure }: { snapshotId: string; figure: Pick<FigureSegment, 'text' | 'sources' | 'derivation' | 'operands'> }): ReactElement {
