@@ -781,7 +781,7 @@ test('a struck figure renders deleted, its reason read after it and linked to th
   ])
   const text = await clickThrough(block, recordingInspector(opened), [`[data-inspect-result="${RESULT}"]`])
   assert.equal(text, 'Revenue was struck: $72.1B (the sources give $62.1B), and margins struck: doubled (the filing says they rose 4 points).')
-  assert.deepEqual(opened, [['result', [RESULT, { subject: null, measure: null, period: 'Q4 FY2026', value: 'the sources give $62.1B' }]]])
+  assert.deepEqual(opened, [['result', [RESULT, { subject: null, measure: null, period: 'Q4 FY2026', value: '$62.1B' }]]], 'the inspector shows the value its source gives, not the sentence (#813)')
   const doc = await renderDocument(block)
   assert.deepEqual([...doc.querySelectorAll('del')].map((del) => [del.textContent, del.querySelector('.sr-only')?.textContent]), [
     ['struck: $72.1B', 'struck: '],

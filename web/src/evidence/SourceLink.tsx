@@ -9,9 +9,10 @@ import { useEvidenceInspector } from './useEvidenceInspector.ts'
 // space before the punctuation after it (#303).
 export const REF_CLASS = 'rounded text-left text-fg-soft underline decoration-dotted underline-offset-2'
 
-// A figure's source (#800): an engine result opens its verified calculation,
-// any other source its evidence, headed with the text the reader clicked. label names a
-// control whose children are not that text (a citation number).
+// A figure's source (#800): an engine result opens its verified calculation, headed by
+// its measure and period like any result chip, with text as the value shown; any other
+// source opens its evidence, headed with text. label names a control whose children are
+// not text (a citation number).
 export function SourceLink({ snapshotId, source, text, label, children }: { snapshotId: string; source: SourceRef; text: string; label?: string; children: ReactNode }): ReactElement {
   if (source.ref_kind === 'result') {
     return (

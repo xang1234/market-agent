@@ -80,7 +80,7 @@ function markdownParts(block: RichTextBlock, segments: ReadonlyArray<RichTextSeg
 }
 
 // A figure the sources contradict: struck, then the reason that names what they give (#800).
-// One source links the reason to it. Several are cited one by
+// One source links the reason to it, showing the value it gives. Several are cited one by
 // one, since a struck segment carries no calculation to show them as inputs to.
 function Struck({ snapshotId, segment }: { snapshotId: string; segment: StruckSegment }): ReactElement {
   const { text, reason, sources = [] } = segment
@@ -89,7 +89,7 @@ function Struck({ snapshotId, segment }: { snapshotId: string; segment: StruckSe
     <>
       <del><span className="sr-only">struck: </span>{text}</del>
       {' ('}
-      {sources.length === 1 && only ? <SourceLink snapshotId={snapshotId} source={only} text={reason}>{reason}</SourceLink> : reason}
+      {sources.length === 1 && only ? <SourceLink snapshotId={snapshotId} source={only} text={sourceText(only)}>{reason}</SourceLink> : reason}
       {sources.length > 1
         ? sources.map((source, index) => (
           <Fragment key={index}>
