@@ -14,7 +14,8 @@ import type {
 } from './inspectionTypes.ts'
 import type { InspectorPage, InspectorStack } from './inspectorStack.ts'
 import { InspectableRef } from './InspectableRef.tsx'
-import { SourceLink, sourceLabel, sourceText } from './SourceLink.tsx'
+import { sourceLabel, sourceText } from '../blocks/richText.ts'
+import { SourceLink } from './SourceLink.tsx'
 import { Details, Facts, ReadableValue } from './Readable.tsx'
 import { humanize, isIdentifier, readableDate } from './readable.ts'
 

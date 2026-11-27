@@ -35,7 +35,7 @@ const INSPECTOR = (opened: unknown[]): EvidenceInspectorContextValue => ({
   closeInspection() {},
 })
 
-async function renderPage(figure: FigureSegment, opened: unknown[], use: (panel: Element) => Promise<void>) {
+async function renderPage(figure: FigureSegment, opened: unknown[], check: (panel: Element) => Promise<void>) {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const globals = globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean; document?: Document; window?: Window }
   const previous = { act: globals.IS_REACT_ACT_ENVIRONMENT, document: globals.document, window: globals.window }
@@ -45,7 +45,7 @@ async function renderPage(figure: FigureSegment, opened: unknown[], use: (panel:
     await act(async () => {
       root.render(<EvidenceInspectorPanel stack={[{ kind: 'figure', snapshotId: SNAPSHOT_ID, figure }]} inspector={INSPECTOR(opened)} onBack={() => {}} onClose={() => {}} />)
     })
-    await use(dom.window.document.querySelector('aside')!)
+    await check(dom.window.document.querySelector('aside')!)
     await act(async () => root.unmount())
   } finally {
     Object.assign(globals, { IS_REACT_ACT_ENVIRONMENT: previous.act, document: previous.document, window: previous.window })
