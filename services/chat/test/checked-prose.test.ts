@@ -57,6 +57,8 @@ type Script = {
   labels?: Readonly<Record<string, object>> | Error;
   findings?: ReadonlyArray<object> | Error;
   edits?: ((sentences: RewriteSentence[]) => ReadonlyArray<object>) | Error;
+  // The replies to the second label and relation calls, when they differ from the first.
+  recheck?: Pick<Script, "labels" | "findings">;
 };
 type Call = { kind: "draft" | "label" | "relation" | "rewrite"; model: string; request: LlmChatRequest };
 
@@ -75,7 +77,9 @@ function scripted(script: Script) {
   const createClient = () => async (deployment: { channel: string; model: string }, request: LlmChatRequest): Promise<LlmChatResult> => {
     const kind = (Object.keys(OPENINGS) as Array<keyof typeof OPENINGS>).find((name) => request.messages[0]!.content.startsWith(OPENINGS[name]));
     assert.ok(kind, `no script for ${request.messages[0]!.content.slice(0, 80)}`);
+    const again = calls.some((call) => call.kind === kind);
     calls.push({ kind, model: deployment.model, request });
+    const { labels, findings } = again && script.recheck ? { ...script, ...script.recheck } : script;
     const failed = (reply: unknown) => {
       if (reply instanceof Error) throw reply;
     };
@@ -83,8 +87,8 @@ function scripted(script: Script) {
       case "draft":
         return { text: script.draft };
       case "label": {
-        failed(script.labels);
-        const table = (script.labels ?? {}) as Record<string, object>;
+        failed(labels);
+        const table = (labels ?? {}) as Record<string, object>;
         const numbers = marked(request);
         return { text: fence("labels", {
           labels: numbers.filter(([, text]) => !(text in table)).map(([id]) => id),
@@ -92,8 +96,8 @@ function scripted(script: Script) {
         }) };
       }
       case "relation":
-        failed(script.findings);
-        return { text: fence("findings", script.findings ?? []) };
+        failed(findings);
+        return { text: fence("findings", findings ?? []) };
       case "rewrite": {
         failed(script.edits);
         const sentences = (JSON.parse(request.messages[1]!.content) as { sentences: RewriteSentence[] }).sentences;
@@ -258,6 +262,31 @@ test("a relation quote the text does not hold is dropped; one it holds goes back
   });
   assert.equal(JSON.parse(standing.calls[3]!.request.messages[1]!.content).sentences[0].problems[0], "below a year ago: revenue was higher than a year ago. Say instead: above a year ago.");
   assert.equal(shown(standing.segments), "Revenue reached {$62.1B}, ~~below a year ago~~ (above a year ago).");
+});
+
+// Codex on #814: a correction whose check failed is unchecked, not clean, so the draft stays.
+test("a correction whose labelling or relation check fails keeps the checked draft", async () => {
+  for (const recheck of [{ labels: new Error("labeller down") }, { findings: new Error("relation down") }]) {
+    const { segments, kinds } = await lane({
+      draft: "Revenue reached $72.1B.",
+      labels: { "$72.1B": reported(REVENUE), "$62.1B": reported(REVENUE) },
+      edits: () => [{ sentence: "s1", text: "Revenue reached $62.1B." }],
+      recheck,
+    });
+    assert.deepEqual(kinds(), ["draft", "label", "relation", "rewrite", "label", "relation"]);
+    assert.equal(shown(segments), "Revenue reached ~~$72.1B~~ (the sources give $62.1B).", Object.keys(recheck)[0]);
+  }
+});
+
+// Codex on #814: a contradicted comparison is struck whole, over a figure inside its quote.
+test("a standing relation quote that holds a linked figure is still struck with its correction", async () => {
+  const { segments } = await lane({
+    draft: "Revenue reached $62.1B, below a year ago.",
+    labels: { "$62.1B": reported(REVENUE) },
+    findings: [{ quote: "Revenue reached $62.1B, below a year ago", problem: "revenue was higher than a year ago", correction: "Revenue reached $62.1B, above a year ago" }],
+    edits: new Error("rewrite down"),
+  });
+  assert.equal(shown(segments), "~~Revenue reached $62.1B, below a year ago~~ (Revenue reached $62.1B, above a year ago).");
 });
 
 test("a sentence stating a stance goes back, and one still stating it after the rewrite is left out", async () => {

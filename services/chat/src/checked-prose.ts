@@ -117,10 +117,13 @@ export async function checkedProse(input: CheckedProseInput, models: CheckedPros
   const edited = new Set(Object.keys(edits));
   const recheck = edited.size === 0 ? null : await step("check_corrections", "Checking the corrections", () =>
     checkRound(models, packet, input.question, lead, parts, { ...texts, ...edits }, edited, draft.labelled.ok));
+  // A check that failed on the corrections but not on the draft found nothing because it
+  // read nothing, so every edit keeps the checked draft.
+  const unchecked = recheck !== null && ((draft.labelled.ok && !recheck.labelled.ok) || (draft.related.ok && !recheck.related.ok));
   const final = parts.map((part) => {
     const before = draft.versions[part.id]!;
     const after = recheck?.versions[part.id];
-    return kept(after === undefined || problemCount(after) > problemCount(before) ? before : after);
+    return kept(after === undefined || unchecked || problemCount(after) > problemCount(before) ? before : after);
   });
   return { written_by, lead, sentences, draft, rewrite: { request, edits, recheck }, final };
 }
@@ -468,11 +471,21 @@ export function proseSegments(checked: CheckedProse, packet: EvidencePacket, sea
     const { text } = version;
     if (text === "" || [...text.matchAll(MARKER)].some((match) => isGone(claims.get(match[1]!)))) return;
     const spans: Array<{ start: number; end: number; segment: ProseSegment }> = [];
+    const overlaps = (start: number, end: number) => spans.some((span) => span.start < end && start < span.end);
+    // A contradicted comparison is struck whole, over any figure or claim inside its quote.
+    // ponytail: of two overlapping quotes the first is struck alone; merge them if that shows up.
+    for (const finding of version.findings) {
+      const start = text.indexOf(finding.quote);
+      const end = start + finding.quote.length;
+      if (!overlaps(start, end)) spans.push({ start, end, segment: { type: "struck", text: finding.quote, reason: finding.correction } });
+    }
     for (const match of text.matchAll(MARKER)) {
       const claim = claims.get(match[1]!);
-      if (claim) spans.push({ start: match.index, end: match.index + match[0].length, segment: sealer.quote(claim) });
+      const end = match.index + match[0].length;
+      if (claim && !overlaps(match.index, end)) spans.push({ start: match.index, end, segment: sealer.quote(claim) });
     }
     for (const entry of version.numerals) {
+      if (overlaps(entry.numeral.start, entry.numeral.end)) continue;
       if (entry.label?.kind !== "figure") {
         if (entry.label === null && figuresChecked) untraced += 1;
         continue;
@@ -480,11 +493,6 @@ export function proseSegments(checked: CheckedProse, packet: EvidencePacket, sea
       const shown = figuresChecked ? figureSegment(entry, entry.label.label, packet, sealer, isGone) : null;
       if (shown) spans.push({ start: entry.numeral.start, end: entry.numeral.end, segment: shown });
       else if (figuresChecked) untraced += 1;
-    }
-    for (const finding of version.findings) {
-      const start = text.indexOf(finding.quote);
-      const end = start + finding.quote.length;
-      if (!spans.some((span) => span.start < end && start < span.end)) spans.push({ start, end, segment: { type: "struck", text: finding.quote, reason: finding.correction } });
     }
     let at = 0;
     for (const span of spans.sort((a, b) => a.start - b.start)) {
