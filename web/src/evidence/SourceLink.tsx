@@ -10,8 +10,9 @@ import { useEvidenceInspector } from './useEvidenceInspector.ts'
 export const REF_CLASS = 'rounded text-left text-fg-soft underline decoration-dotted underline-offset-2'
 
 // A figure's source (#800): an engine result opens its verified calculation,
-// any other source its evidence, headed with the text the reader clicked.
-export function SourceLink({ snapshotId, source, text, children }: { snapshotId: string; source: SourceRef; text: string; children: ReactNode }): ReactElement {
+// any other source its evidence, headed with the text the reader clicked. label names a
+// control whose children are not that text (a citation number).
+export function SourceLink({ snapshotId, source, text, label, children }: { snapshotId: string; source: SourceRef; text: string; label?: string; children: ReactNode }): ReactElement {
   if (source.ref_kind === 'result') {
     return (
       <InspectableResult
@@ -25,7 +26,7 @@ export function SourceLink({ snapshotId, source, text, children }: { snapshotId:
     )
   }
   return (
-    <InspectableRef snapshotId={snapshotId} inspectionRef={{ kind: source.ref_kind, id: source.ref_id }} shownAs={text} className={REF_CLASS}>
+    <InspectableRef snapshotId={snapshotId} inspectionRef={{ kind: source.ref_kind, id: source.ref_id }} shownAs={text} label={label} className={REF_CLASS}>
       {children}
     </InspectableRef>
   )
@@ -49,7 +50,7 @@ export function LinkedFigure({ snapshotId, figure }: { snapshotId: string; figur
       type="button"
       className={`border-0 bg-transparent p-0 ${REF_CLASS}`}
       data-inspect-figure
-      aria-label={`Inspect how ${figure.text} is computed`}
+      aria-label={figure.derivation ? `Inspect how ${figure.text} is computed` : `Inspect the sources of ${figure.text}`}
       onClick={() => open({ snapshotId, figure: { type: 'figure', ...figure } })}
     >
       {figure.text}

@@ -1,7 +1,7 @@
-import { useContext, type ReactElement } from 'react'
+import { Fragment, useContext, type ReactElement } from 'react'
 import { InspectableRef } from '../evidence/InspectableRef.tsx'
 import { InspectableResult } from '../evidence/InspectableResult.tsx'
-import { LinkedFigure, REF_CLASS } from '../evidence/SourceLink.tsx'
+import { LinkedFigure, REF_CLASS, SourceLink, sourceLabel, sourceText } from '../evidence/SourceLink.tsx'
 import type { CitationRef, CommentaryPart, RefSegment, RichTextBlock, RichTextSegment, StruckSegment, TextSegmentTone } from './types.ts'
 import { citationNumbers, citesQuoteBefore, commentaryCard, isCitationRef, isRefSegment, refSegmentText, type Takeaway } from './richText.ts'
 import { Markdown } from './Markdown.tsx'
@@ -79,13 +79,26 @@ function markdownParts(block: RichTextBlock, segments: ReadonlyArray<RichTextSeg
   })
 }
 
-// A figure the sources contradict: struck, then the reason that names what they give, linked to it (#800).
+// A figure the sources contradict: struck, then the reason that names what they give (#800).
+// One source links the reason to it. Several are cited one by
+// one, since a struck segment carries no calculation to show them as inputs to.
 function Struck({ snapshotId, segment }: { snapshotId: string; segment: StruckSegment }): ReactElement {
-  const { text, reason, sources } = segment
+  const { text, reason, sources = [] } = segment
+  const [only] = sources
   return (
     <>
       <del><span className="sr-only">struck: </span>{text}</del>
-      {' ('}{sources?.length ? <LinkedFigure snapshotId={snapshotId} figure={{ text: reason, sources }} /> : reason})
+      {' ('}
+      {sources.length === 1 && only ? <SourceLink snapshotId={snapshotId} source={only} text={reason}>{reason}</SourceLink> : reason}
+      {sources.length > 1
+        ? sources.map((source, index) => (
+          <Fragment key={index}>
+            {' '}
+            <SourceLink snapshotId={snapshotId} source={source} text={sourceText(source)} label={`Source ${index + 1}: ${sourceLabel(source)}`}>[{index + 1}]</SourceLink>
+          </Fragment>
+        ))
+        : null}
+      )
     </>
   )
 }
