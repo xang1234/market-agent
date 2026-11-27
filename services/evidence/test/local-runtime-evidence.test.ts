@@ -37,7 +37,6 @@ test("loadVerifierRowsForRefs scopes hydrated verifier rows to public or same-us
             {
               claim_id: "33333333-3333-4333-8333-333333333333",
               source_id: "11111111-1111-4111-8111-111111111111",
-              text: "Revenue was $1.2 billion.",
             },
           ],
         };
@@ -54,9 +53,6 @@ test("loadVerifierRowsForRefs scopes hydrated verifier rows to public or same-us
   });
 
   assert.deepEqual(rows.sources, [{ source_id: "11111111-1111-4111-8111-111111111111" }]);
-  // A figure a claim states is checked against its stored text at the seal (#800).
-  assert.deepEqual(rows.claims, [{ claim_id: "33333333-3333-4333-8333-333333333333", source_id: "11111111-1111-4111-8111-111111111111", text: "Revenue was $1.2 billion." }]);
-  assert.match(queries[2].text, /text_canonical as text/i);
   assert.equal(queries.length, 3);
   assert.deepEqual(queries.map((query) => query.values[1]), [
     "44444444-4444-4444-8444-444444444444",

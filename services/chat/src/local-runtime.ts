@@ -50,8 +50,6 @@ import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinanci
 import { saveCommentary } from "./engine-commentary.ts";
 import { analystAgentRouter, analystAgentRunner, type AnalystAgentDeps } from "./analyst-agent.ts";
 import { checkedProseModels } from "./checked-prose.ts";
-import { isRecord } from "../../shared/src/http.ts";
-import type { FinancialAnswerContent } from "../../financial-core/src/index.ts";
 import { ChatSnapshotSealError, createChatMessagePersistence, saveChatMessageWorkSummary, type ChatSealResult } from "./messages.ts";
 import type { ChatWorkSummarySave } from "./work-summary.ts";
 import {
@@ -628,8 +626,9 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
         sources: verifierRows.sources,
         documents: verifierRows.documents,
         claims: verifierRows.claims,
-        // The certified answers it shows, which a figure on an engine result reads (#800).
-        financial_answers: saved.flatMap((block) => (block.kind === "financial_answer" && isRecord(block.financial) ? [block.financial as unknown as FinancialAnswerContent] : [])),
+        // The answers it shows, which a figure on an engine result reads (#800). The seal
+        // believes one only as far as its certificate in this thread holds it.
+        financial_answers: saved.flatMap((block) => (block.kind === "financial_answer" ? [block.financial] : [])),
       });
       // A refused seal keeps its audit row.
       await client.query("commit");
