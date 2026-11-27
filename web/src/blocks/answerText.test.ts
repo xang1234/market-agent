@@ -168,3 +168,19 @@ test('a linked figure copies as the answer wrote it, and a struck one struck wit
     'Revenue was about $62B, not ~~$72.1B~~ (the sources give $62.1B).',
   )
 })
+
+// Devin on #813: a struck "~$72B" copied as "~~~$72B~~", which Markdown no longer strikes whole.
+test('a tilde a figure, a struck one or its reason states is escaped, so the strike still covers it', () => {
+  const source = { ref_kind: 'result', ref_id: '91111111-1111-4111-9111-111111111111', format: '$62.1B', period: 'Q4 FY2026' } as const
+  assert.equal(
+    answerText([{
+      ...richTextFixture,
+      segments: [
+        { type: 'figure', text: '~$62B', sources: [source], near: true },
+        { type: 'text', text: ', not ' },
+        { type: 'struck', text: '~$72B', reason: 'the sources give ~$62B', sources: [source] },
+      ],
+    }]),
+    '\\~$62B, not ~~\\~$72B~~ (the sources give \\~$62B)',
+  )
+})

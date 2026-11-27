@@ -20,8 +20,9 @@ import type {
 
 // Text the app shows literally (a ref's figure, a toned run, a table cell) keeps
 // its characters when pasted into Markdown. Only marks that change inline
-// meaning are escaped, so figures like $85.8B stay readable as plain text.
-const literal = (text: string) => text.replace(/[\\`*_[\]<>]/g, '\\$&')
+// meaning are escaped, so figures like $85.8B stay readable as plain text. A
+// tilde strikes text through, so a struck "~$72B" keeps its strike whole.
+const literal = (text: string) => text.replace(/[\\`*_~[\]<>]/g, '\\$&')
 
 function markdownTable(header: ReadonlyArray<string>, rows: ReadonlyArray<ReadonlyArray<string>>): string {
   const line = (cells: ReadonlyArray<string>) => `| ${cells.map((cell) => literal(cell).replaceAll('|', '\\|').replaceAll('\n', ' ')).join(' | ')} |`
