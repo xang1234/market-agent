@@ -85,6 +85,12 @@ export function enumerateNumerals(text: string): Numeral[] {
   });
 }
 
+// The figures a source's text states, in order: its numerals but dates and the digits of a
+// name ("MI308", "FY2026", "Q2"), which no answer cites as a figure. A claim's k-th figure
+// is entry k - 1, in chat's evidence packet and at the seal (#800).
+export const statedFigures = (text: string): Numeral[] =>
+  enumerateNumerals(text).filter((numeral) => numeral.unit !== "date" && !/\p{L}$/u.test(text.slice(0, numeral.start)));
+
 // --- labels ------------------------------------------------------------------------
 
 // A value as the data holds it: an amount (dollars, shares), a fraction (a margin, a
@@ -126,6 +132,24 @@ export function writtenAs({ kind, value }: Quantity, unit: NumeralUnit): number[
   if (unit === "bps") return [value * 10_000];
   if (unit === "multiple") return kind === "ratio" ? [value] : [];
   return [value * 100, value];
+}
+
+// The quantity a numeral states, as writtenAs would write it: a percent, points or basis
+// points as a fraction, a multiple as a ratio, anything else as an amount. A date states none.
+export function statedQuantity({ unit, value }: Numeral): Quantity | undefined {
+  switch (unit) {
+    case "date":
+      return undefined;
+    case "percent":
+    case "points":
+      return { kind: "fraction", value: value / 100 };
+    case "bps":
+      return { kind: "fraction", value: value / 10_000 };
+    case "multiple":
+      return { kind: "ratio", value };
+    case "amount":
+      return { kind: "amount", value };
+  }
 }
 
 // The data's value in the figure's unit. A bare number reads a fraction two ways ("41",

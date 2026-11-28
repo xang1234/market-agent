@@ -11,7 +11,8 @@
 // cutoff): repeats already counted once, each placed by its stored polarity,
 // with any stored contradiction between them named.
 
-import { dependencyClosure, type FinancialAnswerContent, type FinancialPlan } from "../../financial-core/src/index.ts";
+import { dependencyClosure, type FinancialAnswerContent, type FinancialPlan, type PresentedPayload } from "../../financial-core/src/index.ts";
+import { statedFigures, statedQuantity, type Quantity } from "../../financial-core/src/figure-check.ts";
 import { returnLabel } from "../../market/src/perf-points.ts";
 import { QUARTERS_SHOWN, type ResearchScope, type ScopeQuarter } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -31,6 +32,9 @@ export type PacketFigure = {
   value: string;
   // An engine amount shown at its scale ("$12.9B") in full, so two that read alike still compare; never sent to the model.
   exact?: string;
+  // The value exactly, for the figure check (#800); never sent to the model. Absent for a
+  // gap, a ranking sentence, and a figure read from blocks (perfFigures).
+  quantity?: Quantity;
   shown_in?: string;
   fact_id?: string;
   series_ref?: string;
@@ -648,6 +652,7 @@ export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyM
       period: content.labels[period_label_id]!.text,
       value: presented.text,
       ...(presented.kind === "value" && presented.unit.kind === "currency" ? { exact: presented.full_text } : {}),
+      ...(presented.kind === "value" ? { quantity: quantityOf(presented) } : {}),
       ...(presented.kind === "gap" ? { gap: presented.text } : {}),
       ...(presented.kind === "ranking" ? { ranking: true as const } : {}),
       ...(lead === undefined ? {} : { lead_of: lead }),
@@ -669,6 +674,28 @@ export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyM
     claims_truncated: false,
     ...(content.presentations.some((presentation) => presentation.kind === "table") ? { periods_shown: true as const } : {}),
   };
+}
+
+// A value as the figure check reads it. A ratio reads as a multiple exactly when the
+// presentation wrote it as one (readsAsMultiple, so "3.5x" in full); the plan that decides
+// it can be absent here. A percent moves its decimal point ("74.4e-2"), so 74.4% reads as
+// the double nearest 0.744, not 74.4 / 100.
+function quantityOf(presented: Extract<PresentedPayload, { kind: "value" }>): Quantity {
+  const value = Number(presented.value);
+  switch (presented.unit.kind) {
+    case "ratio":
+      return { kind: presented.full_text.endsWith("x") ? "ratio" : "fraction", value };
+    case "percent":
+    case "percentage_points":
+      return { kind: "fraction", value: Number(`${presented.value}e-2`) };
+    case "basis_points":
+      return { kind: "fraction", value: Number(`${presented.value}e-4`) };
+    case "currency":
+    case "currency_per_share":
+    case "shares":
+    case "count":
+      return { kind: "amount", value };
+  }
 }
 
 // Each lead's companies, by its output: the one company each side's inputs are reported for.
@@ -752,13 +779,36 @@ function claimBounds(scope: ResearchScope | undefined, cutoff: string): string {
   return `${route}, published by the ${cutoff.slice(0, 10)} cutoff; a claim repeated by several sources or copies counts once`;
 }
 
+export type FigureId = string & { readonly brand: "FigureId" };
+export type ClaimId = string & { readonly brand: "ClaimId" };
+// A pointer at one value of the packet (#800): a figure ("F3"), or the k-th figure a
+// claim's text states ("C2.1"), counted from 1.
+export type PacketRef = Readonly<{ figure: FigureId }> | Readonly<{ claim: ClaimId; numeral: number }>;
+
+/** "F3" or "C2.1" as a pointer at a value this packet holds; null for anything else. */
+export function parsePacketRef(text: string, packet: EvidencePacket): PacketRef | null {
+  const match = /^(?:(?<figure>F\d+)|(?<claim>C\d+)\.(?<numeral>[1-9]\d*))$/u.exec(text.trim());
+  const { figure, claim, numeral } = match?.groups ?? {};
+  if (figure !== undefined) return packet.figures.some((entry) => entry.id === figure) ? { figure: figure as FigureId } : null;
+  const claimed = packet.claims.find((entry) => entry.id === claim);
+  return claimed && Number(numeral) <= statedFigures(claimed.text).length ? { claim: claim as ClaimId, numeral: Number(numeral) } : null;
+}
+
+/** The value a pointer names exactly, or undefined when the packet holds none there. */
+export function packetValue(packet: EvidencePacket, ref: PacketRef): Quantity | undefined {
+  if ("figure" in ref) return packet.figures.find((figure) => figure.id === ref.figure)?.quantity;
+  const claim = packet.claims.find((entry) => entry.id === ref.claim);
+  const numeral = claim && statedFigures(claim.text)[ref.numeral - 1];
+  return numeral && statedQuantity(numeral);
+}
+
 // The packet as the model sees it: short ids only, no fact, series or source ids.
 export function packetForModel(packet: EvidencePacket): Record<string, unknown> {
   return {
     route: packet.route,
     cutoff: packet.cutoff,
     figures: packet.figures.map((figure) => {
-      const { fact_id: _factId, result_id: _resultId, series_ref: _seriesRef, source_ids: _sourceIds, exact: _exact, ...shown } = figure;
+      const { fact_id: _factId, result_id: _resultId, series_ref: _seriesRef, source_ids: _sourceIds, exact: _exact, quantity: _quantity, ...shown } = figure;
       if (shown.gap === undefined) return shown;
       const { value: _value, ...unavailable } = shown;
       return unavailable;

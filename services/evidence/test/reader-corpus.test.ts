@@ -8,6 +8,7 @@ import test from "node:test";
 
 import { readFigure, type ReleaseMetric } from "../src/release-figures.ts";
 import { extractNonGaapReconciliations, readTables } from "../src/reader/non-gaap-reconciliation-extractor.ts";
+import { statedFigures } from "../../financial-core/src/figure-check.ts";
 
 const CORPUS = join(import.meta.dirname, "reader-corpus");
 const UPDATE = process.env.UPDATE_READER_CORPUS === "1";
@@ -138,4 +139,17 @@ test("the non-GAAP reconciliation reader reads every corpus table as the expecte
     `non-gaap-reconciliation-extractor.ts reads the corpus differently from test/reader-corpus/non-gaap-readings.txt (- expected, + now):`,
     ...gone, ...added, FIX,
   ].join("\n"));
+});
+
+// The figures each corpus sentence states, as chat's packet and the seal number a claim's
+// figures (C2.1 is the first): statedFigures, from financial-core's figure check (#800).
+test("statedFigures reads every corpus sentence as the expected file says", () => {
+  const rows = readFileSync(join(CORPUS, "release-figure-sentences.tsv"), "utf8").split("\n").filter(Boolean);
+  const got = [...new Set(rows.map((row) => row.split("\t")[3]!))]
+    .map((quote) => `${quote} -> ${statedFigures(quote).map((figure) => figure.text).join(" | ")}`)
+    .sort();
+  const want = expected("stated-figure-readings.txt", "# Each sentence of release-figure-sentences.tsv and the figures statedFigures numbers in it, in order.", got);
+  const [had, has] = [new Set(want), new Set(got)];
+  const moved = [...want.filter((line) => !has.has(line)).map((line) => `- ${line}`), ...got.filter((line) => !had.has(line)).map((line) => `+ ${line}`)];
+  assert.ok(moved.length === 0, ["statedFigures reads the corpus differently from test/reader-corpus/stated-figure-readings.txt (- expected, + now):", ...moved, FIX].join("\n"));
 });

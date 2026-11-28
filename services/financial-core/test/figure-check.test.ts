@@ -5,8 +5,11 @@ import {
   atPrecisionOf,
   derive,
   enumerateNumerals,
+  statedFigures,
+  statedQuantity,
   verdictFor,
   withinPrecision,
+  writtenAs,
   type Derivation,
   type FigureLabel,
   type Operand,
@@ -200,4 +203,23 @@ test("the data's value is written at the precision and in the form the figure us
   assert.equal(at("+1.7%", { kind: "fraction", value: -0.01744 }), "-1.7%");
   assert.equal(at("62,500", amount(62_100e6), "millions"), "62,100", "a table in $ millions");
   assert.equal(at("$60B", amount(74_396e6)), "$70B", "a round figure's data is rounded the same way");
+});
+
+test("a text's figures are its numerals but dates and the digits of a name", () => {
+  const text = "Our MI308 GPUs in Q2 FY2025 (ended 2025-06-28) led to approximately $800 million in charges, 10.4% of revenue.";
+  assert.deepEqual(statedFigures(text).map((figure) => figure.text), ["$800 million", "10.4%"]);
+});
+
+test("a numeral states the quantity writtenAs would write it as", () => {
+  const stated = (text: string) => statedQuantity(numeral(text));
+  assert.deepEqual(stated("$800 million"), amount(800e6));
+  assert.deepEqual(stated("-$134.0M"), amount(-134e6));
+  assert.deepEqual(stated("12.5%"), { kind: "fraction", value: 0.125 });
+  assert.deepEqual(stated("3.1 points"), { kind: "fraction", value: 0.031 });
+  assert.deepEqual(stated("120 bps"), { kind: "fraction", value: 0.012 });
+  assert.deepEqual(stated("6.1x"), { kind: "ratio", value: 6.1 });
+  assert.equal(stated("2026-01-25"), undefined, "a date states no quantity");
+  for (const text of ["$800 million", "12.5%", "120 bps", "6.1x"]) {
+    assert.ok(withinPrecision(numeral(text).value, writtenAs(stated(text)!, numeral(text).unit)[0]!, 1e-9), text);
+  }
 });

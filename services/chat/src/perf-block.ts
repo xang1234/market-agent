@@ -124,8 +124,8 @@ export function priceFigures(chart: Block, period: PricePeriod): Array<Omit<Pack
     const spec = specs[index]!;
     const { baseline_date, end_date } = spec.window;
     return [
-      { company: line.name, metric: "Price return", period: `${PERIOD_WORDS[period].phrase}, from the ${dayText(baseline_date)} close to the ${dayText(end_date)} close`, value: returnLabel(line.points.at(-1)!.y), series_ref: spec.series_ref, source_ids: sources },
-      { company: line.name, metric: "Last close", period: `the ${dayText(end_date)} session`, value: closeLabel(spec.end_close, spec.currency), series_ref: spec.series_ref, source_ids: sources },
+      { company: line.name, metric: "Price return", period: `${PERIOD_WORDS[period].phrase}, from the ${dayText(baseline_date)} close to the ${dayText(end_date)} close`, value: returnLabel(line.points.at(-1)!.y), quantity: { kind: "fraction", value: line.points.at(-1)!.y / 100 }, series_ref: spec.series_ref, source_ids: sources },
+      { company: line.name, metric: "Last close", period: `the ${dayText(end_date)} session`, value: closeLabel(spec.end_close, spec.currency), quantity: { kind: "amount", value: spec.end_close }, series_ref: spec.series_ref, source_ids: sources },
     ];
   });
 }
