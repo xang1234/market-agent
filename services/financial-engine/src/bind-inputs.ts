@@ -11,7 +11,9 @@ import {
   BOUND_PRICE_INPUT_SCHEMA_VERSION,
   ExecutionIntegrityError,
   hashCanonical,
+  isOptionalBalance,
   resolveMetricDefinition,
+  unverifiedAbsences,
   validateBoundInput,
   type BoundFactInputV1,
   type BoundPriceInputV1,
@@ -144,7 +146,13 @@ export async function selectPlanInputs(input: {
     ? { node: read.node, candidates: [], incomplete: read.reason_code }
     : { node: read.node, candidates: read.candidates, ...(read.truncated ? { incomplete: "scope_limit_exceeded" as const } : {}) }), policy);
   const histories = await readSplitHistories(client, plan, reads, priceNodes, evidence);
-  const outcomes = reads.map((read) => selectSlot(read, plan, policy, latest.get(read.node.node_id) ?? null, histories.get(read.node.subject_slot)));
+  const selected = reads.map((read) => selectSlot(read, plan, policy, latest.get(read.node.node_id) ?? null, histories.get(read.node.subject_slot)));
+  // Rule 12 (select-inputs.ts) reads each sum's bound balance sheet, so it runs once every slot is selected.
+  const unverified = unverifiedAbsences(plan, new Map(selected.map(({ binding }) => [binding.slot, binding])),
+    new Map(reads.flatMap((read) => read.status === "read" ? [[read.node.node_id, read.candidates] as const] : [])));
+  const outcomes = selected.map(({ binding, ...outcome }): SlotOutcome => unverified.has(binding.slot)
+    ? { ...outcome, binding: { slot: binding.slot, status: "gap", reason_code: "absence_unverified", candidate_set_digest: binding.candidate_set_digest } }
+    : { ...outcome, binding });
   for (const node of priceNodes) outcomes.push(await bindPriceSlot(client, node, plan, policy, histories.get(node.subject_slot), evidence));
   return outcomes;
 }
@@ -179,9 +187,10 @@ async function readSlot(
   return { node, status: "read", candidates: page.candidates, truncated: page.truncated };
 }
 
-// The fiscal period a slot's read asks for, or null for every period. A share count is current only while it is the latest filing's, so every filing's is read.
+// The fiscal period a slot's read asks for, or null for every period. A share count is current only while it is the latest filing's,
+// and an optional balance is absent only while no earlier 10-K reported it (rule 12), so every filing's is read.
 function requestedPeriod(node: ReportedMetricNode): Extract<ReportedMetricNode["period"], { kind: "fiscal_period" }> | null {
-  return node.period.kind === "fiscal_period" && !isShareCount(node.metric_key) ? node.period : null;
+  return node.period.kind === "fiscal_period" && !isShareCount(node.metric_key) && !isOptionalBalance(node.metric_key) ? node.period : null;
 }
 
 /**

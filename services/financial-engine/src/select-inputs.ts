@@ -50,6 +50,12 @@
 //    public at the cutoff or reported only as a restatement under
 //    as_reported, is ineligible_input, so net cash and total debt never
 //    leave out a balance a filing did report (#602).
+// 12. A store misses a line a 10-K tags with a concept it does not read, so
+//    an optional balance net cash or total debt leaves out as missing_input
+//    is absence_unverified when a 10-K public at the cutoff reported it on or
+//    before the sum's balance-sheet date, unless a key the definition may
+//    count as the same line is bound (unverifiedAbsences, #792). It reads the
+//    sum's other slots, so binding applies it once every slot is selected.
 //
 // A selection is a proven input: the chosen candidate with its proofs and
 // context narrowed to non-null, and its numerics parsed exactly once.
@@ -91,7 +97,7 @@ import {
 } from "../../financial-core/src/index.ts";
 import type { InputCandidate, SplitHistory } from "./ports.ts";
 
-export const SELECTION_POLICY_VERSION = "public-information-selection.v8";
+export const SELECTION_POLICY_VERSION = "public-information-selection.v9";
 
 /** A large accelerated filer's filings are due about 112 days apart at most, so an older count is likely superseded. */
 export const SHARE_COUNT_MAX_AGE_DAYS = 130;

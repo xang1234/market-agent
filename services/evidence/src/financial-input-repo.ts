@@ -6,9 +6,12 @@
 // (authoritative/corroborated reported values, or promoted extractions).
 // Estimated, vendor, and derived facts never become candidates. Superseded
 // facts are returned — historical selection decides eligibility at a cutoff —
-// and numerics are projected as text; no value passes through Number.
+// and numerics are projected as text; no value passes through Number. A row
+// without a fiscal year, a period end and a fiscal period the financial
+// contract names is no candidate, so input binding and the seal's reread of a
+// gap read the same rows.
 
-import type { DerivationProofV1, FactInferenceV1 } from "../../financial-core/src/contracts.ts";
+import { FISCAL_PERIODS, type DerivationProofV1, type FactInferenceV1, type FiscalPeriod } from "../../financial-core/src/contracts.ts";
 import type { PrecisionClass, PublicationTimingPrecision } from "../../financial-core/src/evidence-vocabulary.ts";
 import type { CoverageLevel, FactEntitlementChannel } from "./fact-repo.ts";
 import type { FinancialContextFields } from "./financial-context.ts";
@@ -70,9 +73,9 @@ export type FinancialInputCandidate = Readonly<{
   metric_key: string;
   period_kind: string;
   period_start: string | null;
-  period_end: string | null;
-  fiscal_year: number | null;
-  fiscal_period: string | null;
+  period_end: string;
+  fiscal_year: number;
+  fiscal_period: FiscalPeriod;
   value_text: string;
   scale_text: string;
   unit: string;
@@ -163,6 +166,7 @@ export async function listFinancialInputCandidates(db: RowQueryExecutor, request
       where f.subject_kind = $1::subject_kind and f.subject_id = (case when $1 = 'issuer' then current_issuer_id($2::uuid) else $2::uuid end) and m.metric_key = $3
         and ($4::int is null or f.fiscal_year = $4::int)
         and ($5::text is null or f.fiscal_period = $5::text)
+        and f.fiscal_year is not null and f.period_end is not null and f.fiscal_period = any($10::text[])
         and ${ELIGIBLE_FACT_SQL}
         and f.entitlement_channels ? $6
         and (${PUBLIC_SOURCE_SQL} or ($7 = 'owner_visible' and s.user_id = $8::uuid))
@@ -178,6 +182,7 @@ export async function listFinancialInputCandidates(db: RowQueryExecutor, request
       request.scope,
       request.user_id,
       request.limit + 1,
+      FISCAL_PERIODS,
     ],
   );
   const rows = result.rows.map(toCandidate);
@@ -190,9 +195,9 @@ function toCandidate(row: Record<string, unknown>): FinancialInputCandidate {
     metric_key: row.metric_key as string,
     period_kind: row.period_kind as string,
     period_start: row.period_start as string | null,
-    period_end: row.period_end as string | null,
-    fiscal_year: row.fiscal_year as number | null,
-    fiscal_period: row.fiscal_period as string | null,
+    period_end: row.period_end as string,
+    fiscal_year: row.fiscal_year as number,
+    fiscal_period: row.fiscal_period as FiscalPeriod,
     value_text: row.value_text as string,
     scale_text: row.scale_text as string,
     unit: row.unit as string,

@@ -142,6 +142,7 @@ export const REASON_CODES = [
   "split_history_stale",
   "restatement_unverified",
   "source_class_not_allowed",
+  "absence_unverified",
 ] as const;
 export type ReasonCode = (typeof REASON_CODES)[number];
 
