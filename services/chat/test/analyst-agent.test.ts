@@ -7,13 +7,13 @@ import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { LlmClientError, LlmProviderError, LlmRouterError, type ControlledRouter, type LlmChatRequest, type LlmToolCall } from "../../llm/src/router.ts";
-import { analystAgentRouter, analystAgentRunner, analystSectionRunner, certifiedAsk, priceAsk, statusNote, stepLabel, stopNotes, type AnalystAgentDeps } from "../src/analyst-agent.ts";
+import { analystAgentRouter, analystAgentRunner, analystSectionRunner, certifiedAsk, priceAsk, statusNote, stepLabel, stopNotes, withTurnDeadline, type AnalystAgentDeps } from "../src/analyst-agent.ts";
 import type { AnalystToolResult } from "../src/analyst-tools.ts";
 import { answerTurn } from "../src/answer-trace.ts";
 import type { AssertionReport } from "../src/assertions.ts";
 import { createChatCoordinator, resolveTurnSubjects, type ChatAssistantMessagePersistence, type ChatTurnInput } from "../src/coordinator.ts";
 import { figureCompanies, mergePackets, type EvidencePacket, type PacketClaim, type PacketFigure } from "../src/evidence-packet.ts";
-import { chatAuthority, chatGapText, createChatFinancialRuntime, requestedSubjects } from "../src/financial-runtime.ts";
+import { chatAuthority, chatGapText, createChatFinancialRuntime, requestedSubjects, type ChatFinancialRuntime } from "../src/financial-runtime.ts";
 import { ANSWER_DEADLINES, composeAnalystBlocksWithLlm } from "../src/llm-runtime.ts";
 import { proposedMetric, resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import { ENGINE_READS_BY_CATALOG_METRIC, INCOME_LINE_READS } from "../src/scope-figures.ts";
@@ -268,6 +268,21 @@ const meteredPlanner = (model: PlanningModel, beforeModelCall: () => void): Plan
   return model(request);
 };
 
+test("a turn whose claim-started reading spent its deadline starts already aborted, with no timer set", async () => {
+  const warnings: Error[] = [];
+  const onWarning = (warning: Error) => warnings.push(warning);
+  process.on("warning", onWarning);
+  try {
+    const aborted = await withTurnDeadline({ deadlines: { readMs: 30_000, turnMs: 4_000 } }, async (signal) => signal.aborted, performance.now() - 4_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(aborted, true, "the deadline had passed when the turn started");
+    // Node warns of a negative timer once per process, and Node 22 not at all, so this catches the first only on 23+.
+    assert.deepEqual(warnings.map((warning) => warning.name), []);
+  } finally {
+    process.off("warning", onWarning);
+  }
+});
+
 test("a statement ask is keyed by its own words, never by the turn's reading, which only decides whether the planner reads it", () => {
   const ask = (question: string, lines: string[]) => certifiedAsk({ subject_refs: [{ kind: "issuer", id: A }], metrics: ["income_statement"], question } as never, KNOWN, lines);
   const [revenue, margin, unread] = [ask("AAA revenue", ["revenue", "gross_margin"]), ask("AAA gross margin", ["revenue", "gross_margin"]), ask("AAA revenue", [])];
@@ -507,8 +522,8 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     asOf: () => new Date().toISOString(),
     ...(options.logged === false ? {} : { logToolCalls: persist.logToolCalls }),
   });
-  const run = async (agent: ReturnType<typeof agentOf>, input: Omit<ChatTurnInput, "runId"> & { turnId: string; runId?: string }, during?: (stop: () => void, events: () => ReadonlyArray<Record<string, unknown>>) => void, readQuestion?: ReturnType<typeof readingOf>) => {
-    const coordinator = createChatCoordinator({ analystAgent: agent, persistAssistantMessage: persist, runner: () => assert.fail("the agent takes the turn"), ...(readQuestion ? { readQuestion } : {}) });
+  const run = async (agent: ReturnType<typeof agentOf>, input: Omit<ChatTurnInput, "runId"> & { turnId: string; runId?: string }, during?: (stop: () => void, events: () => ReadonlyArray<Record<string, unknown>>) => void, readQuestion?: ReturnType<typeof readingOf>, financialRuntime?: ChatFinancialRuntime) => {
+    const coordinator = createChatCoordinator({ analystAgent: agent, persistAssistantMessage: persist, runner: () => assert.fail("the agent takes the turn"), ...(readQuestion ? { readQuestion } : {}), ...(financialRuntime ? { financialRuntime } : {}) });
     const runId = input.runId ?? input.turnId;
     const handle = coordinator.getOrCreateTurn({ ...input, runId });
     during?.(() => coordinator.stopTurn({ userId: input.userId, threadId: input.threadId, runId, turnId: input.turnId }), () => [...handle.events]);
@@ -1261,7 +1276,7 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
 
   const lane = () => {
     const taken: string[] = [];
-    return { taken, runtime: { take: async (context: { userIntent?: string; companiesByReading?: true }) => (taken.push(`${context.userIntent ?? ""}${context.companiesByReading ? " (by reading)" : ""}`), null), everyOfferedChoice: async () => null, assertReady: async () => {} } };
+    return { taken, runtime: { take: async (context: { userIntent?: string; companiesByReading?: true }) => (taken.push(`${context.userIntent ?? ""}${context.companiesByReading ? " (by reading)" : ""}`), null), claim: async () => null, everyOfferedChoice: async () => null, assertReady: async () => {} } };
   };
 
   await t.test("a comparison naming a company still to be picked goes to the financial lane, which asks, with a page's company or without", async () => {
@@ -1443,7 +1458,13 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
   };
   const TWO_INFERENCES = '```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]},{"kind":"analyst_inference","text":"Its revenue base gives it scale.","supports":[0]},{"kind":"analyst_inference","text":"Scale may help it absorb costs.","supports":[0]}]\n```';
 
-  await t.test("the turn's reading of its question is one of its eight model calls", async () => {
+  // The financial lane's claim reads a cash-resilience ask first, and finds it the analyst's; the agent reuses that reading.
+  const claimed = createChatFinancialRuntime({ pool, planningModel: null, resolveMention, evidence: createEvidenceFinancialPort });
+  const askingGuidance: ScopeProposal = { ...NO_ASKS, asks: new Set(["guidance"]), companies: { kind: "as_named", names: ["AAA"] } };
+  for (const [name, userIntent, reading, financialRuntime] of [
+    ["", "AAA revenue and what it sells", null, undefined],
+    [", when the financial lane's claim made it", "Why did AAA's cash resilience drop?", askingGuidance, claimed],
+  ] as const) await t.test(`the turn's reading of its question is one of its eight model calls${name}`, async () => {
     made.readings = 0;
     const planner = revenueModel(["AAA"]);
     const router = scripted([
@@ -1466,9 +1487,68 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
       asOf: () => new Date().toISOString(),
       logToolCalls: persist.logToolCalls,
     });
-    completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: "AAA revenue and what it sells" }, undefined, meteredReading(null)));
+    completed(await run(agent, { ...base, turnId: randomUUID(), userIntent }, undefined, meteredReading(reading), financialRuntime));
     assert.equal(made.readings, 1);
     assert.equal(made.readings + router.sent.length + planner.calls + kinds.length, 8, JSON.stringify({ readings: made.readings, loop: router.sent.length, planner: planner.calls, answer: kinds }));
+  });
+
+  await t.test("a reading the financial lane's claim made counts toward the agent's turn deadline", async () => {
+    const READ_MS = 4_000;
+    const agent = analystAgentRunner({
+      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
+      router: async () => scripted([{ toolCalls: [call("get_company_profile", PROFILE)] }, { text: "DONE" }]),
+      read: profileOf("We sell widgets."),
+      compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => () => new Promise<never>(() => {}), onAnswered }),
+      asOf: () => new Date().toISOString(),
+      deadlines: { readMs: 30_000, turnMs: READ_MS },
+    });
+    const coordinator = createChatCoordinator({
+      analystAgent: agent,
+      financialRuntime: claimed,
+      persistAssistantMessage: persist,
+      readQuestion: async () => {
+        await new Promise((resolve) => setTimeout(resolve, READ_MS));
+        return askingGuidance;
+      },
+      runner: async (context) => {
+        context.emit("turn.completed", {});
+      },
+    });
+    const turnId = randomUUID();
+    const started = Date.now();
+    await coordinator.getOrCreateTurn({ ...base, runId: turnId, turnId, userIntent: "Why did AAA's cash resilience drop?" }).completed;
+    const took = Date.now() - started;
+    assert.ok(took < READ_MS * 1.6, `the turn took ${took} ms, past its ${READ_MS} ms deadline by more than the time to save it`);
+  });
+
+  await t.test("a claim-started reading that made more model calls than the turn has degrades to unread when the agent charges them", async () => {
+    const agent = analystAgentRunner({
+      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
+      router: async (beforeModelCall) => metered(scripted([{ toolCalls: [call("get_company_profile", PROFILE)] }, { text: "DONE" }]), beforeModelCall),
+      read: profileOf("We sell widgets."),
+      compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: "```assertions\n[]\n```" }), onAnswered }),
+      asOf: () => new Date().toISOString(),
+    });
+    const overBudget = async (_question: string, beforeModelCall?: () => void) => {
+      for (let call = 0; call < 9; call += 1) beforeModelCall?.();
+      return askingGuidance;
+    };
+    let handedBack = false;
+    const coordinator = createChatCoordinator({
+      analystAgent: agent,
+      financialRuntime: claimed,
+      persistAssistantMessage: persist,
+      readQuestion: overBudget,
+      runner: async (context) => {
+        handedBack = true;
+        context.emit("turn.completed", {});
+      },
+    });
+    const turnId = randomUUID();
+    const handle = coordinator.getOrCreateTurn({ ...base, runId: turnId, turnId, userIntent: "Why did AAA's cash resilience drop?" });
+    await handle.completed;
+    assert.deepEqual(handle.events.filter((event) => event.type === "turn.error"), []);
+    assert.equal(handedBack, true, "with no calls left, the agent leaves the turn to the financial lane");
   });
 
   await t.test("the reading's steps leave the answer and its judge their calls, however many the planner takes", async () => {

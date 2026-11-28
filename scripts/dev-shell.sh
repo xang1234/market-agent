@@ -403,6 +403,8 @@ configure_runtime_env() {
     # (services/chat/test/answer-lab/traces), written to .dev by up.
     export LLM_CHANNELS=fixture LLM_FIXTURE_PROTOCOL=openai LLM_FIXTURE_MODELS=recorded
     export LITELLM_MODEL=fixture/recorded LITELLM_FALLBACK_MODELS="" AGENT_LITELLM_MODEL="" ANALYZE_LITELLM_MODEL="" EXTRACTION_LITELLM_MODEL="" JUDGE_LITELLM_MODEL=""
+    # The replies were recorded without the analyst agent.
+    export CHAT_ANALYST_AGENT=""
     if [[ "$DEV_NO_KEYS" == "traces" ]]; then
       export LLM_REPLAY_FILE="$ROOT/.dev/trace-replies.json"
     else
@@ -576,7 +578,7 @@ stop_parked_processes() {
 # `up` leaves running processes alone, but some settings are read only at start:
 # Vite bakes VITE_* into the client (web, or app under chat), and chat/dev-api build
 # their LLM router from LLM_*/LITELLM_* (DEV_NO_KEYS rewrites those), and chat reads
-# CHAT_TRACE_DIR. Each such process
+# CHAT_TRACE_DIR and CHAT_ANALYST_AGENT. Each such process
 # gets a stamp of that env when it starts; a running one whose stamp differs is
 # restarted. The stamp is a checksum so LLM API keys are not copied into .dev.
 launch_env_pattern() {
@@ -584,8 +586,8 @@ launch_env_pattern() {
   case "$1" in
     web) printf '^VITE_' ;;
     # DEV_MODE switches app between live services and the UI-mode replay.
-    app) printf '^(VITE_|DEV_MODE=|DEV_REPLAY_FILE=|DEV_CAPTURE_FILE=|CHAT_TRACE_DIR=|%s)' "$llm" ;;
-    chat) printf '^(CHAT_TRACE_DIR=|%s)' "$llm" ;;
+    app) printf '^(VITE_|DEV_MODE=|DEV_REPLAY_FILE=|DEV_CAPTURE_FILE=|CHAT_TRACE_DIR=|CHAT_ANALYST_AGENT=|%s)' "$llm" ;;
+    chat) printf '^(CHAT_TRACE_DIR=|CHAT_ANALYST_AGENT=|%s)' "$llm" ;;
     dev-api) printf '^(%s)' "$llm" ;;
     *) return 1 ;;
   esac

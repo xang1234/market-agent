@@ -545,6 +545,10 @@ function seats(analystAgent?: (context: ChatTurnRunContext) => Promise<null>) {
         calls.push("offered");
         return null;
       },
+      claim: async () => {
+        calls.push("claim");
+        return null;
+      },
       take: async () => {
         calls.push("financial");
         return null;
@@ -587,6 +591,7 @@ test("without the analyst agent every wrapper of trunk's chain runs in its place
         await context.reading?.();
         return async () => ({ kind: "gap", reason_code: "unsupported", text: "That figure is not supported." });
       },
+      claim: async () => null,
       assertReady: async () => {},
     },
     persistAssistantMessage: async ({ blocks }) => {
@@ -623,10 +628,16 @@ test("without the analyst agent every wrapper of trunk's chain runs in its place
   ]);
 });
 
-test("with the analyst agent it takes the financial lane's seat, and a turn it reads nothing for goes on to the base runner", async () => {
+test("with the analyst agent a turn the financial lane does not claim is the agent's, and one the agent reads nothing for goes on to the base runner", async () => {
   const { calls, coordinator } = seats(async () => null);
   await coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "AAPL revenue" }).completed;
-  assert.deepEqual(calls, ["offered", "agent:analyst_agent", `base:${DEFAULT_BUNDLE_ID}`]);
+  assert.deepEqual(calls, ["offered", "claim", "agent:analyst_agent", `base:${DEFAULT_BUNDLE_ID}`]);
+});
+
+test("with the analyst agent a fixed ask the financial lane gives back is the agent's, never the base runner's directly (#803)", async () => {
+  const { calls, coordinator } = seats(async () => null);
+  await coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "Make a Call on AAPL" }).completed;
+  assert.deepEqual(calls, ["offered", "claim", "agent:analyst_agent", `base:${DEFAULT_BUNDLE_ID}`]);
 });
 
 test("a turn the analyst agent gives back after streaming steps starts the plan over, even for a lane whose own start is empty", async () => {

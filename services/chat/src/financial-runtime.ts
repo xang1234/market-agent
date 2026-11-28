@@ -60,7 +60,7 @@ import type { TurnHydrator } from "./turn-hydration.ts";
 import { priceComparisonTurn } from "./scenario-price-comparison.ts";
 import { findingsDraft } from "./standout-findings.ts";
 import { callTurn, readCallAsk } from "./call.ts";
-import { planEpsScenarios, priorScenario, SCENARIO_DECLINE, SCENARIO_GAP, SCENARIO_INPUTS, scenarioAnswer, turnScenarioAsk, type ScenarioAsk } from "./eps-scenarios.ts";
+import { mayAskScenario, planEpsScenarios, priorScenario, SCENARIO_DECLINE, SCENARIO_GAP, SCENARIO_INPUTS, scenarioAnswer, turnScenarioAsk, type ScenarioAsk } from "./eps-scenarios.ts";
 import { asksCause, filedCauses, namedFigures, NOT_ASKED, type FiledCause } from "./filed-cause.ts";
 import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend, reportsFiscalYear, UNPLANNED, type PeersOf } from "./company-overview.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
@@ -126,6 +126,13 @@ export type ChatFinancialRuntime = Readonly<{
    * It reads the question first, so it may wait on a model.
    */
   take(context: ChatFinancialTurnContext): Promise<(() => Promise<ChatFinancialTurn>) | null>;
+  /**
+   * What take returns, for the fixed asks only: those this lane answers with
+   * no model alone (a Call, a P/E scenario, a price comparison, the
+   * cash-resilience view) and a retry of a turn it saved. Null for any other
+   * turn, which the analyst agent takes.
+   */
+  claim(context: ChatFinancialTurnContext): Promise<(() => Promise<ChatFinancialTurn>) | null>;
   /**
    * For a reply that takes every option the thread's latest message, a
    * clarification of this lane, offered ("all", "all of the above"): those
@@ -202,7 +209,8 @@ const DECLINES: Readonly<Record<Exclude<RequestGap, "publication_failed">, boole
 };
 
 export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): ChatFinancialRuntime {
-  const take = async (context: ChatFinancialTurnContext): Promise<(() => Promise<ChatFinancialTurn>) | null> => {
+  // fixedOnly: claim, which stops wherever the turn shows it is no fixed ask; take, every turn.
+  const lane = async (context: ChatFinancialTurnContext, fixedOnly: boolean): Promise<(() => Promise<ChatFinancialTurn>) | null> => {
     if (!context.userId || !UUID.test(context.threadId)) return null;
     const text = context.userIntent ?? "";
     const turnId = context.turnId ?? context.runId;
@@ -333,12 +341,17 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
         now: () => deps.clock?.() ?? new Date(),
       }, () => savedGap(deps.pool, context.threadId, messageId));
     }
+    // Past here a fixed ask is a P/E scenario or the cash-resilience view, and each needs its wording.
+    const cashResilience = CASH_RESILIENCE.test(text);
+    if (fixedOnly && !cashResilience && !mayAskScenario(text)) return null;
     // A retry of a turn whose run is reserved resumes it, whatever this attempt's reading says.
     const reserved = await findPlanForRequest(deps.pool, { authority, request_key: turnId }) !== null;
     const requested = await requestedSubjects(deps, context, text, context.companiesByReading === true);
     const { clarify } = requested;
-    if (clarify && !reserved) return async () => ({ kind: "clarification", clarification: companyQuestion(clarify) });
+    // A company to ask about is the agent's to ask, which hands it back to take.
+    if (clarify && !reserved) return fixedOnly ? null : async () => ({ kind: "clarification", clarification: companyQuestion(clarify) });
     const ask = turnScenarioAsk(text, requested.subjects);
+    if (fixedOnly && !cashResilience && !ask) return null;
     // A scenario asked of no company is declined here: the analyst path never values multiples.
     const declined = ask ? async (): Promise<ChatFinancialTurn> => gap("unsupported", SCENARIO_GAP) : null;
     if (requested.subjects.length === 0 && !reserved) return declined;
@@ -356,7 +369,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     });
     const routed: PlanChoice = ask ? { kind: "scenario", ask } : routeTurn(reading, scope);
     // An explicit cash-resilience request is that view, unless a scenario or the analyst path takes it.
-    const choice: PlanChoice = routed.kind !== "scenario" && routed.kind !== "analyst" && CASH_RESILIENCE.test(text) ? CASH_RESILIENCE_CHOICE : routed;
+    const choice: PlanChoice = routed.kind !== "scenario" && routed.kind !== "analyst" && cashResilience ? CASH_RESILIENCE_CHOICE : routed;
     if (reserved) return run(requested, reading, scope, choice);
     if (choice.kind === "analyst") return null;
     const inScope = withinScope(requested, scope);
@@ -411,7 +424,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     return choices.join("; ");
   };
   const assertReady = () => requireFinancialReadiness(deps.pool, ["chat"]);
-  return Object.freeze({ take, everyOfferedChoice, assertReady });
+  return Object.freeze({ take: (context: ChatFinancialTurnContext) => lane(context, false), claim: (context: ChatFinancialTurnContext) => lane(context, true), everyOfferedChoice, assertReady });
 }
 
 export const requestKeyFor = (turnId: string, runId: string, ask: string): string => `turn:${turnId}:${runId}:${ask}`;

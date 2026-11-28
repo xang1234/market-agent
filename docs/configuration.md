@@ -37,7 +37,7 @@ JUDGE_LITELLM_MODEL=anthropic/claude-haiku-5-5
 | `AGENT_LITELLM_MODEL` | The analyst agent's tool loop in chat. Falls back to `LITELLM_MODEL`. |
 | `ANALYZE_LITELLM_MODEL` | The same tool loop writing an Analyze memo's sections. Falls back to `AGENT_LITELLM_MODEL`, then `LITELLM_MODEL`. |
 | `EXTRACTION_LITELLM_MODEL` | SEC 8-K and earnings-release extraction, analyst-grid reader columns, and chat's metric scope proposal. Falls back to `LITELLM_MODEL`. |
-| `JUDGE_LITELLM_MODEL` | The judge that checks each analyst inference in a chat answer. It has no fallback. When it is unset, chat shows figures but no inferences. |
+| `JUDGE_LITELLM_MODEL` | The judge that checks each analyst inference in a chat answer. It has no fallback. `.env.dev.example` sets `anthropic/claude-haiku-5-5`. When it is unset, or names a channel `LLM_CHANNELS` does not declare, chat shows figures but no inferences. With only an OpenAI or DeepSeek channel set up, set it to a model on that channel: Settings shows "JUDGE_LITELLM_MODEL: channel 'anthropic' is not configured" while it names the default. |
 
 With `LLM_USAGE_LOG=true`, which `DEV_MODE=analyst` sets, each model call writes one log line with its channel, model, latency, and token counts. The numbers here are an example:
 
@@ -49,6 +49,7 @@ With `LLM_USAGE_LOG=true`, which `DEV_MODE=analyst` sets, each model call writes
 
 | Variable | Effect |
 |---|---|
+| `CHAT_ANALYST_AGENT=1` | Answers chat through the analyst agent's tool loop on `AGENT_LITELLM_MODEL`. The asks the financial lane computes with no model still run there: a Call, a P/E scenario, a price comparison after one, and cash resilience. A turn the agent gives back, or whose model fails, falls back to the analyst path. `.env.dev.example` sets it. Unset, or any other value, chat runs without the agent. |
 | `CHAT_SCOPE_PROPOSAL=off` | Skips the short model call that picks which metrics and facets a question asks for. A follow-up then keeps the previous scope, except for any period it names. |
 | `CHAT_TRACE_DIR` | Writes a trace of each answer turn, including the judge's verdicts, to this directory. Each judged turn also logs one `[chat] judge` line. |
 | `CHAT_VERIFICATION_MODE=display_unverified` | Shows answers that fail verification, labelled **Unverified** with the reasons, and never saves them. The default, `strict`, shows only an error. The chat server refuses this value when `NODE_ENV=production`. |
