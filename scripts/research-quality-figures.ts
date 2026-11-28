@@ -1,7 +1,9 @@
 // The research-quality eval's figure check (#781): every numeral an answer states, found
 // by code, labelled by a model (what each one is and which values on file it rests on),
 // and judged by code against the frozen golden dataset. It reads app runs and bare runs
-// alike, from each completed turn as renderBlock shows it.
+// alike, from each completed turn as renderBlock shows it. The numerals and verdicts are
+// financial-core's figure check, which chat's checked-prose lane is to share (#800); this
+// file holds the golden pointer, its labeller and the CLI.
 //
 //   node --experimental-strip-types scripts/research-quality-figures.ts check <run.json>...
 //
@@ -18,76 +20,25 @@ import {
   goldenDailyBars,
   type GoldenCompany,
 } from "../services/chat/test/golden/dataset.ts";
+import {
+  DERIVATIONS,
+  enumerateNumerals,
+  verdictFor as judge,
+  writtenAs,
+  type Derivation,
+  type FigureLabel,
+  type Numeral,
+  type Operand,
+  type Scale,
+  type Sign,
+  type ValueOf,
+  type Verdict,
+} from "../services/financial-core/src/figure-check.ts";
 import { callMessages, type CallMessages, type Usage } from "./research-quality-bare.ts";
 import { ROOT, Refusal, datasetRevision, renderBlock, runCli, type RunRecord } from "./research-quality-eval.ts";
 import { readRun } from "./research-quality-pairs.ts";
 
 // --- numerals ----------------------------------------------------------------------
-
-// amount: a plain number, a currency amount or one with a B/M/K scale; points:
-// percentage points; bps: basis points; multiple: 3.2x.
-export type NumeralUnit = "amount" | "percent" | "points" | "bps" | "multiple" | "date";
-export type Numeral = {
-  id: string;
-  text: string;
-  start: number;
-  end: number;
-  // As written, its own scale applied; negative only when the text gives it a sign.
-  value: number;
-  // One unit of the last digit shown, scaled like value: the precision the text claims.
-  step: number;
-  unit: NumeralUnit;
-  // The text carries a sign, minus or plus. Parentheses don't sign a number: in prose they
-  // hold an aside ("previous close ($176.10)") far more often than an accounting negative.
-  signed: boolean;
-  // The text carries its own B/M/K scale, so a table's "in millions" doesn't apply.
-  scaled: boolean;
-};
-
-const NUMBER = String.raw`\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+`;
-const SUFFIX = String.raw`\s?(?:%|percent\b|percentage points?\b|pp\b|ppts?\b|points?\b|bps\b|bp\b|basis points\b|trillion\b|billion\b|million\b|thousand\b|tn\b|bn\b|mn\b|mm\b|[tbmk]\b)|(?:x\b|×)`;
-const NUMERAL = new RegExp(
-  String.raw`(?<date>\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z?)?)`
-  + String.raw`|(?<sign>(?<![\w.])[-−+](?=(?:US)?\$?\d|\.\d))?(?:US)?\$?(?<number>${NUMBER})(?<suffix>${SUFFIX})?`,
-  "giu",
-);
-const SCALES: Record<string, number> = { t: 1e12, tn: 1e12, trillion: 1e12, b: 1e9, bn: 1e9, billion: 1e9, m: 1e6, mn: 1e6, mm: 1e6, million: 1e6, k: 1e3, thousand: 1e3 };
-
-function unitOf(suffix: string): { unit: NumeralUnit; scale: number } {
-  const word = suffix.trim().toLowerCase();
-  if (word === "") return { unit: "amount", scale: 1 };
-  if (word === "%" || word === "percent") return { unit: "percent", scale: 1 };
-  if (word === "x" || word === "×") return { unit: "multiple", scale: 1 };
-  if (word === "bps" || word === "bp" || word === "basis points") return { unit: "bps", scale: 1 };
-  if (word in SCALES) return { unit: "amount", scale: SCALES[word]! };
-  return { unit: "points", scale: 1 };
-}
-
-// The last digit's place. ponytail: a whole number's trailing zeros are read as not
-// significant ("$60B", "60%" round to tens), so "$200B" matches 209.9B; a strict reading
-// would flag every round number a model writes.
-function stepOf(digits: string): number {
-  const [whole, fraction] = digits.replaceAll(",", "").split(".");
-  if (fraction !== undefined) return 10 ** -fraction.length;
-  const significant = whole!.replace(/0+$/u, "");
-  return significant === "" ? 1 : 10 ** (whole!.length - significant.length);
-}
-
-// Every numeral in the text, in order, with ids n1, n2... An ISO date or timestamp is one
-// numeral; digits inside a word (FY2026, Q4, MI308) are numerals too, for the labeller.
-export function enumerateNumerals(text: string): Numeral[] {
-  return [...text.matchAll(NUMERAL)].map((match, i) => {
-    const groups = match.groups!;
-    const base = { id: `n${i + 1}`, text: match[0], start: match.index!, end: match.index! + match[0].length };
-    if (groups.date) return { ...base, value: Number.NaN, step: Number.NaN, unit: "date" as const, signed: false, scaled: false };
-    const digits = groups.number!;
-    const suffix = groups.suffix ?? "";
-    const { unit, scale } = unitOf(suffix);
-    const signed = groups.sign !== undefined;
-    const magnitude = Number(digits.replaceAll(",", "")) * scale;
-    return { ...base, value: signed && groups.sign !== "+" ? -magnitude : magnitude, step: stepOf(digits) * scale, unit, signed, scaled: scale !== 1 };
-  });
-}
 
 // The text with each numeral marked by its id, for the labeller.
 export const markNumerals = (text: string, numerals: ReadonlyArray<Numeral>) =>
@@ -100,12 +51,11 @@ export const METRICS = [
   "revenue", "gross_profit", "operating_income", "net_income", "segment_revenue",
   "quote_price", "quote_prev_close", "bar_open", "bar_high", "bar_low", "bar_close", "bar_volume", "filed_claim",
 ] as const;
-export const DERIVATIONS = ["margin", "growth", "difference", "ratio", "share_of_total"] as const;
 const FISCAL_PERIODS = ["Q1", "Q2", "Q3", "Q4", "FY"] as const;
 const SEGMENTS = GOLDEN_COMPANIES.flatMap((company) => company.segments?.revenue.map(([name]) => name) ?? []);
 
 // A pointer at one value on file.
-export type DataRef = {
+export type GoldenRef = {
   company: string;
   metric: (typeof METRICS)[number];
   fiscal_year: number | null;
@@ -114,21 +64,20 @@ export type DataRef = {
   // A daily bar's session date.
   date: string | null;
 };
-// One value on file, or one divided by another (a margin, as an operand of a margin change).
-export type Operand = { value: DataRef; over: DataRef | null };
-export type FigureLabel = {
+// A figure as the labeller states it, saved as is in <run>.figures.json.
+export type LabelledFigure = {
   id: string;
   company: string | null;
   metric: string;
   period: string;
   basis: "reported" | "derived";
-  source: DataRef | null;
-  derivation: (typeof DERIVATIONS)[number] | null;
-  operands: Operand[];
-  sign: "+" | "-" | null;
-  scale: "thousands" | "millions" | "billions" | null;
+  source: GoldenRef | null;
+  derivation: Derivation | null;
+  operands: Operand<GoldenRef>[];
+  sign: Sign;
+  scale: Scale;
 };
-export type TurnLabels = { labels: string[]; figures: FigureLabel[] };
+export type TurnLabels = { labels: string[]; figures: LabelledFigure[] };
 
 const nullable = (schema: object) => ({ anyOf: [schema, { type: "null" }] });
 export const LABELS_SCHEMA = {
@@ -183,8 +132,14 @@ export const LABELS_SCHEMA = {
 const companyOf = (ticker: string): GoldenCompany | undefined => GOLDEN_COMPANIES.find((company) => company.ticker === ticker);
 const BARS = new Map(GOLDEN_COMPANIES.map((company) => [company.ticker, new Map(goldenDailyBars(company).map((bar) => [bar.ts.slice(0, 10), bar]))]));
 
-// The value a pointer names, or undefined when nothing on file is there.
-export function valueOf(ref: DataRef): number | undefined {
+// The value a pointer names, or undefined when nothing on file is there. Every golden
+// value is an amount: dollars, a price or a volume.
+export const valueOf: ValueOf<GoldenRef> = (ref) => {
+  const value = amountOf(ref);
+  return value === undefined ? undefined : { kind: "amount", value };
+};
+
+function amountOf(ref: GoldenRef): number | undefined {
   const company = companyOf(ref.company);
   if (!company) return undefined;
   switch (ref.metric) {
@@ -204,7 +159,7 @@ export function valueOf(ref: DataRef): number | undefined {
     case "quote_prev_close":
       return company.quote.prev_close;
     case "filed_claim":
-      return undefined;
+      return CLAIM_AMOUNTS.length === 1 ? CLAIM_AMOUNTS[0] : undefined;
     default: {
       const bar = ref.date === null ? undefined : BARS.get(company.ticker)!.get(ref.date);
       return bar?.[ref.metric.slice("bar_".length) as "open" | "high" | "low" | "close" | "volume"];
@@ -212,97 +167,45 @@ export function valueOf(ref: DataRef): number | undefined {
   }
 }
 
-// The amounts the filed claim states, read with the same enumerator as answers.
+// The amounts the filed claim states, read with the same enumerator as answers. It states
+// one ($800 million), so a pointer at the claim reads that amount.
 const CLAIM_AMOUNTS = enumerateNumerals(AMD_Q2_2025_RELEASE.text).filter((n) => n.unit === "amount" && n.scaled).map((n) => n.value);
 
 // --- verdicts ------------------------------------------------------------------------
 
-export type Verdict = "matched" | "derived_ok" | "wrong" | "not_checkable";
-export type Checked = { verdict: Verdict; expected?: number; reason?: string };
+export type Checked = { verdict: Verdict["kind"]; expected?: number; reason?: string };
 // A wrong figure within one and a half units of its last digit: a rounding slip, told
 // apart from a misstatement in the summary.
 export const LAST_DIGIT = "off by one in the last digit";
 
-// A fraction (margin, growth, share, a change between margins) reads as percent or
-// points; a ratio as a multiple; an amount only as an amount. A bare table number may be
-// a percent or a plain fraction, so it's read both ways.
-type Result = { kind: "amount" | "fraction" | "ratio"; value: number };
-function candidates({ kind, value }: Result, unit: NumeralUnit): number[] {
-  if (kind === "amount") return unit === "amount" ? [value] : [];
-  if (unit === "percent" || unit === "points") return [value * 100];
-  if (unit === "bps") return [value * 10_000];
-  if (unit === "multiple") return kind === "ratio" ? [value] : [];
-  return [value * 100, value];
-}
+// The filed charge states no sign, so only a reported figure reads it. Adding it back
+// (operating income before the charge) needs a sum, which no derivation is: a difference
+// would expect $934M for the right $666M (#805).
+const operandValueOf: ValueOf<GoldenRef> = (ref) => (ref.metric === "filed_claim" ? undefined : valueOf(ref));
 
-// Equal at the precision shown: within half the last digit's place.
-export const withinPrecision = (shown: number, actual: number, step: number) =>
-  Math.abs(shown - actual) <= step / 2 + 1e-9 * Math.max(Math.abs(shown), Math.abs(actual), step);
-
-function operandValue(operand: Operand): { value: number; fraction: boolean } | undefined {
-  const value = valueOf(operand.value);
-  if (value === undefined) return undefined;
-  if (operand.over === null) return { value, fraction: false };
-  const over = valueOf(operand.over);
-  return over === undefined || over === 0 ? undefined : { value: value / over, fraction: true };
-}
-
-// A derived figure recomputed from its two operands, in their order.
-export function derive(derivation: FigureLabel["derivation"], operands: ReadonlyArray<Operand>): Result | string {
-  if (derivation === null) return "derived, but no derivation given";
-  if (operands.length !== 2) return `${derivation} needs two operands, got ${operands.length}`;
-  const [a, b] = operands.map(operandValue);
-  if (!a || !b) return "an operand isn't in the data";
-  if (derivation === "difference" && a.fraction !== b.fraction) return "a difference between a ratio and an amount";
-  const result: Result = {
-    margin: { kind: "fraction", value: a.value / b.value },
-    share_of_total: { kind: "fraction", value: a.value / b.value },
-    growth: { kind: "fraction", value: (b.value - a.value) / Math.abs(a.value) },
-    ratio: { kind: "ratio", value: a.value / b.value },
-    difference: { kind: a.fraction ? "fraction" : "amount", value: a.value - b.value },
-  }[derivation] as Result;
-  return Number.isFinite(result.value) ? result : "it divides by zero";
-}
-
-const SCALE_WORDS = { thousands: 1e3, millions: 1e6, billions: 1e9 } as const;
-
-// One numeral's verdict. The text's own sign wins; failing that the sign its words give;
-// with neither, only the size is compared ("a loss of $134M" against -134M). A difference
-// is compared by size: its sign follows the operand order, which is the labeller's guess.
-// ponytail: so "margin rose 12.5 points" passes for a fall; check direction when a
-// labeller orders differences reliably.
-export function verdictFor(numeral: Numeral, label: FigureLabel | undefined): Checked {
-  if (!label) return { verdict: "not_checkable", reason: "the labeller skipped it" };
-  if (numeral.unit === "date") return { verdict: "not_checkable", reason: "a date labelled as a figure" };
-  const scale = numeral.unit === "amount" && !numeral.scaled && label.scale ? SCALE_WORDS[label.scale] : 1;
-  const step = numeral.step * scale;
-  // A margin, share or ratio is a level: "fell to 60.5%" says how it moved, not that it is
-  // negative, so only the text's own sign counts. ponytail: an unsigned negative margin
-  // ("an operating loss of 1.7% of revenue") is then compared by size.
-  const level = label.basis === "derived" && (label.derivation === "margin" || label.derivation === "share_of_total" || label.derivation === "ratio");
-  const sign = level ? null : label.sign;
-  const shown = numeral.value * scale * (!numeral.signed && sign === "-" ? -1 : 1);
-  const bySign = (numeral.signed || sign !== null) && !(label.basis === "derived" && label.derivation === "difference");
-  const fits = (actual: number, places = step) => withinPrecision(bySign ? shown : Math.abs(shown), bySign ? actual : Math.abs(actual), places);
-  const wrong = (options: number[]): Checked => ({ verdict: "wrong", expected: options[0], ...(options.some((actual) => fits(actual, step * 3)) ? { reason: LAST_DIGIT } : {}) });
-  let options: number[];
-  if (label.basis === "reported") {
-    if (label.source === null) return { verdict: "not_checkable", reason: `${label.metric} (${label.period}) isn't in the data` };
-    if (label.source.metric === "filed_claim") {
-      if (numeral.unit !== "amount") return { verdict: "not_checkable", reason: "the filed claim states amounts only" };
-      return CLAIM_AMOUNTS.some((actual) => fits(actual)) ? { verdict: "matched" } : wrong(CLAIM_AMOUNTS);
-    }
-    const actual = valueOf(label.source);
-    if (actual === undefined) return { verdict: "not_checkable", reason: "its source isn't in the data" };
-    options = candidates({ kind: "amount", value: actual }, numeral.unit);
-    if (options.length === 0) return { verdict: "not_checkable", reason: `a reported amount shown as ${numeral.unit}` };
-    return options.some((actual) => fits(actual)) ? { verdict: "matched" } : wrong(options);
+// The labeller's figure as the figure check reads it, or why it names nothing to check.
+function asLabel(figure: LabelledFigure): FigureLabel<GoldenRef> | string {
+  const { sign, scale } = figure;
+  if (figure.basis === "derived") {
+    return figure.derivation === null ? "derived, but no derivation given" : { basis: "derived", derivation: figure.derivation, operands: figure.operands, sign, scale };
   }
-  const result = derive(label.derivation, label.operands);
-  if (typeof result === "string") return { verdict: "not_checkable", reason: result };
-  options = candidates(result, numeral.unit);
-  if (options.length === 0) return { verdict: "not_checkable", reason: `a ${label.derivation} shown as ${numeral.unit}` };
-  return options.some((actual) => fits(actual)) ? { verdict: "derived_ok" } : wrong(options);
+  return figure.source === null ? { basis: "off_file", what: `${figure.metric} (${figure.period})` } : { basis: "reported", source: figure.source, sign, scale };
+}
+
+// One numeral's verdict against the golden data, as <run>.figures.json saves it: a wrong
+// figure's expected value in the numeral's own unit (a percent as 74.4, not 0.744).
+export function verdictFor(numeral: Numeral, figure: LabelledFigure | undefined): Checked {
+  if (!figure) return { verdict: "not_checkable", reason: "the labeller skipped it" };
+  const label = asLabel(figure);
+  const verdict: Verdict = typeof label === "string" ? { kind: "not_checkable", reason: label } : judge(numeral, label, label.basis === "derived" ? operandValueOf : valueOf);
+  switch (verdict.kind) {
+    case "wrong":
+      return { verdict: "wrong", expected: writtenAs(verdict.expected, numeral.unit)[0], ...(verdict.lastDigit ? { reason: LAST_DIGIT } : {}) };
+    case "not_checkable":
+      return { verdict: "not_checkable", reason: verdict.reason };
+    default:
+      return { verdict: verdict.kind };
+  }
 }
 
 // --- check -------------------------------------------------------------------------
@@ -310,16 +213,16 @@ export function verdictFor(numeral: Numeral, label: FigureLabel | undefined): Ch
 export type TurnInput = { questionId: string; turn: number; messages: string[]; text: string; numerals: Numeral[] };
 export type LabelResult = { ok: true; labels: TurnLabels; usage?: Usage; stopReason?: string | null } | { ok: false; error: string };
 export type Labeller = (input: TurnInput) => Promise<LabelResult>;
-export type CheckedNumeral = Pick<Numeral, "id" | "text" | "start" | "end"> & { label: "label" | FigureLabel | null; verdict: Verdict | null; expected?: number; reason?: string };
+export type CheckedNumeral = Pick<Numeral, "id" | "text" | "start" | "end"> & { label: "label" | LabelledFigure | null; verdict: Verdict["kind"] | null; expected?: number; reason?: string };
 export type CheckedTurn = { question: string; turn: number; message: string; text: string; labeller: { error?: string; usage?: Usage; stopReason?: string | null }; numerals: CheckedNumeral[] };
-export type Tally = Record<Verdict, number> & { figures: number };
+export type Tally = Record<Verdict["kind"], number> & { figures: number };
 export type FiguresFile = { run: string; checkedAgainst: { datasetRevision: string; asOf: string }; labeller: typeof LABELLER; totals: Tally; turns: CheckedTurn[] };
 
 // A label wins over a figure for an id listed as both; an id listed as neither is a
 // figure the labeller skipped, so it counts as not checkable, never dropped.
 export function checkTurn(input: TurnInput, result: LabelResult, message: string): CheckedTurn {
   const labels = new Set(result.ok ? result.labels.labels : []);
-  const figures = new Map<string, FigureLabel>();
+  const figures = new Map<string, LabelledFigure>();
   for (const figure of result.ok ? result.labels.figures : []) if (!figures.has(figure.id)) figures.set(figure.id, figure);
   return {
     question: input.questionId,
