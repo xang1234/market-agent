@@ -12,7 +12,7 @@ what fails, what still fails shows struck, and every figure that passes links to
 
 | arm | what answers | runs (UTC) |
 |---|---|---|
-| lane | analyst-mode stack at b0ee9f28 (#819's head), `CHAT_ANALYST_AGENT=1`, `CHAT_CHECKED_PROSE=1`, answers by `anthropic/claude-sonnet-5-5`, labeller and relation check by `CHECK_LITELLM_MODEL=anthropic/claude-sonnet-5-5` | 2026-11-28: 090113, 092215, 092744, 093231, 093742 |
+| lane | analyst-mode stack at b0ee9f28, #819's branch before its last three commits (web, and the hedge rule moved to its own module), `CHAT_ANALYST_AGENT=1`, `CHAT_CHECKED_PROSE=1`, answers by `anthropic/claude-sonnet-5-5`, labeller and relation check by `CHECK_LITELLM_MODEL=anthropic/claude-sonnet-5-5` | 2026-11-28: 090113, 092215, 092744, 093231, 093742 |
 | app | a second stack at the same revision and models, with the lane off | 2026-11-28: 090115, 091335, 092215, 092744, 093231 |
 | plain Sonnet | the 11-25 bare runs, `scripts/research-quality-bare.ts` | 2026-11-25: 011555, 013902, 014547, 015253, 035542 |
 
@@ -55,7 +55,8 @@ The lane's own check over the same 70 turns, as the answers render:
 - 14 turns got a rewrite request, for 19 untraced figures and 12 relation findings.
 - 11 relation findings were still there after the rewrite and show struck, with the correction beside them. Each relates
   right figures wrongly, the class the 11-25 write-up said neither check measured:
-  - Four say the margin gap widens down the income statement, where it narrows at net income.
+  - Four say a gap widens down the income statement, where it narrows at net income: two about margins, two about
+    scale.
   - "AMD has the lowest margins", where its gross margin is above AAPL's.
   - "NVDA leads on both scale ... and margins", where AAPL leads on revenue.
 
@@ -87,7 +88,8 @@ Failure labels across the five pairings:
 | plain Sonnet | weak_conclusion ×3 |
 | app (vs plain Sonnet) | weak_conclusion ×27, unstated_gap ×17, operational_failure ×11, missing_counterpoint ×10, wrong_period ×3 |
 
-The app's operational failures are turns that answered "Commentary is unavailable".
+Ten of the app's 21 operational failures are missing-cash-flow turns that answered "Commentary is unavailable". The
+other 11, on the segment and margin-trend questions, returned figures or gaps with no commentary.
 
 ## Against the success rule in #800
 
@@ -106,11 +108,13 @@ criterion but `figures_match_sources`. It falls short on linking and on usefulne
 ## Why usefulness falls short
 
 On `decision_useful` the lane scored 1 of 2 on 46 of its 50 answers and 0 on the other 4. Plain Sonnet scored 2 on 29.
-The reviewers' notes name what the lane's answers lacked, and in each case the lane's evidence packet never held it:
+The reviewers' notes name what the lane's answers lacked, and the lane's evidence packets did not hold it:
 
 - **cause-in-evidence.** No lane answer cites AMD's filed attribution, the MI308 export-control charges.
-- **margin-trend-loss-quarter.** The lane's answers held two of AMD's eight quarters and missed the Q2 FY2025 loss
-  quarter. They said they could not cover eight quarters.
+- **margin-trend-loss-quarter.** No lane answer held AMD's eight quarters, and each said so plainly.
+  - Three held two quarters and missed the Q2 FY2025 loss quarter.
+  - One held three of the eight points, the loss quarter among them.
+  - One said the data could not support a trend.
 - **segment-drill-down.** No lane answer gives NVIDIA's segment split.
 
 Plain Sonnet had the whole 42 KB dataset in its prompt. The lane reads through the analyst agent's tools, so this is a
