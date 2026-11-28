@@ -232,6 +232,21 @@ test("judge calls go to JUDGE_LITELLM_MODEL alone, with no fallback; unset, they
   assert.deepEqual(orderOf(buildLlmDeploymentOrder(parseLlmEnv(ANTHROPIC_ENV), "judge")), ["anthropic/claude-sonnet-5-5", "opencode/qwen3.8-max"]);
 });
 
+test("checked prose's checks go to CHECK_LITELLM_MODEL alone, with no fallback; unset, they follow the primary order (#800)", () => {
+  const settings = parseLlmEnv({
+    ...ANTHROPIC_ENV,
+    LLM_ANTHROPIC_MODELS: "claude-sonnet-5-5,claude-haiku-5-5,claude-opus-5-5",
+    JUDGE_LITELLM_MODEL: "anthropic/claude-haiku-5-5",
+    CHECK_LITELLM_MODEL: "anthropic/claude-opus-5-5",
+  });
+
+  assert.deepEqual(settings.issues, []);
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(settings, "check")), ["anthropic/claude-opus-5-5"]);
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(settings, "judge")), ["anthropic/claude-haiku-5-5"]);
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(parseLlmEnv(ANTHROPIC_ENV), "check")), ["anthropic/claude-sonnet-5-5", "opencode/qwen3.8-max"]);
+  assert.deepEqual(parseLlmEnv({ ...ANTHROPIC_ENV, CHECK_LITELLM_MODEL: "anthropic/claude-opus-5-5" }).issues, ["CHECK_LITELLM_MODEL: model 'claude-opus-5-5' is not listed for channel 'anthropic'"]);
+});
+
 test("a JUDGE_LITELLM_MODEL its channel doesn't list is an issue, and judging falls back to the primary", () => {
   const settings = parseLlmEnv({ ...ANTHROPIC_ENV, JUDGE_LITELLM_MODEL: "anthropic/claude-opus-5-5" });
 

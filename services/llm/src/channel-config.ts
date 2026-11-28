@@ -35,16 +35,18 @@ export type LlmSettings = {
   analyzeModel: LlmModelRef | null;
   extractionModel: LlmModelRef | null;
   judgeModel: LlmModelRef | null;
+  checkModel: LlmModelRef | null;
   issues: ReadonlyArray<string>;
 };
 
 /** What a call is for. "extraction" leads with EXTRACTION_LITELLM_MODEL (a cheaper model
  * for reading filings and picking from fixed lists) when set, "judge" with
- * JUDGE_LITELLM_MODEL (checking a written answer against its evidence), "agent" with
+ * JUDGE_LITELLM_MODEL (checking a written answer against its evidence), "check" with
+ * CHECK_LITELLM_MODEL (checked prose's figure and relation checks, #800), "agent" with
  * AGENT_LITELLM_MODEL (the analyst's tool loop in chat), "analyze" with
  * ANALYZE_LITELLM_MODEL (the same loop writing an Analyze memo), else AGENT_LITELLM_MODEL;
  * else the primary model. */
-export type LlmPurpose = "default" | "extraction" | "judge" | "agent" | "analyze";
+export type LlmPurpose = "default" | "extraction" | "judge" | "check" | "agent" | "analyze";
 
 export type LlmDeployment = {
   channel: string;
@@ -76,6 +78,7 @@ export function parseLlmEnv(env: LlmEnv): LlmSettings {
     issues,
   );
   const judgeModel = parseOptionalModelRef("JUDGE_LITELLM_MODEL", env.JUDGE_LITELLM_MODEL, channels, issues);
+  const checkModel = parseOptionalModelRef("CHECK_LITELLM_MODEL", env.CHECK_LITELLM_MODEL, channels, issues);
 
   return Object.freeze({
     channels: Object.freeze(channels),
@@ -85,6 +88,7 @@ export function parseLlmEnv(env: LlmEnv): LlmSettings {
     analyzeModel,
     extractionModel,
     judgeModel,
+    checkModel,
     issues: Object.freeze(issues),
   });
 }
@@ -108,12 +112,13 @@ export function buildLlmDeploymentOrder(
     default: null,
     extraction: settings.extractionModel,
     judge: settings.judgeModel,
+    check: settings.checkModel,
     agent: settings.agentModel,
     analyze: settings.analyzeModel ?? settings.agentModel,
   }[purpose] ?? settings.primaryModel;
-  // A chosen judge has no fallback: verdicts from another model are another
-  // measurement, and judging every turn on a fallback was not approved.
-  const fallbacks = purpose === "judge" && settings.judgeModel ? [] : settings.fallbackModels;
+  // A chosen judge or checker has no fallback: verdicts from another model are
+  // another measurement, and checking every turn on a fallback was not approved.
+  const fallbacks = (purpose === "judge" && settings.judgeModel) || (purpose === "check" && settings.checkModel) ? [] : settings.fallbackModels;
   return Object.freeze(
     dedupeModelRefs([
       ...(lead ? [lead] : []),

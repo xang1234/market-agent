@@ -49,6 +49,7 @@ import { structuredRefsFromHandoff } from "./local-runtime-structured.ts";
 import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
 import { saveCommentary } from "./engine-commentary.ts";
 import { analystAgentRouter, analystAgentRunner, type AnalystAgentDeps } from "./analyst-agent.ts";
+import { checkedProseModels } from "./checked-prose.ts";
 import { ChatSnapshotSealError, createChatMessagePersistence, saveChatMessageWorkSummary, type ChatSealResult } from "./messages.ts";
 import type { ChatWorkSummarySave } from "./work-summary.ts";
 import {
@@ -547,6 +548,10 @@ export const meteredAgentDeps = (env: NodeJS.ProcessEnv, base: () => Promise<Llm
   planner: (beforeModelCall: () => void) => planningModelWith({ createClient: guardedClient(beforeModelCall, base) }, env),
   compose: ((input, turn, onAnswered, beforeModelCall) =>
     answerTurn(input, turn, { env, traceDir: env.CHAT_TRACE_DIR?.trim(), onAnswered, createClient: guardedClient(beforeModelCall, base) })) satisfies AnalystAgentDeps["compose"],
+  // Checked prose (#800) in the answer's place; runtime.ts refuses it without the agent.
+  ...(env.CHAT_CHECKED_PROSE?.trim() === "1"
+    ? { prose: ((beforeModelCall) => ({ ...checkedProseModels(env, guardedClient(beforeModelCall, base)), traceDir: env.CHAT_TRACE_DIR?.trim() })) satisfies NonNullable<AnalystAgentDeps["prose"]> }
+    : {}),
 });
 
 const { planningModel: _unmetered, ...agentFinancialDeps } = financialDeps;
@@ -621,6 +626,9 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
         sources: verifierRows.sources,
         documents: verifierRows.documents,
         claims: verifierRows.claims,
+        // The answers it shows, which a figure on an engine result reads (#800). The seal
+        // believes one only as far as its certificate in this thread holds it.
+        financial_answers: saved.flatMap((block) => (block.kind === "financial_answer" ? [block.financial] : [])),
       });
       // A refused seal keeps its audit row.
       await client.query("commit");

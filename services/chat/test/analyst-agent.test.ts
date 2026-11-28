@@ -10,6 +10,7 @@ import { LlmClientError, LlmProviderError, LlmRouterError, type ControlledRouter
 import { analystAgentRouter, analystAgentRunner, analystSectionRunner, certifiedAsk, priceAsk, statusNote, stepLabel, stopNotes, withTurnDeadline, type AnalystAgentDeps } from "../src/analyst-agent.ts";
 import type { AnalystToolResult } from "../src/analyst-tools.ts";
 import { answerTurn } from "../src/answer-trace.ts";
+import { checkedProseModels } from "../src/checked-prose.ts";
 import type { AssertionReport } from "../src/assertions.ts";
 import { createChatCoordinator, resolveTurnSubjects, type ChatAssistantMessagePersistence, type ChatTurnInput } from "../src/coordinator.ts";
 import { figureCompanies, mergePackets, type EvidencePacket, type PacketClaim, type PacketFigure } from "../src/evidence-packet.ts";
@@ -283,6 +284,13 @@ test("a turn whose claim-started reading spent its deadline starts already abort
   }
 });
 
+test("the time a turn has left, which gates checked prose's rewrite, counts from the claim-started reading (#800, #803)", async () => {
+  const left = (deps: Parameters<typeof withTurnDeadline>[0]) => withTurnDeadline(deps, async (_signal, remainingMs) => remainingMs(), performance.now() - 100_000);
+  const prose = await left({ prose: (() => { throw new Error("unused"); }) as never });
+  assert.ok(prose <= 80_000 && prose > 70_000, `checked prose's 180s turn, 100s spent: ${prose}`);
+  assert.ok((await left({ deadlines: { readMs: 30_000, turnMs: 104_000 } })) <= 4_000);
+});
+
 test("a statement ask is keyed by its own words, never by the turn's reading, which only decides whether the planner reads it", () => {
   const ask = (question: string, lines: string[]) => certifiedAsk({ subject_refs: [{ kind: "issuer", id: A }], metrics: ["income_statement"], question } as never, KNOWN, lines);
   const [revenue, margin, unread] = [ask("AAA revenue", ["revenue", "gross_margin"]), ask("AAA gross margin", ["revenue", "gross_margin"]), ask("AAA revenue", [])];
@@ -489,6 +497,32 @@ test("the agent's production wiring meters its reading, router, planner and answ
   }
 });
 
+test("checked prose's draft and checks are metered like the agent's other calls, and only with CHAT_CHECKED_PROSE=1 (#800)", async () => {
+  const { meteredAgentDeps } = await import("../src/local-runtime.ts");
+  assert.equal(meteredAgentDeps(LLM_ENV, () => async () => assert.fail("no call")).prose, undefined);
+  let attempts = 0;
+  const deps = meteredAgentDeps({ ...LLM_ENV, CHAT_CHECKED_PROSE: "1", CHAT_TRACE_DIR: "/tmp/traces" }, () => async () => {
+    attempts += 1;
+    return { text: "Revenue was $1.0B." };
+  });
+  let metered = 0;
+  let refuse = false;
+  const meter = () => {
+    if (refuse) throw new LlmClientError("spent");
+    metered += 1;
+  };
+  const prose = deps.prose!(meter);
+  assert.equal(prose.traceDir, "/tmp/traces");
+  for (const call of [prose.write, prose.check]) {
+    assert.equal((await call({ messages: [{ role: "user", content: "AAA" }] }, { attemptMs: 1_000, totalMs: 2_000 })).outcome, "replied");
+    assert.deepEqual([metered, attempts], [1, 1], "one metered attempt");
+    refuse = true;
+    assert.equal((await call({ messages: [{ role: "user", content: "AAA" }] }, { attemptMs: 1_000, totalMs: 2_000 })).outcome, "failed");
+    assert.equal(attempts, 1, "a refused attempt reaches no deployment");
+    [metered, attempts, refuse] = [0, 0, false];
+  }
+});
+
 test("the analyst agent", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("docker is not available");
@@ -555,6 +589,51 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     const proofs = (done.message as { block_proofs: Record<string, { calculation: string }> }).block_proofs;
     assert.deepEqual(blocks.slice(0, 2).map((block) => proofs[block.id as string]?.calculation), ["verified", "verified"]);
     assert.ok(router.sent[0]!.tools!.map((tool) => tool.name).includes("certified_financials"));
+  });
+
+  // Checked prose (#800) on scripted models: the draft as given, every number of it a name
+  // but the ones labelled here, and no relation finding.
+  const proseOf = (draft: string, labels: Readonly<Record<string, string>> | Error): AnalystAgentDeps["prose"] => (beforeModelCall) => checkedProseModels(LLM_ENV, () => async (_deployment, request) => {
+    beforeModelCall();
+    const opening = request.messages[0]!.content;
+    if (opening.startsWith("Write a concise investment research answer for the chat user in Markdown")) return { text: draft };
+    if (opening.startsWith("You check the comparisons")) return { text: "```findings\n[]\n```" };
+    if (labels instanceof Error) throw labels;
+    const numbers = [...request.messages[1]!.content.matchAll(/⟦(n\d+):([^⟧]*)⟧/gu)];
+    return { text: `\`\`\`labels\n${JSON.stringify({
+      labels: numbers.filter((match) => !(match[2]! in labels)).map((match) => match[1]),
+      figures: numbers.filter((match) => match[2]! in labels).map((match) => ({ id: match[1], basis: "reported", source: labels[match[2]!], sign: null, scale: null })),
+    })}\n\`\`\`` };
+  });
+  const proseAgent = (prose: AnalystAgentDeps["prose"]) => analystAgentRunner({
+    financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
+    router: async () => scripted([{ toolCalls: [call("certified_financials", REVENUE)] }, { text: "DONE" }]),
+    planner: (beforeModelCall) => meteredPlanner(revenueModel(["AAA"]), beforeModelCall),
+    read: noRead,
+    compose: () => assert.fail("checked prose writes the answer"),
+    prose,
+    asOf: () => new Date().toISOString(),
+    logToolCalls: persist.logToolCalls,
+  });
+  const proseCard = (done: Record<string, unknown>) => (done.message as { blocks: Array<Record<string, unknown>> }).blocks.find((block) => block.analyst_commentary === true)!;
+
+  await t.test("checked prose: a whole turn through the coordinator seals, its figure linked to the result it was checked against (#800)", async () => {
+    const events = await run(proseAgent(proseOf("AAA's revenue reached $383.0B in fiscal 2023.", { "$383.0B": "F1" })), { ...base, turnId: randomUUID(), userIntent: "AAA revenue" });
+    const done = completed(events);
+    const blocks = (done.message as { blocks: Array<Record<string, unknown> & { financial?: { results: Array<{ result_id: string; presented: { text: string } }> } }> }).blocks;
+    const result = blocks[0]!.financial!.results.find((entry) => entry.presented.text === "$383.0B")!;
+    const segments = proseCard(done).segments as Array<Record<string, unknown>>;
+    assert.deepEqual(segments.filter((segment) => segment.type === "figure").map((segment) => [segment.text, (segment.sources as Array<{ ref_id: string }>)[0]!.ref_id]), [["$383.0B", result.result_id]]);
+    assert.deepEqual(events.filter((event) => event.type === "tool.completed").map((event) => [event.tool_name, event.label, event.status]).slice(1), [
+      ["write_answer", "Writing the answer", "ok"],
+      ["check_answer", "Checking 2 figures and the comparisons", "ok"],
+    ]);
+  });
+
+  await t.test("checked prose: a labeller failure leaves the figures plain under a note, and the turn still seals (#800)", async () => {
+    const done = completed(await run(proseAgent(proseOf("AAA's revenue reached $383.0B in fiscal 2023.", new LlmProviderError("provider_failed", "labeller down"))), { ...base, turnId: randomUUID(), userIntent: "AAA revenue" }));
+    const segments = proseCard(done).segments as Array<Record<string, unknown>>;
+    assert.deepEqual(segments, [{ type: "text", text: "AAA's revenue reached $383.0B in fiscal 2023.\n\n_The figures in this text could not be checked against the sources just now._" }]);
   });
 
   await t.test("the answer's trace lists the tools the agent called", async () => {
