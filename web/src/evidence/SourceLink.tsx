@@ -2,6 +2,7 @@ import type { ReactElement, ReactNode } from 'react'
 
 import type { FigureSegment, SourceRef } from '../blocks/types.ts'
 import { InspectableRef } from './InspectableRef.tsx'
+import { figureText } from './readable.ts'
 import { InspectableResult } from './InspectableResult.tsx'
 import { useEvidenceInspector } from './useEvidenceInspector.ts'
 
@@ -33,24 +34,25 @@ export function SourceLink({ snapshotId, source, text, label, children }: { snap
   )
 }
 
-// A figure as the answer wrote it, linked to what it was checked against: its one
-// source, or, when computed from several, a page naming the derivation and each source.
-export function LinkedFigure({ snapshotId, figure }: { snapshotId: string; figure: Pick<FigureSegment, 'text' | 'sources' | 'derivation' | 'operands'> }): ReactElement {
+// A figure linked to what it was checked against: its one source, or, when computed from
+// several, a page naming the derivation and each source.
+export function LinkedFigure({ snapshotId, figure, before = '' }: { snapshotId: string; figure: FigureSegment; before?: string }): ReactElement {
   const open = useEvidenceInspector()?.openFigure
   const [only] = figure.sources
+  const text = figureText(figure, before)
   if (figure.derivation === undefined && figure.sources.length === 1 && only) {
-    return <SourceLink snapshotId={snapshotId} source={only} text={figure.text}>{figure.text}</SourceLink>
+    return <SourceLink snapshotId={snapshotId} source={only} text={text}>{text}</SourceLink>
   }
-  if (!open) return <>{figure.text}</>
+  if (!open) return <>{text}</>
   return (
     <button
       type="button"
       className={`border-0 bg-transparent p-0 ${REF_CLASS}`}
       data-inspect-figure
-      aria-label={figure.derivation ? `Inspect how ${figure.text} is computed` : `Inspect the sources of ${figure.text}`}
-      onClick={() => open({ snapshotId, figure: { type: 'figure', ...figure } })}
+      aria-label={figure.derivation ? `Inspect how ${text} is computed` : `Inspect the sources of ${text}`}
+      onClick={() => open({ snapshotId, figure })}
     >
-      {figure.text}
+      {text}
     </button>
   )
 }

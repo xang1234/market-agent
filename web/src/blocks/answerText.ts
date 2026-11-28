@@ -2,7 +2,8 @@
 // answer shows them, tables as Markdown tables. A chart or other visual names
 // itself rather than vanishing, so the reader knows the note leaves it out.
 import { labelText, resultLabel, resultsById, supportedFinancialContent } from './financialAnswer.ts'
-import { citationNumbers, citesQuoteBefore, commentaryCard, isCitationRef, isRefSegment, refSegmentText } from './richText.ts'
+import { citationNumbers, citesQuoteBefore, commentaryCard, isCitationRef, isRefSegment, refSegmentText, textBefore } from './richText.ts'
+import { figureText } from '../evidence/readable.ts'
 import { formatTableCell } from './table.ts'
 import type {
   Block,
@@ -84,7 +85,7 @@ function segmentText(segments: ReadonlyArray<RichTextSegment>, numbers: Readonly
   return segments.map((segment, index) => {
     if (isCitationRef(segment)) return citesQuoteBefore(segments, index) ? ` [${numbers.get(segment.ref_id)}]` : `“${literal(refSegmentText(segment))}” [${numbers.get(segment.ref_id)}]`
     if (isRefSegment(segment)) return literal(refSegmentText(segment))
-    if (segment.type === 'figure') return literal(segment.text)
+    if (segment.type === 'figure') return literal(figureText(segment, textBefore(segments, index)))
     if (segment.type === 'struck') return `~~${literal(segment.text)}~~ (${literal(segment.reason)})`
     return segment.tone === undefined || segment.tone === 'neutral' ? segment.text : literal(segment.text)
   }).join('')

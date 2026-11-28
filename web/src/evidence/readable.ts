@@ -3,8 +3,10 @@
 // what is copied or certified; the full text stays in each element's title.
 
 import type { FinancialUnit } from '../../../services/financial-core/src/contracts.ts'
+import type { FigureSegment } from '../blocks/types.ts'
 import { parseDerivedDecimalText } from '../../../services/financial-core/src/exact-decimal.ts'
 import { formatValue } from '../../../services/financial-core/src/value-text.ts'
+import { endsInHedge } from '../../../services/financial-core/src/hedge.ts'
 
 const UNIT_KINDS: ReadonlySet<string> = new Set(['currency', 'currency_per_share', 'shares', 'ratio', 'percent', 'percentage_points', 'basis_points', 'count'])
 
@@ -13,6 +15,14 @@ function isUnit(unit: unknown): unit is FinancialUnit {
   const { kind, currency } = unit as { kind?: unknown; currency?: unknown }
   if (typeof kind !== 'string' || !UNIT_KINDS.has(kind)) return false
   return (kind !== 'currency' && kind !== 'currency_per_share') || typeof currency === 'string'
+}
+
+// A figure as the answer wrote it, "≈" before it when it is near its source's value (a
+// last digit off, or hedged), so it never reads as the exact value (#800 §7). Words that
+// already hedge it, before it or at the start of its text ("about", "~"), say so instead.
+export function figureText(figure: Pick<FigureSegment, 'text' | 'near'>, before = ''): string {
+  const lead = figure.text.slice(0, Math.max(0, figure.text.search(/[\d$.]/u)))
+  return figure.near && !endsInHedge(before + lead) ? `≈${figure.text}` : figure.text
 }
 
 /** A canonical decimal as the answer prints it ("$54.2B") and in full ("USD 54229000000"); null when this client cannot read it. `multiple` is the server's reads_as_multiple. */

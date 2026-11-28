@@ -80,6 +80,7 @@ test("every numeral is found with its span, value, precision, unit and sign", ()
   assert.equal(found.filter((n) => n.text === "2026").every((n) => !n.signed), true, "a range dash isn't a minus sign");
   assert.deepEqual([by("74.40%").step, by("$178.40").step], [0.01, 0.01]);
   assert.equal(by("1,010,000").step, 10_000, "a whole number's trailing zeros aren't significant");
+  assert.deepEqual([by("1,010,000").place, by("74.40%").place, by("$62.1B").place], [1, 0.01, by("$62.1B").step], "its last digit as written, trailing zeros counted");
 });
 
 test("a figure matches the data at the precision it shows", () => {
@@ -99,6 +100,23 @@ test("a figure matches the data at the precision it shows", () => {
   assert.equal(check("62,100", reported(revenue)).kind, "wrong");
   assert.deepEqual(check("$178.40", reported("NVDA price")), { kind: "matched" });
   assert.deepEqual(check("$55.2B", reported("NVDA Data Center revenue Q4 FY2026")), { kind: "matched" });
+});
+
+// #816: "$100B" matched 62.1B at its last nonzero digit, and "$200B" was near it.
+test("a round figure matches at its last nonzero digit only within a tenth of the data, and is near only one and a half units of its last digit as written", () => {
+  const revenue = reported("NVDA revenue Q4 FY2026");
+  assert.deepEqual(check("$60B", revenue), { kind: "matched" });
+  assert.deepEqual(check("$200B", reported("NVDA revenue FY2026")), { kind: "matched" }, "209.9B to its last nonzero digit, within a tenth");
+  for (const text of ["$100B", "$70B", "$200B"]) assert.deepEqual(check(text, revenue), { kind: "wrong", expected: amount(62_100e6) }, text);
+  assert.deepEqual(check("$62.2B", revenue), { kind: "near", expected: amount(62_100e6) }, "a last-digit slip stays near");
+  const value = (quantity: Quantity) => () => quantity;
+  assert.equal(verdictFor(numeral("$100B"), reported("r"), value(amount(1e9))).kind, "wrong");
+  assert.equal(verdictFor(numeral("100%"), reported("r"), value({ kind: "fraction", value: 0.01 })).kind, "wrong");
+  assert.equal(verdictFor(numeral("200%"), reported("r"), value({ kind: "fraction", value: 1.4 })).kind, "wrong", "200% growth for 140%");
+  assert.equal(verdictFor(numeral("10%"), reported("r"), value({ kind: "fraction", value: 0.08936 })).kind, "near", "12% off, one and a half units of its last digit");
+  assert.deepEqual(verdictFor(numeral("0%"), reported("r"), value({ kind: "fraction", value: 0.004 })), { kind: "matched" }, "never narrower than its last digit as written");
+  // ponytail: a bound is read as its figure, so "over $100B" for $140B is wrong.
+  assert.equal(verdictFor(enumerateNumerals("over $100B")[0]!, reported("r"), value(amount(140e9))).kind, "wrong");
 });
 
 test("a sign comes from the text, then from its words; with neither only the size counts", () => {
@@ -189,10 +207,12 @@ test("a hedged figure is near within one and a half units of its last digit, and
   assert.deepEqual(hedged("$62.2B"), { kind: "near", expected: amount(62_100e6) });
   assert.deepEqual(hedged("$62.3B"), { kind: "wrong", expected: amount(62_100e6) }, "two units off is wrong, hedged or not");
   assert.deepEqual(check("$62.1B", revenue), { kind: "matched" });
+  assert.deepEqual(hedged("$60B"), { kind: "near", expected: amount(62_100e6) }, "a hedged round figure that would match is near");
+  assert.deepEqual(hedged("$100B"), { kind: "wrong", expected: amount(62_100e6) });
 });
 
 test("the data's value is written at the precision and in the form the figure used", () => {
-  const at = (text: string, expected: Parameters<typeof atPrecisionOf>[1], scale: Parameters<typeof atPrecisionOf>[2] = null) => atPrecisionOf(numeral(text), expected, scale);
+  const at = (text: string, expected: Parameters<typeof atPrecisionOf>[1], label?: Parameters<typeof atPrecisionOf>[2]) => atPrecisionOf(numeral(text), expected, label);
   assert.equal(at("41%", { kind: "fraction", value: 0.3445 }), "34%", "not 34.45%");
   assert.equal(at("0.41", { kind: "fraction", value: 0.3445 }), "0.34", "a bare fraction keeps its scale");
   assert.equal(at("41", { kind: "fraction", value: 0.3445 }), "34", "a bare percent keeps its own");
@@ -204,8 +224,26 @@ test("the data's value is written at the precision and in the form the figure us
   assert.equal(at("−1,350 bps", { kind: "fraction", value: -0.12505 }), "−1,250 bps");
   assert.equal(at("-$134.0M", amount(666e6)), "$666.0M");
   assert.equal(at("+1.7%", { kind: "fraction", value: -0.01744 }), "-1.7%");
-  assert.equal(at("62,500", amount(62_100e6), "millions"), "62,100", "a table in $ millions");
+  assert.equal(at("62,500", amount(62_100e6), reported("r", { scale: "millions" })), "62,100", "a table in $ millions");
   assert.equal(at("$60B", amount(74_396e6)), "$70B", "a round figure's data is rounded the same way");
+  assert.equal(at("$100B", amount(62_100e6)), "$62B", "unless that is more than a tenth off: then at its last digit as written");
+  assert.equal(at("200%", { kind: "fraction", value: 1.4 }), "140%");
+});
+
+// #817: "Revenue fell 58%" against +58% was told "they give 58%".
+test("a correction names the data's sign when it turns the sign the figure's words give", () => {
+  const rose = [of("NVDA revenue Q4 FY2025"), of("NVDA revenue Q4 FY2026")];
+  const corrected = (text: string, label: FigureLabel<string>) => {
+    const verdict = check(text, label);
+    assert.equal(verdict.kind, "wrong", text);
+    return atPrecisionOf(numeral(text), (verdict as { expected: Quantity }).expected, label);
+  };
+  assert.equal(corrected("58%", derived("growth", rose, { sign: "-" })), "+58%", "revenue fell 58%");
+  assert.equal(corrected("40%", derived("growth", rose, { sign: "-" })), "+60%", "revenue fell 40%, rounded as the figure is");
+  assert.equal(corrected("$134M", reported("AMD operating income Q2 FY2025", { sign: "+" })), "-$134M", "operating profit was $134M");
+  assert.equal(corrected("45%", derived("growth", [...rose].reverse(), { sign: "-" })), "37%", "revenue fell 45%: its words have the sign right");
+  const q1 = [of("NVDA gross profit Q1 FY2026"), of("NVDA revenue Q1 FY2026")];
+  assert.equal(corrected("50.5%", derived("margin", q1, { sign: "-" })), "60.5%", "gross margin fell to 50.5%: a level has no sign");
 });
 
 test("a text's figures are its numerals but dates and the digits of a name", () => {

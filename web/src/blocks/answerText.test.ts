@@ -169,6 +169,23 @@ test('a linked figure copies as the answer wrote it, and a struck one struck wit
   )
 })
 
+test('a near figure copies with its "≈", unless the words already hedge it (#819)', () => {
+  const source = { ref_kind: 'result', ref_id: '91111111-1111-4111-9111-111111111111', format: '$62.1B', period: 'Q4 FY2026' } as const
+  assert.equal(
+    answerText([{
+      ...richTextFixture,
+      segments: [
+        { type: 'text', text: 'Revenue was ' },
+        { type: 'figure', text: '$62.2B', sources: [source], near: true },
+        { type: 'text', text: ', or about ' },
+        { type: 'figure', text: '$62B', sources: [source], near: true },
+        { type: 'text', text: '.' },
+      ],
+    }]),
+    'Revenue was ≈$62.2B, or about $62B.',
+  )
+})
+
 // Devin on #813: a struck "~$72B" copied as "~~~$72B~~", which Markdown no longer strikes whole.
 test('a tilde a figure, a struck one or its reason states is escaped, so the strike still covers it', () => {
   const source = { ref_kind: 'result', ref_id: '91111111-1111-4111-9111-111111111111', format: '$62.1B', period: 'Q4 FY2026' } as const
