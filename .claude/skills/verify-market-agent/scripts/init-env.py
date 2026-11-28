@@ -28,7 +28,9 @@ for line in open(example_path).read().splitlines():
     lines.append(f"{key}={shift_url_ports(value)}")
 
 # A port, local URL or project name from the main checkout would point this stack at that
-# stack, and down --volumes would delete its database.
+# stack, and down --volumes would delete its database. Its LLM_SETTINGS_ENV_FILE names the
+# main checkout's .env.dev, so this stack would read its models from there and its Settings
+# page would write there; left out, dev-shell defaults it to this checkout's own .env.dev.
 overrides = {}
 if os.path.exists(main_path):
     for line in open(main_path).read().splitlines():
@@ -36,7 +38,7 @@ if os.path.exists(main_path):
         if (
             match
             and not match.group(1).endswith("_PORT")
-            and match.group(1) != "COMPOSE_PROJECT_NAME"
+            and match.group(1) not in ("COMPOSE_PROJECT_NAME", "LLM_SETTINGS_ENV_FILE")
             and not LOCAL_URL_PORT.search(match.group(2))
         ):
             overrides[match.group(1)] = match.group(2)

@@ -10,7 +10,7 @@ Every command is `scripts/verify` in this skill. **Run it from inside the checko
 ## Launch
 
 ```bash
-$V init-env 100                # First time in a worktree. Shifts every port by 100 and takes the main checkout's keys.
+$V init-env 100                # First time in a worktree. Shifts every port by 100 and takes the main checkout's keys; model settings are read from this worktree's own .env.dev.
 $V up                          # DEV_MODE=data on Node 22.18. Takes minutes on a fresh checkout.
 $V up analyst                  # DEV_MODE=analyst: also writes chat turn traces and [llm] usage lines, which the scorecard reads.
 $V doctor                      # Ready means exit 0 and no FAIL line.
