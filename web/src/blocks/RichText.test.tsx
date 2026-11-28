@@ -742,6 +742,14 @@ async function clickThrough(block: RichTextBlock, inspector: EvidenceInspectorCo
   }
 }
 
+test('a near figure the words already hedge gets no second "≈" (#819)', async () => {
+  const near = { type: 'figure', text: '$62B', sources: [REVENUE_SOURCE], near: true } as const
+  for (const [hedge, shown] of [['about ', 'about $62B'], ['~', '~$62B'], ['≈', '≈$62B'], ['', '≈$62B']] as const) {
+    const block = richTextBlock('rt-hedged', [{ type: 'text', text: `Revenue was ${hedge}` }, near, { type: 'text', text: '.' }])
+    assert.equal((await renderDocument(block)).getElementById('root')!.textContent, `Revenue was ${shown}.`, JSON.stringify(hedge))
+  }
+})
+
 test('a linked figure reads as the answer wrote it and opens the inspector on its source', async () => {
   const opened: Opened = []
   const block = richTextBlock('rt-figures', [
