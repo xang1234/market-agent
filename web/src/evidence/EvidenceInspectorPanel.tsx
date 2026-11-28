@@ -15,7 +15,7 @@ import type {
 import type { InspectorPage, InspectorStack } from './inspectorStack.ts'
 import { InspectableRef } from './InspectableRef.tsx'
 import { sourceLabel, sourceText } from '../blocks/richText.ts'
-import { SourceLink } from './SourceLink.tsx'
+import { figureText, SourceLink } from './SourceLink.tsx'
 import { Details, Facts, ReadableValue } from './Readable.tsx'
 import { humanize, isIdentifier, readableDate } from './readable.ts'
 
@@ -167,7 +167,7 @@ function PageBody({ page }: { page: InspectorPage }) {
 function pageTitle(page: InspectorPage): string {
   if (page.kind === 'financial') return heading(page).title
   if (page.kind === 'block') return page.inspection.title
-  if (page.kind === 'figure') return page.figure.text
+  if (page.kind === 'figure') return figureText(page.figure)
   if (page.shownAs) return page.shownAs
   return page.load.kind === 'ready' ? page.load.inspection.title : REF_KIND_NAMES[page.ref.kind]
 }
