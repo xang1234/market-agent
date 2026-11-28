@@ -175,6 +175,10 @@ test("a difference written as one operand that subtracts the other is those two 
   const costs = total(["NVDA gross profit Q4 FY2026"], ["NVDA operating income Q4 FY2026"], ["NVDA revenue Q4 FY2026"]);
   assert.deepEqual(check("9.5%", derived("difference", [costs])), { kind: "derived_ok" });
   assert.equal(derive(derived("difference", [of("NVDA revenue Q4 FY2026")]), valueOf), "difference needs two operands, got 1", "nothing subtracted");
+  // Gemini on #821: split first, each side over revenue is a fraction and the mix went unseen.
+  const mixed: ValueOf<string> = (ref) => (ref === "margin" ? { kind: "fraction", value: 0.649 } : valueOf(ref));
+  const amountLessMargin = total(["NVDA gross profit Q4 FY2026"], ["margin"], ["NVDA revenue Q4 FY2026"]);
+  assert.equal(derive(derived("difference", [amountLessMargin]), mixed), "an operand mixes amounts and ratios");
 });
 
 test("anything the data can't settle is not checkable, with its reason", () => {
