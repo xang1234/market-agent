@@ -111,6 +111,13 @@ test("a figure one digit off seals only when it is marked near", async () => {
   assert.deepEqual(await codes(seal([{ type: "figure", text: "$64.1B", sources: [REVENUE], near: true }])), ["figure_text_mismatch"], "near is one and a half digits, not more");
 });
 
+// #816: the seal recomputes the verdict, so a round figure far off its source cannot seal.
+test("a round figure more than a tenth off its source fails, as matched or as near", async () => {
+  assert.deepEqual(await codes(seal([{ type: "figure", text: "$100B", sources: [REVENUE] }])), ["figure_text_mismatch"]);
+  assert.deepEqual(await codes(seal([{ type: "figure", text: "$200B", sources: [REVENUE], near: true }])), ["figure_text_mismatch"]);
+  assert.deepEqual(await seal([{ type: "figure", text: "$60B", sources: [REVENUE] }]), SEALED, "a round figure within a tenth seals");
+});
+
 test("a result source whose format or period differs from its result fails, as a result ref does in chat", async () => {
   const misread = await seal([{ type: "figure", text: "$62.1B", sources: [{ ...REVENUE, format: "$62.0B" }] }]);
   assert.deepEqual(misread.failures, [{

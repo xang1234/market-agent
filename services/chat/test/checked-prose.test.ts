@@ -8,7 +8,9 @@ import test from "node:test";
 import type { FinancialAnswerContent } from "../../financial-core/src/index.ts";
 import type { LlmChatRequest, LlmChatResult } from "../../llm/src/index.ts";
 import { checkedProse, checkedProseModels, proseSegments, type CheckedProse, type ProseSegment } from "../src/checked-prose.ts";
-import { enginePacket, type EvidencePacket, type PacketClaim } from "../src/evidence-packet.ts";
+import type { AnalystToolResult } from "../src/analyst-tools.ts";
+import { enginePacket, mergePackets, type EvidencePacket, type PacketClaim } from "../src/evidence-packet.ts";
+import { statedFigures } from "../../financial-core/src/figure-check.ts";
 import { createSealer } from "../src/prose-refs.ts";
 
 // NVIDIA's latest-quarter answer on the golden data, recorded from a real stack with
@@ -192,6 +194,68 @@ test("a near figure, a last digit off or hedged, is linked as near and never sen
   const { segments, kinds } = await lane({ draft: "Revenue reached $62.2B, or about $62B.", labels: { "$62.2B": reported(REVENUE), "$62B": reported(REVENUE) } });
   assert.deepEqual(kinds(), ["draft", "label", "relation"]);
   assert.equal(shown(segments), "Revenue reached {$62.2B~}, or about {$62B~}.");
+});
+
+// #816: a round figure far off the data matched it, or was near it, so it linked unchecked.
+test("a round figure more than a tenth off the data goes back, and is struck naming the data at its last digit", async () => {
+  const { segments, calls } = await lane({
+    draft: "Revenue was $100B, or $200B.",
+    labels: { "$100B": reported(REVENUE), "$200B": reported(REVENUE) },
+    edits: new Error("rewrite down"),
+  });
+  assert.equal(shown(segments), "Revenue was ~~$100B~~ (the sources give $62B), or ~~$200B~~ (the sources give $62B).");
+  const sent = JSON.parse(calls[3]!.request.messages[1]!.content) as { sentences: RewriteSentence[] };
+  assert.deepEqual(sent.sentences[0]!.problems, ["$100B is not what the sources give: they give $62B.", "$200B is not what the sources give: they give $62B."]);
+});
+
+// #817: the rewrite was told "they give 58%" for a rise of 58% stated as a fall.
+test("a figure wrong only by the sign its words give goes back, and is struck, naming the data's sign", async () => {
+  const { segments, calls } = await lane({
+    draft: "Revenue fell 58%.",
+    labels: { "58%": { ...derived("growth", [YEAR_AGO], [REVENUE]), sign: "-" } },
+    edits: new Error("rewrite down"),
+  });
+  assert.equal(shown(segments), "Revenue fell ~~58%~~ (the sources give +58%).");
+  const sent = JSON.parse(calls[3]!.request.messages[1]!.content) as { sentences: RewriteSentence[] };
+  assert.deepEqual(sent.sentences[0]!.problems, ["58% is not what the sources give: they give +58%."]);
+});
+
+// #817: a reconciliation's amounts "in millions" were read as dollars, so a correct "$11.0B"
+// was struck "(the sources give $0.0B)".
+test("a non-GAAP claim's amounts are read at their table's scale", async () => {
+  const history: AnalystToolResult = {
+    tool: "get_non_gaap_history",
+    status: "ok",
+    company: "NVDA",
+    undated: 0,
+    categories: [],
+    quarters: [{
+      document_id: "d0000000-0000-4000-8000-000000000001",
+      source_id: "d0000000-0000-4000-8000-000000000002",
+      accession: "0001045810-25-000230",
+      form: "8-K",
+      filed_on: "2025-11-19",
+      quarter_end: "2025-10-26",
+      superseded: [],
+      eps: null,
+      operating_income: { gaap: 10_000, non_gaap: 11_000, scale: "millions" },
+      operating_margin: { revenue: 57_006, gaap_pct: 17.5, non_gaap_pct: 19.3, spread: { value: 1.8, unit: { kind: "percentage_points" } } },
+      sbc: { value: 1_652, basis: "net_income", scale: "millions", non_gaap_net_income: 33_366, share_pct: 5 },
+      categories: [],
+      reconciled: true,
+    }],
+  };
+  const packet = mergePackets({ engine: [], analyst: [history], figuresAskedFor: [], notes: [], labels: new Map(), cutoff: "2026-11-14T00:00:00.000Z" });
+  const [claim] = packet.claims;
+  const at = (digits: string) => `${claim!.id}.${statedFigures(claim!.text).findIndex((numeral) => numeral.text.startsWith(digits)) + 1}`;
+  const draft = "Non-GAAP operating income was $11.0B on revenue of $57.0B, and stock-based compensation of $1.7B was 5.0% of non-GAAP net income of $33.4B.";
+  const { checked, kinds, segments } = await lane({
+    draft,
+    labels: { "$11.0B": reported(at("11,000")), "$57.0B": reported(at("57,006")), "$1.7B": reported(at("1,652")), "5.0%": reported(at("5.0%")), "$33.4B": reported(at("33,366")) },
+  }, { packet });
+  assert.equal(shown(segments), `${draft}\n\n_5 figures could not be traced to the sources read._`, "matched, and plain since a reconciliation is no sealed claim");
+  assert.deepEqual(checked.final[0]!.numerals.map((entry) => [entry.numeral.text, entry.verdict?.kind]), [["$11.0B", "matched"], ["$57.0B", "matched"], ["$1.7B", "matched"], ["5.0%", "matched"], ["$33.4B", "matched"]]);
+  assert.deepEqual(kinds(), ["draft", "label", "relation"], "nothing goes back");
 });
 
 test("a figure still wrong after the rewrite is struck, naming the data and linking it", async () => {

@@ -68,6 +68,13 @@ test('a derived figure\'s page reads its operands in order, each source in its p
   ])
 })
 
+// #816: a near figure is not the exact value, so its page says so as the text does.
+test('a near figure\'s page is headed with "≈" before it', async () => {
+  await renderPage({ ...GROWTH, text: '59%', near: true }, [], async (panel) => {
+    assert.equal(panel.querySelector('h2')!.textContent, '≈59%')
+  })
+})
+
 test('an operand shows what it adds, subtracts and divides by', async () => {
   const result = (id: string, format: string) => ({ ref_kind: 'result', ref_id: `9${id}111111-1111-4111-9111-111111111111`, format }) as const
   const change: FigureSegment = {

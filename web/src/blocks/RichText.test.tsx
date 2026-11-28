@@ -746,16 +746,16 @@ test('a linked figure reads as the answer wrote it and opens the inspector on it
   const opened: Opened = []
   const block = richTextBlock('rt-figures', [
     { type: 'text', text: 'Revenue was ' },
-    { type: 'figure', text: 'about $62B', sources: [REVENUE_SOURCE], near: true },
+    { type: 'figure', text: '$62.2B', sources: [REVENUE_SOURCE], near: true },
     { type: 'text', text: ', data center ' },
     { type: 'figure', text: '$51.2B', sources: [{ ref_kind: 'claim', ref_id: FACT_A, format: 'Data center revenue was $51.2 billion.', numeral: 1 }] },
     { type: 'text', text: '.' },
   ])
   assert.deepEqual(validateBlock(block).valid, true)
   const text = await clickThrough(block, recordingInspector(opened), [`[data-inspect-result="${RESULT}"]`, `[data-inspection-kind="claim"][data-inspection-id="${FACT_A}"]`])
-  assert.equal(text, 'Revenue was about $62B, data center $51.2B.')
+  assert.equal(text, 'Revenue was ≈$62.2B, data center $51.2B.', 'a near figure shows "≈" (#816)')
   assert.deepEqual(opened, [
-    ['result', [RESULT, { subject: null, measure: null, period: 'Q4 FY2026', value: 'about $62B' }]],
+    ['result', [RESULT, { subject: null, measure: null, period: 'Q4 FY2026', value: '≈$62.2B' }]],
     ['evidence', { snapshotId: SNAPSHOT_ID, ref: { kind: 'claim', id: FACT_A }, shownAs: '$51.2B' }],
   ])
 })
@@ -768,6 +768,11 @@ test('a derived figure opens a page of its derivation and sources, and is plain 
   const plain = await renderDocument(block)
   assert.equal(plain.querySelector('button'), null)
   assert.equal(plain.getElementById('root')!.textContent, 'Revenue grew 58%.')
+  const near = { ...GROWTH, text: '59%', near: true } as const
+  const nearOpened: Opened = []
+  assert.equal(await clickThrough(richTextBlock('rt-derived-near', [{ type: 'text', text: 'Revenue grew ' }, near, { type: 'text', text: '.' }]), recordingInspector(nearOpened), ['[data-inspect-figure]']), 'Revenue grew ≈59%.')
+  assert.deepEqual(nearOpened, [['figure', { snapshotId: SNAPSHOT_ID, figure: near }]], 'the page gets the figure with its near mark')
+  assert.equal((await renderDocument(richTextBlock('rt-derived-near', [near]))).getElementById('root')!.textContent, '≈59%', 'with no inspector too')
 })
 
 test('a struck figure renders deleted, its reason read after it and linked to the data it names', async () => {
