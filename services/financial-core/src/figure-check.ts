@@ -211,9 +211,18 @@ function operandValue<R>(operand: Operand<R>, valueOf: ValueOf<R>): Quantity | s
 }
 
 // A derived figure recomputed from its operands: two, in their order; any number for a sum;
-// one for a margin, share or ratio whose operand already has its denominator in over.
+// one for a margin, share or ratio whose operand already has its denominator in over. A
+// difference written as one operand ({add: [A], subtract: [B]}) is the two, A and B, once
+// it reads as one operand (no mix of amounts and ratios).
 export function derive<R>(label: Extract<FigureLabel<R>, { basis: "derived" }>, valueOf: ValueOf<R>): Quantity | string {
-  const { derivation, operands } = label;
+  const { derivation } = label;
+  const [only] = label.operands;
+  const split = derivation === "difference" && label.operands.length === 1 && only!.subtract.length > 0;
+  const whole = split ? operandValue(only!, valueOf) : null;
+  if (typeof whole === "string") return whole;
+  const operands = split
+    ? [{ add: only!.add, subtract: [], over: only!.over }, { add: only!.subtract, subtract: [], over: only!.over }]
+    : label.operands;
   const values = operands.map((operand) => operandValue(operand, valueOf));
   const failed = values.find((value) => typeof value === "string");
   const quantities = values.filter((value): value is Quantity => typeof value !== "string");
