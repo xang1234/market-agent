@@ -90,6 +90,17 @@ test('commentary hands over its verified inferences and figures, never an unveri
   assert.equal(thesisOf([section('investment_thesis', [card, saved])]), 'NVDA: Data center revenue leads its segments.\n\nNVIDIA sells data center platforms.')
 })
 
+test('a thesis whose only inference is unverified hands over its certified figures', () => {
+  const card = {
+    id: 'card', kind: 'rich_text', analyst_commentary: true, segments: [],
+    commentary: [
+      { kind: 'figures', segments: [{ type: 'text', text: "AAA's revenue was " }, { type: 'ref', ref_kind: 'result', ref_id: '77777777-7777-4777-8777-777777777777', format: '$383.0B', period: 'FY2023' }, { type: 'text', text: ' in FY2023.' }] },
+      { kind: 'unverified', subject: null, text: 'Demand looks durable.' },
+    ],
+  }
+  assert.equal(thesisOf([section('investment_thesis', [card])]), "AAA's revenue was $383.0B in FY2023.")
+})
+
 test('a ref with no format reads as the memo shows it', () => {
   assert.equal(
     thesisOf([section('investment_thesis', [{ id: 'x', kind: 'rich_text', segments: [{ type: 'text', text: 'NVIDIA sells ' }, { type: 'ref', ref_kind: 'claim', ref_id: CLAIM }, { type: 'text', text: ' to cloud customers.' }] }])]),

@@ -759,17 +759,20 @@ test("engine commentary leaves out the figures and rankings no shown inference r
   assert.deepEqual(repeated, [0, 2]);
 });
 
-test("engine commentary leaves out what only an unverified or hidden inference rests on", async () => {
+test("engine commentary whose only shown inference is unverified says every figure it was written with", async () => {
   const scale = { kind: "analyst_inference", subject: "AAPL", text: "Its scale is unmatched.", supports: [0] };
   const { text, repeated } = await commentaryOn(THREE, [REVENUES, MARGIN_ORDER, OPERATING_ORDER, PRICING, scale], {
     [PRICING.text]: "unsupported",
     [scale.text]: "contradicted",
   });
   assert.equal(text, [
+    SAID.revenues,
+    SAID.marginOrder,
+    SAID.operatingOrder,
     "> **Unverified analyst view on NVDA** (not backed by the figures shown): Its pricing power is the strongest of the three.",
     SAID.periods,
   ].join("\n\n"));
-  assert.deepEqual(repeated, [0, 1, 2]);
+  assert.equal(repeated, undefined);
 });
 
 test("engine commentary keeps what a verified inference rests on beside an unverified one", async () => {

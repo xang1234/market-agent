@@ -1537,23 +1537,37 @@ test("the analyst agent", { timeout: 300_000 }, async (t) => {
     assert.ok(!savedText(unrepaired).includes("undervalued"), savedText(unrepaired));
   });
 
-  await t.test("an inference its judge does not entail is not shown in the agent's answer, not even as an unverified view", async () => {
-    const kinds: string[] = [];
-    const agent = analystAgentRunner({
-      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
-      router: async () => scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }, { text: "DONE" }]),
-      read: noRead,
-      compose: (input, turn, onAnswered) => answerTurn(input, turn, {
-        env: { ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" },
-        createClient: judgedBy('```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]},{"kind":"analyst_inference","text":"Its revenue leaves it exposed to memory competitors.","supports":[0]}]\n```', "unsupported", kinds),
-        onAnswered,
-      }),
-      asOf: () => new Date().toISOString(),
-      logToolCalls: persist.logToolCalls,
-    });
-    const text = savedText(completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: "AAA income statement" })));
-    assert.deepEqual(kinds, ["answer", "judge"]);
-    assert.ok(text.includes("revenue was") && !text.includes("memory competitors") && !text.includes("Unverified"), text);
+  await t.test("the agent's answer shows an entailed inference, an unsupported one as an unverified analyst view, and hides a contradicted one, one with no verdict and one stating an amount in words (#793)", async () => {
+    const seen = async (judged: string) => {
+      const agent = analystAgentRunner({
+        financial: { pool, evidence: createEvidenceFinancialPort, resolveMention },
+        router: async () => scripted([{ toolCalls: [call("certified_financials", INCOME_2023)] }, { text: "DONE" }]),
+        read: noRead,
+        compose: (input, turn, onAnswered) => answerTurn(input, turn, {
+          env: { ...LLM_ENV, JUDGE_LITELLM_MODEL: "openai/gpt-4.1" },
+          createClient: () => async (_deployment, request) => {
+            const sent = request.messages.map((message) => message.content).join("\n");
+            if (sent.startsWith("You check the analyst inferences")) return { text: judged };
+            // A repair round's reply leaves the inference out.
+            return { text: sent.includes("memory competitors") ? "```assertions\n[]\n```" : '```assertions\n[{"kind":"observation","text":"Revenue was $383.0B.","evidence":["F1"]},{"kind":"analyst_inference","text":"Its revenue leaves it exposed to memory competitors.","supports":[0]}]\n```' };
+          },
+          onAnswered,
+        }),
+        asOf: () => new Date().toISOString(),
+        logToolCalls: persist.logToolCalls,
+      });
+      const text = savedText(completed(await run(agent, { ...base, turnId: randomUUID(), userIntent: "AAA income statement" })));
+      assert.ok(text.includes("$383.0B"), text);
+      return !text.includes("memory competitors") ? "hidden" : text.includes("Unverified analyst view") ? "unverified" : "shown";
+    };
+    const verdict = (verdict: string, worded_amount = false) => `{"verdicts":[{"id":1,"verdict":"${verdict}","worded_amount":${worded_amount}}]}`;
+    assert.deepEqual([
+      await seen(verdict("entailed")),
+      await seen(verdict("unsupported")),
+      await seen(verdict("contradicted")),
+      await seen('{"verdicts":[]}'),
+      await seen(verdict("entailed", true)),
+    ], ["shown", "unverified", "hidden", "hidden", "hidden"]);
   });
 
   await t.test("a company the question names by name is resolved from its reading, or named as matching none", async () => {

@@ -186,8 +186,8 @@ test("an inference the judge finds stating an amount in words is hidden in an an
     assert.equal(text(analyst.blocks), FIGURES, `${label}: analyst`);
     assert.deepEqual(judgeRejections(analyst.assertions).map(([index]) => index), [3, 4], `${label}: analyst`);
     const commentary = await judged(asCommentary(SEGMENTS));
-    // The ranking only the unverified view rests on is left out: the table shows it.
-    assert.equal(text(commentary.blocks), UNVERIFIED_CONCENTRATED, `${label}: commentary`);
+    // No verified inference is shown, so the ranking the unverified view rests on still shows.
+    assert.equal(text(commentary.blocks), [FIGURES, UNVERIFIED_CONCENTRATED].join("\n\n"), `${label}: commentary`);
     assert.deepEqual(judgeRejections(commentary.assertions).map(([index]) => index), [4], `${label}: commentary`);
   }
 });

@@ -26,16 +26,16 @@ export type AnswerPath = "analyst" | "engine" | "agent";
 const SHOWN_AS: Readonly<Record<Verdict, ShownAs>> = { entailed: "shown", unsupported: "unverified", contradicted: "hidden" };
 
 // What the reader is shown of an inference. One the judge flags as stating an
-// amount in words is not shown in an analyst answer, whose numbers are only
-// its claims' and its chart's (#398), and shows no higher than unverified in
-// an engine answer's commentary (#509), so neither page vouches for an amount
-// that is not a packet value, as far as the judge's flag catches them.
+// amount in words is not shown in an analyst or agent answer, whose numbers
+// are only its claims' and its figures' (#398), and shows no higher than
+// unverified in an engine answer's commentary (#509), so no page vouches for
+// an amount that is not a packet value, as far as the judge's flag catches
+// them.
 export function shownAs(verdict: InferenceVerdict, path: AnswerPath): ShownAs {
   if (verdict.verdict === "error") return "hidden";
-  if (path === "agent") return verdict.verdict === "entailed" && !verdict.worded_amount ? "shown" : "hidden";
   const as = SHOWN_AS[verdict.verdict];
   if (!verdict.worded_amount) return as;
-  return path === "analyst" ? "hidden" : as === "shown" ? "unverified" : as;
+  return path === "engine" ? (as === "shown" ? "unverified" : as) : "hidden";
 }
 
 // A worded amount goes to repair even when it shows: a rewrite without the
