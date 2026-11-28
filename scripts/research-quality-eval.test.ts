@@ -48,6 +48,25 @@ test("blocks render for scoring: cited figures bold, tables as tables, the rest 
     renderBlock({ kind: "rich_text", segments: [{ type: "text", text: "Revenue " }, { type: "mention", format: "NVDA" }, { type: "text", text: "." }] }),
     "Revenue [mention segment not shown].",
   );
+  const result = { ref_kind: "result", ref_id: "r1", format: "$62.1B", period: "Q4 FY2026" };
+  const cited: string[] = [];
+  assert.equal(
+    renderBlock({
+      kind: "rich_text",
+      segments: [
+        { type: "text", text: "Revenue was " },
+        { type: "figure", text: "about $62B", sources: [result], near: true },
+        { type: "text", text: ", up " },
+        { type: "figure", text: "58%", sources: [{ ...result, format: "$39.3B" }, result], derivation: "growth" },
+        { type: "text", text: ", not " },
+        { type: "struck", text: "$72.1B", reason: "the sources give $62.1B" },
+        { type: "text", text: "." },
+      ],
+    }, (segment) => `[${cited.push(segment.format!)}]`),
+    "Revenue was **about $62B**[1], up **58%**[2][3], not ~~$72.1B~~ (the sources give $62.1B).",
+    "a figure is cited by each of its sources, a struck figure by its reason (#800)",
+  );
+  assert.deepEqual(cited, ["$62.1B", "$39.3B", "$62.1B"]);
   assert.equal(
     renderBlock({
       kind: "metrics_comparison",

@@ -11,8 +11,8 @@
 // cutoff): repeats already counted once, each placed by its stored polarity,
 // with any stored contradiction between them named.
 
-import { dependencyClosure, type FinancialAnswerContent, type FinancialPlan, type PresentedPayload } from "../../financial-core/src/index.ts";
-import { statedFigures, statedQuantity, type Quantity } from "../../financial-core/src/figure-check.ts";
+import { dependencyClosure, type FinancialAnswerContent, type FinancialPlan } from "../../financial-core/src/index.ts";
+import { presentedQuantity, statedFigures, statedQuantity, type Quantity } from "../../financial-core/src/figure-check.ts";
 import { returnLabel } from "../../market/src/perf-points.ts";
 import { QUARTERS_SHOWN, type ResearchScope, type ScopeQuarter } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -652,7 +652,7 @@ export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyM
       period: content.labels[period_label_id]!.text,
       value: presented.text,
       ...(presented.kind === "value" && presented.unit.kind === "currency" ? { exact: presented.full_text } : {}),
-      ...(presented.kind === "value" ? { quantity: quantityOf(presented) } : {}),
+      ...(presented.kind === "value" ? { quantity: presentedQuantity(presented) } : {}),
       ...(presented.kind === "gap" ? { gap: presented.text } : {}),
       ...(presented.kind === "ranking" ? { ranking: true as const } : {}),
       ...(lead === undefined ? {} : { lead_of: lead }),
@@ -674,28 +674,6 @@ export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyM
     claims_truncated: false,
     ...(content.presentations.some((presentation) => presentation.kind === "table") ? { periods_shown: true as const } : {}),
   };
-}
-
-// A value as the figure check reads it. A ratio reads as a multiple exactly when the
-// presentation wrote it as one (readsAsMultiple, so "3.5x" in full); the plan that decides
-// it can be absent here. A percent moves its decimal point ("74.4e-2"), so 74.4% reads as
-// the double nearest 0.744, not 74.4 / 100.
-function quantityOf(presented: Extract<PresentedPayload, { kind: "value" }>): Quantity {
-  const value = Number(presented.value);
-  switch (presented.unit.kind) {
-    case "ratio":
-      return { kind: presented.full_text.endsWith("x") ? "ratio" : "fraction", value };
-    case "percent":
-    case "percentage_points":
-      return { kind: "fraction", value: Number(`${presented.value}e-2`) };
-    case "basis_points":
-      return { kind: "fraction", value: Number(`${presented.value}e-4`) };
-    case "currency":
-    case "currency_per_share":
-    case "shares":
-    case "count":
-      return { kind: "amount", value };
-  }
 }
 
 // Each lead's companies, by its output: the one company each side's inputs are reported for.

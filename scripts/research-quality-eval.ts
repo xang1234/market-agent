@@ -260,12 +260,15 @@ export type RefSegment = { type: "ref"; ref_kind: string; ref_id: string; format
 
 // ponytail: prose in full, tables as tables, any other block as its title and figures;
 // charts and sources are one click away on the thread link. cite, when given, marks each
-// cited figure (a blinded packet's citation alias).
+// cited figure (a blinded packet's citation alias), and a linked figure once per source.
 export function renderBlock(block: Block, cite?: (segment: RefSegment, block: Block) => string): string {
   if (block.kind === "rich_text") {
-    const segments = (block.segments ?? []) as Array<{ type: string; text?: string; format?: string }>;
-    const text = segments.map((s) => (s.type === "text" ? s.text ?? ""
+    type Segment = { type: string; text?: string; format?: string; reason?: string; sources?: Array<Omit<RefSegment, "type">> };
+    const cited = (sources: Segment["sources"]) => (sources ?? []).map((source) => cite?.({ type: "ref", ...source }, block) ?? "").join("");
+    const text = (block.segments as Segment[] | undefined ?? []).map((s) => (s.type === "text" ? s.text ?? ""
       : s.type === "ref" ? `**${s.format ?? ""}**${cite?.(s as RefSegment, block) ?? ""}`
+      : s.type === "figure" ? `**${s.text ?? ""}**${cited(s.sources)}`
+      : s.type === "struck" ? `~~${s.text ?? ""}~~ (${s.reason ?? ""})`
       : `[${s.type} segment not shown]`)).join("");
     return block.analyst_commentary === true ? `_Analyst commentary:_ ${text}` : text;
   }

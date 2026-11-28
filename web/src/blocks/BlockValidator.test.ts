@@ -22,6 +22,25 @@ test('validateBlock accepts analyst commentary citing an engine result, and no o
   assert.equal(validateBlock({ ...commentary, segments: [{ ...commentary.segments[0], ref_kind: 'calculation' }] }).valid, false)
 })
 
+test('validateBlock accepts a linked figure and a struck one, and a derivation only with its operands (#800)', () => {
+  const result = { ref_kind: 'result', ref_id: '91111111-1111-4111-9111-111111111111', format: '$62.1B', period: 'Q4 FY2026' }
+  const growth = { type: 'figure', text: '58%', sources: [result, { ...result, format: '$39.3B', period: 'Q4 FY2025' }], derivation: 'growth', operands: [{ add: [1], subtract: [], over: null }, { add: [0], subtract: [], over: null }] }
+  const block = {
+    ...richTextFixture,
+    segments: [
+      { type: 'figure', text: 'about $62B', sources: [result], near: true },
+      growth,
+      { type: 'struck', text: '$72.1B', reason: 'the sources give $62.1B', sources: [result] },
+      { type: 'figure', text: '66%', sources: [{ ref_kind: 'claim', ref_id: '33333333-3333-4333-9333-333333333333', format: 'up 66% from a year ago', numeral: 1 }] },
+    ],
+  }
+  assert.deepEqual(validateBlock(block), { valid: true, block })
+  const unexplained = { type: 'figure', text: growth.text, sources: growth.sources, derivation: growth.derivation }
+  assert.equal(validateBlock({ ...block, segments: [unexplained] }).valid, false)
+  assert.equal(validateBlock({ ...block, segments: [{ ...growth, derivation: 'average' }] }).valid, false)
+  assert.equal(validateBlock({ ...block, segments: [{ type: 'figure', text: '$62.1B', sources: [] }] }).valid, false)
+})
+
 test('validateBlock rejects a block missing the kind discriminator', () => {
   const block: Record<string, unknown> = { ...richTextFixture }
   delete block.kind
