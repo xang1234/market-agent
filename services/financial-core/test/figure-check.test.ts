@@ -167,6 +167,16 @@ test("each derivation is recomputed from its operands", () => {
   assert.equal(derive(derived("growth", [of("NVDA revenue Q4 FY2026")]), valueOf), "growth needs two operands, got 1");
 });
 
+// The #800 eval's labeller wrote 52 differences as one operand that subtracts the other.
+test("a difference written as one operand that subtracts the other is those two operands", () => {
+  // 62,100 - 57,006 = 5,094
+  assert.deepEqual(check("$5.1B", derived("difference", [total(["NVDA revenue Q4 FY2026"], ["NVDA revenue Q3 FY2026"])])), { kind: "derived_ok" });
+  // (46,200 - 40,300) / 62,100 = 9.5% of revenue, a share, not points
+  const costs = total(["NVDA gross profit Q4 FY2026"], ["NVDA operating income Q4 FY2026"], ["NVDA revenue Q4 FY2026"]);
+  assert.deepEqual(check("9.5%", derived("difference", [costs])), { kind: "derived_ok" });
+  assert.equal(derive(derived("difference", [of("NVDA revenue Q4 FY2026")]), valueOf), "difference needs two operands, got 1", "nothing subtracted");
+});
+
 test("anything the data can't settle is not checkable, with its reason", () => {
   assert.deepEqual(check("$2.1B", { basis: "off_file", what: "free cash flow (p)" }), { kind: "not_checkable", reason: "free cash flow (p) isn't in the data" });
   assert.deepEqual(check("$6.8B", reported("AMD revenue Q1 FY2024")), { kind: "not_checkable", reason: "its source isn't in the data" }, "a quarter that isn't seeded");
