@@ -3,7 +3,7 @@ import { InspectableRef } from '../evidence/InspectableRef.tsx'
 import { InspectableResult } from '../evidence/InspectableResult.tsx'
 import { LinkedFigure, REF_CLASS, SourceLink } from '../evidence/SourceLink.tsx'
 import type { CitationRef, CommentaryPart, RefSegment, RichTextBlock, RichTextSegment, StruckSegment, TextSegmentTone } from './types.ts'
-import { citationNumbers, citesQuoteBefore, commentaryCard, isCitationRef, isRefSegment, refSegmentText, sourceLabel, sourceText, type Takeaway } from './richText.ts'
+import { citationNumbers, citesQuoteBefore, commentaryCard, isCitationRef, isRefSegment, refSegmentText, sourceLabel, sourceText, textBefore, type Takeaway } from './richText.ts'
 import { Markdown } from './Markdown.tsx'
 import { OpenClarificationContext } from './openClarification.ts'
 import { CARD_CLASS } from '../symbol/surfaceStyles.ts'
@@ -72,7 +72,7 @@ function markdownParts(block: RichTextBlock, segments: ReadonlyArray<RichTextSeg
         />
       )
     }
-    if (segment.type === 'figure') return <LinkedFigure snapshotId={block.snapshot_id} figure={segment} />
+    if (segment.type === 'figure') return <LinkedFigure snapshotId={block.snapshot_id} figure={segment} before={textBefore(segments, index)} />
     if (segment.type === 'struck') return <Struck snapshotId={block.snapshot_id} segment={segment} />
     if (segment.tone === undefined || segment.tone === 'neutral') return segment.text
     return { inline: <span data-tone={segment.tone} className={TONE_CLASS[segment.tone]}>{segment.text}</span> }

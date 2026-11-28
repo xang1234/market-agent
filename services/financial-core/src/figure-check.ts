@@ -48,6 +48,9 @@ const NUMERAL = new RegExp(
 // rule reads loosely within a tenth of the data ("over $60B" matches 62.1 billion, "over
 // $100B" is wrong for 140 billion).
 const HEDGE = /(?:\b(?:about|approximately|around|roughly|nearly|almost|close to)\s+|[~≈]\s?)$/iu;
+// The text right before a figure hedges it, as enumerateNumerals reads it. The web reads it
+// too, so a near figure the words already hedge gets no second "≈".
+export const endsInHedge = (text: string): boolean => HEDGE.test(text.slice(-24));
 const SCALES: Record<string, number> = { t: 1e12, tn: 1e12, trillion: 1e12, b: 1e9, bn: 1e9, billion: 1e9, m: 1e6, mn: 1e6, mm: 1e6, million: 1e6, k: 1e3, thousand: 1e3 };
 
 function unitOf(suffix: string): { unit: NumeralUnit; scale: number } {
@@ -80,7 +83,7 @@ export function enumerateNumerals(text: string): Numeral[] {
       text: match[0],
       start: match.index,
       end: match.index + match[0].length,
-      hedged: HEDGE.test(text.slice(Math.max(0, match.index - 24), match.index)),
+      hedged: endsInHedge(text.slice(0, match.index)),
     };
     if (groups.date) return { ...base, value: Number.NaN, step: Number.NaN, place: Number.NaN, unit: "date" as const, signed: false, scaled: false };
     const digits = groups.number!;

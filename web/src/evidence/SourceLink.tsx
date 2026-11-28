@@ -36,10 +36,10 @@ export function SourceLink({ snapshotId, source, text, label, children }: { snap
 
 // A figure linked to what it was checked against: its one source, or, when computed from
 // several, a page naming the derivation and each source.
-export function LinkedFigure({ snapshotId, figure }: { snapshotId: string; figure: FigureSegment }): ReactElement {
+export function LinkedFigure({ snapshotId, figure, before = '' }: { snapshotId: string; figure: FigureSegment; before?: string }): ReactElement {
   const open = useEvidenceInspector()?.openFigure
   const [only] = figure.sources
-  const text = figureText(figure)
+  const text = figureText(figure, before)
   if (figure.derivation === undefined && figure.sources.length === 1 && only) {
     return <SourceLink snapshotId={snapshotId} source={only} text={text}>{text}</SourceLink>
   }

@@ -25,6 +25,12 @@ export function citesQuoteBefore(segments: ReadonlyArray<RichTextSegment>, index
   return before !== undefined && isCitationRef(before) && isCitationRef(segment) && refSegmentText(before) === refSegmentText(segment)
 }
 
+// The plain text right before a segment, which may hedge a figure ("about ").
+export function textBefore(segments: ReadonlyArray<RichTextSegment>, index: number): string {
+  const before = segments[index - 1]
+  return before !== undefined && 'type' in before && before.type === 'text' ? before.text : ''
+}
+
 export function citationNumbers(segments: ReadonlyArray<RichTextSegment>): ReadonlyMap<string, number> {
   const numbers = new Map<string, number>()
   for (const segment of segments) {
