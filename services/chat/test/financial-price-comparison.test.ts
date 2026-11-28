@@ -18,6 +18,14 @@ import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from 
 import { mergeIssuerAway } from "../../fundamentals/test/issuer-merge-fixture.ts";
 import { chatDatabase, chatHarness, completed, NO_ASKS, resolveMention } from "./financial-fixtures.ts";
 import { readMessage } from "./read-message-fixture.ts";
+import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
+import type { ControlledRouter } from "../../llm/src/router.ts";
+import { analystAgentRunner } from "../src/analyst-agent.ts";
+import type { AnalystToolResult } from "../src/analyst-tools.ts";
+import { answerTurn } from "../src/answer-trace.ts";
+import type { ChatAnalystAgent } from "../src/coordinator.ts";
+
+const LLM_ENV = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1,o3", LITELLM_MODEL: "openai/gpt-4.1", AGENT_LITELLM_MODEL: "openai/o3" };
 
 const PXC = {
   issuer: "4f000000-0000-4000-8000-000000000aa1", listing: "4f000000-0000-4000-8000-000000000ae1",
@@ -39,8 +47,9 @@ test("scenario price comparisons in chat", { timeout: 300_000 }, async (t) => {
   }
   const { db, pool } = await chatDatabase(t, "chat-price-comparison");
   await seedValuedIssuer(db, PXC);
-  const harness = chatHarness(pool, {
+  const harnessWith = (analystAgent?: ChatAnalystAgent) => chatHarness(pool, {
     model: null,
+    ...(analystAgent ? { analystAgent } : {}),
     resolveMention: resolvePxc,
     readQuestion: async () => ({ ...NO_ASKS, companies: { kind: "as_named", names: [] } }),
     clock: () => new Date(NVDA.cutoff),
@@ -61,13 +70,14 @@ test("scenario price comparisons in chat", { timeout: 300_000 }, async (t) => {
       return readMessage({ snapshot_id: snapshotId, message_id: messageId, thread_id: message.threadId });
     },
   });
+  const harness = harnessWith();
   const newThread = async () => {
     const thread = randomUUID();
     await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [thread, IDS.owner]);
     return thread;
   };
-  const say = async (threadId: string, userIntent: string, turnId?: string) => {
-    const { events, turnId: id } = await harness.run({ threadId, userId: IDS.owner, userIntent, ...(turnId ? { turnId } : {}) });
+  const say = async (threadId: string, userIntent: string, turnId?: string, on = harness) => {
+    const { events, turnId: id } = await on.run({ threadId, userId: IDS.owner, userIntent, ...(turnId ? { turnId } : {}) });
     return { done: completed(events), turnId: id };
   };
   const read = async (threadId: string, messageId: unknown) =>
@@ -90,6 +100,74 @@ test("scenario price comparisons in chat", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(message.block_proofs[block!.id], { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown", scenario_calculation: "verified" });
     assert.equal(done.financial, undefined, "no financial run answers it");
   });
+
+  // #803: with the analyst agent on, its model answering or none configured, the fixed asks run in the financial lane and the agent is never called.
+  // Each turn the agent is handed is kept, so a test sees whether it was called.
+  const scripted: ControlledRouter = { complete: async () => ({ text: "DONE", deployment: { channel: "openai", model: "o3" } }) };
+  const agentOn = (router: ControlledRouter | null) => {
+    const turns: unknown[] = [];
+    const agent = analystAgentRunner({
+      financial: { pool, evidence: createEvidenceFinancialPort, resolveMention: resolvePxc },
+      router: async () => router,
+      read: async (tool) => ({ tool, status: "no_business_claims", truncated: false, reads: [], no_filing: [] }) as AnalystToolResult,
+      compose: (input, turn, onAnswered) => answerTurn(input, turn, { env: LLM_ENV, createClient: () => async () => ({ text: "PXC makes things." }), onAnswered }),
+      asOf: () => NVDA.cutoff,
+    });
+    return {
+      turns,
+      on: harnessWith(async (turn) => {
+        turns.push(turn);
+        return agent(turn);
+      }),
+    };
+  };
+  const valuesOf = async (thread: string, messageId: unknown) => {
+    const [answer] = (await read(thread, messageId)).blocks as unknown as Array<{ kind: string; financial?: { results: Array<{ presented: { value?: string } }> } }>;
+    assert.equal(answer!.kind, "financial_answer", JSON.stringify(answer));
+    return answer!.financial!.results.map((result) => result.presented.value);
+  };
+  for (const [name, router] of [["a working model", scripted], ["no model configured", null]] as const) {
+    await t.test(`the analyst agent on with ${name}, a P/E scenario seals its prices and “compare with the price” seals the comparison (#803)`, async () => {
+      const { on, turns } = agentOn(router);
+      const thread = await newThread();
+      const scenario = await say(thread, "PXC bear 20x, base 25x, bull 30x", undefined, on);
+      assert.deepEqual(await valuesOf(thread, scenario.done.message_id), ["4", "80", "100", "120"]);
+      const comparison = await say(thread, "compare with the price", undefined, on);
+      const [block] = (await read(thread, comparison.done.message_id)).blocks as unknown as ComparisonBlock[];
+      assert.equal(block!.kind, "scenario_price_comparison", JSON.stringify(block));
+      assert.deepEqual(block!.comparison.outcome.rows!.map((row) => row.percent.text), ["-20.00%", "0.00%", "+20.00%"]);
+      assert.equal(turns.length, 0, "the analyst agent receives no call");
+    });
+
+    await t.test(`the analyst agent on with ${name}, a one-label edit that names its company carries the rest, and the next edit carries from it (#803)`, async () => {
+      const { on, turns } = agentOn(router);
+      const thread = await newThread();
+      await say(thread, "PXC bear 20x, base 25x, bull 30x", undefined, on);
+      const named = await say(thread, "make PXC bull 35", undefined, on);
+      assert.deepEqual(await valuesOf(thread, named.done.message_id), ["4", "80", "100", "140"]);
+      const next = await say(thread, "make bull 40", undefined, on);
+      assert.deepEqual(await valuesOf(thread, next.done.message_id), ["4", "80", "100", "160"]);
+      assert.equal(turns.length, 0, "the analyst agent receives no call");
+    });
+
+    await t.test(`the analyst agent on with ${name}, a comparison ask outside the sentence with no scenario before it is the agent's (#803)`, async () => {
+      for (const ask of ["Compare it to AMD's stock price performance", "Compare it to AMD's price-to-earnings ratio", "Compare with MSFT's share price over the last year"]) {
+        const { on, turns } = agentOn(router);
+        await on.run({ threadId: await newThread(), userId: IDS.owner, userIntent: ask });
+        assert.equal(turns.length, 1, `${ask}: the analyst agent is handed the turn`);
+      }
+    });
+
+    await t.test(`the analyst agent on with ${name}, an ordinary question about a price, a P/E or a bull case is the agent's (#803)`, async () => {
+      for (const ask of ["What is PXC's P/E ratio?", "How has PXC's share price moved this year?", "Is the bull case for PXC realistic at 30x?"]) {
+        const { on, turns } = agentOn(router);
+        const thread = await newThread();
+        await say(thread, "PXC bear 20x, base 25x, bull 30x", undefined, on);
+        await on.run({ threadId: thread, userId: IDS.owner, userIntent: ask });
+        assert.equal(turns.length, 1, `${ask}: the analyst agent is handed the turn`);
+      }
+    });
+  }
 
   await t.test("a comparison asked right after a comparison compares the same sealed scenario", async () => {
     const thread = await newThread();

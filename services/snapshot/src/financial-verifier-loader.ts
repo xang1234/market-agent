@@ -14,7 +14,15 @@
 // imports the engine.
 
 import { listFinancialInputCandidates } from "../../evidence/src/financial-input-repo.ts";
-import { OPERATION_REGISTRY, operationDependencies, unitClosures, validateFinancialPlan, type FinancialPlan } from "../../financial-core/src/index.ts";
+import {
+  isOptionalBalance,
+  OPERATION_REGISTRY,
+  operationDependencies,
+  unitClosures,
+  validateFinancialPlan,
+  type FinancialPlan,
+  type StoredBalance,
+} from "../../financial-core/src/index.ts";
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
 import { isDatabaseError } from "../../shared/src/database-error.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
@@ -131,10 +139,10 @@ export type LoadedResult = Readonly<{
 /** A subject's current display name: an issuer's legal name, or a listing's ticker and venue. */
 export type LoadedSubjectName = Readonly<{ kind: "issuer" | "listing"; id: string; name: string }>;
 
-/** A missing_input gap's slot that a sum leaves out, reread now as binding read it: the period of each authorized candidate. */
+/** A missing_input gap's slot that a sum leaves out, reread now as binding read it: each authorized candidate's period, and what rule 12 reads of it. */
 export type LoadedGapCandidates = Readonly<{
   input_slot: string;
-  candidates: ReadonlyArray<Readonly<{ fiscal_year: number | null; fiscal_period: string | null; period_end: string | null }>>;
+  candidates: ReadonlyArray<StoredBalance & Readonly<{ period: Readonly<{ end: string; fiscal_year: number; fiscal_period: string }> }>>;
   truncated: boolean;
 }>;
 
@@ -306,7 +314,8 @@ async function readGapCandidates(db: QueryExecutor, plan: FinancialPlan, missing
   const reads: LoadedGapCandidates[] = [];
   for (const node of operations) {
     if (node.operation !== "reported_metric" || !missing.has(node.node_id)) continue;
-    const period = node.period.kind === "fiscal_period" ? node.period : null;
+    // An optional balance's earlier 10-Ks decide whether it is absent (binding's rule 12), so every period is read.
+    const period = node.period.kind === "fiscal_period" && !isOptionalBalance(node.metric_key) ? node.period : null;
     const page = await listFinancialInputCandidates(db, {
       user_id: owner,
       channel: "app",
@@ -319,7 +328,8 @@ async function readGapCandidates(db: QueryExecutor, plan: FinancialPlan, missing
     });
     reads.push({
       input_slot: node.node_id,
-      candidates: page.candidates.map(({ fiscal_year, fiscal_period, period_end }) => ({ fiscal_year, fiscal_period, period_end })),
+      candidates: page.candidates.map(({ fiscal_year, fiscal_period, period_end, context, publication }) =>
+        ({ period: { end: period_end, fiscal_year, fiscal_period }, context, publication: publication.map((proof) => ({ timing: proof })) })),
       truncated: page.truncated,
     });
   }

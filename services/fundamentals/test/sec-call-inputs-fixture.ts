@@ -9,8 +9,9 @@ export function callInputsCompanyFacts(): Record<string, unknown> {
 /**
  * AAPL's companyfacts as downloaded for ADR 0006's hand audit on 2026-11-09, trimmed to the FY2017 to FY2026
  * 10-Ks' entries of the Call's input tags (#605): ten fiscal years of operating cash flow, PP&E capex, cash,
- * marketable securities, debt, diluted weighted-average shares, stock-based compensation and cover counts, and
- * net income, without which no income statement, and so no diluted count, extracts.
+ * marketable securities, debt, diluted weighted-average shares, stock-based compensation and cover counts,
+ * net income, without which no income statement, and so no diluted count, extracts, and revenue, from SEC's bulk
+ * companyfacts of 2026-11-24, which puts the Call in its base rate's size bucket.
  */
 export function aaplHistoryCompanyFacts(): unknown {
   return parseFinancialJson(readFileSync(new URL("./aapl-history.companyfacts.json", import.meta.url), "utf8"));
@@ -40,7 +41,9 @@ const fy2026 = (val: string) => ({ label: "", description: "", units: { USD: [{ 
 /**
  * AAPL's FY2026 Call inputs: aaplWithCash plus the operating cash flow, PP&E
  * capex and cover-page share count the hand audit read off the same 10-K
- * (ADR 0006's probe). The trimmed companyfacts hold none of the three.
+ * (ADR 0006's probe), and the revenue the base rate buckets by, from that
+ * 10-K's entry in SEC's bulk companyfacts of 2026-11-24. The trimmed
+ * companyfacts hold none of the four.
  */
 export function aaplCallInputs(facts: Record<string, unknown> = callInputsCompanyFacts()): unknown {
   const aapl = aaplWithCash(facts) as { facts: Record<string, Record<string, unknown>> };
@@ -52,6 +55,7 @@ export function aaplCallInputs(facts: Record<string, unknown> = callInputsCompan
         ...aapl.facts["us-gaap"],
         NetCashProvidedByUsedInOperatingActivities: fy2026("145097000000"),
         PaymentsToAcquirePropertyPlantAndEquipment: fy2026("9041000000"),
+        RevenueFromContractWithCustomerExcludingAssessedTax: fy2026("478834000000"),
       },
       dei: {
         ...aapl.facts.dei,

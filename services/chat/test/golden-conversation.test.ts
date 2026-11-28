@@ -24,7 +24,7 @@ import { readChatMessage } from "../src/messages.ts";
 import { loadChatServerOptionsFromEnv } from "../src/runtime.ts";
 import { STARTER_QUESTIONS } from "../../../web/src/chat/starterQuestionList.ts";
 import { AMD_Q2_2025_RELEASE, GOLDEN_AS_OF, GOLDEN_COMPANIES, seedGoldenDataset } from "./golden/dataset.ts";
-import { requireRecordedScopes } from "./golden/harness.ts";
+import { GOLDEN_ENV as HARNESS_GOLDEN_ENV, requireRecordedScopes } from "./golden/harness.ts";
 import type { Client } from "pg";
 import { parseSseEvents, type ParsedSseEvent } from "./sse-helpers.ts";
 import type { AddressInfo } from "node:net";
@@ -52,7 +52,22 @@ const GOLDEN_ENV: Record<string, string> = {
   CHAT_VERIFICATION_MODE: "strict",
   // The frozen dataset, as in no-keys mode: its YTD window ends 2026-08-31 (#256).
   DEV_NO_KEYS: "true",
+  // The replies were recorded with the financial lane answering, so a developer's agent flag stays off (#782).
+  CHAT_ANALYST_AGENT: "",
 };
+
+test("golden conversation: the recorded lane answers even with the analyst agent switched on locally", async () => {
+  const analystAgent = async () => {
+    throw new Error("unused");
+  };
+  for (const env of [GOLDEN_ENV, HARNESS_GOLDEN_ENV]) {
+    const options = await loadChatServerOptionsFromEnv(
+      { CHAT_ANALYST_AGENT: "1", ...env, CHAT_DATABASE_URL: "postgres://unused" },
+      async () => ({ financialRuntime: { assertReady: async () => {} }, analystAgent }) as never,
+    );
+    assert.equal(options.analystAgent, undefined);
+  }
+});
 
 type Block = Record<string, unknown> & { id?: string; kind?: string };
 type ChatMessage = { message_id: string; role: string; snapshot_id: string; blocks: Block[]; block_proofs?: Record<string, unknown>; answered_by?: string | null };

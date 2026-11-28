@@ -75,7 +75,7 @@ test("pinned verification replay", { timeout: 300_000 }, async (t) => {
     const { runId, lease } = await leasedRun(db, plan, authority);
     await bindPlanInputs({ client: db, lease, plan, authority, evidence: createEvidenceFinancialPort });
     const policies = async () => (await db.query(`select distinct selection_policy_version from financial_run_inputs where run_id = $1`, [runId])).rows;
-    assert.deepEqual(await policies(), [{ selection_policy_version: "public-information-selection.v8" }]);
+    assert.deepEqual(await policies(), [{ selection_policy_version: "public-information-selection.v9" }]);
     const rows = (await db.query<{ input_slot: string; bound_payload: { eligibility: { selection_policy_version: string } } | null }>(
       `select input_slot, bound_payload from financial_run_inputs where run_id = $1`, [runId])).rows;
     for (const row of rows) {

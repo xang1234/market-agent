@@ -4,6 +4,8 @@
 
 Accepted by the owner on 2026-11-10 for #226, every definition below as written. Implementation is tracked under #205 in #602 (`total_debt.v1` and `net_cash.v1`), #603 (the model and solver), #604 (the Call block) and #605 (the exit-multiple anchor).
 
+Amended on 2026-11-24: the bear case's `g` is anchored on a base rate (ADR 0005, "Bear case anchor"), and required growth is shown beside the same base rate. Amended on 2026-11-25: the base case's `g` is that base rate's median, and both cases and the base rate read total free cash flow growth (ADR 0005, "Base case").
+
 ## Context
 
 ADR 0005 accepted the Call: the agent's opinion, kept apart from facts, with a stance relative to the owner's hurdle. It left the valuation model to #226. #226 asks for one bounded model with every input classified, two issuer probes, worked examples, and named outcomes for every failure.
@@ -62,6 +64,7 @@ Base, bear and bull cases are three assumption sets (`g`, `d`, `X`) on the same 
 - **Cash and securities**: `cash_and_equivalents` + `marketable_securities_current` + `marketable_securities_noncurrent` + `short_term_investments` + `debt_securities_current`. `cash_and_equivalents` is required; the other components are added when reported.
 - **Debt**: `long_term_debt_current` + `long_term_debt_noncurrent` + `commercial_paper` + `short_term_borrowings`. At least one is required; the others are added when reported.
 - **An absent component is never read as zero.** With no `cash_and_equivalents`, or none of the four debt keys, the result is `missing_input`. That includes a filer tagging only `LongTermDebt`, and a filer with no debt. Both are excluded from v1, which is a named limitation: a filer with no debt reports no debt line, and tags can't distinguish that from unmapped debt.
+- **An absence the store can't prove blocks the figure (#792).** The store reads SEC companyfacts, which leaves out a line the 10-K tags with a company concept, and maps a few concepts per line. So an optional component that any earlier 10-K public by the knowledge cutoff reported, on or before this balance-sheet date, is `absence_unverified` when none is stored for this one. A report of zero counts. Net cash is then a gap, and so is total debt for a debt line. A component whose overlap key (below) is reported for this date moved there, so its absence is explained. Proving an absence from the 10-K's own XBRL is #807.
 - **Excluded**: operating lease liabilities, equity investments, restricted cash, pension deficits and finance-arm receivables.
 - **Overlap rule**: the cash and securities keys are distinct lines on a balance sheet. If a filer reports both `short_term_investments` and `marketable_securities_current`, or both `debt_securities_current` and `marketable_securities_current`, for one date, the result is `conflicting_evidence`, not a sum. Two keys for one line would count it twice.
 - **Debt overlap**: a filer that reports commercial paper inside `ShortTermBorrowings` is not detectable from tags. This is a named limitation, listed among the Call's facts.
@@ -200,6 +203,16 @@ These figures were computed with a 20-line script during drafting (not committed
   4. #605: an exit-multiple anchor from the ten years of closes #601 captures and FY free cash flow.
 - **Until item 4 ships**, every Call shows required growth at today's multiple and declines its stance under ADR 0005 rule 1.
 - **NVDA-style capex tagging.** The operator reviewed `PaymentsToAcquireProductiveAssets` as capex on 2026-11-21 (#731). It certifies for a filer that tags it instead of `PaymentsToAcquirePropertyPlantAndEquipment`, and the Call's free cash flow basis names it, since it may include purchased intangibles.
+
+## Base rate of required growth (owner, 2026-11-24)
+
+A Call sets required growth at today's multiple against a base rate, a `deterministic_result` row: "Of N five-year windows that began at a similar size, K delivered at least that growth." The bear case's `g` is that bucket's 25th percentile, and the base case's its median, each at the anchored exit multiple and `d` (ADR 0005).
+
+- **Measured quantity** (owner, 2026-11-25): annual growth of total free cash flow over five fiscal years, each year as its own 10-K reports it. Free cash flow uses `free_cash_flow.v1`'s concepts and scopes (#731, #743). A window whose two ends use different concepts is `incompatible_definition`, and one whose operating cash flow and capex at an end cover different periods is `mismatched_period`. The table also holds growth per diluted weighted-average share, carried across splits through each next 10-K's restated comparative, and revenue growth. Neither enters `V`.
+- **Buckets**: starting revenue under USD 100M, 100M to 1B, 1B to 10B, 10B to 50B, and 50B and up. Each bucket holds at least 430 windows of total free cash flow growth (`docs/eval-runs/growth-base-rates/2026-11-24.md`).
+- **Revenue growth** is shown beside the result and never enters `V`.
+- **Never certified.** The archive is a dev-only copy, so the row and both cases are labelled with the archive's date and sha256, and the Call names the table it read. The row counts the windows at or above the required growth rounded to the table's 4 stored places, and states that cutoff.
+- **Why total, not per share.** `g` is free cash flow growth before dilution, with share change `d` apart and buybacks left out. Historical growth per share includes buybacks, so as `g` it would count them twice. Over FY2003 to FY2020 starts, the 50B-and-up bucket's median is 6.7% per share against 4.2% in total. The fcf-backtest run of 2026-11-21 shows the same gap: 5.47% against 4.03%. The owner chose per share on 2026-11-24 and total free cash flow on 2026-11-25.
 
 ## Owner decision
 

@@ -213,6 +213,7 @@ test("a financial turn's in-progress notice is not saved under the id its publis
   const coordinator = createChatCoordinator({
     financialRuntime: {
       take: async () => async () => ({ kind: "gap", reason_code: "run_in_progress", text: "This calculation is already running." }),
+      claim: async () => null,
       assertReady: async () => {},
       everyOfferedChoice: async () => null,
     },

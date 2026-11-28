@@ -125,7 +125,7 @@ threads hold them.
   (#376). Its verdict is entailed, unsupported or contradicted, with a separate `worded_amount` flag for an amount
   stated in words, and `shownAs` reads both, on the answer's path (`answerPath`): entailed shows as an analyst
   inference, unsupported shows labelled as an unverified analyst view, and a contradicted one stays hidden. One
-  stating an amount in words is hidden in an analyst answer, whatever its verdict, and shows at most as an
+  stating an amount in words is hidden in an analyst or analyst-agent answer, whatever its verdict, and shows at most as an
   unverified analyst view in an engine answer's commentary (#509). It still goes to the repair round once, which may
   show it clean. A failed repair leaves it as it was. The report keeps every verdict (`judged`). The
   answer is sealed and shown at once with a line in each inference's place (`answer.shown`); as each verdict

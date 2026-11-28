@@ -37,13 +37,13 @@ export function offeredChoicesRunner(runner: ChatTurnRunner, financialRuntime: C
   };
 }
 
-/** Routes a turn the financial lane takes to it; every other turn goes to `runner` unchanged. */
+/** Routes a turn the financial lane takes (`take`, or its `claim`) to it; every other turn goes to `runner` unchanged. */
 export function financialAwareRunner(
   runner: ChatTurnRunner,
-  options: { financialRuntime?: ChatFinancialRuntime; persistAssistantMessage?: ChatAssistantMessageCommit },
+  options: { take?: ChatFinancialRuntime["take"]; persistAssistantMessage?: ChatAssistantMessageCommit },
 ): ChatTurnRunner {
-  const runtime = options.financialRuntime;
-  if (!runtime) return runner;
+  const { take } = options;
+  if (!take) return runner;
   return async (context) => {
     // Nothing about an unfinished turn's companies or calculation leaves the server.
     const failed = () => {
@@ -51,7 +51,7 @@ export function financialAwareRunner(
     };
     let taken: (() => Promise<ChatFinancialTurn>) | null;
     try {
-      taken = await runtime.take(context);
+      taken = await take(context);
     } catch (error) {
       console.error("[chat] the financial lane could not decide whether it takes the turn", error);
       return failed();

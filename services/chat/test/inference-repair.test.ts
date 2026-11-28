@@ -239,8 +239,8 @@ test("every inference sent to repair goes in one call, once every first verdict 
     { index: 0, text: TAKEAWAY_TEXT, check: "judge", verdict: "contradicted", worded_amount: false, reason: "QoQ growth rose." },
     { index: 6, text: DIGIT_TEXT, check: "binding", reason: "an inference rests on its supports; it writes no figure" },
   ]);
-  // The figures only the hidden takeaway rested on are left out; the trend the shown view rests on stays.
-  assert.equal(text(done.blocks), [QUARTER_TREND, "> **Unverified analyst view** (not backed by the figures shown): Growth is a third smaller than before."].join("\n\n"));
+  // No verified inference is shown, so the commentary says every figure it was written with.
+  assert.equal(text(done.blocks), [QUARTER_FIGURES, "> **Unverified analyst view** (not backed by the figures shown): Growth is a third smaller than before."].join("\n\n"));
   assert.deepEqual(calls.sort(), ["answer", "judge 0", "judge 0", "judge 6", "repair"]);
   assert.deepEqual(done.assertions?.repaired, [0, 6]);
   assert.deepEqual(rejections(done.assertions).filter(([index]) => index === 0 || index === 6), [

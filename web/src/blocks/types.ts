@@ -543,13 +543,16 @@ export type CallRowId =
   | 'stock_based_compensation'
   | 'shares_outstanding'
   | 'share_price'
+  | 'revenue'
   | 'required_return'
   | 'exit_multiple'
   | 'anchored_exit_multiple'
   | 'share_change'
+  | 'base_case'
   | 'bear_case'
   | 'required_growth'
   | 'required_growth_anchored'
+  | 'base_rate'
   | 'consensus'
 
 export type CallInputKind = 'reported_fact' | 'attributed_consensus' | 'market_observation' | 'owner_policy' | 'agent_assumption' | 'deterministic_result'
@@ -564,18 +567,33 @@ export type CallRow = {
   from: ReadonlyArray<CallRowId>
 }
 
-/** The agent's opinion on one company (ADR 0005, #604, #605): server-written strings, stored unchanged, never evidence. A call.v1 has the rows #604 wrote, before the exit multiple was anchored. */
+/** The agent's opinion on one company (ADR 0005, #604, #605): server-written strings, stored unchanged, never evidence. A call.v1 has the rows #604 wrote, before the exit multiple was anchored; a call.v2 has #605's, before the base rate. */
 export type CallContent = {
-  version: 'call.v1' | 'call.v2'
+  version: 'call.v1' | 'call.v2' | 'call.v3'
   call_date: string
   subject: { issuer_id: string; label: string }
   settings: { required_return: string; margin_of_safety: string; bear_loss_limit: string; near_band: string }
   inputs: { snapshot_id: string; run_id: string; unit_id: string; fingerprint: string }
+  /** call.v3 only: the sha256 of the base-rate table the Call read. */
+  base_rate_table?: string | null
   facts: ReadonlyArray<CallRow>
   assumptions: ReadonlyArray<CallRow>
   requires: ReadonlyArray<CallRow>
-  stance: { kind: 'declined'; rule: 0 | 1; text: string; reasons: ReadonlyArray<{ cites: CallRowId; text: string }> }
+  stance: CallStance
 }
+
+type CallReason = { cites: CallRowId; text: string }
+
+/** Declined under rules 0 to 3, or stated under 4 to 6 in ADR 0005's wording, naming the parts neither ADR defines. Only a call.v3 states one. */
+export type CallStance =
+  | { kind: 'declined'; rule: 0 | 1 | 2 | 3; text: string; reasons: ReadonlyArray<CallReason> }
+  | {
+    kind: 'stated'
+    rule: 4 | 5 | 6
+    text: 'Clears your hurdle.' | 'Near your hurdle.' | 'Falls short of your hurdle.'
+    reasons: ReadonlyArray<CallReason>
+    not_shown: ReadonlyArray<{ part: 'skew' | 'falsifiers'; text: string }>
+  }
 
 export type CallBlock = Omit<BaseBlock, 'title'> & {
   kind: 'call'

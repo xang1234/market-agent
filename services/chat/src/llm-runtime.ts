@@ -594,16 +594,15 @@ function claimEvidence(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>)
 const isQuoteRef = (segment: Segment): segment is QuoteRef => segment.type === "ref" && (segment.ref_kind === "claim" || segment.ref_kind === "source");
 
 // What an answer leaves out of restating: each that no verified inference it
-// shows rests on (one still pending may verify), once any inference is shown,
-// so commentary whose every inference is hidden still says its figures. An
-// unverified view backs nothing: the table above shows its figures. An
-// inference is shown when the answer renders it (rendered) and it has a
-// state: one with a state that rests on a claim the seal left out, or that
-// its repair lost, renders nowhere.
+// shows rests on (one still pending may verify), once any such inference is
+// shown, so commentary whose every inference is hidden or unverified still
+// says its figures. An unverified view backs nothing. An inference is shown
+// when the answer renders it (rendered) and it has a state: one with a state
+// that rests on a claim the seal left out, or that its repair lost, renders
+// nowhere.
 export function restated(restating: AssertionReport["restating"], inferences: Inferences, rendered: ReadonlyArray<number>): number[] {
-  const shown = rendered.filter((index) => inferences.has(index));
-  if (shown.length === 0) return [];
-  const backing = new Set(shown.filter((index) => inferences.get(index) !== "unverified"));
+  const backing = new Set(rendered.filter((index) => inferences.has(index) && inferences.get(index) !== "unverified"));
+  if (backing.size === 0) return [];
   return (restating ?? []).filter(({ relied_on }) => !relied_on.some((index) => backing.has(index))).map(({ index }) => index);
 }
 

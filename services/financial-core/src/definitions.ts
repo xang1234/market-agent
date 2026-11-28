@@ -205,6 +205,11 @@ export const BALANCE_SUM_SIDES: Readonly<Record<BalanceSumKind, Readonly<Partial
   total_debt: { debt: "add" },
 });
 
+/** Whether a balance sum may leave the balance out when the store proves it absent (unverifiedAbsences, #792). */
+export function isOptionalBalance(metricKey: MetricKey): boolean {
+  return BALANCE_COMPONENTS.some((component) => component.metric_key === metricKey && !component.required);
+}
+
 /** A balance sum's components, in table order: its plan node's dependency order. */
 export function balanceComponents(kind: BalanceSumKind): ReadonlyArray<BalanceComponent> {
   return BALANCE_COMPONENTS.filter((component) => Object.hasOwn(BALANCE_SUM_SIDES[kind], component.side));

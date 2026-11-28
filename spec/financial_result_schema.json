@@ -42,7 +42,8 @@
         "split_history_missing",
         "split_history_stale",
         "restatement_unverified",
-        "source_class_not_allowed"
+        "source_class_not_allowed",
+        "absence_unverified"
       ]
     },
     "GapDisposition": {
