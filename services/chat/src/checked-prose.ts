@@ -25,7 +25,7 @@ import type { LlmChatClient, LlmChatRequest, LlmSettingsLoaderEnv } from "../../
 import { isRecord } from "../../shared/src/http.ts";
 import { isUuid } from "./chat-ids.ts";
 import type { DroppedClaims } from "./coordinator.ts";
-import { figureCompanies, packetForModel, packetValue, parsePacketRef, type EvidencePacket, type PacketClaim, type PacketRef } from "./evidence-packet.ts";
+import { claimNumeral, figureCompanies, packetForModel, packetValue, parsePacketRef, type EvidencePacket, type PacketClaim, type PacketRef } from "./evidence-packet.ts";
 import { modelCall, type ModelRecord } from "./inference-judge.ts";
 import { ANSWER_DEADLINES, droppedNotes, type ModelDeadlines } from "./llm-runtime.ts";
 import type { Sealer, Segment } from "./prose-refs.ts";
@@ -40,6 +40,7 @@ const REWRITE_BUDGET_MS = 35_000;
 // stays, its figures plain, under a note).
 const FIGURES_UNCHECKED = "The figures in this text could not be checked against the sources just now.";
 const RELATIONS_UNCHECKED = "Comparisons in this text were not checked.";
+const CUT_OFF = "The answer was cut off at its length limit, so it may end early.";
 
 type ModelCallOf = (request: LlmChatRequest, deadlines: ModelDeadlines) => Promise<ModelRecord>;
 // write: the draft and the rewrite, on the default purpose. check: the labeller and the
@@ -87,6 +88,8 @@ export type CheckedProse = Readonly<{
   lead: string;
   sentences: ReadonlyArray<Readonly<{ id: string; after: string }>>;
   draft: CheckRound;
+  // The draft stopped at its length limit, so the answer may end early.
+  cut_off?: true;
   rewrite: Readonly<{ request: RewriteRequest; edits: Readonly<Record<string, string>> | Readonly<{ error: string }>; recheck: CheckRound | null }> | null;
   // Each sentence's kept version, in order; its text is "" when it is left out.
   final: ReadonlyArray<Version>;
@@ -103,16 +106,16 @@ export async function checkedProse(input: CheckedProseInput, models: CheckedPros
     checkRound(models, packet, input.question, lead, parts, texts, new Set(parts.map((part) => part.id))));
   const request = rewriteRequest(parts, draft);
   const sentences = parts.map(({ id, after }) => ({ id, after }));
-  const written_by = written.exchange.deployment;
+  const head = { written_by: written.exchange.deployment, lead, sentences, draft, ...(written.exchange.truncated ? { cut_off: true as const } : {}) };
   if (request.length === 0 || input.remainingMs() < REWRITE_BUDGET_MS) {
-    return { written_by, lead, sentences, draft, rewrite: null, final: parts.map((part) => kept(draft.versions[part.id]!)) };
+    return { ...head, rewrite: null, final: parts.map((part) => kept(draft.versions[part.id]!)) };
   }
   const corrected = await step("correct_answer", `Correcting ${request.length} sentence${request.length === 1 ? "" : "s"}`, () =>
     models.write(rewriteMessages(input, written.exchange.text, request), ANSWER_DEADLINES));
   const edits = corrected.outcome === "replied" ? parseEdits(corrected.exchange.text, new Set(request.map((entry) => entry.sentence))) : null;
   if (edits === null) {
     const error = corrected.outcome === "replied" ? "the rewrite was unreadable" : corrected.reason;
-    return { written_by, lead, sentences, draft, rewrite: { request, edits: { error }, recheck: null }, final: parts.map((part) => kept(draft.versions[part.id]!)) };
+    return { ...head, rewrite: { request, edits: { error }, recheck: null }, final: parts.map((part) => kept(draft.versions[part.id]!)) };
   }
   const edited = new Set(Object.keys(edits));
   const recheck = edited.size === 0 ? null : await step("check_corrections", "Checking the corrections", () =>
@@ -127,7 +130,7 @@ export async function checkedProse(input: CheckedProseInput, models: CheckedPros
     const unsettled = draft.labelled.ok && after?.numerals.some(isUnsettled);
     return kept(after === undefined || unchecked || unsettled || problemCount(after) > problemCount(before) ? before : after);
   });
-  return { written_by, lead, sentences, draft, rewrite: { request, edits, recheck }, final };
+  return { ...head, rewrite: { request, edits, recheck }, final };
 }
 
 // The packet ids of the claims the final prose quotes by marker.
@@ -211,7 +214,7 @@ async function checkRound(
       numerals: numbered.flatMap((entry, i) => {
         if (entry.part !== part.id) return [];
         const label = labels?.get(ids[i]!) ?? null;
-        const verdict = label?.kind === "figure" ? verdictFor(entry.numeral, label.label, (ref) => packetValue(packet, ref)) : null;
+        const verdict = label?.kind === "figure" ? verdictFor(entry.numeral, claimSized(label.label, packet), (ref) => packetValue(packet, ref)) : null;
         return [{ numeral: entry.numeral, label, verdict }];
       }),
       findings: (findings ?? []).filter((finding) => text.includes(finding.quote)),
@@ -224,6 +227,13 @@ async function checkRound(
     versions,
   };
 }
+
+// A claim's numeral gives a size and its words the sign ("Operating loss was $134 million"
+// reads 134M), so a figure reported from an unsigned one is compared by size, as the seal
+// compares it. ponytail: an answer's own minus ("-$134M") on one, or a derivation over such
+// claims, still compares signed.
+const claimSized = (label: FigureLabel<PacketRef>, packet: EvidencePacket): FigureLabel<PacketRef> =>
+  label.basis === "reported" && "claim" in label.source && claimNumeral(packet, label.source)?.signed === false ? { ...label, sign: null } : label;
 
 const isWrong = (numeral: CheckedNumeral) => numeral.verdict?.kind === "wrong";
 const isUntraced = (numeral: CheckedNumeral) => numeral.label?.kind === "figure" && numeral.label.label.basis === "off_file";
@@ -507,6 +517,7 @@ export function proseSegments(checked: CheckedProse, packet: EvidencePacket, sea
     segments.push({ type: "text", text: text.slice(at) + checked.sentences[i]!.after });
   });
   const notes = [
+    ...(checked.cut_off ? [CUT_OFF] : []),
     ...(figuresChecked ? [] : [FIGURES_UNCHECKED]),
     ...(checked.draft.related.ok ? [] : [RELATIONS_UNCHECKED]),
     ...(untraced === 0 ? [] : [`${untraced} figure${untraced === 1 ? "" : "s"} could not be traced to the sources read.`]),

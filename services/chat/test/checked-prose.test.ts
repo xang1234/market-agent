@@ -53,6 +53,8 @@ const derived = (derivation: string, ...operands: string[][]) => ({ basis: "deri
 type RewriteSentence = { id: string; text: string; problems: string[] };
 type Script = {
   draft: string;
+  // The draft stopped at its length limit.
+  truncated?: boolean;
   // Each figure's label by the text it is marked with; any other marked number is a name.
   labels?: Readonly<Record<string, object>> | Error | "omitted";
   findings?: ReadonlyArray<object> | Error;
@@ -85,7 +87,7 @@ function scripted(script: Script) {
     };
     switch (kind) {
       case "draft":
-        return { text: script.draft };
+        return { text: script.draft, ...(script.truncated ? { truncated: true } : {}) };
       case "label": {
         failed(labels);
         if (labels === "omitted") return { text: fence("labels", { labels: [], figures: [] }) };
@@ -109,11 +111,12 @@ function scripted(script: Script) {
   return { calls, kinds: () => calls.map((call) => call.kind), models: checkedProseModels(ENV, createClient) };
 }
 
-async function lane(script: Script, options: { remainingMs?: number } = {}) {
+async function lane(script: Script, options: { remainingMs?: number; packet?: EvidencePacket } = {}) {
+  const packet = options.packet ?? PACKET;
   const { calls, kinds, models } = scripted(script);
   const steps: string[] = [];
   const checked = await checkedProse(
-    { question: "How did NVIDIA do last quarter?", conversation: [], packet: PACKET, remainingMs: () => options.remainingMs ?? 120_000 },
+    { question: "How did NVIDIA do last quarter?", conversation: [], packet, remainingMs: () => options.remainingMs ?? 120_000 },
     models,
     async (_tool, label, run) => {
       steps.push(label);
@@ -121,7 +124,7 @@ async function lane(script: Script, options: { remainingMs?: number } = {}) {
     },
   );
   assert.ok(checked, "the draft was written");
-  return { checked, calls, kinds, steps, segments: proseSegments(checked, PACKET, createSealer([])) };
+  return { checked, calls, kinds, steps, segments: proseSegments(checked, packet, createSealer([])) };
 }
 
 // The segments as a reader sees them: a figure in braces, a struck one with its reason.
@@ -337,6 +340,21 @@ test("a claim marker quotes the claim, a figure it states links to it, and the d
   assert.deepEqual(marked(calls[1]!.request).map(([, text]) => text), ["$51.2B"]);
   assert.equal(shown(segments), `Management said “${CLAIM.text}” So data center revenue was {$51.2B}.`);
   assert.deepEqual(figures(segments), [{ type: "figure", text: "$51.2B", sources: [{ ref_kind: "claim", ref_id: CLAIM.claim_id, format: CLAIM.text, numeral: 1 }] }]);
+});
+
+test("a loss a claim states in words links at its size, though the labeller signs it", async () => {
+  const loss: PacketClaim = { ...CLAIM, id: "C2", text: "Operating loss was $134 million.", claim_id: "5c000000-0000-4000-8000-000000000003" };
+  const { segments, kinds } = await lane(
+    { draft: "Operating loss was $134M.", labels: { "$134M": { ...reported("C2.1"), sign: "-" } } },
+    { packet: { ...PACKET, claims: [CLAIM, loss] } },
+  );
+  assert.deepEqual(kinds(), ["draft", "label", "relation"], "it matched, so nothing goes back");
+  assert.deepEqual(figures(segments), [{ type: "figure", text: "$134M", sources: [{ ref_kind: "claim", ref_id: loss.claim_id, format: loss.text, numeral: 1 }] }]);
+});
+
+test("a draft cut off at its length limit says so in a note", async () => {
+  const { segments } = await lane({ draft: "Revenue reached $62.1B, and", truncated: true, labels: { "$62.1B": reported(REVENUE) } });
+  assert.equal(shown(segments), "Revenue reached {$62.1B}, and\n\n_The answer was cut off at its length limit, so it may end early._");
 });
 
 test("a figure the sources do not hold, or that no sealed ref can show, stays plain and is counted in one note", async () => {

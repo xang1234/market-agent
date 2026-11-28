@@ -38,7 +38,7 @@ JUDGE_LITELLM_MODEL=anthropic/claude-haiku-5-5
 | `ANALYZE_LITELLM_MODEL` | The same tool loop writing an Analyze memo's sections. Falls back to `AGENT_LITELLM_MODEL`, then `LITELLM_MODEL`. |
 | `EXTRACTION_LITELLM_MODEL` | SEC 8-K and earnings-release extraction, analyst-grid reader columns, and chat's metric scope proposal. Falls back to `LITELLM_MODEL`. |
 | `JUDGE_LITELLM_MODEL` | The judge that checks each analyst inference in a chat answer. It has no fallback. `.env.dev.example` sets `anthropic/claude-haiku-5-5`. When it is unset, or names a channel `LLM_CHANNELS` does not declare, chat shows figures but no inferences. With only an OpenAI or DeepSeek channel set up, set it to a model on that channel: Settings shows "JUDGE_LITELLM_MODEL: channel 'anthropic' is not configured" while it names the default. |
-| `CHECK_LITELLM_MODEL` | Checked prose's figure labeller and relation check (`CHAT_CHECKED_PROSE=1`). When set, it has no fallback. When unset, they use `LITELLM_MODEL` and its fallbacks. |
+| `CHECK_LITELLM_MODEL` | Checked prose's figure labeller and relation check (`CHAT_CHECKED_PROSE=1`). When it names a model on a configured, enabled channel, it has no fallback. When it is unset, or names a channel that is not configured or is disabled, they use `LITELLM_MODEL` and its fallbacks, and Settings shows the problem (for example "CHECK_LITELLM_MODEL: channel 'anthropic' is not configured"). |
 
 With `LLM_USAGE_LOG=true`, which `DEV_MODE=analyst` sets, each model call writes one log line with its channel, model, latency, and token counts. The numbers here are an example:
 

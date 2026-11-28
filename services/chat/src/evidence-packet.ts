@@ -12,7 +12,7 @@
 // with any stored contradiction between them named.
 
 import { dependencyClosure, type FinancialAnswerContent, type FinancialPlan } from "../../financial-core/src/index.ts";
-import { presentedQuantity, statedFigures, statedQuantity, type Quantity } from "../../financial-core/src/figure-check.ts";
+import { presentedQuantity, statedFigures, statedQuantity, type Numeral, type Quantity } from "../../financial-core/src/figure-check.ts";
 import { returnLabel } from "../../market/src/perf-points.ts";
 import { QUARTERS_SHOWN, type ResearchScope, type ScopeQuarter } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -775,9 +775,13 @@ export function parsePacketRef(text: string, packet: EvidencePacket): PacketRef 
 /** The value a pointer names exactly, or undefined when the packet holds none there. */
 export function packetValue(packet: EvidencePacket, ref: PacketRef): Quantity | undefined {
   if ("figure" in ref) return packet.figures.find((figure) => figure.id === ref.figure)?.quantity;
-  const claim = packet.claims.find((entry) => entry.id === ref.claim);
-  const numeral = claim && statedFigures(claim.text)[ref.numeral - 1];
+  const numeral = claimNumeral(packet, ref);
   return numeral && statedQuantity(numeral);
+}
+
+export function claimNumeral(packet: EvidencePacket, ref: Extract<PacketRef, { claim: ClaimId }>): Numeral | undefined {
+  const claim = packet.claims.find((entry) => entry.id === ref.claim);
+  return claim && statedFigures(claim.text)[ref.numeral - 1];
 }
 
 // The packet as the model sees it: short ids only, no fact, series or source ids.
