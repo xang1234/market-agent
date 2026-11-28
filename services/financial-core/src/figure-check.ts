@@ -22,8 +22,11 @@ export type Numeral = Readonly<{
   end: number;
   // As written, its own scale applied; negative only when the text gives it a sign.
   value: number;
-  // One unit of the last digit shown, scaled like value: the precision the text claims.
+  // The precision the text claims, scaled like value: one unit of its last digit, a whole
+  // number's trailing zeros not counted ("$200B": $100B).
   step: number;
+  // One unit of the last digit as written, trailing zeros counted ("$200B": $1B).
+  place: number;
   unit: NumeralUnit;
   // The text carries a sign, minus or plus. Parentheses don't sign a number: in prose they
   // hold an aside ("previous close ($176.10)") far more often than an accounting negative.
@@ -42,7 +45,8 @@ const NUMERAL = new RegExp(
   "giu",
 );
 // ponytail: these words only. "Over" and "more than" are bounds, which the trailing-zero
-// rule already reads loosely ("over $60B" matches 62.1 billion).
+// rule reads loosely within a tenth of the data ("over $60B" matches 62.1 billion, "over
+// $100B" is wrong for 140 billion).
 const HEDGE = /(?:\b(?:about|approximately|around|roughly|nearly|almost|close to)\s+|[~≈]\s?)$/iu;
 const SCALES: Record<string, number> = { t: 1e12, tn: 1e12, trillion: 1e12, b: 1e9, bn: 1e9, billion: 1e9, m: 1e6, mn: 1e6, mm: 1e6, million: 1e6, k: 1e3, thousand: 1e3 };
 
@@ -56,9 +60,9 @@ function unitOf(suffix: string): { unit: NumeralUnit; scale: number } {
   return { unit: "points", scale: 1 };
 }
 
-// The last digit's place. ponytail: a whole number's trailing zeros are read as not
-// significant ("$60B", "60%" round to tens), so "$200B" matches 209.9B; a strict reading
-// would flag every round number a model writes.
+// The last digit's place, a whole number's trailing zeros read as not significant ("$60B",
+// "60%" round to tens), so "$200B" matches 209.9B; a strict reading would flag every round
+// number a model writes. verdictFor caps the rounding at a tenth of the data (#816).
 function stepOf(digits: string): number {
   const [whole, fraction] = digits.replaceAll(",", "").split(".");
   if (fraction !== undefined) return 10 ** -fraction.length;
@@ -78,12 +82,13 @@ export function enumerateNumerals(text: string): Numeral[] {
       end: match.index + match[0].length,
       hedged: HEDGE.test(text.slice(Math.max(0, match.index - 24), match.index)),
     };
-    if (groups.date) return { ...base, value: Number.NaN, step: Number.NaN, unit: "date" as const, signed: false, scaled: false };
+    if (groups.date) return { ...base, value: Number.NaN, step: Number.NaN, place: Number.NaN, unit: "date" as const, signed: false, scaled: false };
     const digits = groups.number!;
     const { unit, scale } = unitOf(groups.suffix ?? "");
     const signed = groups.sign !== undefined;
     const magnitude = Number(digits.replaceAll(",", "")) * scale;
-    return { ...base, value: signed && groups.sign !== "+" ? -magnitude : magnitude, step: stepOf(digits) * scale, unit, signed, scaled: scale !== 1 };
+    const place = 10 ** -(digits.split(".")[1]?.length ?? 0);
+    return { ...base, value: signed && groups.sign !== "+" ? -magnitude : magnitude, step: stepOf(digits) * scale, place: place * scale, unit, signed, scaled: scale !== 1 };
   });
 }
 
@@ -144,8 +149,8 @@ export type ValueOf<R> = (ref: R) => Quantity | undefined;
 export type Verdict =
   | Readonly<{ kind: "matched" }>
   | Readonly<{ kind: "derived_ok" }>
-  // Within one and a half units of the last digit shown, and either off in that digit or
-  // hedged ("about 25%"): linked, never sent back for a rewrite.
+  // Within one and a half units of the last digit as written and off in it, or hedged
+  // ("about 25%") and otherwise matched: linked, never sent back for a rewrite.
   | Readonly<{ kind: "near"; expected: Quantity }>
   | Readonly<{ kind: "wrong"; expected: Quantity }>
   | Readonly<{ kind: "not_checkable"; reason: string }>;
@@ -247,8 +252,12 @@ export function derive<R>(label: Extract<FigureLabel<R>, { basis: "derived" }>, 
 const SCALE_WORDS = { thousands: 1e3, millions: 1e6, billions: 1e9 } as const;
 const tableScale = (numeral: Numeral, scale: Scale) => (numeral.unit === "amount" && !numeral.scaled && scale ? SCALE_WORDS[scale] : 1);
 
-// One numeral's verdict. The text's own sign wins; failing that the sign its words give;
-// with neither, only the size is compared ("a loss of $134M" against -134M). A difference
+// One numeral's verdict. It matches within half its step: a round figure ("$200B") rounds at
+// its last nonzero digit, but never further than a tenth of the data ("$100B" is not 62.1B)
+// nor finer than its last digit as written. It is near within one and a half units of its
+// last digit as written, trailing zeros counted, so "$62.2B" is near 62.1B and "$70B" is
+// wrong; a hedged figure that would match is near (#816). The text's own sign wins; failing
+// that the sign its words give; with neither, only the size is compared ("a loss of $134M" against -134M). A difference
 // honours only its text's own sign ("+3.3 points"), its operands being [first, the value
 // subtracted from it]. Its words' sign is left to the relation check, since "AMD's margin is
 // 12.5 points lower" names the operands in either order. A change in points shown as a
@@ -257,7 +266,7 @@ export function verdictFor<R>(numeral: Numeral, label: FigureLabel<R>, valueOf: 
   if (numeral.unit === "date") return { kind: "not_checkable", reason: "a date labelled as a figure" };
   if (label.basis === "off_file") return { kind: "not_checkable", reason: `${label.what} isn't in the data` };
   const scale = tableScale(numeral, label.scale);
-  const step = numeral.step * scale;
+  const [step, place] = [numeral.step * scale, numeral.place * scale];
   // A margin, share or ratio is a level: "fell to 60.5%" says how it moved, not that it is
   // negative, so only the text's own sign counts. ponytail: an unsigned negative margin
   // ("an operating loss of 1.7% of revenue") is then compared by size.
@@ -265,13 +274,15 @@ export function verdictFor<R>(numeral: Numeral, label: FigureLabel<R>, valueOf: 
   const sign = derivation === "margin" || derivation === "share_of_total" || derivation === "ratio" ? null : label.sign;
   const shown = numeral.value * scale * (!numeral.signed && sign === "-" ? -1 : 1);
   const bySign = numeral.signed || (sign !== null && derivation !== "difference");
-  const fits = (actual: number, places = step) => withinPrecision(bySign ? shown : Math.abs(shown), bySign ? actual : Math.abs(actual), places);
+  const fits = (actual: number, places: number) => withinPrecision(bySign ? shown : Math.abs(shown), bySign ? actual : Math.abs(actual), places);
   const judged = (expected: Quantity, what: string, ok: "matched" | "derived_ok"): Verdict => {
     const options = writtenAs(expected, numeral.unit);
     if (options.length === 0) return { kind: "not_checkable", reason: `a ${what} shown as ${numeral.unit}` };
     if (expected.kind === "points" && numeral.unit === "percent") return { kind: "wrong", expected };
-    if (!numeral.hedged && options.some((actual) => fits(actual))) return { kind: ok };
-    return options.some((actual) => fits(actual, step * 3)) ? { kind: "near", expected } : { kind: "wrong", expected };
+    // A step of a fifth of the data is a window of a tenth.
+    const equal = (actual: number) => fits(actual, Math.max(place, Math.min(step, Math.abs(actual) / 5)));
+    if (!numeral.hedged && options.some(equal)) return { kind: ok };
+    return options.some((actual) => fits(actual, place * 3) || (numeral.hedged && equal(actual))) ? { kind: "near", expected } : { kind: "wrong", expected };
   };
   if (label.basis === "reported") {
     const actual = valueOf(label.source);
@@ -283,7 +294,8 @@ export function verdictFor<R>(numeral: Numeral, label: FigureLabel<R>, valueOf: 
 
 // The data's value as the figure would have written it, for a request to correct it: at
 // the figure's precision, with its currency sign, scale and unit ("34%" for an answer's
-// "41%", not "34.45%"). An unsigned figure gets the size, since its words carry the sign.
+// "41%", not "34.45%"), a round figure rounded as verdictFor reads it ("$70B" for "$60B",
+// "$62B" for "$100B"). An unsigned figure gets the size, since its words carry the sign.
 // scale is the label's, for a bare amount in a table "in millions". Points shown as a
 // percent are written in points ("3.3 percentage points" for "3.3%").
 export function atPrecisionOf(numeral: Numeral, expected: Quantity, scale: Scale = null): string {
@@ -292,8 +304,10 @@ export function atPrecisionOf(numeral: Numeral, expected: Quantity, scale: Scale
   if (value === undefined || numeral.unit === "date" || digits === null) return String(expected.value);
   const step = stepOf(digits[0]);
   const own = 10 ** Math.round(Math.log10(numeral.step / step));
-  const rounded = Math.round(Math.abs(value) / (own * tableScale(numeral, scale)) / step) * step;
+  const size = Math.abs(value) / (own * tableScale(numeral, scale));
   const decimals = digits[0].split(".")[1]?.length ?? 0;
+  const at = (unit: number) => Math.round(size / unit) * unit;
+  const rounded = Math.abs(at(step) - size) <= size / 10 ? at(step) : at(10 ** -decimals);
   const written = rounded.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals, useGrouping: digits[0].includes(",") });
   const minus = /^[-−]/u.test(numeral.text) ? numeral.text[0]! : "-";
   const sign = !numeral.signed || rounded === 0 ? "" : value < 0 ? minus : numeral.text.startsWith("+") ? "+" : "";
