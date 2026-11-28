@@ -50,7 +50,8 @@ test("each golden pointer reads its value on file, and a verdict saves its expec
   assert.deepEqual(check(`$${last.close.toFixed(2)}`, reported("n1", ref("AAPL", "bar_close", null, null, { date: last.ts.slice(0, 10) }))), { verdict: "matched" });
   assert.deepEqual(check("$55.2B", reported("n1", ref("NVDA", "segment_revenue", 2026, "Q4", { segment: "Data Center" }))), { verdict: "matched" });
   assert.deepEqual(check("$800 million", reported("n1", ref("AMD", "filed_claim", 2025, "Q2"))), { verdict: "matched" });
-  assert.equal(check("$900 million", reported("n1", ref("AMD", "filed_claim", 2025, "Q2"))).verdict, "near", "one unit of $100M off");
+  assert.equal(check("$801 million", reported("n1", ref("AMD", "filed_claim", 2025, "Q2"))).verdict, "near", "one unit of its last digit off");
+  assert.equal(check("$900 million", reported("n1", ref("AMD", "filed_claim", 2025, "Q2"))).verdict, "wrong", "a round figure's trailing zeros count for near (#816)");
   assert.equal(check("$950 million", reported("n1", ref("AMD", "filed_claim", 2025, "Q2"))).verdict, "wrong");
   const q4 = (metric: GoldenRef["metric"]) => of(ref("NVDA", metric, 2026, "Q4"));
   assert.deepEqual(check("74.4%", derived("n1", "margin", [q4("gross_profit"), q4("revenue")])), { verdict: "derived_ok" });
