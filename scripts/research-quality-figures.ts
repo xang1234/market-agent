@@ -24,7 +24,7 @@ import {
   DERIVATIONS,
   enumerateNumerals,
   verdictFor as judge,
-  writtenAs,
+  writtenLike,
   type Derivation,
   type FigureLabel,
   type Numeral,
@@ -80,6 +80,7 @@ export type LabelledFigure = {
 export type TurnLabels = { labels: string[]; figures: LabelledFigure[] };
 
 const nullable = (schema: object) => ({ anyOf: [schema, { type: "null" }] });
+const refs = { type: "array", items: { $ref: "#/$defs/ref" } };
 export const LABELS_SCHEMA = {
   type: "object",
   $defs: {
@@ -113,7 +114,12 @@ export const LABELS_SCHEMA = {
           derivation: nullable({ type: "string", enum: DERIVATIONS }),
           operands: {
             type: "array",
-            items: { type: "object", properties: { value: { $ref: "#/$defs/ref" }, over: nullable({ $ref: "#/$defs/ref" }) }, required: ["value", "over"], additionalProperties: false },
+            items: {
+              type: "object",
+              properties: { add: refs, subtract: refs, over: nullable(refs) },
+              required: ["add", "subtract", "over"],
+              additionalProperties: false,
+            },
           },
           sign: nullable({ type: "string", enum: ["+", "-"] }),
           scale: nullable({ type: "string", enum: ["thousands", "millions", "billions"] }),
@@ -174,33 +180,33 @@ const CLAIM_AMOUNTS = enumerateNumerals(AMD_Q2_2025_RELEASE.text).filter((n) => 
 // --- verdicts ------------------------------------------------------------------------
 
 export type Checked = { verdict: Verdict["kind"]; expected?: number; reason?: string };
-// A wrong figure within one and a half units of its last digit: a rounding slip, told
-// apart from a misstatement in the summary.
-export const LAST_DIGIT = "off by one in the last digit";
 
-// The filed charge states no sign, so only a reported figure reads it. Adding it back
-// (operating income before the charge) needs a sum, which no derivation is: a difference
-// would expect $934M for the right $666M (#805).
-const operandValueOf: ValueOf<GoldenRef> = (ref) => (ref.metric === "filed_claim" ? undefined : valueOf(ref));
+// The filed charge states no sign. An operand adds or subtracts it (operating income before
+// the charge), and a share divides it. A difference with the charge alone as an operand
+// never adds it back: it would expect $934M for the right $666M (#805).
+const chargeAlone = ({ add, subtract }: Operand<GoldenRef>) => add.length + subtract.length === 1 && [...add, ...subtract][0]!.metric === "filed_claim";
 
 // The labeller's figure as the figure check reads it, or why it names nothing to check.
 function asLabel(figure: LabelledFigure): FigureLabel<GoldenRef> | string {
   const { sign, scale } = figure;
   if (figure.basis === "derived") {
-    return figure.derivation === null ? "derived, but no derivation given" : { basis: "derived", derivation: figure.derivation, operands: figure.operands, sign, scale };
+    if (figure.derivation === null) return "derived, but no derivation given";
+    if (figure.derivation === "difference" && figure.operands.some(chargeAlone)) return "a difference from the filed charge alone";
+    return { basis: "derived", derivation: figure.derivation, operands: figure.operands, sign, scale };
   }
   return figure.source === null ? { basis: "off_file", what: `${figure.metric} (${figure.period})` } : { basis: "reported", source: figure.source, sign, scale };
 }
 
-// One numeral's verdict against the golden data, as <run>.figures.json saves it: a wrong
-// figure's expected value in the numeral's own unit (a percent as 74.4, not 0.744).
+// One numeral's verdict against the golden data, as <run>.figures.json saves it: a near or
+// wrong figure's expected value in the numeral's own unit (a percent as 74.4, not 0.744).
 export function verdictFor(numeral: Numeral, figure: LabelledFigure | undefined): Checked {
   if (!figure) return { verdict: "not_checkable", reason: "the labeller skipped it" };
   const label = asLabel(figure);
-  const verdict: Verdict = typeof label === "string" ? { kind: "not_checkable", reason: label } : judge(numeral, label, label.basis === "derived" ? operandValueOf : valueOf);
+  const verdict: Verdict = typeof label === "string" ? { kind: "not_checkable", reason: label } : judge(numeral, label, valueOf);
   switch (verdict.kind) {
+    case "near":
     case "wrong":
-      return { verdict: "wrong", expected: writtenAs(verdict.expected, numeral.unit)[0], ...(verdict.lastDigit ? { reason: LAST_DIGIT } : {}) };
+      return { verdict: verdict.kind, expected: writtenLike(numeral, verdict.expected) };
     case "not_checkable":
       return { verdict: "not_checkable", reason: verdict.reason };
     default:
@@ -240,7 +246,7 @@ export function checkTurn(input: TurnInput, result: LabelResult, message: string
 }
 
 export function tally(turns: ReadonlyArray<CheckedTurn>): Tally {
-  const totals: Tally = { figures: 0, matched: 0, derived_ok: 0, wrong: 0, not_checkable: 0 };
+  const totals: Tally = { figures: 0, matched: 0, derived_ok: 0, near: 0, wrong: 0, not_checkable: 0 };
   for (const numeral of turns.flatMap((turn) => turn.numerals)) {
     if (numeral.verdict === null) continue;
     totals.figures += 1;
@@ -282,15 +288,23 @@ export async function checkRun(record: RunRecord, label: Labeller): Promise<Figu
 }
 
 export function summaryLines(file: FiguresFile): string[] {
-  const { figures, matched, derived_ok, wrong, not_checkable } = file.totals;
+  const { figures, matched, derived_ok, near, wrong, not_checkable } = file.totals;
   const failed = file.turns.filter((turn) => turn.labeller.error !== undefined);
-  const slips = file.turns.flatMap((turn) => turn.numerals).filter((n) => n.verdict === "wrong" && n.reason === LAST_DIGIT).length;
   return [
-    `${file.run}: figures ${figures}, matched ${matched}, derived_ok ${derived_ok}, wrong ${wrong} (${slips} ${LAST_DIGIT}), not_checkable ${not_checkable}${failed.length > 0 ? ` (${failed.length} turns not labelled)` : ""}`,
+    `${file.run}: figures ${figures}, matched ${matched}, derived_ok ${derived_ok}, near ${near}, wrong ${wrong}, not_checkable ${not_checkable}${failed.length > 0 ? ` (${failed.length} turns not labelled)` : ""}`,
     ...file.turns.flatMap((turn) => turn.numerals.filter((n) => n.verdict === "wrong").map((n) =>
       `  wrong ${turn.question} turn ${turn.turn}: ${n.text} (data: ${n.expected === undefined ? "?" : Number(n.expected.toPrecision(6))}${n.reason ? `, ${n.reason}` : ""}): ${sentenceAt(turn.text, n.start, n.end)}`)),
   ];
 }
+
+// A figure saved before an operand could sum (#800) had one value and an optional one over
+// it; a figure saved since is returned as it is.
+type SavedOperand = Operand<GoldenRef> | { value: GoldenRef; over: GoldenRef | null };
+const withSums = (figure: LabelledFigure): LabelledFigure => ({
+  ...figure,
+  operands: (figure.operands as SavedOperand[]).map((operand) =>
+    "add" in operand ? operand : { add: [operand.value], subtract: [], over: operand.over === null ? null : [operand.over] }),
+});
 
 // Judges a checked run again from its saved labels, so a change to the verdict code is
 // measured on the same labels without paying for new ones. Refuses a turn whose numerals
@@ -305,7 +319,7 @@ export function rejudge(file: FiguresFile): FiguresFile {
       ok: true,
       labels: {
         labels: turn.numerals.filter((n) => n.label === "label").map((n) => n.id),
-        figures: turn.numerals.flatMap((n) => (n.label !== null && n.label !== "label" ? [n.label] : [])),
+        figures: turn.numerals.flatMap((n) => (n.label !== null && n.label !== "label" ? [withSums(n.label)] : [])),
       },
       usage: turn.labeller.usage,
       stopReason: turn.labeller.stopReason,
@@ -340,7 +354,8 @@ export function labellerSystemPrompt(): string {
       "A figure states an amount, price, volume, percentage, margin, growth rate, change or multiple. For each figure give:",
       "- company, metric and period in a few words, as the sentence gives them;",
       "- basis \"reported\" when it states one value on file, with source pointing at that value;",
-      "- basis \"derived\" when it is computed (a margin, growth rate, share or multiple always is) from values on file, with derivation and its two operands in this order: margin [profit, revenue]; share_of_total [part, total]; growth [earlier, later]; difference [first, the value subtracted from it], so a change from A to B is [B, A]; ratio [numerator, denominator]. An operand is one value on file, or one value over another (over) when the figure compares two margins or ratios;",
+      "- basis \"derived\" when it is computed (a margin, growth rate, share or multiple always is) from values on file, with derivation and its two operands in this order: margin [profit, revenue]; share_of_total [part, total]; growth [earlier, later]; difference [first, the value subtracted from it], so a change from A to B is [B, A]; ratio [numerator, denominator]. A sum has any number of operands, see below. An operand is a sum: the values in add, less the values in subtract, and, when the figure compares two margins or ratios, over the sum of the values in over (else over null). One value on file is add [that value], subtract [], over null. A total over several periods (trailing four quarters, a first half, a fiscal year built from quarters) lists each period in add. An amount adjusted for the filed charge adds or subtracts filed_claim. Operating expenses are add [gross_profit] subtract [operating_income]. A trailing-four-quarter margin is margin with two operands: the four profits in the first operand's add, the four revenues in the second's;",
+      "- derivation \"sum\" when the figure is itself a total of several values on file, such as trailing four-quarter revenue or operating income before the charge: one operand whose add lists them all;",
       "- sign is the sign of the marked figure itself, not of the trend around it: \"-\" for a loss, or a change stated as a decline (\"fell 5%\"); \"+\" for a change stated as a gain (\"rose 5%\"); null otherwise. In \"margin fell to 60.5%\", 60.5% is a level, so its sign is null;",
       "- scale when the number has no B, M or K of its own but its table or sentence puts it in thousands, millions or billions.",
       "Point at what the sentence says, even where you think it is wrong. A figure about something not on file (another metric, period or company) still goes in figures, with source null and no operands.",
