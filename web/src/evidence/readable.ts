@@ -6,7 +6,7 @@ import type { FinancialUnit } from '../../../services/financial-core/src/contrac
 import type { FigureSegment } from '../blocks/types.ts'
 import { parseDerivedDecimalText } from '../../../services/financial-core/src/exact-decimal.ts'
 import { formatValue } from '../../../services/financial-core/src/value-text.ts'
-import { endsInHedge } from '../../../services/financial-core/src/figure-check.ts'
+import { endsInHedge } from '../../../services/financial-core/src/hedge.ts'
 
 const UNIT_KINDS: ReadonlySet<string> = new Set(['currency', 'currency_per_share', 'shares', 'ratio', 'percent', 'percentage_points', 'basis_points', 'count'])
 
