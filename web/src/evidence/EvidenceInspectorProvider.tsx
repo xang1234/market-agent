@@ -129,6 +129,7 @@ export function EvidenceInspectorProvider({ children }: { children: ReactNode })
         openInspection: (input) => openEvidence('open', input),
         openBlockInspection: (inspection) => show('open', { kind: 'block', inspection }),
         openFinancialResult: (resultId, shown) => openFinancial('open', resultId, shown),
+        openFigure: ({ snapshotId, figure }) => show('open', { kind: 'figure', snapshotId, figure }),
         closeInspection: () => close(),
       },
       inside: {

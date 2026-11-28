@@ -1,4 +1,4 @@
-import type { CitationRef, CommentaryPart, RefSegment, RichTextSegment, TextSegment } from './types.ts'
+import type { CitationRef, CommentaryPart, RefSegment, RichTextSegment, SourceRef, TextSegment } from './types.ts'
 
 export function isTextSegment(segment: RichTextSegment): segment is TextSegment {
   return segment.type === 'text'
@@ -54,3 +54,7 @@ export function commentaryCard(parts: ReadonlyArray<CommentaryPart>) {
   ])
   return { takeaways, figures, quotes, notes, numbers }
 }
+
+// A figure's source as a figure page or a citation names it: what it shows, and its period (#800).
+export const sourceText = (source: SourceRef) => source.format ?? source.ref_kind
+export const sourceLabel = (source: SourceRef) => (source.period ? `${sourceText(source)}, ${source.period}` : sourceText(source))

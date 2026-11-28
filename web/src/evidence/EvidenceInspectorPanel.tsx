@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 
 import { FinancialResultInspector } from '../blocks/renderers/FinancialResultInspector.tsx'
 import { financialHeading } from '../blocks/financialInspection.ts'
+import type { FigureDerivation, FigureOperand, FigureSegment, SourceRef } from '../blocks/types.ts'
 import { Skeleton } from '../ui/Skeleton.tsx'
 import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from './evidenceInspectorContext.ts'
 import type {
@@ -13,6 +14,8 @@ import type {
 } from './inspectionTypes.ts'
 import type { InspectorPage, InspectorStack } from './inspectorStack.ts'
 import { InspectableRef } from './InspectableRef.tsx'
+import { sourceLabel, sourceText } from '../blocks/richText.ts'
+import { SourceLink } from './SourceLink.tsx'
 import { Details, Facts, ReadableValue } from './Readable.tsx'
 import { humanize, isIdentifier, readableDate } from './readable.ts'
 
@@ -37,6 +40,30 @@ const DATE_ROWS: ReadonlyArray<readonly [label: string, shown: string]> = [
 
 const LINK_CLASS = 'text-accent-ink underline underline-offset-2'
 
+const DERIVATION_NAMES: Readonly<Record<FigureDerivation, string>> = {
+  margin: 'Margin',
+  growth: 'Growth',
+  difference: 'Difference',
+  ratio: 'Ratio',
+  share_of_total: 'Share of total',
+  sum: 'Sum',
+}
+
+// Each operand's part in its derivation, in the order chat's labeller gives them
+// (services/chat/src/checked-prose.ts): margin [profit, revenue], growth [earlier, later]...
+const OPERAND_ROLES: Readonly<Record<Exclude<FigureDerivation, 'sum'>, readonly [string, string]>> = {
+  margin: ['Profit', 'Revenue'],
+  share_of_total: ['Part', 'Total'],
+  growth: ['From', 'To'],
+  difference: ['From', 'Less'],
+  ratio: ['Numerator', 'Denominator'],
+}
+const operandRole = (derivation: FigureDerivation, count: number, index: number) =>
+  derivation === 'sum' ? 'Add' : count === 2 ? OPERAND_ROLES[derivation][index]! : `Operand ${index + 1}`
+// The sources a figure's operands read, or null when it has none to read them by.
+const operandSources = (figure: FigureSegment) =>
+  figure.derivation && figure.operands ? new Set(figure.operands.flatMap((operand) => [...operand.add, ...operand.subtract, ...(operand.over ?? [])])) : null
+
 /**
  * The inspector docked beside the main column. It shows the top page of the
  * stack; Back and the breadcrumb step down it. Refs opened from inside the
@@ -55,7 +82,7 @@ export function EvidenceInspectorPanel({
 }) {
   const page = stack[stack.length - 1]
   const headingRef = useRef<HTMLHeadingElement>(null)
-  const pageKey = page.kind === 'block' ? page.inspection : page.request
+  const pageKey = page.kind === 'block' ? page.inspection : page.kind === 'figure' ? page.figure : page.request
 
   useEffect(() => {
     headingRef.current?.focus()
@@ -131,6 +158,7 @@ function PageBody({ page }: { page: InspectorPage }) {
     return <FinancialResultInspector load={page.load} shown={page.shown} />
   }
   if (page.kind === 'block') return <BlockInspectionBody inspection={page.inspection} />
+  if (page.kind === 'figure') return <FigureSources snapshotId={page.snapshotId} figure={page.figure} />
   if (page.load.kind === 'loading') return <Skeleton label="Loading evidence" className="h-40" />
   if (page.load.kind === 'error') return <p className="text-sm text-fg-soft">{page.load.message}</p>
   return <InspectionBody inspection={page.load.inspection} />
@@ -139,6 +167,7 @@ function PageBody({ page }: { page: InspectorPage }) {
 function pageTitle(page: InspectorPage): string {
   if (page.kind === 'financial') return heading(page).title
   if (page.kind === 'block') return page.inspection.title
+  if (page.kind === 'figure') return page.figure.text
   if (page.shownAs) return page.shownAs
   return page.load.kind === 'ready' ? page.load.inspection.title : REF_KIND_NAMES[page.ref.kind]
 }
@@ -146,6 +175,11 @@ function pageTitle(page: InspectorPage): string {
 function pageSubtitle(page: InspectorPage): string {
   if (page.kind === 'financial') return heading(page).subtitle
   if (page.kind === 'block') return joinParts(['Block', datePart(page.inspection.rows)])
+  if (page.kind === 'figure') {
+    const used = operandSources(page.figure)
+    const count = (n: number) => `${n} source${n === 1 ? '' : 's'}`
+    return used && page.figure.derivation ? `${DERIVATION_NAMES[page.figure.derivation]}, computed from ${count(used.size)}` : `Cites ${count(page.figure.sources.length)}`
+  }
   if (page.load.kind !== 'ready') return REF_KIND_NAMES[page.ref.kind]
   const { inspection } = page.load
   const provider = inspection.rows.find((row) => row.label === 'Provider')?.value ??
@@ -173,6 +207,49 @@ function shortDate(value: string): string {
 
 function joinParts(parts: ReadonlyArray<string | null>): string {
   return parts.filter((part): part is string => part !== null).join(' · ')
+}
+
+// A computed figure's operands in the order its derivation reads them, each source in its
+// part (added, subtracted, divided by) and opening its own page; then any source no operand
+// reads, as a citation.
+function FigureSources({ snapshotId, figure }: { snapshotId: string; figure: FigureSegment }) {
+  const used = operandSources(figure)
+  const link = (index: number) => {
+    const source: SourceRef | undefined = figure.sources[index]
+    if (!source) return <span key={index}>a missing source</span>
+    return <SourceLink key={index} snapshotId={snapshotId} source={source} text={sourceText(source)}>{sourceLabel(source)}</SourceLink>
+  }
+  const terms = (indexes: ReadonlyArray<number>, wrap: boolean) => {
+    const joined = indexes.flatMap((index, k) => (k === 0 ? [link(index)] : [' + ', link(index)]))
+    return wrap && indexes.length > 1 ? ['(', ...joined, ')'] : joined
+  }
+  const operandText = (operand: FigureOperand) => {
+    const top = [...terms(operand.add, false), ...operand.subtract.flatMap((index) => [' − ', link(index)])]
+    if (operand.over === null) return top
+    return [...(operand.add.length + operand.subtract.length > 1 ? ['(', ...top, ')'] : top), ' ÷ ', ...terms(operand.over, true)]
+  }
+  const cited = figure.sources.flatMap((_, index) => (used?.has(index) ? [] : [index]))
+  return (
+    <div className="flex flex-col gap-4 text-sm">
+      {used && figure.derivation && figure.operands ? (
+        <ol aria-label="Calculation" className="flex flex-col gap-2">
+          {figure.operands.map((operand, index) => (
+            <li key={index}>
+              <span className="text-muted">{operandRole(figure.derivation!, figure.operands!.length, index)}</span> {operandText(operand)}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      {cited.length > 0 ? (
+        <section className="flex flex-col gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">{used ? 'Also cited' : 'Sources'}</h3>
+          <ul aria-label={used ? 'Also cited' : 'Sources'} className="flex flex-col gap-2">
+            {cited.map((index) => <li key={index}>{link(index)}</li>)}
+          </ul>
+        </section>
+      ) : null}
+    </div>
+  )
 }
 
 function InspectionBody({ inspection }: { inspection: EvidenceInspection }) {

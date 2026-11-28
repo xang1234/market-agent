@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client";
 import { AuthContext } from "../shell/authTypes.ts";
 import { EvidenceInspectorDock, EvidenceInspectorProvider } from "./EvidenceInspectorProvider.tsx";
 import { useEvidenceInspector } from "./useEvidenceInspector.ts";
+import type { FigureSegment } from "../blocks/types.ts";
 
 const USER_ID = "00000000-0000-4000-8000-000000000001";
 const SNAPSHOT_ID = "11111111-1111-4111-8111-111111111111";
@@ -497,6 +498,34 @@ test("the panel heads with the text the user clicked, and with the server title 
   }
 });
 
+// A figure computed from two sources (#800).
+const SUM: FigureSegment = {
+  type: "figure",
+  text: "$43.1B",
+  sources: [{ ref_kind: "fact", ref_id: FACT_ID, format: "$42.0B" }, { ref_kind: "claim", ref_id: SOURCE_ID, format: "$1.1B", numeral: 1 }],
+  derivation: "sum",
+  operands: [{ add: [0, 1], subtract: [], over: null }],
+};
+
+test("a computed figure opens a page of its sources, and following one pushes its evidence (#800)", async () => {
+  const app = await mountDockedInspector(async (ref) => jsonResponse(ref.kind === "fact" ? FACT_INSPECTION : SOURCE_INSPECTION));
+  try {
+    await app.click(app.opener("Total"));
+    assert.equal(app.heading(), "$43.1B");
+    assert.equal(app.headerSubtitle(), "Sum, computed from 2 sources");
+    assert.deepEqual(app.fetchedKinds, []);
+
+    await app.click(app.button("$42.0B"));
+    assert.deepEqual(app.breadcrumb(), ["$43.1B", "$42.0B"]);
+    assert.deepEqual(app.fetchedKinds, ["fact"]);
+
+    await app.click(app.button("Back"));
+    assert.equal(app.heading(), "$43.1B");
+  } finally {
+    await app.unmount();
+  }
+});
+
 async function mountDockedInspector(respond: (ref: { kind: string; id: string }) => Promise<Response>) {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>");
   const restoreGlobals = installDomGlobals(dom.window as unknown as Window);
@@ -541,6 +570,9 @@ async function mountDockedInspector(respond: (ref: { kind: string; id: string })
           onClick={() => inspector?.openInspection({ snapshotId: SNAPSHOT_ID, ref: { kind: "fact", id: FACT_ID }, shownAs: "30.0×" })}
         >
           P/E
+        </button>
+        <button type="button" onClick={() => inspector?.openFigure?.({ snapshotId: SNAPSHOT_ID, figure: SUM })}>
+          Total
         </button>
       </>
     );

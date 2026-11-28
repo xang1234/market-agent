@@ -693,3 +693,125 @@ test('a quote resting on several sources shows once with a citation for each, an
     assert.deepEqual(citations(quoted), ['[1]', '[2]'])
   })
 })
+
+// Figures checked prose links (#800): each opens the source it was checked against.
+const REVENUE_SOURCE = { ref_kind: 'result', ref_id: RESULT, format: '$62.1B', period: 'Q4 FY2026' } as const
+const YEAR_AGO_SOURCE = { ref_kind: 'result', ref_id: FACT_B, format: '$39.3B', period: 'Q4 FY2025' } as const
+const GROWTH = {
+  type: 'figure',
+  text: '58%',
+  sources: [YEAR_AGO_SOURCE, REVENUE_SOURCE],
+  derivation: 'growth',
+  operands: [{ add: [0], subtract: [], over: null }, { add: [1], subtract: [], over: null }],
+} as const
+
+type Opened = Array<[string, unknown]>
+function recordingInspector(opened: Opened): EvidenceInspectorContextValue {
+  return {
+    openInspection(input) { opened.push(['evidence', input]) },
+    openBlockInspection() {},
+    openFinancialResult(resultId, shown) { opened.push(['result', [resultId, shown]]) },
+    openFigure(input) { opened.push(['figure', input]) },
+    closeInspection() {},
+  }
+}
+
+// Renders the block, clicks each selector in turn, and returns the text it showed.
+async function clickThrough(block: RichTextBlock, inspector: EvidenceInspectorContextValue, selectors: ReadonlyArray<string>): Promise<string> {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  try {
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        <EvidenceInspectorContext.Provider value={inspector}>
+          <RichText block={block} />
+        </EvidenceInspectorContext.Provider>,
+      )
+    })
+    for (const selector of selectors) {
+      const control = dom.window.document.querySelector<HTMLElement>(selector)
+      assert.ok(control, `nothing matches ${selector}`)
+      await act(async () => control.click())
+    }
+    const text = dom.window.document.getElementById('root')!.textContent ?? ''
+    await act(async () => root.unmount())
+    return text
+  } finally {
+    restoreGlobals()
+  }
+}
+
+test('a linked figure reads as the answer wrote it and opens the inspector on its source', async () => {
+  const opened: Opened = []
+  const block = richTextBlock('rt-figures', [
+    { type: 'text', text: 'Revenue was ' },
+    { type: 'figure', text: 'about $62B', sources: [REVENUE_SOURCE], near: true },
+    { type: 'text', text: ', data center ' },
+    { type: 'figure', text: '$51.2B', sources: [{ ref_kind: 'claim', ref_id: FACT_A, format: 'Data center revenue was $51.2 billion.', numeral: 1 }] },
+    { type: 'text', text: '.' },
+  ])
+  assert.deepEqual(validateBlock(block).valid, true)
+  const text = await clickThrough(block, recordingInspector(opened), [`[data-inspect-result="${RESULT}"]`, `[data-inspection-kind="claim"][data-inspection-id="${FACT_A}"]`])
+  assert.equal(text, 'Revenue was about $62B, data center $51.2B.')
+  assert.deepEqual(opened, [
+    ['result', [RESULT, { subject: null, measure: null, period: 'Q4 FY2026', value: 'about $62B' }]],
+    ['evidence', { snapshotId: SNAPSHOT_ID, ref: { kind: 'claim', id: FACT_A }, shownAs: '$51.2B' }],
+  ])
+})
+
+test('a derived figure opens a page of its derivation and sources, and is plain text with no inspector', async () => {
+  const opened: Opened = []
+  const block = richTextBlock('rt-derived', [{ type: 'text', text: 'Revenue grew ' }, GROWTH, { type: 'text', text: '.' }])
+  assert.equal(await clickThrough(block, recordingInspector(opened), ['[data-inspect-figure]']), 'Revenue grew 58%.')
+  assert.deepEqual(opened, [['figure', { snapshotId: SNAPSHOT_ID, figure: GROWTH }]])
+  const plain = await renderDocument(block)
+  assert.equal(plain.querySelector('button'), null)
+  assert.equal(plain.getElementById('root')!.textContent, 'Revenue grew 58%.')
+})
+
+test('a struck figure renders deleted, its reason read after it and linked to the data it names', async () => {
+  const opened: Opened = []
+  const block = richTextBlock('rt-struck', [
+    { type: 'text', text: 'Revenue was ' },
+    { type: 'struck', text: '$72.1B', reason: 'the sources give $62.1B', sources: [REVENUE_SOURCE] },
+    { type: 'text', text: ', and margins ' },
+    { type: 'struck', text: 'doubled', reason: 'the filing says they rose 4 points' },
+    { type: 'text', text: '.' },
+  ])
+  const text = await clickThrough(block, recordingInspector(opened), [`[data-inspect-result="${RESULT}"]`])
+  assert.equal(text, 'Revenue was struck: $72.1B (the sources give $62.1B), and margins struck: doubled (the filing says they rose 4 points).')
+  assert.deepEqual(opened, [['result', [RESULT, { subject: null, measure: null, period: 'Q4 FY2026', value: '$62.1B' }]]], 'the inspector shows the value its source gives, not the sentence (#813)')
+  const doc = await renderDocument(block)
+  assert.deepEqual([...doc.querySelectorAll('del')].map((del) => [del.textContent, del.querySelector('.sr-only')?.textContent]), [
+    ['struck: $72.1B', 'struck: '],
+    ['struck: doubled', 'struck: '],
+  ])
+  assert.equal(doc.querySelector('[aria-hidden="true"]'), null, 'nothing a struck figure says is hidden from screen readers')
+})
+
+// Devin on #813: a struck figure with several sources opened them as the inputs of a
+// calculation, though a struck segment has none. Each is now its own citation.
+test('a struck figure cites each of several sources plainly, never as a calculation', async () => {
+  const opened: Opened = []
+  const block = richTextBlock('rt-struck-cited', [
+    { type: 'struck', text: '68%', reason: 'the sources give 58%', sources: [YEAR_AGO_SOURCE, REVENUE_SOURCE] },
+  ])
+  const text = await clickThrough(block, recordingInspector(opened), [`[data-inspect-result="${FACT_B}"]`, `[data-inspect-result="${RESULT}"]`])
+  assert.equal(text, 'struck: 68% (the sources give 58% [1] [2])')
+  assert.deepEqual(opened, [
+    ['result', [FACT_B, { subject: null, measure: null, period: 'Q4 FY2025', value: '$39.3B' }]],
+    ['result', [RESULT, { subject: null, measure: null, period: 'Q4 FY2026', value: '$62.1B' }]],
+  ])
+  const doc = await renderDocument(block, recordingInspector([]))
+  assert.equal(doc.querySelector('[data-inspect-figure]'), null)
+  assert.deepEqual([...doc.querySelectorAll('[data-inspect-result]')].map((button) => button.getAttribute('aria-label')), [
+    'Inspect the verified calculation for $39.3B, Q4 FY2025',
+    'Inspect the verified calculation for $62.1B, Q4 FY2026',
+  ])
+  const claim = { ref_kind: 'claim', ref_id: FACT_A, format: 'Revenue rose 58% from a year ago.', numeral: 1 } as const
+  const cited = await renderDocument(richTextBlock('rt-struck-claim', [{ type: 'struck', text: '68%', reason: 'the sources give 58%', sources: [REVENUE_SOURCE, claim] }]), recordingInspector([]))
+  assert.equal(cited.querySelector('[data-inspection-kind="claim"]')!.getAttribute('aria-label'), 'Source 2: Revenue rose 58% from a year ago.', 'a citation number is named by what it opens')
+  const reported = await renderDocument(richTextBlock('rt-two-sources', [{ type: 'figure', text: '$62.1B', sources: [REVENUE_SOURCE, claim] }]), recordingInspector([]))
+  assert.equal(reported.querySelector('[data-inspect-figure]')!.getAttribute('aria-label'), 'Inspect the sources of $62.1B', 'a figure with no derivation is not called computed')
+})

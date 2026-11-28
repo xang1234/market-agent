@@ -20,8 +20,9 @@ import type {
 
 // Text the app shows literally (a ref's figure, a toned run, a table cell) keeps
 // its characters when pasted into Markdown. Only marks that change inline
-// meaning are escaped, so figures like $85.8B stay readable as plain text.
-const literal = (text: string) => text.replace(/[\\`*_[\]<>]/g, '\\$&')
+// meaning are escaped, so figures like $85.8B stay readable as plain text. A
+// tilde strikes text through, so a struck "~$72B" keeps its strike whole.
+const literal = (text: string) => text.replace(/[\\`*_~[\]<>]/g, '\\$&')
 
 function markdownTable(header: ReadonlyArray<string>, rows: ReadonlyArray<ReadonlyArray<string>>): string {
   const line = (cells: ReadonlyArray<string>) => `| ${cells.map((cell) => literal(cell).replaceAll('|', '\\|').replaceAll('\n', ' ')).join(' | ')} |`
@@ -83,6 +84,8 @@ function segmentText(segments: ReadonlyArray<RichTextSegment>, numbers: Readonly
   return segments.map((segment, index) => {
     if (isCitationRef(segment)) return citesQuoteBefore(segments, index) ? ` [${numbers.get(segment.ref_id)}]` : `“${literal(refSegmentText(segment))}” [${numbers.get(segment.ref_id)}]`
     if (isRefSegment(segment)) return literal(refSegmentText(segment))
+    if (segment.type === 'figure') return literal(segment.text)
+    if (segment.type === 'struck') return `~~${literal(segment.text)}~~ (${literal(segment.reason)})`
     return segment.tone === undefined || segment.tone === 'neutral' ? segment.text : literal(segment.text)
   }).join('')
 }

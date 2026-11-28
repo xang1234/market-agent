@@ -1,8 +1,9 @@
-import { useContext, type ReactElement } from 'react'
+import { Fragment, useContext, type ReactElement } from 'react'
 import { InspectableRef } from '../evidence/InspectableRef.tsx'
 import { InspectableResult } from '../evidence/InspectableResult.tsx'
-import type { CitationRef, CommentaryPart, RefSegment, RichTextBlock, RichTextSegment, TextSegmentTone } from './types.ts'
-import { citationNumbers, citesQuoteBefore, commentaryCard, isCitationRef, isRefSegment, refSegmentText, type Takeaway } from './richText.ts'
+import { LinkedFigure, REF_CLASS, SourceLink } from '../evidence/SourceLink.tsx'
+import type { CitationRef, CommentaryPart, RefSegment, RichTextBlock, RichTextSegment, StruckSegment, TextSegmentTone } from './types.ts'
+import { citationNumbers, citesQuoteBefore, commentaryCard, isCitationRef, isRefSegment, refSegmentText, sourceLabel, sourceText, type Takeaway } from './richText.ts'
 import { Markdown } from './Markdown.tsx'
 import { OpenClarificationContext } from './openClarification.ts'
 import { CARD_CLASS } from '../symbol/surfaceStyles.ts'
@@ -71,9 +72,35 @@ function markdownParts(block: RichTextBlock, segments: ReadonlyArray<RichTextSeg
         />
       )
     }
+    if (segment.type === 'figure') return <LinkedFigure snapshotId={block.snapshot_id} figure={segment} />
+    if (segment.type === 'struck') return <Struck snapshotId={block.snapshot_id} segment={segment} />
     if (segment.tone === undefined || segment.tone === 'neutral') return segment.text
     return { inline: <span data-tone={segment.tone} className={TONE_CLASS[segment.tone]}>{segment.text}</span> }
   })
+}
+
+// A figure the sources contradict: struck, then the reason that names what they give (#800).
+// One source links the reason to it, showing the value it gives. Several are cited one by
+// one, since a struck segment carries no calculation to show them as inputs to.
+function Struck({ snapshotId, segment }: { snapshotId: string; segment: StruckSegment }): ReactElement {
+  const { text, reason, sources = [] } = segment
+  const [only] = sources
+  return (
+    <>
+      <del><span className="sr-only">struck: </span>{text}</del>
+      {' ('}
+      {sources.length === 1 && only ? <SourceLink snapshotId={snapshotId} source={only} text={sourceText(only)}>{reason}</SourceLink> : reason}
+      {sources.length > 1
+        ? sources.map((source, index) => (
+          <Fragment key={index}>
+            {' '}
+            <SourceLink snapshotId={snapshotId} source={source} text={sourceText(source)} label={`Source ${index + 1}: ${sourceLabel(source)}`}>[{index + 1}]</SourceLink>
+          </Fragment>
+        ))
+        : null}
+      )
+    </>
+  )
 }
 
 // Each takeaway's badge: what the judge found of it.
@@ -172,10 +199,6 @@ type RefSegmentSpanProps = {
   index: number | string
   segment: Exclude<RefSegment, { ref_kind: 'result' }>
 }
-
-// A value as the text reads it, with no padding or fill: either would show as a
-// space before the punctuation after it (#303).
-const REF_CLASS = 'rounded text-left text-fg-soft underline decoration-dotted underline-offset-2'
 
 function RefSegmentSpan({ snapshotId, blockId, index, segment }: RefSegmentSpanProps): ReactElement {
   return (

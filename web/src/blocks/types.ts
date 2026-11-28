@@ -92,7 +92,26 @@ export type RefSegment =
   // An engine result in commentary on its financial answer, with its period as that answer labels it.
   | { type: 'ref'; ref_kind: 'result'; ref_id: string; format?: string; period?: string }
 
-export type RichTextSegment = TextSegment | RefSegment
+// A source a linked figure cites (#800): a ref as RefSegment states it, plus,
+// for a claim, which of the figures its text states (counted from 1).
+export type SourceRef = { ref_kind: 'result' | 'fact' | 'series' | 'claim'; ref_id: string; format?: string; period?: string; numeral?: number }
+export type FigureDerivation = 'margin' | 'growth' | 'difference' | 'ratio' | 'share_of_total' | 'sum'
+// Indexes into a figure's sources: those added, less those subtracted, over the sum of those in over.
+export type FigureOperand = { add: ReadonlyArray<number>; subtract: ReadonlyArray<number>; over: ReadonlyArray<number> | null }
+// A figure the prose states, linked to the sources the seal checked it against.
+// Without a derivation it reports its one source; near marks a last digit off, or a hedge.
+export type FigureSegment = {
+  type: 'figure'
+  text: string
+  sources: ReadonlyArray<SourceRef>
+  derivation?: FigureDerivation
+  operands?: ReadonlyArray<FigureOperand>
+  near?: true
+}
+// A figure the sources contradict, struck, with a reason that names what they give.
+export type StruckSegment = { type: 'struck'; text: string; reason: string; sources?: ReadonlyArray<SourceRef> }
+
+export type RichTextSegment = TextSegment | RefSegment | FigureSegment | StruckSegment
 
 // A quote's ref, shown as a numbered citation.
 export type CitationRef = Extract<RefSegment, { ref_kind: Exclude<RefSegmentKind, 'result'> }> & { ref_kind: 'claim' | 'source' }

@@ -1,4 +1,5 @@
 import type { FinancialResultShown } from '../blocks/financialInspection.ts'
+import type { FigureSegment } from '../blocks/types.ts'
 import type { FinancialInspectorLoad } from '../blocks/renderers/FinancialResultInspector.tsx'
 import type { EvidenceBlockInspection, EvidenceInspection, EvidenceInspectionRef } from './inspectionTypes.ts'
 
@@ -10,6 +11,7 @@ export type EvidenceLoad =
 export type InspectorPage =
   | { kind: 'evidence'; request: number; snapshotId: string; ref: EvidenceInspectionRef; shownAs?: string; load: EvidenceLoad }
   | { kind: 'block'; inspection: EvidenceBlockInspection }
+  | { kind: 'figure'; snapshotId: string; figure: FigureSegment }
   | { kind: 'financial'; request: number; shown?: FinancialResultShown; load: FinancialInspectorLoad }
 
 /** Pages the inspector has walked through. Empty means closed; the last page is shown. */
@@ -43,7 +45,7 @@ export function inspectorStackReducer(stack: InspectorStack, action: InspectorAc
       return CLOSED
     case 'settled': {
       const { request, settlement } = action
-      if (!stack.some((page) => page.kind !== 'block' && page.request === request)) return stack
+      if (!stack.some((page) => 'request' in page && page.request === request)) return stack
       return stack.map((page): InspectorPage => {
         if (page.kind === 'evidence' && settlement.kind === 'evidence' && page.request === request) {
           return { ...page, load: settlement.load }

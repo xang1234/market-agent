@@ -13,6 +13,8 @@ type InspectableRefProps = {
   testId?: string
   dataAttrs?: DataAttrs
   shownAs?: string
+  // The control's name when its children are not what it opens (a citation number).
+  label?: string
 }
 
 const DEFAULT_CLASS = 'text-left underline decoration-dotted underline-offset-2'
@@ -25,6 +27,7 @@ export function InspectableRef({
   testId,
   dataAttrs,
   shownAs,
+  label,
 }: InspectableRefProps): ReactElement {
   const inspector = useEvidenceInspector()
   const sharedAttrs = {
@@ -51,6 +54,7 @@ export function InspectableRef({
     <button
       type="button"
       {...sharedAttrs}
+      aria-label={label}
       onClick={() => inspector.openInspection({ snapshotId, ref: inspectionRef, ...(shownAs === undefined ? {} : { shownAs }) })}
       className={`border-0 bg-transparent p-0 ${controlClassName}`}
     >
