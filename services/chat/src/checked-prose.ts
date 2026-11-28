@@ -104,7 +104,7 @@ export async function checkedProse(input: CheckedProseInput, models: CheckedPros
   const figures = parts.reduce((count, part) => count + answerNumerals(part.text).length, 0);
   const draft = await step("check_answer", `Checking ${figures} figure${figures === 1 ? "" : "s"} and the comparisons`, () =>
     checkRound(models, packet, input.question, lead, parts, texts, new Set(parts.map((part) => part.id))));
-  const request = rewriteRequest(parts, draft);
+  const request = rewriteRequest(parts, draft, packet);
   const sentences = parts.map(({ id, after }) => ({ id, after }));
   const head = { written_by: written.exchange.deployment, lead, sentences, draft, ...(written.exchange.truncated ? { cut_off: true as const } : {}) };
   if (request.length === 0 || input.remainingMs() < REWRITE_BUDGET_MS) {
@@ -229,8 +229,8 @@ async function checkRound(
 }
 
 // A claim's numeral gives a size and its words the sign ("Operating loss was $134 million"
-// reads 134M), so a figure reported from an unsigned one is compared by size, as the seal
-// compares it. ponytail: an answer's own minus ("-$134M") on one, or a derivation over such
+// reads 134M), so a figure reported from an unsigned one is compared, and corrected, by
+// size, as the seal compares it. ponytail: an answer's own minus ("-$134M") on one, or a derivation over such
 // claims, still compares signed.
 const claimSized = (label: FigureLabel<PacketRef>, packet: EvidencePacket): FigureLabel<PacketRef> =>
   label.basis === "reported" && "claim" in label.source && claimNumeral(packet, label.source)?.signed === false ? { ...label, sign: null } : label;
@@ -245,14 +245,13 @@ const problemCount = (version: Version) =>
 // ADR 0005: a sentence still stating a stance is left out.
 const kept = (version: Version): Version => (version.stance ? { text: "", numerals: [], findings: [], stance: false } : version);
 
-function rewriteRequest(parts: ReadonlyArray<Part>, round: CheckRound): RewriteRequest {
+function rewriteRequest(parts: ReadonlyArray<Part>, round: CheckRound, packet: EvidencePacket): RewriteRequest {
   return parts.flatMap((part) => {
     const version = round.versions[part.id]!;
     const problems: Problem[] = [
       ...version.numerals.flatMap((entry): Problem[] => {
-        if (entry.verdict?.kind === "wrong") {
-          const scale = entry.label?.kind === "figure" && entry.label.label.basis !== "off_file" ? entry.label.label.scale : null;
-          return [{ kind: "wrong_figure", text: entry.numeral.text, data: atPrecisionOf(entry.numeral, entry.verdict.expected, scale) }];
+        if (entry.verdict?.kind === "wrong" && entry.label?.kind === "figure") {
+          return [{ kind: "wrong_figure", text: entry.numeral.text, data: atPrecisionOf(entry.numeral, entry.verdict.expected, claimSized(entry.label.label, packet)) }];
         }
         return entry.label?.kind === "figure" && entry.label.label.basis === "off_file" ? [{ kind: "untraced_figure", text: entry.numeral.text, what: entry.label.label.what }] : [];
       }),
@@ -548,8 +547,7 @@ function figureSegment(entry: CheckedNumeral, label: FigureLabel<PacketRef>, pac
   const sealed = sources.every((source) => source !== null) ? (sources as SourceRef[]) : null;
   const text = entry.numeral.text;
   if (entry.verdict.kind === "wrong") {
-    const scale = label.scale;
-    return { type: "struck", text, reason: `the sources give ${atPrecisionOf(entry.numeral, entry.verdict.expected, scale)}`, ...(sealed ? { sources: sealed } : {}) };
+    return { type: "struck", text, reason: `the sources give ${atPrecisionOf(entry.numeral, entry.verdict.expected, claimSized(label, packet))}`, ...(sealed ? { sources: sealed } : {}) };
   }
   if (sealed === null) return null;
   const index = (ref: PacketRef) => refs.findIndex((entry) => sameRef(entry, ref));

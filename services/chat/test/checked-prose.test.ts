@@ -415,6 +415,11 @@ test("a loss a claim states in words links at its size, though the labeller sign
   );
   assert.deepEqual(kinds(), ["draft", "label", "relation"], "it matched, so nothing goes back");
   assert.deepEqual(figures(segments), [{ type: "figure", text: "$134M", sources: [{ ref_kind: "claim", ref_id: loss.claim_id, format: loss.text, numeral: 1 }] }]);
+  const wrong = await lane(
+    { draft: "Operating loss was $150M.", labels: { "$150M": { ...reported("C2.1"), sign: "-" } }, edits: new Error("rewrite down") },
+    { packet: { ...PACKET, claims: [CLAIM, loss] } },
+  );
+  assert.equal(shown(wrong.segments), "Operating loss was ~~$150M~~ (the sources give $130M).", "compared by size, so corrected by size (#817)");
 });
 
 test("a draft cut off at its length limit says so in a note", async () => {
