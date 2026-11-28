@@ -284,6 +284,13 @@ test("a turn whose claim-started reading spent its deadline starts already abort
   }
 });
 
+test("the time a turn has left, which gates checked prose's rewrite, counts from the claim-started reading (#800, #803)", async () => {
+  const left = (deps: Parameters<typeof withTurnDeadline>[0]) => withTurnDeadline(deps, async (_signal, remainingMs) => remainingMs(), performance.now() - 100_000);
+  const prose = await left({ prose: (() => { throw new Error("unused"); }) as never });
+  assert.ok(prose <= 80_000 && prose > 70_000, `checked prose's 180s turn, 100s spent: ${prose}`);
+  assert.ok((await left({ deadlines: { readMs: 30_000, turnMs: 104_000 } })) <= 4_000);
+});
+
 test("a statement ask is keyed by its own words, never by the turn's reading, which only decides whether the planner reads it", () => {
   const ask = (question: string, lines: string[]) => certifiedAsk({ subject_refs: [{ kind: "issuer", id: A }], metrics: ["income_statement"], question } as never, KNOWN, lines);
   const [revenue, margin, unread] = [ask("AAA revenue", ["revenue", "gross_margin"]), ask("AAA gross margin", ["revenue", "gross_margin"]), ask("AAA revenue", [])];
