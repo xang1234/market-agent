@@ -310,7 +310,9 @@ const SBC_BASIS_TEXT: Readonly<Record<SbcBasis, string>> = {
 
 const amount = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 4 });
 
-const inScale = (scale: TableScale | null) => (scale ? ` in ${scale}` : "");
+// An amount with its table's scale on it ("37,822 million"), so the figure check reads each
+// one scaled, as it reads an answer's "$37.8B" (#817).
+const scaled = (value: number, scale: TableScale | null) => `${amount(value)}${scale ? ` ${scale.slice(0, -1)}` : ""}`;
 
 // Each figure as the release states it, in its own table's scale, or a difference or ratio of its figures.
 function nonGaapQuarterText(quarter: NonGaapQuarter): string {
@@ -320,10 +322,11 @@ function nonGaapQuarterText(quarter: NonGaapQuarter): string {
   const { eps, operating_income: income, operating_margin: margin, sbc } = quarter;
   const parts = [
     eps && `diluted EPS GAAP ${eps.gaap.toFixed(2)}, non-GAAP ${eps.non_gaap.toFixed(2)}, a spread of ${eps.spread.toFixed(2)}`,
-    income && `operating income GAAP ${amount(income.gaap)}, non-GAAP ${amount(income.non_gaap)}${inScale(income.scale)}`,
+    income && `operating income GAAP ${scaled(income.gaap, income.scale)}, non-GAAP ${scaled(income.non_gaap, income.scale)}`,
     // A margin is shown only when revenue is in operating income's scale.
-    margin && `operating margin on revenue of ${amount(margin.revenue)}${inScale(income!.scale)}, GAAP ${margin.gaap_pct.toFixed(1)}%, non-GAAP ${margin.non_gaap_pct.toFixed(1)}%, a spread of ${margin.spread.value.toFixed(1)} percentage points`,
-    sbc && `stock-based compensation added back ${amount(sbc.value)}${inScale(sbc.scale)} (${SBC_BASIS_TEXT[sbc.basis]})${sbc.share_pct === null ? "" : `, ${sbc.share_pct.toFixed(1)}% of non-GAAP net income of ${amount(sbc.non_gaap_net_income!)}`}`,
+    margin && `operating margin on revenue of ${scaled(margin.revenue, income!.scale)}, GAAP ${margin.gaap_pct.toFixed(1)}%, non-GAAP ${margin.non_gaap_pct.toFixed(1)}%, a spread of ${margin.spread.value.toFixed(1)} percentage points`,
+    // Net income is compared only in stock-based compensation's scale (non-gaap-history.ts sbcOf).
+    sbc && `stock-based compensation added back ${scaled(sbc.value, sbc.scale)} (${SBC_BASIS_TEXT[sbc.basis]})${sbc.share_pct === null ? "" : `, ${sbc.share_pct.toFixed(1)}% of non-GAAP net income of ${scaled(sbc.non_gaap_net_income!, sbc.scale)}`}`,
   ].filter(Boolean);
   return `${head}: ${parts.join("; ") || "the release reconciles none of diluted EPS, operating income and stock-based compensation"}`;
 }

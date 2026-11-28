@@ -249,13 +249,14 @@ test("a non-GAAP claim's amounts are read at their table's scale", async () => {
   const [claim] = packet.claims;
   const at = (digits: string) => `${claim!.id}.${statedFigures(claim!.text).findIndex((numeral) => numeral.text.startsWith(digits)) + 1}`;
   const draft = "Non-GAAP operating income was $11.0B on revenue of $57.0B, and stock-based compensation of $1.7B was 5.0% of non-GAAP net income of $33.4B.";
-  const { checked, kinds, segments } = await lane({
+  const { checked, kinds, segments, calls } = await lane({
     draft,
     labels: { "$11.0B": reported(at("11,000")), "$57.0B": reported(at("57,006")), "$1.7B": reported(at("1,652")), "5.0%": reported(at("5.0%")), "$33.4B": reported(at("33,366")) },
   }, { packet });
   assert.equal(shown(segments), `${draft}\n\n_5 figures could not be traced to the sources read._`, "matched, and plain since a reconciliation is no sealed claim");
   assert.deepEqual(checked.final[0]!.numerals.map((entry) => [entry.numeral.text, entry.verdict?.kind]), [["$11.0B", "matched"], ["$57.0B", "matched"], ["$1.7B", "matched"], ["5.0%", "matched"], ["$33.4B", "matched"]]);
   assert.deepEqual(kinds(), ["draft", "label", "relation"], "nothing goes back");
+  assert.match(calls[1]!.request.messages[1]!.content, /C1\.\d+ "11,000 million"/u, "the labeller sees each figure at its scale");
 });
 
 test("a figure still wrong after the rewrite is struck, naming the data and linking it", async () => {
