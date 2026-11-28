@@ -15,9 +15,9 @@ import type {
 import type { InspectorPage, InspectorStack } from './inspectorStack.ts'
 import { InspectableRef } from './InspectableRef.tsx'
 import { sourceLabel, sourceText } from '../blocks/richText.ts'
-import { figureText, SourceLink } from './SourceLink.tsx'
+import { SourceLink } from './SourceLink.tsx'
 import { Details, Facts, ReadableValue } from './Readable.tsx'
-import { humanize, isIdentifier, readableDate } from './readable.ts'
+import { figureText, humanize, isIdentifier, readableDate } from './readable.ts'
 
 const REF_KIND_NAMES: Readonly<Record<EvidenceInspectionRefKind, string>> = {
   source: 'Source',

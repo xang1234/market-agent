@@ -230,8 +230,8 @@ async function checkRound(
 
 // A claim's numeral gives a size and its words the sign ("Operating loss was $134 million"
 // reads 134M), so a figure reported from an unsigned one is compared, and corrected, by
-// size, as the seal compares it. ponytail: an answer's own minus ("-$134M") on one, or a derivation over such
-// claims, still compares signed.
+// size, as the seal compares it. ponytail: an answer's own minus ("-$134M") on one, or a
+// derivation over such claims, still compares signed.
 const claimSized = (label: FigureLabel<PacketRef>, packet: EvidencePacket): FigureLabel<PacketRef> =>
   label.basis === "reported" && "claim" in label.source && claimNumeral(packet, label.source)?.signed === false ? { ...label, sign: null } : label;
 

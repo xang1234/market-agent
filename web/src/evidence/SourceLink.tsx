@@ -2,6 +2,7 @@ import type { ReactElement, ReactNode } from 'react'
 
 import type { FigureSegment, SourceRef } from '../blocks/types.ts'
 import { InspectableRef } from './InspectableRef.tsx'
+import { figureText } from './readable.ts'
 import { InspectableResult } from './InspectableResult.tsx'
 import { useEvidenceInspector } from './useEvidenceInspector.ts'
 
@@ -32,10 +33,6 @@ export function SourceLink({ snapshotId, source, text, label, children }: { snap
     </InspectableRef>
   )
 }
-
-// A figure as the answer wrote it, "≈" before it when it is near its source's value (a
-// last digit off, or hedged), so it never reads as the exact value (#800 §7).
-export const figureText = (figure: Pick<FigureSegment, 'text' | 'near'>) => (figure.near ? `≈${figure.text}` : figure.text)
 
 // A figure linked to what it was checked against: its one source, or, when computed from
 // several, a page naming the derivation and each source.
